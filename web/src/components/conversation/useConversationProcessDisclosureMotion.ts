@@ -11,13 +11,15 @@ export type ConversationProcessUserToggle = (
 export function useConversationProcessDisclosureMotion(
   running: boolean,
   onUserToggle?: ConversationProcessUserToggle,
+  controlledExpanded?: boolean,
+  onExpandedChange?: (expanded: boolean) => void,
 ) {
-  const [mounted, setMounted] = useState(running);
-  const [expanded, setExpanded] = useState(running);
+  const [mounted, setMounted] = useState(controlledExpanded ?? running);
+  const [expanded, setExpanded] = useState(controlledExpanded ?? running);
   const frameRef = useRef<number | null>(null);
   const settleTimerRef = useRef<number | null>(null);
   const settleScrollRef = useRef<(() => void) | null>(null);
-  const previousRunningRef = useRef(running);
+  const userExpandedRef = useRef<boolean | undefined>(undefined);
 
   function clearScheduledTransition() {
     if (frameRef.current !== null) {
@@ -50,6 +52,8 @@ export function useConversationProcessDisclosureMotion(
   function handleSummaryClick(event: MouseEvent<HTMLElement>) {
     event.preventDefault();
     const nextExpanded = !expanded;
+    userExpandedRef.current = nextExpanded;
+    onExpandedChange?.(nextExpanded);
     clearScheduledTransition();
     settleScrollRef.current?.();
     settleScrollRef.current = onUserToggle?.(event.currentTarget, nextExpanded) ?? null;
@@ -83,15 +87,14 @@ export function useConversationProcessDisclosureMotion(
   }, []);
 
   useEffect(() => {
-    const wasRunning = previousRunningRef.current;
-    previousRunningRef.current = running;
-    if (wasRunning === running) {
+    const nextExpanded = controlledExpanded ?? userExpandedRef.current ?? running;
+    if (nextExpanded === expanded) {
       return;
     }
     clearScheduledTransition();
     settleScrollRef.current?.();
     settleScrollRef.current = null;
-    if (running) {
+    if (nextExpanded) {
       setMounted(true);
       frameRef.current = window.requestAnimationFrame(() => {
         frameRef.current = null;
@@ -104,7 +107,7 @@ export function useConversationProcessDisclosureMotion(
       setExpanded(false);
       scheduleTransitionFinish(false);
     }
-  }, [running]);
+  }, [controlledExpanded, running]);
 
   return {
     expanded,

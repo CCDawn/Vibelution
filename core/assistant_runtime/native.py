@@ -240,7 +240,7 @@ def _bootstrap(root: Path | str, *, offline_migration: bool) -> dict[str, Any]:
             raise
 
 
-def get_detail(session_id: str) -> dict[str, Any]:
+def get_detail(session_id: str, *, before_message_index: int | None = None) -> dict[str, Any]:
     """Only the current singleton's direct Session is visible to this adapter."""
     with _LOCK:
         assistant = _projection()["assistant"]
@@ -250,13 +250,14 @@ def get_detail(session_id: str) -> dict[str, Any]:
         # This endpoint is polled by the resident renderer. The native light
         # projection retains messages and execution state without computing
         # project inbox/governance/next-state side lists on every read, and the
-        # recent-window limit keeps every response under the desktop bridge's
-        # 8 MiB envelope regardless of session length.
+        # recent-window limit bounds history per response. The desktop bridge
+        # independently enforces its byte limit, including individual large turns.
         detail = sessions.get_session_detail(
             session_id,
             include_secondary=False,
             message_limit=LAUNCHER_ASSISTANT_DETAIL_MESSAGE_LIMIT,
             transcript_scope="window",
+            **({"before_message_index": before_message_index} if before_message_index is not None else {}),
         )
         if detail is None or str(detail.get("agentId") or "") != assistant["agentId"]:
             raise sessions.SessionNotFoundError("Launcher assistant session not found")
@@ -267,6 +268,68 @@ def identity() -> dict[str, Any]:
     """Refresh native settings without re-provisioning or changing identity."""
     with _LOCK:
         return _projection()
+
+
+def assistant_settings() -> dict[str, Any]:
+    """Read the singleton owner's safe settings without model execution."""
+    with _LOCK:
+        _, personal, _, _ = _services()
+        with personal._LOCK:
+            assistant = _projection()["assistant"]
+            if (not _AGENT_ID or not _SESSION_ID or assistant.get("agentId") != _AGENT_ID
+                    or assistant.get("directSessionId") != _SESSION_ID):
+                raise AssistantSessionError("ASSISTANT_IDENTITY_INVALID")
+            settings = personal.get_personal_assistant_settings().get("settings")
+            if not isinstance(settings, dict):
+                raise AssistantSessionError("ASSISTANT_MODEL_UNAVAILABLE")
+            model = settings.get("model") or {}
+            fields = ("modelId", "label", "providerLabel", "isDefault", "providerHealthy",
+                      "missingApiKey", "availability")
+            return {"ok": True, "verified": True, "status": "completed",
+                    "displayName": settings.get("displayName", ""),
+                    "preferences": {key: value for key, value in (settings.get("preferences") or {}).items()
+                                    if key in personal.PREFERENCES_FIELDS},
+                    "modelId": model.get("currentModelId", ""),
+                    "modelChoices": [{key: row[key] for key in fields if key in row}
+                                     for row in model.get("choices", []) if isinstance(row, dict)]}
+
+
+def set_model(model_id: str) -> dict[str, str]:
+    """Rebind only this assistant through its existing settings owner."""
+    from core.web.services import agent_directory_service as directory
+    from core.web.services.session.admission_lock import SessionAdmissionLock
+
+    if (not isinstance(model_id, str) or not 1 <= len(model_id) <= 200
+            or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in model_id)):
+        raise AssistantSessionError("ASSISTANT_MODEL_INVALID")
+    with _session_command() as (sessions, session_id):
+        _, personal, _, _ = _services()
+        with personal._LOCK:
+            # Recheck under the singleton owner's lock before any mutation.
+            assistant_settings()
+            lock = SessionAdmissionLock(sessions.PROJECT_ROOT, session_id)
+            try:
+                lock.acquire(timeout=0.1)
+            except sessions.SessionBusyError:
+                raise AssistantSessionError("ASSISTANT_MODEL_BUSY") from None
+            try:
+                try:
+                    _assert_session_idle(sessions, session_id)
+                except AssistantSessionError as exc:
+                    code = "ASSISTANT_MODEL_BUSY" if exc.code == "ASSISTANT_QUIESCENCE_BUSY" else "ASSISTANT_MODEL_UNAVAILABLE"
+                    raise AssistantSessionError(code) from None
+                try:
+                    personal.update_personal_assistant_model(model_id)
+                except directory.AgentStateConflictError:
+                    raise AssistantSessionError("ASSISTANT_MODEL_UNAVAILABLE") from None
+                except directory.AgentDirectoryError:
+                    raise AssistantSessionError("ASSISTANT_MODEL_INVALID") from None
+                observed = assistant_settings()["modelId"]
+                if observed != model_id:
+                    raise AssistantSessionError("ASSISTANT_MODEL_UNAVAILABLE")
+                return {"modelId": observed}
+            finally:
+                lock.release()
 
 
 def _assistant_avatar_agent() -> dict[str, Any]:

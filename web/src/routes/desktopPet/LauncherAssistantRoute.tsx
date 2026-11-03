@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, MessageCircle, RefreshCw, SlidersHorizontal, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import {
-  getLauncherAssistantDetail, getLauncherAssistantDispatches, getLauncherAssistantStatus,
+  getLauncherAssistantDetail, getLauncherAssistantDispatches, getLauncherAssistantStatus, setLauncherAssistantModel,
   hideLauncherAssistant, sendLauncherAssistantMessage, setLauncherAssistantExpanded,
   launcherConversationApi,
   getLauncherAssistantApprovals, resolveLauncherAssistantApproval,
@@ -13,13 +13,13 @@ import {
   readLauncherAttachment, subscribeLauncherAssistantSessionEvent,
 } from "../../api/launcherAssistant";
 import { openLauncherModelConnection } from "../../api/launcher";
-import type { ConversationMessage } from "../../api/types";
+import type { ConversationMessage, SessionDetail } from "../../api/types";
 import type { SessionContinuationExpectation } from "../../api/chat";
 import { queryKeys } from "../../api/queryKeys";
 import type { SessionToolApprovalRequest } from "../../api/types";
 import { LazyConversationView } from "../../components/conversation/LazyConversationView";
 import { LauncherAssistantWelcome } from "./LauncherAssistantWelcome";
-import { VButton, VDenseOpsPage, VNativeButton, VStateSurface } from "../../components/vui";
+import { VButton, VDenseOpsPage, VNativeButton, VNativeSelect, VStateSurface } from "../../components/vui";
 import { useShellI18n } from "../../i18n/useShellI18n";
 import { hasExecutionOwnership, resolveSessionActivity, sessionActivityStatusLabel } from "../sessionActivityState";
 import { continuationSnapshotKey, resolveConversationContinuation } from "../chat/conversationContinuationModel";
@@ -48,11 +48,13 @@ import {
   launcherAssistantActivity, launcherAssistantMessageOverLimit, launcherAssistantPollInterval, launcherAssistantSubmission,
   launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
   launcherAssistantSendDefinitelyRejected, launcherAssistantSessionEventRefreshesDetail, launcherAssistantSseHealthy,
-  launcherAssistantWaitInterval, launcherAssistantLiveTextFromEvent, launcherAssistantLiveTextIsStale,
-  launcherAssistantActiveTurnMessage, launcherAssistantContextRing, launcherAssistantModelDisplay,
+  launcherAssistantWaitInterval, launcherAssistantContextRing, launcherAssistantModelDisplay,
   launcherAssistantEditBackfillDraft,
-  type LauncherAssistantSubmission, type LauncherAssistantQueuedAcceptance, type LauncherAssistantLiveText,
+  type LauncherAssistantSubmission, type LauncherAssistantQueuedAcceptance,
 } from "./launcherAssistantModel";
+import { activeTurnLayerToConversationMessage, createLauncherAssistantStream } from "./launcherAssistantStream";
+import type { ActiveTurnLayerState } from "../chatActiveTurnLayer";
+import { mergeSessionDetailMessageWindow } from "../chatSessionState";
 import { loadLauncherComposer, restoreLauncherComposerAttachments, saveLauncherComposer } from "./launcherAssistantComposerStorage";
 
 const COPY = {
@@ -61,7 +63,6 @@ const COPY = {
     collapse: "收起聊天", loading: "正在打开对话…", unavailable: "个人助理暂不可用",
     retry: "重试", refresh: "刷新", placeholder: "和个人助理聊一聊…", send: "发送", sending: "正在发送…",
     unknownSend: "尚未确认消息是否收到。输入已保留，重试会核对同一条消息。",
-    discardSend: "放弃本次发送",
     sendRejected: "本次发送已被拒绝，未进入对话；请修改后重新发送。",
     tooLong: "消息超出 64,000 字上限，请精简后再发送。",
     imageUnsupported: "当前模型不支持图片输入，请移除图片附件后再发送。",
@@ -78,7 +79,6 @@ const COPY = {
     collapse: "Collapse chat", loading: "Opening conversation…", unavailable: "Assistant unavailable",
     retry: "Retry", refresh: "Refresh", placeholder: "Chat with your assistant…", send: "Send", sending: "Sending…",
     unknownSend: "Delivery is unconfirmed. Your input is retained; retry checks the same message.",
-    discardSend: "Discard this send",
     sendRejected: "This send was rejected and never entered the conversation; edit and send again.",
     tooLong: "Message exceeds the 64,000-character limit; shorten it before sending.",
     imageUnsupported: "The current model does not support image input; remove image attachments before sending.",
@@ -320,7 +320,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     queryFn: async ({ signal }) => {
       const result = await getLauncherAssistantDetail(sessionId);
       signal.throwIfAborted();
-      return result;
+      return mergeSessionDetailMessageWindow(client.getQueryData<SessionDetail>(["launcher-assistant", "detail", sessionId]), result);
     },
     enabled: observingOwnSession, retry: false,
     refetchInterval: query => {
@@ -335,12 +335,25 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     },
     refetchIntervalInBackground: false,
   });
-  // Newest streaming answer text from the push channel, attributed to its turn.
-  // A ref plus explicit repaint through the overlay row below would be enough,
-  // but state keeps the effect graph plain: deltas are throttled by the host,
-  // so re-renders per frame are acceptable and never re-render on their own
-  // when the pump is absent (the value just stays null).
-  const [liveText, setLiveText] = useState<LauncherAssistantLiveText | null>(null);
+  const sessionStream = useMemo(() => createLauncherAssistantStream(sessionId), [sessionId]);
+  const [activeLayer, setActiveLayer] = useState<ActiveTurnLayerState>();
+  const latestDetail = useRef(detail.data);
+  latestDetail.current = detail.data;
+  const historyGate = useRef(false);
+  const [earlierMessagesLoading, setEarlierMessagesLoading] = useState(false);
+  async function loadEarlierMessages() {
+    const cursor = latestDetail.current?.messageWindow?.nextBeforeMessageIndex;
+    if (historyGate.current || !sessionId || !cursor) return;
+    historyGate.current = true;
+    setEarlierMessagesLoading(true);
+    try {
+      const page = await getLauncherAssistantDetail(sessionId, cursor);
+      if (mounted.current && sessionIdRef.current === sessionId) {
+        client.setQueryData<SessionDetail>(["launcher-assistant", "detail", sessionId], previous => mergeSessionDetailMessageWindow(previous, page));
+      }
+    } catch (error) { if (mounted.current && sessionIdRef.current === sessionId) setFeedback(errorMessage(error)); }
+    finally { historyGate.current = false; if (mounted.current) setEarlierMessagesLoading(false); }
+  }
   useEffect(() => {
     if (!observingOwnSession) return;
     let active = true;
@@ -352,23 +365,17 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     const unsubscribe = subscribeLauncherAssistantSessionEvent(event => {
       if (!active) return;
       sseAliveAt.current = Date.now();
-      const delta = launcherAssistantLiveTextFromEvent(event, sessionId);
-      if (delta.finished) setLiveText(null);
-      else if (delta.update) setLiveText(delta.update);
-      if (!launcherAssistantSessionEventRefreshesDetail(event, sessionId)) return;
+      const result = sessionStream.apply(event, latestDetail.current);
+      setActiveLayer(result.layer);
+      if (!result.needsRefresh && !launcherAssistantSessionEventRefreshesDetail(event, sessionId)) return;
       void client.invalidateQueries({ queryKey: ["launcher-assistant", "detail", sessionId] });
     });
     if (!unsubscribe) return;
     return () => { active = false; unsubscribe(); };
-  }, [client, observingOwnSession, sessionId]);
-  // The detail authority retires the preview: once this turn's answer commits
-  // as a durable row (or another turn took over), the overlay row must not
-  // outlive it. A missed `done` still converges because the committed row lands
-  // through the existing snapshot/polling paths.
+  }, [client, observingOwnSession, sessionId, sessionStream]);
   useEffect(() => {
-    if (liveText && launcherAssistantLiveTextIsStale(liveText, detail.data)) setLiveText(null);
-  }, [detail.data, liveText]);
-  useEffect(() => { setLiveText(null); }, [sessionId]);
+    setActiveLayer(detail.data ? sessionStream.reconcile(detail.data) : undefined);
+  }, [detail.data, detail.dataUpdatedAt, sessionStream]);
   useEffect(() => {
     const submission = outstanding.current;
     const recovered = submission && launcherAssistantRequestReadback(detail.data, submission.requestId);
@@ -662,9 +669,6 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     finally { launcherGate.current = false; if (mounted.current) setLauncherPending(false); }
   }
 
-  // Opens the Workbench model-connection page: the honest configuration entry
-  // for the assistant's bound dialogue model (the launcher surface has no
-  // model-parameter write verb of its own).
   const modelConfigGate = useRef(false);
   const [modelConfigPending, setModelConfigPending] = useState(false);
   async function openModelConnection() {
@@ -674,6 +678,18 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     setFeedback("");
     try { await openLauncherModelConnection(); }
     catch (error) { if (mounted.current) setFeedback(errorMessage(error)); }
+    finally { modelConfigGate.current = false; if (mounted.current) setModelConfigPending(false); }
+  }
+  async function changeModel(modelId: string) {
+    if (modelConfigGate.current || !modelId || hasExecutionOwnership(resolveSessionActivity(latestDetail.current || {}).execution)) return;
+    modelConfigGate.current = true;
+    setModelConfigPending(true);
+    setFeedback("");
+    try {
+      await setLauncherAssistantModel(modelId);
+      await status.refetch();
+      void client.invalidateQueries({ queryKey: [launcherConversationApi.cacheKey, "config"], exact: true });
+    } catch (error) { if (mounted.current) setFeedback(errorMessage(error)); }
     finally { modelConfigGate.current = false; if (mounted.current) setModelConfigPending(false); }
   }
 
@@ -753,7 +769,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
         setFeedback(copy.tooLong);
         return false;
       }
-      if (!prepared && attachmentsRef.current.length && status.data?.settings?.supportsImageInput === false) {
+      if (!prepared && attachmentsRef.current.some(item => item.kind === "image") && status.data?.settings?.supportsImageInput === false) {
         setFeedback(copy.imageUnsupported);
         return false;
       }
@@ -810,18 +826,6 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       }
     }
     return true;
-  }
-
-  function discardUnconfirmedSend() {
-    if (sendPending || !outstanding.current) return;
-    // The user explicitly gives up an unconfirmed send: only the outstanding
-    // lock clears. Nothing is retired as accepted and the draft and tray stay
-    // editable, so a genuinely delivered message could still be followed by a
-    // duplicate — that trade-off belongs to the operator who saw the warning.
-    outstanding.current = null;
-    saveComposer({ outstanding: null });
-    setSendUnconfirmed(false);
-    setFeedback("");
   }
 
   const computerAccess = useLauncherComputerAccess({
@@ -1106,7 +1110,9 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       runtimeApi={launcherConversationApi}
       sessionId={detail.data.id} title={detail.data.title || identity?.displayName || copy.title}
       phase={resolveSessionActivity(detail.data).execution} messages={historyAttachments.messages}
-      activeTurnMessage={liveText ? launcherAssistantActiveTurnMessage(sessionId, liveText) : undefined}
+      activeTurnMessage={activeLayer?.sessionId === sessionId ? activeTurnLayerToConversationMessage(activeLayer) : undefined}
+      hasEarlierMessages={Boolean(detail.data.messageWindow?.hasEarlier)} earlierMessagesLoading={earlierMessagesLoading}
+      onLoadEarlierMessages={() => void loadEarlierMessages()}
       onVisibleTimelineMessageIds={setVisibleMessageIds}
       turnError={detail.data.lastTurnError}
       defaultFileContext={detail.data.defaultFileContext} assistantDisplayName={displayName}
@@ -1126,7 +1132,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       onAddComposerAttachments={addAttachments} onRemoveComposerAttachment={removeAttachment}
       onRetryComposerAttachment={id => void uploadAttachments(id)} onRetryComposerAttachmentUploads={() => void uploadAttachments()}
       composerError={sendUnconfirmed ? copy.unknownSend
-        : attachments.length > 0 && status.data?.settings?.supportsImageInput === false ? copy.imageUnsupported
+        : attachments.some(item => item.kind === "image") && status.data?.settings?.supportsImageInput === false ? copy.imageUnsupported
         : attachments.some(item => item.uploadStatus === "failed") ? (lang === "zh" ? "附件上传失败，请重试。" : "Attachment upload failed; retry.") : ""}
       submitLabel={sendUnconfirmed ? copy.retry : copy.send} submitPendingLabel={copy.sending}
       composerActionDisabled={sendPending || controlPending || (attachments.length > 0 && status.data?.attachmentVersion !== 1) || (actionMode === "stop" ? stopping || !resolveSessionStopTurnId(detail.data, acceptedTurnId) : actionMode === "send" && !sendUnconfirmed && !draft.trim() && !attachments.length)}
@@ -1136,13 +1142,20 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       onEditUserMessage={editMessageToComposer}
       editUserMessageLabel={copy.editAsNew}
       editUserMessageDisabled={sendPending || sendUnconfirmed || controlPending || busy || stopping}
-      composerPrecedingContent={<>{status.data ? <div className="flex min-w-0 shrink-0 items-center gap-2 px-4 py-1 text-vui-xs text-[var(--fg-secondary)]"
+      composerPrecedingContent={<>{status.data ? <div className={petStyles.modelRow}
         data-launcher-assistant-model-row aria-label={copy.currentModel}>
         <Bot size={12} aria-hidden="true" />
-        <span className="truncate">{modelDisplay}</span>
-        <VButton density="compact" variant="ghost" className="shrink-0" isPending={modelConfigPending} isDisabled={modelConfigPending}
+        {status.data.settings?.modelChoices?.length ? <VNativeSelect aria-label={lang === "zh" ? "助理模型" : "Assistant model"}
+          value={status.data.settings.modelId} disabled={modelConfigPending || busy || stopping || sendPending || sendUnconfirmed || controlPending}
+          onChange={event => void changeModel(event.currentTarget.value)} className={petStyles.modelSelect}>
+          {!status.data.settings.modelChoices.some(choice => choice.modelId === status.data?.settings?.modelId)
+            ? <option value={status.data.settings.modelId}>{modelDisplay}</option> : null}
+          {status.data.settings.modelChoices.map(choice => <option key={choice.modelId} value={choice.modelId}
+            disabled={choice.providerHealthy === false || choice.missingApiKey === true}>{choice.label || choice.modelId}</option>)}
+        </VNativeSelect> : <span className={petStyles.modelName}>{modelDisplay}</span>}
+        {embedded ? <VButton density="compact" variant="ghost" className={petStyles.modelSettingsButton} isPending={modelConfigPending} isDisabled={modelConfigPending}
           icon={<SlidersHorizontal size={12} aria-hidden="true" />}
-          onClick={() => void openModelConnection()}>{copy.modelSettings}</VButton>
+          onClick={() => void openModelConnection()}>{copy.modelSettings}</VButton> : null}
       </div> : null}
       {pendingQuestion ? <VStateSurface density="compact" tone="info" title={copy.pendingQuestion}
         data-launcher-assistant-pending-question={pendingQuestion.id}
@@ -1189,8 +1202,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       {queueReadback.removed ? <p role="status">{removedQueueText}</p> : null}
     </section> : null}
     {sendUnconfirmed ? <VStateSurface tone="error" title={copy.unknownSend}
-      actions={<><VButton onClick={() => void submit()} isDisabled={sendPending || controlPending || stopping}>{copy.retry}</VButton>
-        <VButton variant="ghost" onClick={discardUnconfirmedSend} isDisabled={sendPending || controlPending}>{copy.discardSend}</VButton></>} /> : null}
+      actions={<VButton onClick={() => void submit()} isDisabled={sendPending || controlPending || stopping}>{copy.retry}</VButton>} /> : null}
     {detail.isError && detail.data ? <VStateSurface tone="error" title={copy.unavailable}
       actions={<VButton onClick={() => void detail.refetch()}>{copy.retry}</VButton>}>{detail.error.message}</VStateSurface> : null}
     {dispatches.isError ? <VStateSurface tone="error" title={copy.receipts}

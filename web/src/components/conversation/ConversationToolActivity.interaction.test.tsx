@@ -34,6 +34,13 @@ function namedToolCell(id: string, rawToolName: string): CodexTranscriptCell {
 
 const DEFAULT_SESSION = "session-expand-tests";
 
+function clickNestedSummary(summary: HTMLElement) {
+  // happy-dom performs each ancestor <details>' default action during bubbling,
+  // before React's delegated handler can prevent it. Browsers wait until dispatch ends.
+  summary.addEventListener("click", (event) => event.preventDefault(), { once: true });
+  summary.click();
+}
+
 function mountActivity(
   cells: CodexTranscriptCell[],
   options?: { sessionId?: string; turnFailed?: boolean },
@@ -209,6 +216,52 @@ describe("ConversationToolActivity row open persistence", () => {
 });
 
 describe("ConversationToolActivity failed-turn scene preservation", () => {
+  it.each([
+    { name: "row", cells: [toolCell("failure-choice-row", "已完成")], selector: '[data-codex-tool-detail="true"]' },
+    { name: "batch", cells: [namedToolCell("failure-choice-batch-1", "web_fetch_tool"), namedToolCell("failure-choice-batch-2", "web_fetch_tool")], selector: '[data-codex-tool-activity-batch="true"]' },
+    { name: "category", cells: [namedToolCell("failure-choice-read", "read_file_tool"), namedToolCell("failure-choice-grep", "grep_search_tool")], selector: '[data-codex-tool-activity-category-group="true"]' },
+  ])("keeps a failed $name collapsed after the user closes it and its subtree remounts", async ({ cells, selector }) => {
+    const first = mountActivity(cells, { turnFailed: true });
+    try {
+      await act(async () => first.render());
+      const target = first.host.querySelector(selector)!;
+      expect(target.hasAttribute("open")).toBe(true);
+      await act(async () => clickNestedSummary(target.querySelector("summary")!));
+    } finally {
+      await first.unmount();
+    }
+    resetToolExpandPersistenceForTests();
+    const second = mountActivity(cells, { turnFailed: true });
+    try {
+      await act(async () => second.render());
+      expect(second.host.querySelector(selector)!.hasAttribute("open")).toBe(false);
+    } finally {
+      await second.unmount();
+    }
+  });
+
+  it("keeps a failed batch's child collapsed when the batch subtree remounts", async () => {
+    const cells = [namedToolCell("failure-child-1", "web_fetch_tool"), namedToolCell("failure-child-2", "web_fetch_tool")];
+    const first = mountActivity(cells, { turnFailed: true });
+    try {
+      await act(async () => first.render());
+      const child = first.host.querySelector('[data-codex-tool-detail="true"]')!;
+      expect(child.hasAttribute("open")).toBe(true);
+      await act(async () => clickNestedSummary(child.querySelector("summary")!));
+    } finally {
+      await first.unmount();
+    }
+    resetToolExpandPersistenceForTests();
+    const second = mountActivity(cells, { turnFailed: true });
+    try {
+      await act(async () => second.render());
+      expect(second.host.querySelector('[data-codex-tool-activity-batch="true"]')!.hasAttribute("open")).toBe(true);
+      expect(second.host.querySelector('[data-codex-tool-detail="true"]')!.hasAttribute("open")).toBe(false);
+    } finally {
+      await second.unmount();
+    }
+  });
+
   it("force-opens the failed turn's rows, batches, and category groups initially", async () => {
     const single = mountActivity([toolCell("failed-scene-row", "已完成")], { turnFailed: true });
     await act(async () => single.render());
@@ -281,7 +334,7 @@ describe("ConversationToolActivity failed-turn scene preservation", () => {
   });
 });
 
-describe("ConversationToolActivity complete-edge auto-collapse", () => {
+describe("ConversationToolActivity user choices across running and settled states", () => {
   function runningCell(id: string): CodexTranscriptCell {
     const cell = toolCell(id, "正在执行");
     cell.status = "running";
@@ -289,17 +342,17 @@ describe("ConversationToolActivity complete-edge auto-collapse", () => {
     return cell;
   }
 
-  it("auto-collapses a persisted-open row once when it settles after running", async () => {
+  it("keeps a persisted-open row open when it settles after running", async () => {
     // The row was expanded earlier and persisted; it mounts open while running.
     setToolRowOpen(DEFAULT_SESSION, "edge-auto-1", true);
     const mount = mountActivity([runningCell("edge-auto-1")]);
     await act(async () => mount.render());
     expect(mount.host.querySelector("details")!.hasAttribute("open")).toBe(true);
 
-    // Settling auto-collapses once (the user did not touch the row this run).
+    // A stored user choice remains explicit even if it predates this mount.
     await act(async () => mount.render([toolCell("edge-auto-1", "已完成")]));
-    expect(mount.host.querySelector("details")!.hasAttribute("open")).toBe(false);
-    expect(readOpenToolKeys(DEFAULT_SESSION).has("edge-auto-1")).toBe(false);
+    expect(mount.host.querySelector("details")!.hasAttribute("open")).toBe(true);
+    expect(readOpenToolKeys(DEFAULT_SESSION).has("edge-auto-1")).toBe(true);
     await mount.unmount();
   });
 
@@ -318,7 +371,7 @@ describe("ConversationToolActivity complete-edge auto-collapse", () => {
     await mount.unmount();
   });
 
-  it("auto-collapses the category group at the settle edge unless the user toggled it", async () => {
+  it("keeps the category group's persisted or current user choice at the settle edge", async () => {
     const cells = (firstStatus: string) => [
       namedToolCell("edge-group-read-1", "read_file_tool"),
       (() => {
@@ -336,11 +389,11 @@ describe("ConversationToolActivity complete-edge auto-collapse", () => {
     const group = mount.host.querySelector('[data-codex-tool-activity-category-group="true"]')!;
     expect(group.hasAttribute("open")).toBe(true);
 
-    // Group settles (its last child completed) → auto-collapse once.
+    // The last child settling does not erase the stored user choice.
     await act(async () => mount.render(cells("completed")));
     expect(
       mount.host.querySelector('[data-codex-tool-activity-category-group="true"]')!.hasAttribute("open"),
-    ).toBe(false);
+    ).toBe(true);
     await mount.unmount();
 
     // User-opened variant: toggle during running, settle keeps it open.
@@ -372,17 +425,17 @@ describe("ConversationToolActivity batch open persistence", () => {
 
     await act(async () => batch.querySelector("summary")!.click());
     expect(batch.hasAttribute("open")).toBe(true);
-    expect(readOpenToolKeys(DEFAULT_SESSION).has("tool-batch:batch-persist-1:batch-persist-2")).toBe(true);
+    expect(readOpenToolKeys(DEFAULT_SESSION).has("tool-batch:batch-persist-1")).toBe(true);
     await first.unmount();
 
     const second = mountActivity(batchCells());
     await act(async () => second.render());
     expect(second.host.querySelector('[data-codex-tool-activity-batch="true"]')!.hasAttribute("open")).toBe(true);
 
-    // Collapsing frees the stored entry again.
+    // Collapsing records an explicit closed choice.
     await act(async () => second.host.querySelector('[data-codex-tool-activity-batch="true"] summary')!.click());
     expect(second.host.querySelector('[data-codex-tool-activity-batch="true"]')!.hasAttribute("open")).toBe(false);
-    expect(readOpenToolKeys(DEFAULT_SESSION).has("tool-batch:batch-persist-1:batch-persist-2")).toBe(false);
+    expect(readOpenToolKeys(DEFAULT_SESSION).has("tool-batch:batch-persist-1")).toBe(false);
     await second.unmount();
 
     const third = mountActivity(batchCells());
@@ -426,7 +479,85 @@ describe("ConversationToolActivity batch open persistence", () => {
     expect(group).not.toBeNull();
     const settledBatch = mount.host.querySelector('[data-codex-tool-activity-batch="true"]')!;
     expect(settledBatch.hasAttribute("open")).toBe(true);
-    expect(readOpenToolKeys(DEFAULT_SESSION).has("tool-batch:batch-swap-1:batch-swap-3")).toBe(true);
+    expect(readOpenToolKeys(DEFAULT_SESSION).has("tool-batch:batch-swap-1")).toBe(true);
     await mount.unmount();
+  });
+
+  it("keeps an expanded batch and child open when a third tool is appended", async () => {
+    const cells = batchCells();
+    const tail: CodexTranscriptCell = { ...namedToolCell("batch-append-tail", "zephyr_calc_tool"), status: "running", tone: "running" };
+    const mount = mountActivity([...cells, tail]);
+    try {
+      await act(async () => mount.render());
+      const batch = mount.host.querySelector('[data-codex-tool-activity-batch="true"]')!;
+      await act(async () => batch.querySelector("summary")!.click());
+      expect(batch.hasAttribute("open")).toBe(true);
+      const row = batch.querySelector('[data-codex-tool-detail="true"]')!;
+      await act(async () => clickNestedSummary(row.querySelector("summary")!));
+      expect(batch.hasAttribute("open")).toBe(true);
+
+      await act(async () => mount.render([
+        ...cells,
+        namedToolCell("batch-persist-3", "web_fetch_tool"),
+        tail,
+      ]));
+      const appended = mount.host.querySelector('[data-codex-tool-activity-batch="true"]')!;
+      expect(appended).toBe(batch);
+      expect(appended.hasAttribute("open")).toBe(true);
+      expect(appended.getAttribute("data-codex-tool-activity-count")).toBe("3");
+      expect(appended.querySelector('[data-codex-tool-detail="true"]')).toBe(row);
+      expect(row.hasAttribute("open")).toBe(true);
+    } finally {
+      await mount.unmount();
+    }
+  });
+
+  it("persists nested batch and child choices through a settled activity remount", async () => {
+    const cells: CodexTranscriptCell[] = [
+      namedToolCell("nested-read-1", "read_file_tool"),
+      namedToolCell("nested-read-2", "read_file_tool"),
+      namedToolCell("nested-grep", "grep_search_tool"),
+      { ...namedToolCell("nested-tail", "zephyr_calc_tool"), status: "running", tone: "running" },
+    ];
+    const mount = mountActivity(cells);
+    try {
+      await act(async () => mount.render());
+      const category = mount.host.querySelector('[data-codex-tool-activity-category-group="true"]')!;
+      await act(async () => category.querySelector("summary")!.click());
+      const batch = category.querySelector('[data-codex-tool-activity-batch="true"]')!;
+      await act(async () => batch.querySelector("summary")!.click());
+      const row = batch.querySelector('[data-codex-tool-detail="true"]')!;
+      await act(async () => row.querySelector("summary")!.click());
+
+      await act(async () => mount.render(cells.map((cell): CodexTranscriptCell => ({ ...cell, status: "completed", tone: "neutral" }))));
+      expect(mount.host.querySelector('[data-codex-tool-activity-group="true"]')).not.toBeNull();
+      const settledCategory = mount.host.querySelector('[data-codex-tool-activity-category-group="true"]')!;
+      const settledBatch = settledCategory.querySelector('[data-codex-tool-activity-batch="true"]')!;
+      expect(settledCategory.hasAttribute("open")).toBe(true);
+      expect(settledBatch.hasAttribute("open")).toBe(true);
+      expect(settledBatch.querySelector('[data-codex-tool-detail="true"]')!.hasAttribute("open")).toBe(true);
+      expect(readOpenToolKeys(DEFAULT_SESSION).has("nested-read-1")).toBe(true);
+      expect(readOpenToolKeys(DEFAULT_SESSION).has("tool-batch:nested-read-1")).toBe(true);
+    } finally {
+      await mount.unmount();
+    }
+  });
+
+  it("passes failed-turn scene preservation through a category into its batch and rows", async () => {
+    const mount = mountActivity([
+      namedToolCell("failed-nested-read-1", "read_file_tool"),
+      namedToolCell("failed-nested-read-2", "read_file_tool"),
+      namedToolCell("failed-nested-grep", "grep_search_tool"),
+    ], { turnFailed: true });
+    try {
+      await act(async () => mount.render());
+      const batch = mount.host.querySelector('[data-codex-tool-activity-batch="true"]')!;
+      expect(batch.hasAttribute("open")).toBe(true);
+      for (const row of batch.querySelectorAll('[data-codex-tool-detail="true"]')) {
+        expect(row.hasAttribute("open")).toBe(true);
+      }
+    } finally {
+      await mount.unmount();
+    }
   });
 });

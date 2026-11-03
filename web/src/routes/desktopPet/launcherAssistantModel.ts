@@ -88,7 +88,8 @@ export function launcherAssistantSendDefinitelyRejected(error: unknown): boolean
     && (error.name === "LauncherAssistantRejectedError"
       // The desktop bridge's pre-admission HostError code, surfaced as the
       // caught Error's message; thrown only before the send RPC leaves main.
-      || error.message === "ASSISTANT_REQUEST_INVALID");
+      || error.message === "ASSISTANT_REQUEST_INVALID"
+      || /^Error invoking remote method '[^']+': (?:Error: )?ASSISTANT_REQUEST_INVALID$/.test(error.message));
 }
 
 export function launcherAssistantActivity(source: SessionActivitySource = {}): {
@@ -138,80 +139,6 @@ export function launcherAssistantSessionEventRefreshesDetail(event: LauncherAssi
   if (!sessionId || event.sessionId !== sessionId) return false;
   if (event.type === "session_detail") return true;
   return event.type === "assistant_delta" && (event as { done?: unknown }).done === true;
-}
-
-export type LauncherAssistantLiveText = { turnId: string; text: string };
-
-/** One pushed assistant_delta reduced to the live streaming preview. Only an
- * unfinished delta carrying both the generating turn's id and answer text
- * updates the preview; an explicit `done` finishes it (the caller clears the
- * preview, and the existing refresh gate re-reads detail for the committed
- * answer). Heartbeats, foreign sessions and identity-only envelopes (older
- * shell, oversized-frame fallback) leave the preview untouched, so absence
- * always degrades to today's polling-only path. */
-export function launcherAssistantLiveTextFromEvent(
-  event: LauncherAssistantSessionEvent, sessionId: string,
-): { update: LauncherAssistantLiveText | null; finished: boolean } {
-  if (!sessionId || event.sessionId !== sessionId || event.type !== "assistant_delta") return { update: null, finished: false };
-  if ((event as { done?: unknown }).done === true) return { update: null, finished: true };
-  const turnId = typeof event.turnId === "string" ? event.turnId.trim() : "";
-  const text = typeof event.textPreview === "string" ? event.textPreview.trim() : "";
-  if (!turnId || !text) return { update: null, finished: false };
-  return { update: { turnId, text }, finished: false };
-}
-
-function launcherAssistantTurnIdOf(message: ConversationMessage): string {
-  return String(
-    (message.role === "assistant" ? message.turnId : undefined)
-    ?? message.metadata?.turnId
-    ?? message.metadata?.turn_id
-    ?? "",
-  ).replace(/^live:/, "").trim();
-}
-
-/** A detail contradiction that retires the streaming preview: another turn took
- * over generation, or this turn's answer already committed as a durable row.
- * The native live-overlay row for the same turn is not a commitment — both may
- * paint while the pump preview is the lower-latency source. */
-export function launcherAssistantLiveTextIsStale(
-  live: LauncherAssistantLiveText,
-  source: Pick<SessionDetail, "messages" | "activeTurnId"> | undefined,
-): boolean {
-  if (!source) return false;
-  const turnId = live.turnId.replace(/^live:/, "").trim();
-  const activeTurnId = String(source.activeTurnId || "").replace(/^live:/, "").trim();
-  if (activeTurnId && activeTurnId !== turnId) return true;
-  return (source.messages ?? []).some(message => message.role === "assistant"
-    && launcherAssistantTurnIdOf(message) === turnId
-    && message.metadata?.kind !== "session_live_overlay"
-    && !/-message-(live|active)-/.test(message.id));
-}
-
-const LAUNCHER_ASSISTANT_LIVE_ROW_ID_PREFIX = "launcher-assistant-live-";
-
-/** The streaming preview as the shared conversation's active-turn overlay row:
- * one revisioned `agent_message` item on a running assistant turn. The timeline
- * projection already owns overlay dedupe (a native live-overlay row for the
- * same turn keeps painting if the preview is absent, and the committed row
- * outranks both), so this stays a display hint that never fights the detail
- * authority. */
-export function launcherAssistantActiveTurnMessage(
-  sessionId: string, live: LauncherAssistantLiveText,
-): ConversationMessage {
-  const itemId = `${LAUNCHER_ASSISTANT_LIVE_ROW_ID_PREFIX}${live.turnId}`;
-  return {
-    id: `${itemId}-row`,
-    role: "assistant",
-    timestamp: new Date().toISOString(),
-    turnId: live.turnId,
-    status: "running",
-    turnItems: [{
-      id: itemId, itemId, version: 3, sessionId, turnId: live.turnId,
-      status: "running", revision: 1, sequence: 1,
-      type: "agent_message", phase: "final_answer", text: live.text,
-    }],
-    metadata: { kind: "session_active_turn_layer", sessionId, activeStatusSource: "assistant_delta" },
-  };
 }
 
 export function launcherAssistantPollInterval(visible: boolean, source?: LauncherAssistantActivitySource, acceptedTurnId?: string, queuedAcceptance?: LauncherAssistantQueuedAcceptance | null, pendingRequestIds: readonly string[] = [], options: { sseHealthy?: boolean } = {}): number | false {

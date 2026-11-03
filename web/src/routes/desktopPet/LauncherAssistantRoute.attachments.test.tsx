@@ -147,6 +147,16 @@ it("blocks sending image attachments when the dialogue model cannot accept image
   expect(conversation.composerDisabled).toBe(false);
 });
 
+it("allows document attachments for a text-only model without showing an image warning", async () => {
+  const { invoke } = await setup(true, { settings: { ok: true, displayName: "助手", modelId: "m", supportsImageInput: false,
+    preferences: { characterId: "dafeiyu", showStatus: true, showTitles: true, showCompletion: true, idleMessage: "" } } });
+  await act(async () => conversation.onAddComposerAttachments!([new File(["ok"], "notes.txt", { type: "text/plain" })]));
+  expect(conversation.composerAttachments?.[0].kind).toBe("document");
+  expect(conversation.composerError).toBe("");
+  await act(async () => conversation.onSubmit()); await settle(); await settle();
+  expect(invoke.mock.calls.some(([request]) => request.operation === "send")).toBe(true);
+});
+
 it("restores uploaded attachment chips across a reload and refills previews through the read IPC", async () => {
   localStorage.setItem("vibelution.launcher-assistant.composer.v1:embedded:s", JSON.stringify({
     version: 1, sessionId: "s", surface: "embedded",

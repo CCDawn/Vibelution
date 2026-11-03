@@ -7,6 +7,11 @@ export type LauncherOperatorProfile = {
   avatarPreset: "default" | "circle" | "spark" | "codex" | "minimal" | "initial";
 };
 
+export type LauncherAssistantModelChoice = {
+  modelId: string; label: string; providerLabel: string; isDefault: boolean;
+  providerHealthy: boolean; missingApiKey: boolean; availability: string;
+};
+
 export type LauncherAssistantStatus = {
   teamRunsVersion?: 1;
   assistantAvatarVersion?: 1;
@@ -17,6 +22,7 @@ export type LauncherAssistantStatus = {
   operatorProfile?: LauncherOperatorProfile;
   assistant: { agentId: string; directSessionId: string; displayName: string };
   settings?: { ok: boolean; preferences: DesktopPetPreferences; displayName: string; modelId: string;
+    modelChoices?: LauncherAssistantModelChoice[];
     /** Dialogue-model image-input capability for the attach gate; null or
      * absent means unknown, which never blocks a send (chat-page parity). */
     supportsImageInput?: boolean | null };
@@ -71,7 +77,9 @@ export type LauncherDispatchApprovalPreview = {
 export type LauncherAssistantRequest =
   | { operation: "previewTaskCleanup" | "executeTaskCleanup"; agentId: string; directSessionId: string; targets: LauncherTaskCleanupTarget[]; fingerprint?: string }
   | { operation: "teamRuns"; cursor?: string }
-  | { operation: "status" | "detail" | "dispatches" | "hide" | "approvals" | "openLauncher" | "assistantAvatar" }
+  | { operation: "setModel"; modelId: string }
+  | { operation: "detail"; beforeMessageIndex?: number }
+  | { operation: "status" | "dispatches" | "hide" | "approvals" | "openLauncher" | "assistantAvatar" }
   | { operation: "resolveApproval"; requestId: string; decision: "accept" | "decline" }
   | { operation: "previewDispatchApproval"; dispatchId: string; taskId: string; approvalId: string }
   | { operation: "declineDispatchApproval"; dispatchId: string; taskId: string; approvalId: string; revision: string }
@@ -111,33 +119,70 @@ function record(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object";
 }
 
-/** Session event pushed by the Launcher host (preload contract, additively
- * extended). `session_detail` is an authoritative snapshot frame,
- * `assistant_delta` an incremental frame, `heartbeat` a ~15s channel-health
- * signal; unknown types are ignored by consumers. The assistant_delta
- * enhancement fields below are optional and additive: identity-only envelopes
- * (older shell, oversized-frame fallback) stay valid, so absence always means
- * "unknown" — probe, never assume.
- * - `done`: the delta's terminal flag. Only `true` proves the turn finished;
- *   absent or false is no evidence either way.
- * - `turnId`: the turn the delta belongs to; correlate previews per turn.
- * - `textPreview`: newest assistant answer text from that frame's turnItems
- *   projection (`agent_message` body), tail-capped by the pump — may be cut
- *   mid-sentence. Display hint only; session detail stays the authority. */
+/** Closed, bounded transport of native assistant deltas. Detail and Journal
+ * remain authoritative; missing/oversized delta content requires a refresh. */
 export type LauncherAssistantSessionEvent = {
   type: string;
   sessionId: string;
   ledgerSeq?: number;
+  connectionEpoch?: number;
   at: number;
-  done?: boolean;
-  turnId?: string;
-  textPreview?: string;
-};
+  needsRefresh?: true;
+} & Partial<Omit<import("./types").SessionAssistantDeltaStreamEvent, "type" | "sessionId" | "ledgerSeq">>;
 
-/** Progressive enhancement over the preload bridge: an older or degraded shell
- * exposes no `onSessionEvent`, in which case this returns null without throwing
- * so callers keep today's polling behaviour untouched. Malformed frames are
- * dropped at this trust boundary rather than handed to the page. */
+const assistantEventSequence = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
+const assistantEventIdentity = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 256;
+const assistantEventRecord = (value: unknown): value is Record<string, unknown> => record(value) && !Array.isArray(value);
+
+function assistantEventItem(value: unknown, sessionId: string, turnId: string): boolean {
+  if (!assistantEventRecord(value) || value.version !== 3 || !assistantEventIdentity(value.id)
+    || !assistantEventIdentity(value.itemId) || value.sessionId !== sessionId || value.turnId !== turnId
+    || !assistantEventSequence(value.revision) || !assistantEventSequence(value.sequence)
+    || !["pending", "running", "completed", "failed"].includes(String(value.status))) return false;
+  switch (value.type) {
+    case "agent_message": return ["commentary", "final_answer"].includes(String(value.phase)) && typeof value.text === "string";
+    case "reasoning": return typeof value.text === "string";
+    case "tool_call": return assistantEventIdentity(value.callId) && typeof value.toolName === "string";
+    case "retry": return assistantEventSequence(value.attempt) && assistantEventIdentity(value.targetItemId) && typeof value.reason === "string";
+    case "status": case "error": return typeof value.code === "string" && typeof value.text === "string";
+    default: return false;
+  }
+}
+
+export function parseLauncherAssistantSessionEvent(value: unknown): LauncherAssistantSessionEvent | null {
+  if (!assistantEventRecord(value) || !assistantEventIdentity(value.sessionId) || typeof value.type !== "string"
+    || !value.type || value.type.length > 80 || typeof value.at !== "number" || !Number.isFinite(value.at)
+    || value.ledgerSeq !== undefined && !assistantEventSequence(value.ledgerSeq)
+    || value.connectionEpoch !== undefined && (!assistantEventSequence(value.connectionEpoch) || value.connectionEpoch < 1)) return null;
+  const base: LauncherAssistantSessionEvent = { type: value.type, sessionId: value.sessionId, at: value.at,
+    ...(value.ledgerSeq !== undefined ? { ledgerSeq: value.ledgerSeq as number } : {}),
+    ...(value.connectionEpoch !== undefined ? { connectionEpoch: value.connectionEpoch as number } : {}) };
+  if (value.needsRefresh === true) base.needsRefresh = true;
+  if (value.type !== "assistant_delta") return base;
+  const fallback: LauncherAssistantSessionEvent = { ...base, needsRefresh: true,
+    ...(assistantEventIdentity(value.turnId) ? { turnId: value.turnId } : {}) };
+  if (value.needsRefresh === true || !assistantEventIdentity(value.turnId) || typeof value.done !== "boolean"
+    || typeof value.stage !== "string" || value.stage.length > 256 || typeof value.updatedAt !== "string" || value.updatedAt.length > 80
+    || !Array.isArray(value.turnItems) || !value.turnItems.every(item => assistantEventItem(item, value.sessionId as string, value.turnId as string))
+    || [value.deltaSeq, value.deltaSeqFrom].some(seq => seq !== undefined && !assistantEventSequence(seq))
+    || value.streamEncoding !== undefined && value.streamEncoding !== "append-v1"
+    || value.turnItemAppends !== undefined && (!Array.isArray(value.turnItemAppends)
+      || value.turnItemAppends.some(entry => !assistantEventRecord(entry) || entry.kind !== "append"
+        || !assistantEventIdentity(entry.itemId) || !["agent_message", "reasoning"].includes(String(entry.itemType))
+        || !assistantEventSequence(entry.baseLength) || !assistantEventSequence(entry.appendedLength)
+        || typeof entry.appendedText !== "string" || !entry.appendedText)
+      || value.turnItemAppends.length > 0 && value.streamEncoding !== "append-v1")) return fallback;
+  const event = { ...base, turnId: value.turnId, stage: value.stage, done: value.done, updatedAt: value.updatedAt,
+    turnItems: value.turnItems } as LauncherAssistantSessionEvent;
+  for (const key of ["deltaSeq", "deltaSeqFrom", "turnItemAppends", "streamEncoding"] as const) {
+    if (value[key] !== undefined) Object.assign(event, { [key]: value[key] });
+  }
+  try {
+    return new TextEncoder().encode(JSON.stringify(event)).byteLength <= 256 * 1024 ? event : fallback;
+  } catch { return fallback; }
+}
+
+/** An older shell without this verb keeps the existing polling fallback. */
 export function subscribeLauncherAssistantSessionEvent(
   listener: (event: LauncherAssistantSessionEvent) => void,
   source: unknown = globalThis,
@@ -145,19 +190,15 @@ export function subscribeLauncherAssistantSessionEvent(
   const bridge = (source as { vibelutionLauncherAssistant?: { onSessionEvent?: unknown } } | null)?.vibelutionLauncherAssistant;
   const subscribe = bridge?.onSessionEvent;
   if (typeof subscribe !== "function") return null;
-  const guarded = (event: unknown) => {
-    if (!record(event) || typeof event.type !== "string" || typeof event.sessionId !== "string") return;
-    listener(event as LauncherAssistantSessionEvent);
+  const guarded = (value: unknown) => {
+    const event = parseLauncherAssistantSessionEvent(value);
+    if (event) listener(event);
   };
   try {
     const unsubscribe: unknown = subscribe.call(bridge, guarded);
     if (typeof unsubscribe !== "function") return () => {};
-    // Teardown runs inside React cleanup; a shell that is already gone must not
-    // turn an unmount into an error.
     return () => { try { unsubscribe(); } catch { /* channel already closed */ } };
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 export type LauncherOperatorAssetKind = "avatar" | "background";
@@ -254,6 +295,14 @@ export async function getLauncherAssistantStatus(): Promise<LauncherAssistantSta
       || typeof settings.preferences.idleMessage !== "string" || typeof settings.displayName !== "string" || typeof settings.modelId !== "string") {
       throw new Error("Launcher 个人助理外观设置不可用。");
     }
+    if (settings.modelChoices !== undefined && (!Array.isArray(settings.modelChoices)
+      || settings.modelChoices.some(choice => !record(choice) || Array.isArray(choice)
+        || !exactFields(choice, ["modelId", "label", "providerLabel", "isDefault", "providerHealthy", "missingApiKey", "availability"])
+        || ![choice.modelId, choice.label, choice.providerLabel, choice.availability].every(value => typeof value === "string")
+        || ![choice.isDefault, choice.providerHealthy, choice.missingApiKey].every(value => typeof value === "boolean")
+        || typeof choice.modelId !== "string" || !choice.modelId.trim()))) {
+      throw new Error("Launcher 个人助理模型列表不可用。");
+    }
   }
   if (result.operatorProfile !== undefined) {
     const profile = result.operatorProfile;
@@ -276,8 +325,27 @@ export async function getLauncherAssistantStatus(): Promise<LauncherAssistantSta
   return result as LauncherAssistantStatus;
 }
 
-export async function getLauncherAssistantDetail(sessionId: string): Promise<SessionDetail> {
-  const result = await launcherAssistantBridge().invoke({ operation: "detail" });
+export async function setLauncherAssistantModel(modelId: string): Promise<{ modelId: string }> {
+  if (typeof modelId !== "string" || !/^[^\s\x00-\x1f\x7f]{1,200}(?![\s\S])/.test(modelId))
+    throw new Error("请选择可用的助理模型。");
+  let result: unknown;
+  try { result = await launcherAssistantBridge().invoke({ operation: "setModel", modelId }); }
+  catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message.includes("ASSISTANT_MODEL_BUSY")) throw new Error("请等待助理当前回复完成后再切换模型。");
+    if (message.includes("ASSISTANT_MODEL_INVALID")) throw new Error("所选模型当前不可用，请刷新后重新选择。");
+    throw new Error("助理模型切换尚未确认，请刷新后核对当前模型。");
+  }
+  if (!record(result) || Array.isArray(result) || !exactFields(result, ["modelId"]) || result.modelId !== modelId)
+    throw new Error("助理模型切换尚未确认，请刷新后核对当前模型。");
+  return { modelId };
+}
+
+export async function getLauncherAssistantDetail(sessionId: string, beforeMessageIndex?: number): Promise<SessionDetail> {
+  if (beforeMessageIndex !== undefined && (!Number.isSafeInteger(beforeMessageIndex) || beforeMessageIndex < 1 || beforeMessageIndex > 2_147_483_647))
+    throw new Error("历史分页位置无效。");
+  const result = await launcherAssistantBridge().invoke(beforeMessageIndex === undefined
+    ? { operation: "detail" } : { operation: "detail", beforeMessageIndex });
   if (!record(result) || result.id !== sessionId || !Array.isArray(result.messages)) {
     throw new Error("Launcher 返回的会话与个人助理身份不一致。");
   }

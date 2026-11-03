@@ -97,7 +97,29 @@ describe("SSE frame parsing", () => {
     expect(frames).toEqual([{ kind: "event", name: "session_detail", id: "1", data: "", truncated: true }]);
     expect(parser.lastEventId()).toBe("1");
   });
+
+  it("also dispatches a bounded refresh frame when an oversized data line arrives in network chunks", () => {
+    const parser = new SseFrameParser();
+    expect(parser.feed('id: 2\nevent: assistant_delta\ndata: {"body":"')).toEqual([]);
+    for (let i = 0; i < 65; i += 1) expect(parser.feed("x".repeat(64 * 1024))).toEqual([]);
+    expect(parser.feed('event: cannot-relabel-a-truncated-line"}\n\n')).toEqual([
+      { kind: "event", name: "assistant_delta", id: "2", data: "", truncated: true },
+    ]);
+    expect(parser.feed('id: 3\nevent: session_detail\ndata: {}\n\n')).toEqual([
+      { kind: "event", name: "session_detail", id: "3", data: "{}", truncated: false },
+    ]);
+  });
 });
+
+function nativeItem(text = "hello", type = "agent_message") {
+  return { version: 3, id: "item-r1", itemId: "item-1", sessionId: "session-1", turnId: "turn-9",
+    type, phase: "final_answer", text, status: "running", revision: 1, sequence: 1 };
+}
+function nativeDelta(patch: Record<string, unknown> = {}) {
+  return { type: "assistant_delta", sessionId: "session-1", turnId: "turn-9", deltaSeq: 1,
+    ledgerSeq: 8, stage: "responding", updatedAt: "2026-11-03T08:00:00Z", done: false,
+    turnItems: [nativeItem()], ...patch };
+}
 
 describe("assistant session event pump", () => {
   it("forwards event and heartbeat envelopes to both fans-out targets via publish, identity-only for plain frames", async () => {
@@ -114,33 +136,31 @@ describe("assistant session event pump", () => {
     expect(String(url)).toBe("http://127.0.0.1:9999/api/assistant/events");
     // Bearer credential only; Node fetch sends no Origin header.
     expect(init.headers).toEqual({ Authorization: "Bearer token-1" });
-    expect(publish).toHaveBeenNthCalledWith(1, { type: "assistant_delta", sessionId: "session-1", ledgerSeq: 7, at: 5_000 });
-    expect(publish).toHaveBeenNthCalledWith(2, { type: "heartbeat", sessionId: "session-1", at: 5_000 });
-    expect(Object.keys(publish.mock.calls[0][0] as object).sort()).toEqual(["at", "ledgerSeq", "sessionId", "type"]);
+    const connectionEpoch = publish.mock.calls[0][0].connectionEpoch;
+    expect(Number.isSafeInteger(connectionEpoch) && connectionEpoch > 0).toBe(true);
+    expect(publish).toHaveBeenNthCalledWith(1, { type: "assistant_delta", sessionId: "session-1", ledgerSeq: 7, at: 5_000, needsRefresh: true, connectionEpoch });
+    expect(publish).toHaveBeenNthCalledWith(2, { type: "heartbeat", sessionId: "session-1", at: 5_000, connectionEpoch });
+    expect(Object.keys(publish.mock.calls[0][0] as object).sort()).toEqual(["at", "connectionEpoch", "ledgerSeq", "needsRefresh", "sessionId", "type"]);
     stop.abort();
     await pump.done;
   });
 
-  it("carries done, turnId and a text preview from assistant_delta turnItems on the envelope", async () => {
+  it("forwards real full and append frames with their native identity and ordering", async () => {
     const publish = vi.fn();
     const stop = new AbortController();
-    const turnItems = JSON.stringify([
-      { type: "agent_message", text: "earlier answer" },
-      { type: "reasoning", text: "thought stream is not the response body" },
-      { type: "agent_message", text: "最新回答正文" },
-      { type: "tool_call", text: "tool output text stays local" },
-    ]);
+    const full = nativeDelta();
+    const append = nativeDelta({ deltaSeq: 2, deltaSeqFrom: 2, ledgerSeq: 9, turnItems: [], streamEncoding: "append-v1",
+      turnItemAppends: [{ kind: "append", itemId: "item-1", itemType: "agent_message", baseLength: 5, appendedLength: 6, appendedText: " world" }] });
     const fetchImpl = vi.fn(async (_url: unknown, init: FetchInit) => eventStream(init, [
-      `id: 8\nevent: assistant_delta\ndata: {"type":"assistant_delta","sessionId":"session-1","turnId":"turn-9","done":false,"turnItems":${turnItems}}\n\n`,
-      'id: 9\nevent: assistant_delta\ndata: {"type":"assistant_delta","sessionId":"session-1","turnId":"turn-9","done":true}\n\n',
+      `id: 8\nevent: assistant_delta\ndata: ${JSON.stringify(full)}\n\n`,
+      `id: 9\nevent: assistant_delta\ndata: ${JSON.stringify(append)}\n\n`,
     ]));
     const pump = startAssistantEventPump({ lease: () => sseLease("g1"), stop: stop.signal,
       fetch: fetchImpl as unknown as typeof fetch, publish, now: () => 5_000 });
     await vi.waitFor(() => expect(publish).toHaveBeenCalledTimes(2));
-    expect(publish).toHaveBeenNthCalledWith(1, { type: "assistant_delta", sessionId: "session-1", ledgerSeq: 8, at: 5_000,
-      turnId: "turn-9", done: false, textPreview: "最新回答正文" });
-    expect(publish).toHaveBeenNthCalledWith(2, { type: "assistant_delta", sessionId: "session-1", ledgerSeq: 9, at: 5_000,
-      turnId: "turn-9", done: true });
+    const connectionEpoch = publish.mock.calls[0][0].connectionEpoch;
+    expect(publish).toHaveBeenNthCalledWith(1, { ...full, at: 5_000, connectionEpoch });
+    expect(publish).toHaveBeenNthCalledWith(2, { ...append, at: 5_000, connectionEpoch });
     stop.abort();
     await pump.done;
   });
@@ -156,9 +176,23 @@ describe("assistant session event pump", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
     leased = sseLease("g1");
     await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
-    await vi.waitFor(() => expect(publish).toHaveBeenCalledWith({ type: "heartbeat", sessionId: "session-1", at: 1 }));
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledWith({ type: "heartbeat", sessionId: "session-1", at: 1, connectionEpoch: expect.any(Number) }));
     stop.abort();
     await pump.done;
+  });
+
+  it("does not reuse a connection epoch when Main replaces its pump instance", async () => {
+    const epochs: number[] = [];
+    for (let index = 0; index < 2; index += 1) {
+      const stop = new AbortController();
+      const pump = startAssistantEventPump({ lease: () => sseLease(`replacement-${index}`), stop: stop.signal,
+        fetch: vi.fn(async (_url: unknown, init: FetchInit) => eventStream(init, [": keep-alive\n\n"])) as unknown as typeof fetch,
+        publish: event => { epochs.push(event.connectionEpoch!); }, now: () => 1 });
+      await vi.waitFor(() => expect(epochs).toHaveLength(index + 1));
+      stop.abort();
+      await pump.done;
+    }
+    expect(epochs[1]).toBe(epochs[0]! + 1);
   });
 
   it("reconnects with exponential backoff capped at five seconds", async () => {
@@ -189,6 +223,7 @@ describe("assistant session event pump", () => {
   it("resumes with Last-Event-ID after a dropped stream and resets backoff on frames", async () => {
     vi.useFakeTimers();
     const stop = new AbortController();
+    const publish = vi.fn();
     const fetchImpl = vi.fn()
       .mockImplementationOnce(async (_url: unknown, init: FetchInit) =>
         eventStream(init, ['id: 42\nevent: session_detail\ndata: {"type":"session_detail","sessionId":"session-1"}\n\n'], true))
@@ -196,7 +231,7 @@ describe("assistant session event pump", () => {
         eventStream(init, ['id: 43\nevent: assistant_delta\ndata: {"type":"assistant_delta","sessionId":"session-1"}\n\n'], true))
       .mockImplementationOnce(async (_url: unknown, init: FetchInit) => eventStream(init, [": keep-alive\n\n"]));
     const pump = startAssistantEventPump({ lease: () => sseLease("g1"), stop: stop.signal,
-      fetch: fetchImpl as unknown as typeof fetch, publish: () => undefined, now: () => 1 });
+      fetch: fetchImpl as unknown as typeof fetch, publish, now: () => 1 });
     const settle = () => vi.advanceTimersByTimeAsync(0);
     await settle();
     expect(fetchImpl).toHaveBeenCalledTimes(1);
@@ -211,6 +246,8 @@ describe("assistant session event pump", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(3);
     expect((fetchImpl.mock.calls[2]![1] as { headers: Record<string, string> }).headers)
       .toEqual({ Authorization: "Bearer token-1", "Last-Event-ID": "43" });
+    const firstEpoch = publish.mock.calls[0][0].connectionEpoch;
+    expect(publish.mock.calls.map(([event]) => event.connectionEpoch)).toEqual([firstEpoch, firstEpoch + 1, firstEpoch + 2]);
     stop.abort();
     await pump.done;
   });
@@ -234,13 +271,14 @@ describe("assistant session event pump", () => {
     vi.useFakeTimers();
     const stop = new AbortController();
     const generation = new AbortController();
+    const publish = vi.fn();
     let leased = sseLease("g1", generation.signal);
     const fetchImpl = vi.fn()
       .mockImplementationOnce(async (_url: unknown, init: FetchInit) =>
         eventStream(init, ['id: 9\nevent: session_detail\ndata: {"type":"session_detail"}\n\n'], true))
       .mockImplementationOnce(async (_url: unknown, init: FetchInit) => eventStream(init, [": keep-alive\n\n"]));
     const pump = startAssistantEventPump({ lease: () => leased, stop: stop.signal,
-      fetch: fetchImpl as unknown as typeof fetch, publish: () => undefined, now: () => 1 });
+      fetch: fetchImpl as unknown as typeof fetch, publish, now: () => 1 });
     const settle = () => vi.advanceTimersByTimeAsync(0);
     await settle();
     expect(fetchImpl).toHaveBeenCalledTimes(1);
@@ -252,6 +290,8 @@ describe("assistant session event pump", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect((fetchImpl.mock.calls[1]![1] as { headers: Record<string, string> }).headers)
       .toEqual({ Authorization: "Bearer token-1" });
+    const firstEpoch = publish.mock.calls[0][0].connectionEpoch;
+    expect(publish.mock.calls.map(([event]) => event.connectionEpoch)).toEqual([firstEpoch, firstEpoch + 1]);
     stop.abort();
     await pump.done;
   });
@@ -328,56 +368,50 @@ const desktopPaths = {
 describe("session event envelope reduction", () => {
   const base = { frameName: "assistant_delta", leaseSessionId: "session-1", at: 5_000 } as const;
 
-  it("tail-caps a long agent_message body to the preview budget without splitting a surrogate pair", () => {
-    const text = "a".repeat(7_999) + "\u{1F600}" + "b".repeat(7_999);
-    const envelope = sessionEventEnvelope({ ...base, frameId: "12",
-      data: { type: "assistant_delta", sessionId: "session-1", turnId: "turn-1", done: false, turnItems: [{ type: "agent_message", text }] } });
-    expect(envelope.ledgerSeq).toBe(12);
-    expect(envelope.done).toBe(false);
-    expect(envelope.turnId).toBe("turn-1");
-    expect(envelope.textPreview).toHaveLength(7_999);
-    expect(envelope.textPreview![0]).toBe("b");
-    expect(envelope.textPreview).not.toMatch(/[\uD800-\uDFFF]/);
+  it("preserves uncut native message, reasoning and tool rows, but strips unrelated host fields", () => {
+    const data = nativeDelta({ origin: "http://127.0.0.1:9999", token: "secret", detail: { messages: [] }, turnItems: [
+      nativeItem("回答".repeat(8_000)),
+      { ...nativeItem("reasoning", "reasoning"), id: "reason-r1", itemId: "reason-1", sequence: 2, status: "pending" },
+      { ...nativeItem("", "tool_call"), id: "tool-r1", itemId: "tool-1", sequence: 3, callId: "call-1", toolName: "read_file", input: "file", output: "result",
+        status: "failed", terminal: true, durationMs: 250, error: { code: "FILE_NOT_FOUND", message: "Missing file" } },
+    ] });
+    const envelope = sessionEventEnvelope({ ...base, frameId: "8", data })!;
+    expect(envelope.turnItems).toEqual(data.turnItems);
+    expect(envelope.turnItems?.[0]?.text).toHaveLength(16_000);
+    expect(envelope).not.toHaveProperty("origin");
+    expect(envelope).not.toHaveProperty("token");
+    expect(envelope).not.toHaveProperty("detail");
+    expect(envelope).not.toHaveProperty("textPreview");
   });
 
-  it("ignores non-boolean done, empty turnId and non-answer item text; delta content never leaks onto other types", () => {
-    const noisy = sessionEventEnvelope({ ...base,
-      data: { type: "assistant_delta", sessionId: "session-1", done: "true", turnId: "", turnItems: [
-        { type: "reasoning", text: "thought" },
-        { type: "status", text: "x".repeat(300_000) },
-        { type: "agent_message", text: "" },
-      ] } });
-    expect(Object.keys(noisy).sort()).toEqual(["at", "sessionId", "type"]);
-    // session_detail is a snapshot frame: no delta projection fields even if present.
-    const detail = sessionEventEnvelope({ ...base, frameName: "session_detail",
-      data: { type: "session_detail", sessionId: "session-1", done: true, turnId: "turn-1", turnItems: [{ type: "agent_message", text: "answer" }] } });
-    expect(Object.keys(detail).sort()).toEqual(["at", "sessionId", "type"]);
+  it("drops another session instead of forwarding it under the assistant lease", () => {
+    expect(sessionEventEnvelope({ ...base, data: nativeDelta({ sessionId: "other-session" }) })).toBeNull();
   });
 
-  it("caps the turnId length", () => {
-    const envelope = sessionEventEnvelope({ ...base,
-      data: { type: "assistant_delta", sessionId: "session-1", turnId: "t".repeat(500) } });
-    expect(envelope.turnId).toHaveLength(200);
+  it("requests a snapshot for truncated/malformed/unknown-protocol delta frames without fabricating content", () => {
+    for (const data of [null, nativeDelta({ done: "true" }), nativeDelta({ turnId: "t".repeat(500) }),
+      nativeDelta({ turnItems: [{ type: "agent_message", text: "no native identity" }] }),
+      nativeDelta({ streamEncoding: "unknown" }), nativeDelta({ turnItems: [nativeItem("x", "unknown")] })]) {
+      const envelope = sessionEventEnvelope({ ...base, frameId: "8", data })!;
+      expect(envelope).toMatchObject({ sessionId: "session-1", ledgerSeq: 8, needsRefresh: true });
+      expect(envelope.turnItems).toBeUndefined();
+      expect(envelope.turnId === undefined || envelope.turnId === "turn-9").toBe(true);
+    }
   });
 
-  it("falls back to an identity-only envelope with clamped identity and logs when the envelope would exceed the size cap", () => {
+  it("bounds UTF-8 IPC bytes and falls back to an explicit identity refresh, never a cut body", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
-      const envelope = sessionEventEnvelope({ ...base, frameId: "13",
-        data: { type: "assistant_delta", sessionId: "s".repeat(300_000), turnId: "turn-1", done: true,
-          turnItems: [{ type: "agent_message", text: "answer" }] } });
-      expect(Object.keys(envelope).sort()).toEqual(["at", "ledgerSeq", "sessionId", "type"]);
-      expect(envelope.type).toBe("assistant_delta");
-      expect(envelope.sessionId).toHaveLength(80);
-      expect(envelope.done).toBeUndefined();
-      expect(envelope.turnId).toBeUndefined();
-      expect(envelope.textPreview).toBeUndefined();
-      expect(JSON.stringify(envelope).length).toBeLessThan(256 * 1024);
-      expect(warn).toHaveBeenCalledTimes(1);
-      expect((warn.mock.calls[0]?.[0] as string)).toBe("ASSISTANT_EVENT_ENVELOPE_OVERSIZE");
-    } finally {
-      warn.mockRestore();
-    }
+      const envelope = sessionEventEnvelope({ ...base, connectionEpoch: 2, data: nativeDelta({ turnItems: [nativeItem("中".repeat(100_000))] }) })!;
+      expect(envelope).toEqual({ type: "assistant_delta", sessionId: "session-1", turnId: "turn-9", ledgerSeq: 8, at: 5_000, needsRefresh: true, connectionEpoch: 2 });
+      expect(warn).toHaveBeenCalledExactlyOnceWith("ASSISTANT_EVENT_ENVELOPE_OVERSIZE", { type: "assistant_delta", sessionId: "session-1", at: 5_000 });
+    } finally { warn.mockRestore(); }
+  });
+
+  it("keeps snapshot detail and credentials in Main", () => {
+    expect(sessionEventEnvelope({ ...base, frameName: "session_detail", frameId: "13",
+      data: { type: "session_detail", sessionId: "session-1", detail: { messages: ["private"] }, turnItems: [nativeItem()], token: "secret" } }))
+      .toEqual({ type: "session_detail", sessionId: "session-1", ledgerSeq: 13, at: 5_000 });
   });
 });
 

@@ -2463,8 +2463,10 @@ async function openWorkbenchAtCurrentLauncherUrlImpl(
     }
     assertCurrentOpen();
     const state = payload.present === false
-      ? await provider.openOrFocusWorkbench(workbenchUrl, { present: false })
-      : await provider.openOrFocusWorkbench(workbenchUrl);
+      ? await provider.openOrFocusWorkbench(workbenchUrl, { present: false, ...(payload.workbenchPath === "/config" ? { loadTarget: true } : {}) })
+      : payload.workbenchPath === "/config"
+        ? await provider.openOrFocusWorkbench(workbenchUrl, { loadTarget: true })
+        : await provider.openOrFocusWorkbench(workbenchUrl);
     await recordElectronSupervisorEvent(bootstrap, {
       eventCode: "electron.workbench.navigation.ready",
       message: "Electron loaded the current Workbench URL before acknowledging the open action.",

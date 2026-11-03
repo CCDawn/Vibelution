@@ -1,5 +1,5 @@
 /** @vitest-environment happy-dom */
-import React, { act } from "react";
+import React, { act, useEffect, useMemo } from "react";
 import { createRoot } from "react-dom/client";
 import { describe, expect, it } from "vitest";
 
@@ -11,6 +11,14 @@ import {
   type UseConversationProcessExpansionResult,
 } from "./useConversationProcessExpansion";
 import type { RetiredOverlayAlias } from "./useAgentMessageTimelineProjection";
+import { projectAgentMessageTimelineMessages } from "./useAgentMessageTimelineProjection";
+import { ConversationProcessDisclosure } from "./ConversationProcessDisclosure";
+import type { ConversationMessage } from "../../api/types";
+import { assistantTurnIsStreaming } from "../../routes/chatTurnProtocol";
+import { buildAgentMessageOperations } from "./agentMessageOperations";
+import { buildAgentMessageTimelineItems } from "./agentMessageTimeline";
+import { buildCodexTranscriptCells } from "./codexTranscriptCells";
+import { createCodexTranscriptCellRenderers } from "./conversationCodexTranscriptCells";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -52,6 +60,77 @@ function mountExpansionHook(initial: UseConversationProcessExpansionInput) {
         throw new Error("expansion hook is not mounted");
       }
       return latest;
+    },
+  };
+}
+
+function assistantFrame(id: string, completed = false, turnId = "turn-atomic"): ConversationMessage {
+  const status = completed ? "completed" : "running";
+  const common = { version: 3, sessionId: "session-overlay-alias", turnId, revision: 1, status, terminal: completed } as const;
+  return {
+    id,
+    role: "assistant",
+    turnId,
+    status,
+    timestamp: "2026-11-03T10:00:00Z",
+    metadata: { turnId, ...(completed ? {} : { kind: "session_live_overlay" }) },
+    turnItems: [
+      { ...common, id: "thought-1:1", itemId: "thought-1", type: "reasoning", sequence: 1, text: "Thought" },
+      { ...common, id: "answer-1:1", itemId: "answer-1", type: "agent_message", phase: "final_answer", sequence: 2, text: "Answer" },
+    ],
+  };
+}
+
+/** Uses the actual projection and remounts a row when its message id changes. */
+function mountProjectedExpansion(initial: ConversationMessage[], companionMode: boolean) {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  let messages = initial;
+  let activeTurnMessage: ConversationMessage | undefined;
+  let sessionId = "session-overlay-alias";
+  const Host = () => {
+    const projection = useMemo(() => projectAgentMessageTimelineMessages({ timelineMessages: messages, activeTurnMessage, companionMode }), [messages, activeTurnMessage]);
+    const expansion = useConversationProcessExpansion(baseInput({
+      sessionId,
+      timelineMessages: projection.messages,
+      activeTimelineMessages: projection.messages,
+      timelineRowIdentities: projection.rowIdentities,
+      retiredOverlayAliases: projection.retiredOverlayAliases,
+    }));
+    useEffect(() => expansion.resetSessionExpansion(), [sessionId]);
+    const renderers = createCodexTranscriptCellRenderers({ lang: "en", t: (key) => key, ...expansion });
+    return projection.messages.map((message, index) => {
+      const agentMessage = projection.agentMessages[index];
+      const operations = buildAgentMessageOperations(agentMessage, { thought: "Thought", mental: "Mental", status: "Status" });
+      const timelineItems = buildAgentMessageTimelineItems(agentMessage, operations, { lang: "en" });
+      const cells = buildCodexTranscriptCells(agentMessage, { operations, timelineItems });
+      return (
+        <div key={message.id} data-message-id={message.id}>
+          <ConversationProcessDisclosure
+            cells={[]}
+            language="en"
+            turnStreaming={assistantTurnIsStreaming(message)}
+            expanded={expansion.getExpansionState(message.id, "process", assistantTurnIsStreaming(message))}
+            onExpandedChange={(expanded) => expansion.setExpansionState(message.id, "process", expanded)}
+          >
+            {cells.filter((cell) => cell.kind === "reasoning_summary").map((cell) => renderers.renderCodexReasoningSummaryCell(message, cell))}
+          </ConversationProcessDisclosure>
+        </div>
+      );
+    });
+  };
+  return {
+    host,
+    render(next = messages, nextSession = sessionId, nextActiveTurnMessage?: ConversationMessage) {
+      messages = next;
+      sessionId = nextSession;
+      activeTurnMessage = nextActiveTurnMessage;
+      root.render(<Host />);
+    },
+    async unmount() {
+      await act(async () => root.unmount());
+      host.remove();
     },
   };
 }
@@ -104,6 +183,121 @@ describe("migrateSectionExpansionRecords", () => {
 });
 
 describe("useConversationProcessExpansion overlay alias migration", () => {
+  it.each([false, true])("follows running and settled defaults for an untouched controlled process (companion=%s)", async (companionMode) => {
+    const mount = mountProjectedExpansion([assistantFrame("same-row")], companionMode);
+    try {
+      await act(async () => mount.render());
+      expect(mount.host.querySelector("summary")!.getAttribute("aria-expanded")).toBe("true");
+      await act(async () => mount.render([assistantFrame("same-row", true)]));
+      expect(mount.host.querySelector("summary")!.getAttribute("aria-expanded")).toBe("false");
+      await act(async () => mount.render([assistantFrame("same-row")]));
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 40)));
+      expect(mount.host.querySelector("summary")!.getAttribute("aria-expanded")).toBe("true");
+    } finally {
+      await mount.unmount();
+    }
+  });
+
+  it.each([false, true])("migrates onto the painted row after overlay dedupe and durable folding choose different ids (companion=%s)", async (companionMode) => {
+    const live = assistantFrame("session-overlay-alias-message-live-A");
+    const durable = assistantFrame("session-overlay-alias-message-43");
+    durable.metadata = { turnId: "turn-atomic", messageIndex: 43 };
+    const active = assistantFrame("session-overlay-alias-message-active-B");
+    active.metadata = { turnId: "turn-atomic", kind: "session_active_turn_layer" };
+    const nextProjection = projectAgentMessageTimelineMessages({
+      timelineMessages: [durable, live],
+      activeTurnMessage: active,
+      companionMode,
+    });
+    expect(nextProjection.retiredOverlayAliases).toEqual([{ fromMessageId: live.id, toMessageId: active.id }]);
+    expect(nextProjection.messages.map((message) => message.id)).toEqual([durable.id]);
+
+    const mount = mountProjectedExpansion([live], companionMode);
+    try {
+      await act(async () => mount.render());
+      await act(async () => mount.host.querySelector('[data-thought-expanded] button')!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })));
+      await act(async () => mount.host.querySelector("summary")!.click());
+      await act(async () => mount.render([durable, live], "session-overlay-alias", active));
+      const paintedRow = mount.host.querySelector('[data-message-id]')!;
+      expect(paintedRow.getAttribute("data-message-id")).toBe(durable.id);
+      expect(paintedRow.querySelector("summary")!.getAttribute("aria-expanded")).toBe("false");
+      expect(paintedRow.querySelector('[data-thought-expanded]')!.getAttribute("data-thought-expanded")).toBe("true");
+    } finally {
+      await mount.unmount();
+    }
+  });
+
+  it.each([false, true])("keeps user-opened process and thought across an atomic live→durable remount (companion=%s)", async (companionMode) => {
+    const live = assistantFrame("session-overlay-alias-message-live-turn-atomic");
+    const durable = assistantFrame("session-overlay-alias-message-42", true);
+    expect(projectAgentMessageTimelineMessages({ timelineMessages: [durable], companionMode }).retiredOverlayAliases).toEqual([]);
+    const mount = mountProjectedExpansion([live], companionMode);
+    try {
+      await act(async () => mount.render());
+      const liveRow = mount.host.querySelector('[data-message-id]')!;
+      const summary = liveRow.querySelector("summary")!;
+      await act(async () => summary.click());
+      await act(async () => summary.click());
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 40)));
+      await act(async () => liveRow.querySelector('[data-thought-expanded] button')!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })));
+      expect(liveRow.querySelector('[data-thought-expanded]')!.getAttribute("data-thought-expanded")).toBe("true");
+
+      await act(async () => mount.render([durable]));
+      const durableRow = mount.host.querySelector('[data-message-id]')!;
+      expect(durableRow).not.toBe(liveRow);
+      expect(durableRow.getAttribute("data-message-id")).toBe(durable.id);
+      expect(durableRow.querySelector('summary')!.getAttribute("aria-expanded")).toBe("true");
+      expect(durableRow.querySelector('[data-thought-expanded]')!.getAttribute("data-thought-expanded")).toBe("true");
+      await act(async () => mount.render([durable]));
+      expect(mount.host.querySelector('[data-thought-expanded]')!.getAttribute("data-thought-expanded")).toBe("true");
+    } finally {
+      await mount.unmount();
+    }
+  });
+
+  it("does not transfer a previous session's row choice into the same turn in another session", async () => {
+    const mount = mountProjectedExpansion([assistantFrame("old-live")], false);
+    try {
+      await act(async () => mount.render());
+      await act(async () => mount.host.querySelector('[data-thought-expanded] button')!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })));
+      await act(async () => mount.render([assistantFrame("other-durable", true)], "other-session"));
+      expect(mount.host.querySelector('summary')!.getAttribute("aria-expanded")).toBe("false");
+    } finally {
+      await mount.unmount();
+    }
+  });
+
+  it("carries an explicit collapsed process choice through durable and running row replacements", async () => {
+    const mount = mountProjectedExpansion([assistantFrame("first-live")], false);
+    try {
+      await act(async () => mount.render());
+      await act(async () => mount.host.querySelector("summary")!.click());
+      await act(async () => mount.render([assistantFrame("durable", true)]));
+      expect(mount.host.querySelector("summary")!.getAttribute("aria-expanded")).toBe("false");
+      await act(async () => mount.render([assistantFrame("replayed-live")]));
+      expect(mount.host.querySelector("summary")!.getAttribute("aria-expanded")).toBe("false");
+    } finally {
+      await mount.unmount();
+    }
+  });
+
+  it("expires old row identities after the bounded history fills", async () => {
+    const mount = mountProjectedExpansion([assistantFrame("old-live")], false);
+    try {
+      await act(async () => mount.render());
+      await act(async () => mount.host.querySelector("summary")!.click());
+      await act(async () => mount.host.querySelector("summary")!.click());
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 40)));
+      await act(async () => mount.render(Array.from({ length: 129 }, (_, index) => (
+        assistantFrame(`message-${index}`, true, `turn-${index}`)
+      ))));
+      await act(async () => mount.render([assistantFrame("old-durable", true)]));
+      expect(mount.host.querySelector("summary")!.getAttribute("aria-expanded")).toBe("false");
+    } finally {
+      await mount.unmount();
+    }
+  });
+
   it("carries an explicit live-id toggle onto the durable id after settle", async () => {
     const mount = mountExpansionHook(baseInput());
     await act(async () => mount.render());

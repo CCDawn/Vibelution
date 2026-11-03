@@ -9,7 +9,6 @@ import type { LauncherAssistantSessionEvent } from "../../api/launcherAssistant"
 import {
   launcherAssistantActivity, launcherAssistantMessageOverLimit, launcherAssistantPollInterval, launcherAssistantSendDefinitelyRejected, launcherAssistantSubmission, launcherDispatchLabel, launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
   launcherAssistantSessionEventRefreshesDetail, launcherAssistantSseHealthy, launcherAssistantWaitInterval,
-  launcherAssistantLiveTextFromEvent, launcherAssistantLiveTextIsStale, launcherAssistantActiveTurnMessage,
   launcherAssistantContextRing, launcherAssistantModelDisplay, launcherAssistantEditBackfillDraft,
   LAUNCHER_ASSISTANT_MAX_MESSAGE_CHARS, LAUNCHER_ASSISTANT_SSE_HEALTH_WINDOW_MS, LAUNCHER_ASSISTANT_WAIT_POLL_FIRST_MS, LAUNCHER_ASSISTANT_WAIT_POLL_MAX_MS,
 } from "./launcherAssistantModel";
@@ -18,14 +17,14 @@ import { LauncherAssistantRoute } from "./LauncherAssistantRoute";
 const bridge = vi.hoisted(() => ({
   getLauncherAssistantStatus: vi.fn(), getLauncherAssistantDetail: vi.fn(), getLauncherAssistantDispatches: vi.fn(),
   hideLauncherAssistant: vi.fn(), sendLauncherAssistantMessage: vi.fn(), setLauncherAssistantExpanded: vi.fn(),
-  openLauncherFromAssistant: vi.fn(),
+  openLauncherFromAssistant: vi.fn(), setLauncherAssistantModel: vi.fn(),
   launcherConversationApi: { cacheKey: "launcher-test" },
   getLauncherAssistantApprovals: vi.fn(), resolveLauncherAssistantApproval: vi.fn(),
   stopLauncherAssistantTurn: vi.fn(), continueLauncherAssistantTurn: vi.fn(),
   // Default: no push channel, exactly like a shell without `onSessionEvent`.
   subscribeLauncherAssistantSessionEvent: vi.fn((): (() => void) | null => null),
 }));
-vi.mock("../../api/launcherAssistant", () => bridge);
+vi.mock("../../api/launcherAssistant", async importOriginal => ({ ...await importOriginal<typeof import("../../api/launcherAssistant")>(), ...bridge }));
 vi.mock("../../i18n/useShellI18n", () => ({ useShellI18n: () => ({ lang: "zh" }) }));
 let character: { characterId: string; name: string } | undefined;
 vi.mock("./DesktopPetCharacter", () => ({ DesktopPetCharacter: (props: typeof character) => { character = props; return null; } }));
@@ -380,6 +379,7 @@ describe("Launcher assistant state", () => {
       new Error("Launcher 尚未确认消息所属轮次。"), new Error("network down"), "string failure", undefined];
     expect(launcherAssistantSendDefinitelyRejected(rejected)).toBe(true);
     expect(launcherAssistantSendDefinitelyRejected(bridgeRefused)).toBe(true);
+    expect(launcherAssistantSendDefinitelyRejected(new Error("Error invoking remote method 'assistant:request': Error: ASSISTANT_REQUEST_INVALID"))).toBe(true);
     for (const error of unknown) expect(launcherAssistantSendDefinitelyRejected(error)).toBe(false);
   });
 
@@ -484,53 +484,34 @@ describe("Launcher assistant state", () => {
     await deliver({ type: "session_detail", sessionId: "other", at: Date.now() });
     await deliver({ type: "assistant_delta", sessionId: "s", at: Date.now() });
     await deliver({ type: "unknown_frame", sessionId: "s", at: Date.now() });
-    expect(bridge.getLauncherAssistantDetail).toHaveBeenCalledTimes(reads);
-    await deliver({ type: "session_detail", sessionId: "s", ledgerSeq: 3, at: Date.now() });
     expect(bridge.getLauncherAssistantDetail).toHaveBeenCalledTimes(reads + 1);
-    await deliver({ type: "assistant_delta", sessionId: "s", at: Date.now(), done: true } as LauncherAssistantSessionEvent);
+    await deliver({ type: "session_detail", sessionId: "s", ledgerSeq: 3, at: Date.now() });
     expect(bridge.getLauncherAssistantDetail).toHaveBeenCalledTimes(reads + 2);
+    await deliver({ type: "assistant_delta", sessionId: "s", at: Date.now(), done: true } as LauncherAssistantSessionEvent);
+    expect(bridge.getLauncherAssistantDetail).toHaveBeenCalledTimes(reads + 3);
     expect(unsubscribe).not.toHaveBeenCalled();
     await act(async () => root?.unmount());
     root = undefined;
     expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 
-  it("streams the pushed answer preview into the active-turn row, replaces it wholesale and retires it on done", async () => {
+  it("applies native full and append frames with one stable item identity until durable readback", async () => {
     let push: ((event: LauncherAssistantSessionEvent) => void) | undefined;
     bridge.subscribeLauncherAssistantSessionEvent.mockImplementation((listener: (event: LauncherAssistantSessionEvent) => void) => { push = listener; return () => {}; });
-    await renderAssistant({ id: "s", status: "running", activeTurnId: "t1", messages: [], defaultFileContext: "" }, undefined, undefined, { embedded: true });
-    expect(conversation?.activeTurnMessage).toBeUndefined();
-    await act(async () => { push?.({ type: "assistant_delta", sessionId: "s", at: Date.now(), turnId: "t1", textPreview: "第一段" }); });
-    expect(conversation?.activeTurnMessage).toMatchObject({ role: "assistant", turnId: "t1", status: "running" });
-    expect(conversation?.activeTurnMessage?.turnItems?.[0]).toMatchObject({ type: "agent_message", text: "第一段" });
-    // The preview is the frame's whole answer text, never an increment.
-    await act(async () => { push?.({ type: "assistant_delta", sessionId: "s", at: Date.now(), turnId: "t1", textPreview: "第一段第二段" }); });
-    expect(conversation?.activeTurnMessage?.turnItems?.[0]).toMatchObject({ text: "第一段第二段" });
-    // Heartbeats and identity-only envelopes never clear or clobber it.
-    await act(async () => { push?.({ type: "heartbeat", sessionId: "s", at: Date.now() }); });
-    await act(async () => { push?.({ type: "assistant_delta", sessionId: "s", at: Date.now() }); });
-    expect(conversation?.activeTurnMessage?.turnItems?.[0]).toMatchObject({ text: "第一段第二段" });
-    const reads = bridge.getLauncherAssistantDetail.mock.calls.length;
-    await act(async () => { push?.({ type: "assistant_delta", sessionId: "s", at: Date.now(), turnId: "t1", textPreview: "第一段第二段", done: true }); });
+    await renderAssistant({ id: "s", status: "running", activeTurnId: "t1", messages: [], defaultFileContext: "", ledgerSeq: 0 }, undefined, undefined, { embedded: true });
+    const item = { id: "native-answer", itemId: "native-answer", version: 3, sessionId: "s", turnId: "t1", revision: 1, sequence: 1, status: "running", type: "agent_message", phase: "final_answer", text: "第一段" };
+    const frame = { type: "assistant_delta", sessionId: "s", turnId: "t1", at: 1, updatedAt: "2026-11-03T02:00:00Z", stage: "assistant_response", done: false };
+    await act(async () => push?.({ ...frame, deltaSeq: 1, ledgerSeq: 1, turnItems: [item] } as LauncherAssistantSessionEvent));
+    expect(conversation?.activeTurnMessage?.turnItems?.[0]).toMatchObject({ itemId: "native-answer", text: "第一段" });
+    await act(async () => push?.({ ...frame, deltaSeq: 2, ledgerSeq: 2, turnItems: [], streamEncoding: "append-v1", turnItemAppends: [{ kind: "append", itemId: "native-answer", itemType: "agent_message", baseLength: 3, appendedLength: 3, appendedText: "第二段" }] } as LauncherAssistantSessionEvent));
+    expect(conversation?.activeTurnMessage?.turnItems).toHaveLength(1);
+    expect(conversation?.activeTurnMessage?.turnItems?.[0]).toMatchObject({ itemId: "native-answer", text: "第一段第二段" });
+    const completed = { ...item, text: "第一段第二段", status: "completed", terminal: true };
+    bridge.getLauncherAssistantDetail.mockResolvedValue({ id: "s", status: "ready", currentPhase: "ready", activeTurnId: "", ledgerSeq: 3, defaultFileContext: "", messages: [{ id: "m1", role: "assistant", turnId: "t1", status: "completed", turnItems: [completed] }] });
+    await act(async () => push?.({ ...frame, deltaSeq: 3, ledgerSeq: 3, done: true, turnItems: [completed] } as LauncherAssistantSessionEvent));
     await settle(); await settle();
     expect(conversation?.activeTurnMessage).toBeUndefined();
-    // done re-reads detail for the committed answer.
-    expect(bridge.getLauncherAssistantDetail.mock.calls.length).toBeGreaterThan(reads);
-  });
-
-  it("retires the streaming preview once detail holds the committed answer for that turn", async () => {
-    let push: ((event: LauncherAssistantSessionEvent) => void) | undefined;
-    bridge.subscribeLauncherAssistantSessionEvent.mockImplementation((listener: (event: LauncherAssistantSessionEvent) => void) => { push = listener; return () => {}; });
-    await renderAssistant({ id: "s", status: "running", activeTurnId: "t1", messages: [], defaultFileContext: "" }, undefined, undefined, { embedded: true });
-    await act(async () => { push?.({ type: "assistant_delta", sessionId: "s", at: Date.now(), turnId: "t1", textPreview: "流式答案" }); });
-    expect(conversation?.activeTurnMessage).toBeTruthy();
-    bridge.getLauncherAssistantDetail.mockResolvedValue({
-      id: "s", status: "ready", defaultFileContext: "",
-      messages: [{ id: "m1", role: "assistant", turnId: "t1", status: "completed", turnItems: [] }],
-    });
-    await act(async () => { push?.({ type: "session_detail", sessionId: "s", at: Date.now() }); });
-    await settle(); await settle();
-    expect(conversation?.activeTurnMessage).toBeUndefined();
+    expect(conversation?.messages[0].turnItems?.[0]).toMatchObject({ text: "第一段第二段" });
   });
 
   it("keeps the conversation mounted through a visibility restore and refreshes detail in place", async () => {
@@ -618,48 +599,7 @@ describe("Launcher assistant state", () => {
     expect(launcherAssistantQueueReadback(source, receipt)).toEqual({ receipt: null, admittedTurnId: "native-turn", removed: false });
   });
 
-  it("reduces only this session's unfinished answer deltas into the live preview", () => {
-    const at = 1;
-    const delta = (patch: Record<string, unknown>) => ({ type: "assistant_delta", sessionId: "s", at, ...patch }) as LauncherAssistantSessionEvent;
-    expect(launcherAssistantLiveTextFromEvent({ type: "heartbeat", sessionId: "s", at }, "s")).toEqual({ update: null, finished: false });
-    expect(launcherAssistantLiveTextFromEvent(delta({}), "s")).toEqual({ update: null, finished: false });
-    // Identity-only envelope (older shell / oversized fallback): nothing to show.
-    expect(launcherAssistantLiveTextFromEvent(delta({ turnId: "t" }), "s")).toEqual({ update: null, finished: false });
-    expect(launcherAssistantLiveTextFromEvent(delta({ textPreview: "答案" }), "s")).toEqual({ update: null, finished: false });
-    expect(launcherAssistantLiveTextFromEvent(delta({ turnId: "t", textPreview: "  " }), "s")).toEqual({ update: null, finished: false });
-    expect(launcherAssistantLiveTextFromEvent(delta({ turnId: "t", textPreview: "答案" }), "other")).toEqual({ update: null, finished: false });
-    expect(launcherAssistantLiveTextFromEvent(delta({ turnId: "t", textPreview: "答案" }), "s"))
-      .toEqual({ update: { turnId: "t", text: "答案" }, finished: false });
-    // An explicit done finishes the preview without producing another update.
-    expect(launcherAssistantLiveTextFromEvent(delta({ done: true, turnId: "t", textPreview: "答案" }), "s"))
-      .toEqual({ update: null, finished: true });
-    expect(launcherAssistantLiveTextFromEvent({ type: "session_detail", sessionId: "s", at }, "s").finished).toBe(false);
-  });
 
-  it("retires the live preview when the answer commits or another turn takes over, not for the native overlay", () => {
-    const live = { turnId: "t1", text: "部分回答" };
-    expect(launcherAssistantLiveTextIsStale(live, undefined)).toBe(false);
-    expect(launcherAssistantLiveTextIsStale(live, { messages: [], activeTurnId: "" })).toBe(false);
-    expect(launcherAssistantLiveTextIsStale(live, { messages: [], activeTurnId: "t1" })).toBe(false);
-    // Another generating turn supersedes the preview.
-    expect(launcherAssistantLiveTextIsStale(live, { messages: [], activeTurnId: "t2" })).toBe(true);
-    // A committed durable row for the same turn retires it.
-    expect(launcherAssistantLiveTextIsStale(live, { messages: [{ id: "m", role: "assistant", turnId: "t1", status: "completed", turnItems: [] }], activeTurnId: "" } as never)).toBe(true);
-    // The native live-overlay row for the same turn is not a commitment.
-    expect(launcherAssistantLiveTextIsStale(live, { messages: [{ id: "s-message-live-t1", role: "assistant", turnId: "t1", status: "running", turnItems: [], metadata: { kind: "session_live_overlay" } }], activeTurnId: "t1" } as never)).toBe(false);
-    // live: prefixed transport ids compare on their canonical half.
-    expect(launcherAssistantLiveTextIsStale({ turnId: "live:t1", text: "x" }, { messages: [], activeTurnId: "t1" })).toBe(false);
-  });
-
-  it("shapes the live preview as the shared conversation's active-turn overlay row", () => {
-    const row = launcherAssistantActiveTurnMessage("s", { turnId: "t1", text: "流式答案" });
-    expect(row.role).toBe("assistant");
-    expect(row).toMatchObject({ turnId: "t1", status: "running", metadata: { kind: "session_active_turn_layer", sessionId: "s" } });
-    expect(row.turnItems).toHaveLength(1);
-    expect(row.turnItems![0]).toMatchObject({ type: "agent_message", phase: "final_answer", status: "running", text: "流式答案", version: 3, sessionId: "s", turnId: "t1" });
-    const next = launcherAssistantActiveTurnMessage("s", { turnId: "t1", text: "流式答案变长" });
-    expect(next.turnItems![0].text).toBe("流式答案变长");
-  });
 });
 
 describe("Launcher native turn controls", () => {
@@ -1214,6 +1154,44 @@ describe("Launcher assistant composer surface model", () => {
     } finally {
       delete (globalThis as { vibelutionLauncher?: unknown }).vibelutionLauncher;
     }
+  });
+
+  it("switches the assistant model through the fixed bridge while preserving the composer", async () => {
+    const status = { assistant: { agentId: "a", directSessionId: "s", displayName: "助理" }, settings: { ok: true,
+      modelId: "m1", displayName: "助理", modelChoices: [{ modelId: "m1", label: "模型一" }, { modelId: "m2", label: "模型二" }],
+      preferences: { characterId: "xiaoluo", showStatus: true, showTitles: true, showCompletion: false, idleMessage: "" } } };
+    await renderAssistant(undefined, status, undefined, { embedded: true });
+    await act(async () => conversation?.onComposerChange("保留我的草稿"));
+    bridge.setLauncherAssistantModel.mockResolvedValue({ modelId: "m2" });
+    bridge.getLauncherAssistantStatus.mockResolvedValue({ ...status, settings: { ...status.settings, modelId: "m2" } });
+    const select = container!.querySelector<HTMLSelectElement>('select[aria-label="助理模型"]')!;
+    expect(select.disabled).toBe(false);
+    await act(async () => { select.value = "m2"; select.dispatchEvent(new Event("change", { bubbles: true })); });
+    await settle(); await settle();
+    expect(bridge.setLauncherAssistantModel).toHaveBeenCalledWith("m2");
+    expect(select.value).toBe("m2");
+    expect(conversation?.composerValue).toBe("保留我的草稿");
+    expect(bridge.sendLauncherAssistantMessage).not.toHaveBeenCalled();
+  });
+
+  it("loads earlier native history and retains it when the recent window refreshes", async () => {
+    const messages = (start: number, end: number) => Array.from({ length: end - start + 1 }, (_, i) => ({ id: `s-message-${start + i}`, role: "user", content: String(start + i), timestamp: "2026-11-03T02:00:00Z" }));
+    const page = (start: number, end: number) => ({ id: "s", status: "ready", currentPhase: "ready", activeBranchId: "branch", ledgerSeq: 5,
+      defaultFileContext: "", messages: messages(start, end), messageWindow: { mode: "window", totalMessages: 260,
+        returnedMessages: end - start + 1, oldestMessageIndex: start, newestMessageIndex: end, hasEarlier: start > 1,
+        hasLater: end < 260, nextBeforeMessageIndex: start > 1 ? start : null, transcriptScope: "window" } });
+    await renderAssistant(page(61, 260), undefined, undefined, { embedded: true });
+    expect(conversation?.hasEarlierMessages).toBe(true);
+    bridge.getLauncherAssistantDetail.mockImplementation((_session, cursor) => Promise.resolve(cursor === 61 ? page(1, 60) : page(61, 260)));
+    await act(async () => conversation?.onLoadEarlierMessages?.());
+    await settle(); await settle();
+    expect(bridge.getLauncherAssistantDetail).toHaveBeenCalledWith("s", 61);
+    expect(conversation?.messages[0].id).toBe("s-message-1");
+    expect(conversation?.messages).toHaveLength(260);
+    expect(conversation?.hasEarlierMessages).toBe(false);
+    await click("刷新");
+    expect(conversation?.messages[0].id).toBe("s-message-1");
+    expect(conversation?.messages).toHaveLength(260);
   });
 
   it("projects the native context usage into the composer ring without a detail handoff", async () => {

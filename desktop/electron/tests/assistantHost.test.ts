@@ -68,6 +68,24 @@ function fixture(options: { stale?: boolean; noReadyFirst?: boolean; graceful?: 
 }
 
 describe("AssistantHost", () => {
+  it("switches only the fixed assistant model and requires the verified model readback", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    for (const extra of [{ agentId: "foreign" }, { directSessionId: "foreign" }])
+      await expect(host.request({ operation: "setModel", modelId: "local/other", ...extra } as AssistantHostRequest)).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    fetchImpl.mockResolvedValueOnce(Response.json({ modelId: "local/other" }));
+    await expect(host.request({ operation: "setModel", modelId: "local/other" })).resolves.toEqual({ modelId: "local/other" });
+    const call = fetchImpl.mock.calls.find(([url]) => String(url).endsWith("/api/assistant/model"));
+    expect(call?.[1]?.method).toBe("POST");
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ modelId: "local/other" });
+    fetchImpl.mockResolvedValueOnce(Response.json({ modelId: "wrong" }));
+    await expect(host.request({ operation: "setModel", modelId: "local/other" })).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
+    fetchImpl.mockResolvedValueOnce(Response.json({ detail: "private" }, { status: 409 }));
+    await expect(host.request({ operation: "setModel", modelId: "local/other" })).rejects.toThrow("ASSISTANT_MODEL_BUSY");
+    fetchImpl.mockResolvedValueOnce(Response.json({ detail: "private" }, { status: 422 }));
+    await expect(host.request({ operation: "setModel", modelId: "local/other" })).rejects.toThrow("ASSISTANT_MODEL_INVALID");
+    await host.stop();
+  });
   it("vetoes lifecycle commit for an arriving message and admits the original request once after release", async () => {
     const { host, fetchImpl } = fixture({ graceful: true });
     await host.start();

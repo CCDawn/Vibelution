@@ -228,6 +228,7 @@ describe("Electron main Launcher IPC facade", () => {
     expect(implStart).toBeGreaterThan(-1);
     const implSource = mainSource.slice(implStart, mainSource.indexOf("currentWorkbenchUrl = workbenchUrl;", implStart));
     expect(implSource).toContain('payload.workbenchPath === "/config"');
+    expect(mainSource.slice(implStart)).toContain('provider.openOrFocusWorkbench(workbenchUrl, { loadTarget: true })');
     expect(preloadSource).toContain("openWorkbenchConfig: () => ipcRenderer.invoke(IPC_CHANNELS.openWorkbenchConfig)");
   });
 

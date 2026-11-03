@@ -63,7 +63,7 @@ import {
   toolActivityAriaTitle,
 } from "./ConversationToolActivityPills";
 import {
-  readOpenToolKeys,
+  readToolRowOpen,
   setToolRowOpen,
 } from "./conversationToolExpandPersistence";
 import styles from "./ConversationToolActivity.styles";
@@ -78,7 +78,7 @@ type ConversationToolActivityProps = {
   approvalSlot?: ReactNode;
   /** Owning session id: scopes the expand-state localStorage persistence. */
   sessionId?: string;
-  /** Failed/interrupted turn: force the work rows open to preserve the scene. */
+  /** Failed/interrupted turn: initially open its work scene until the user chooses. */
   turnFailed?: boolean;
 };
 
@@ -135,77 +135,57 @@ async function copyToolFailureToClipboard(text: string) {
 type ToolRowOpenOptions = {
   /** Owning session id; scopes the persistence (empty string = memory only). */
   sessionId: string;
-  /** Failed/interrupted turn: force the row open to preserve the scene. */
+  /** Failed/interrupted turn: initially open its scene until the user chooses. */
   forceOpen?: boolean;
-  /** Live run state; drives the running→settled auto-collapse edge. */
-  running?: boolean;
 };
+
+function toolRowChoiceKey(key: string, failed: boolean) {
+  return failed ? `failed-scene:${key}` : key;
+}
 
 /**
  * Expand/collapse state for one tool row.
  *
  * Open-state priority (ZCode ToolLayout semantics, highest first):
- * 1. failed/interrupted turn (`forceOpen`) — the scene stays open and the
- *    complete-edge auto-collapse below is disabled for the whole turn;
- * 2. a manual user toggle made while the row was running — never overwritten;
- * 3. the running→settled edge — auto-collapse once (only if nothing above);
- * 4. the persisted per-session choice (localStorage), else collapsed.
+ * A failed/interrupted turn (`forceOpen`) initially opens its diagnostic scene.
+ * Otherwise the persisted per-session user choice wins, defaulting to collapsed.
+ * Running/settled changes never overwrite an explicit expand/collapse choice.
  *
  * Reads the persistence store on mount, writes through on every toggle, and
  * keeps the body mounted for a short delay after a collapse so a rapid
  * re-expand never unmounts/remounts the content.
  */
 function usePersistentToolRowOpen(persistKey: string, options: ToolRowOpenOptions) {
-  const { sessionId, forceOpen = false, running = false } = options;
+  const { sessionId, forceOpen = false } = options;
+  const choiceKey = toolRowChoiceKey(persistKey, forceOpen);
   const [isOpen, setIsOpen] = useState(
-    () => forceOpen || readOpenToolKeys(sessionId).has(persistKey),
+    () => readToolRowOpen(sessionId, choiceKey) ?? forceOpen,
   );
   const [shouldRenderBody, setShouldRenderBody] = useState(isOpen);
   const bodyUnmountTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isOpenRef = useRef(isOpen);
-  const wasRunningRef = useRef(running);
-  // A manual toggle during the run outranks the complete-edge auto-collapse.
-  const userToggledWhileRunningRef = useRef(false);
 
   const applyOpen = useCallback((next: boolean, persist: boolean) => {
     isOpenRef.current = next;
     if (persist) {
-      setToolRowOpen(sessionId, persistKey, next);
+      setToolRowOpen(sessionId, choiceKey, next);
     }
     setShouldRenderBody(true);
     setIsOpen(next);
-  }, [persistKey, sessionId]);
+  }, [choiceKey, sessionId]);
 
   const toggle = useCallback(() => {
-    if (running) {
-      userToggledWhileRunningRef.current = true;
-    }
     applyOpen(!isOpenRef.current, true);
-  }, [applyOpen, running]);
+  }, [applyOpen]);
 
-  // Failure edge: force the scene open once, even over the stored default.
-  // The user may still collapse it again afterwards (this effect only fires
-  // when `forceOpen` flips, not on every render).
+  // The first failure opens over choices from the normal scene. A choice made
+  // in this failure scene wins, including when the row remounts later.
   useEffect(() => {
-    if (forceOpen && !isOpenRef.current) {
-      applyOpen(true, false);
+    const failedChoice = readToolRowOpen(sessionId, choiceKey) ?? true;
+    if (forceOpen && failedChoice !== isOpenRef.current) {
+      applyOpen(failedChoice, false);
     }
-  }, [applyOpen, forceOpen]);
-
-  // ZCode complete-edge auto-collapse: when a row settles after running, close
-  // it once — unless the turn failed (keep the scene for diagnosis) or the
-  // user toggled the row while it ran (their choice wins).
-  useEffect(() => {
-    const wasRunning = wasRunningRef.current;
-    wasRunningRef.current = running;
-    if (!wasRunning || running || forceOpen) {
-      return;
-    }
-    if (userToggledWhileRunningRef.current || !isOpenRef.current) {
-      return;
-    }
-    applyOpen(false, true);
-  }, [applyOpen, forceOpen, running]);
+  }, [applyOpen, choiceKey, forceOpen, sessionId]);
 
   useEffect(() => {
     if (isOpen) {
@@ -246,8 +226,7 @@ function staggeredRowStyle(index: number, count: number): CSSProperties {
 /**
  * Native <details> hides content immediately; keep it mounted for its exit
  * sequence. With `persistence`, the open choice round-trips through the shared
- * per-session localStorage store (same rules as tool rows and category
- * groups: only OPEN is stored, so a collapse is a removal) and survives the
+ * per-session localStorage store (including explicit closed choices) and survives the
  * remounts caused by the group's div→details root swap. A `openByDefault`
  * force-open (failed turn scene) is scene preservation, not a user choice, so
  * it never writes the store.
@@ -258,8 +237,7 @@ function useStaggeredDetails(
 ) {
   const { sessionId = "", key = "" } = persistence ?? {};
   const [isExpanded, setIsExpanded] = useState(
-    () => openByDefault
-      || (Boolean(sessionId) && Boolean(key) && readOpenToolKeys(sessionId).has(key)),
+    () => readToolRowOpen(sessionId, key) ?? openByDefault,
   );
   const [isClosing, setIsClosing] = useState(false);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -303,8 +281,8 @@ function useStaggeredDetails(
   useEffect(() => {
     if (!openByDefault) return;
     cancelClose();
-    setIsExpanded(true);
-  }, [cancelClose, openByDefault]);
+    setIsExpanded(readToolRowOpen(sessionId, key) ?? true);
+  }, [cancelClose, key, openByDefault, sessionId]);
 
   useEffect(() => () => {
     if (closeTimer.current !== null) clearTimeout(closeTimer.current);
@@ -469,7 +447,6 @@ function ToolActivityItem({
   const { isOpen, shouldRenderBody, toggle } = usePersistentToolRowOpen(persistKey, {
     sessionId,
     forceOpen: turnFailed,
-    running: cell.status === "running" || cell.status === "pending",
   });
   // ZCode failure denoising: the colored status word + dashed underline carries
   // the failure semantics; hovering it reveals the error summary, and the
@@ -618,7 +595,11 @@ function ToolActivityBatch({
   // batches have no running→completed auto-collapse (they never self-open).
   // The user's expand choice persists per session (keyed by the batch's
   // anchored id) so the settle-time group remount reopens it.
-  const staggeredDetails = useStaggeredDetails(turnFailed, { sessionId, key: item.id });
+  const persistKey = toolActivityRowKey(item);
+  const staggeredDetails = useStaggeredDetails(turnFailed, {
+    sessionId,
+    key: toolRowChoiceKey(persistKey, turnFailed),
+  });
   const descriptor = conversationToolActivityRendererForCell(item.cells[0], language);
   const Icon = descriptor.icon;
   const countLabel = language === "zh" ? `${item.count} 次` : `${item.count} calls`;
@@ -631,7 +612,7 @@ function ToolActivityBatch({
       className={`${styles.batch} group`}
       data-codex-tool-activity-batch="true"
       data-codex-tool-activity-count={item.count}
-      data-conversation-part-key={item.id}
+      data-conversation-part-key={persistKey}
       data-closing={staggeredDetails.isClosing || undefined}
       open={staggeredDetails.isOpen}
     >
@@ -698,7 +679,6 @@ function ToolActivityCategoryGroup({
   const { isOpen, shouldRenderBody, toggle } = usePersistentToolRowOpen(item.id, {
     sessionId,
     forceOpen: turnFailed,
-    running: item.running,
   });
   const Icon = CATEGORY_GROUP_ICONS[item.category];
   const countLabel = language === "zh" ? `${item.count} 次` : `${item.count} calls`;
@@ -791,11 +771,14 @@ function ToolActivityCategoryGroup({
           <div className={styles.categoryGroupDetailsInner}>
             {item.items.map((child, index) => (
               <div
-                key={child.id}
+                key={toolActivityRowKey(child)}
                 className={styles.categoryGroupRow}
                 style={staggeredRowStyle(index, item.items.length)}
               >
-                {toolActivityRowContent(child, language, renderToolDetails, toolDetailIsEmpty)}
+                {toolActivityRowContent(child, language, renderToolDetails, toolDetailIsEmpty, {
+                  sessionId,
+                  turnFailed,
+                })}
               </div>
             ))}
           </div>
@@ -816,6 +799,13 @@ const CATEGORY_GROUP_ICONS: Record<ConversationToolCategory, LucideIcon> = {
   cua: MonitorSmartphone,
   agent: Bot,
 };
+
+/** Streaming appends change a batch's last cell; its first tool stays the anchor. */
+function toolActivityRowKey(item: ConversationToolCategorizedItem): string {
+  return item.kind === "batch"
+    ? `tool-batch:${conversationToolPersistKey(item.cells[0])}`
+    : item.id;
+}
 
 function toolActivityRowContent(
   item: ConversationToolCategorizedItem,
@@ -882,7 +872,7 @@ function ToolActivityRows({
   return (
     <>
       {items.map((item) => (
-        <div key={item.id} className={styles.activityRow}>
+        <div key={toolActivityRowKey(item)} className={styles.activityRow}>
           {toolActivityRowContent(item, language, renderToolDetails, toolDetailIsEmpty, {
             sessionId,
             turnFailed,

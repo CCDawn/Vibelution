@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getLauncherAssistantDetail, getLauncherAssistantDispatches, getLauncherAssistantStatus, getLauncherAssistantTeamRuns,
   hideLauncherAssistant, launcherAssistantBridge, launcherConversationApi,
-  sendLauncherAssistantMessage, setLauncherAssistantExpanded,
+  sendLauncherAssistantMessage, setLauncherAssistantExpanded, setLauncherAssistantModel,
   getLauncherAssistantApprovals, resolveLauncherAssistantApproval,
   previewLauncherDispatchApproval, decideLauncherDispatchApproval, declineLauncherDispatchSummary,
   stopLauncherAssistantTurn, continueLauncherAssistantTurn,
@@ -12,6 +12,40 @@ import {
 import type { SessionToolApprovalRequest } from "./types";
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe("Launcher assistant model controls", () => {
+  it("switches through the closed invoke bridge and verifies the observed binding", async () => {
+    const invoke = vi.fn().mockResolvedValue({ modelId: "local/other" });
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    await expect(setLauncherAssistantModel("local/other")).resolves.toEqual({ modelId: "local/other" });
+    expect(invoke).toHaveBeenCalledExactlyOnceWith({ operation: "setModel", modelId: "local/other" });
+    invoke.mockResolvedValueOnce({ modelId: "wrong" });
+    await expect(setLauncherAssistantModel("local/other")).rejects.toThrow("切换尚未确认");
+    invoke.mockRejectedValueOnce(new Error("ASSISTANT_MODEL_BUSY"));
+    await expect(setLauncherAssistantModel("local/other")).rejects.toThrow("当前回复完成");
+  });
+
+  it("rejects malformed model IDs without sending or changing a draft", async () => {
+    const invoke = vi.fn();
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    for (const modelId of ["", " local/other", "local/other\n", "x".repeat(201)])
+      await expect(setLauncherAssistantModel(modelId)).rejects.toThrow("请选择可用");
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("accepts safe model choices and rejects accidental credential fields", async () => {
+    const choice = { modelId: "local/other", label: "Other", providerLabel: "Local", isDefault: false,
+      providerHealthy: true, missingApiKey: false, availability: "available" };
+    const status = { assistant: { agentId: "pa", directSessionId: "s", displayName: "PA" }, settings: {
+      ok: true, preferences: { characterId: "dafeiyu", showStatus: true, showTitles: true, showCompletion: true, idleMessage: "" },
+      displayName: "PA", modelId: "local/other", modelChoices: [choice] } };
+    const invoke = vi.fn().mockResolvedValue(status);
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    await expect(getLauncherAssistantStatus()).resolves.toEqual(status);
+    invoke.mockResolvedValueOnce({ ...status, settings: { ...status.settings, modelChoices: [{ ...choice, apiKey: "private" }] } });
+    await expect(getLauncherAssistantStatus()).rejects.toThrow("模型列表不可用");
+  });
+});
 
 describe("Launcher team run reads", () => {
   const assistant = { agentId: "pa", directSessionId: "session" };

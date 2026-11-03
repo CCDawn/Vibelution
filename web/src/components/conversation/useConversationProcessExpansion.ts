@@ -8,6 +8,7 @@ import {
 import type { AgentMessageOperationGroups } from "./agentMessageOperations";
 import type { AgentMessageRenderState } from "./agentMessageRenderState";
 import type { AgentMessageTimelineItem } from "./agentMessageTimeline";
+import type { AgentMessageTimelineRowIdentity } from "./agentMessageTimelineRows";
 import {
   preserveConversationExpansionDefaults,
   shouldRefreshConversationExpansionDefault,
@@ -21,6 +22,7 @@ import type { RetiredOverlayAlias } from "./useAgentMessageTimelineProjection";
 const DEFAULT_EXPANDED_RESPONSE_TAIL_COUNT = 3;
 const RESPONSE_PARSE_CACHE_LIMIT = 80;
 const RESPONSE_PREWARM_MESSAGE_LIMIT = 8;
+const ROW_IDENTITY_HISTORY_LIMIT = 128;
 
 /**
  * Moves explicit expansion records from retired overlay row ids onto the rows
@@ -57,6 +59,8 @@ export type UseConversationProcessExpansionInput = {
   agentRenderStatesByMessageId: Map<string, AgentMessageRenderState>;
   agentTimelineItemsByMessageId: Map<string, AgentMessageTimelineItem[]>;
   agentOperationGroupsByMessageId: Map<string, AgentMessageOperationGroups>;
+  /** Actual painted row keys, so an atomic live→durable replacement can carry user choices. */
+  timelineRowIdentities?: readonly AgentMessageTimelineRowIdentity[];
   /**
    * Overlay→durable row id pairs reported by the timeline projection when a
    * settled turn retires its live overlay rows. Explicit toggles bound to a
@@ -80,6 +84,7 @@ export type UseConversationProcessExpansionResult = {
   getCachedResponseSegments: (content: string) => ResponseSegment[];
   getExpansionState: (messageId: string, section: string, defaultExpanded: boolean) => boolean;
   toggleSection: (messageId: string, section: string, defaultExpanded: boolean) => void;
+  setExpansionState: (messageId: string, section: string, expanded: boolean) => void;
 };
 
 /**
@@ -88,7 +93,7 @@ export type UseConversationProcessExpansionResult = {
  * still calls this beside `useConversationTimelineFollow` and passes
  * `preserveCurrentExpansionDefaults` into that follow hook. Explicit toggles
  * follow their row across the live→durable identity change via the projection's
- * `retiredOverlayAliases`.
+ * aliases and a bounded, session-scoped history of actual painted row keys.
  */
 export function useConversationProcessExpansion({
   sessionId,
@@ -97,11 +102,37 @@ export function useConversationProcessExpansion({
   agentRenderStatesByMessageId,
   agentTimelineItemsByMessageId,
   agentOperationGroupsByMessageId,
+  timelineRowIdentities,
   retiredOverlayAliases,
 }: UseConversationProcessExpansionInput): UseConversationProcessExpansionResult {
   const defaultExpansionRef = useRef<Record<string, Record<string, boolean>>>({});
   const responseSegmentCacheRef = useRef<Map<string, ResponseSegment[]>>(new Map());
   const [sectionExpansion, setSectionExpansion] = useState<ConversationSectionExpansion>({});
+  const rowIdentityHistoryRef = useRef({ sessionId, rows: new Map<string, string>() });
+  const rowIdentityMigration = useMemo(() => {
+    const rows = new Map(rowIdentityHistoryRef.current.sessionId === sessionId
+      ? rowIdentityHistoryRef.current.rows
+      : []);
+    const aliasesBySource = new Map((retiredOverlayAliases ?? []).map((alias) => [alias.fromMessageId, alias]));
+    const currentMessageIds = new Set(timelineRowIdentities?.map((row) => row.messageId));
+    for (const { rowKey, messageId } of timelineRowIdentities ?? []) {
+      const previousMessageId = rows.get(rowKey);
+      if (previousMessageId && previousMessageId !== messageId && !currentMessageIds.has(previousMessageId)) {
+        // Dedupe runs before durable folding, so its replacement may not be
+        // painted. The final row identity owns this source's actual target.
+        aliasesBySource.set(previousMessageId, { fromMessageId: previousMessageId, toMessageId: messageId });
+      }
+      rows.delete(rowKey);
+      rows.set(rowKey, messageId);
+    }
+    while (rows.size > ROW_IDENTITY_HISTORY_LIMIT) {
+      rows.delete(rows.keys().next().value!);
+    }
+    return { rows, aliases: [...aliasesBySource.values()] };
+  }, [retiredOverlayAliases, sessionId, timelineRowIdentities]);
+  // Resolve before children render: a new row must mount with the user's choice,
+  // rather than briefly mounting collapsed until an effect migrates its record.
+  const effectiveSectionExpansion = migrateSectionExpansionRecords(sectionExpansion, rowIdentityMigration.aliases);
 
   const defaultExpandedResponseIds = useMemo(() => {
     const ids = new Set<string>();
@@ -133,7 +164,7 @@ export function useConversationProcessExpansion({
   function preserveCurrentExpansionDefaults() {
     defaultExpansionRef.current = preserveConversationExpansionDefaults({
       currentDefaults: defaultExpansionRef.current,
-      sectionExpansion,
+      sectionExpansion: effectiveSectionExpansion,
       messages: activeTimelineMessages,
       renderStatesByMessageId: agentRenderStatesByMessageId,
       timelineItemsByMessageId: agentTimelineItemsByMessageId,
@@ -151,9 +182,14 @@ export function useConversationProcessExpansion({
   }
 
   function getExpansionState(messageId: string, section: string, defaultExpanded: boolean) {
-    const explicit = sectionExpansion[messageId]?.[section];
+    const explicit = effectiveSectionExpansion[messageId]?.[section];
     if (explicit !== undefined) {
       return explicit;
+    }
+    // Process chrome follows the current run state until the user chooses.
+    // Caching a settled default would otherwise block the next running edge.
+    if (section === "process") {
+      return defaultExpanded;
     }
     const messageDefaults = defaultExpansionRef.current[messageId] ?? {};
     if (messageDefaults[section] === undefined) {
@@ -189,6 +225,9 @@ export function useConversationProcessExpansion({
     if (explicit !== undefined) {
       return explicit;
     }
+    if (section === "process") {
+      return defaultExpanded;
+    }
     const messageDefaults = defaultExpansionRef.current[messageId] ?? {};
     if (messageDefaults[section] !== undefined) {
       return messageDefaults[section];
@@ -198,13 +237,24 @@ export function useConversationProcessExpansion({
 
   function toggleSection(messageId: string, section: string, defaultExpanded: boolean) {
     setSectionExpansion((current) => {
-      const currentlyExpanded = resolveExpansionState(current, messageId, section, defaultExpanded);
+      const migrated = migrateSectionExpansionRecords(current, rowIdentityMigration.aliases);
+      const currentlyExpanded = resolveExpansionState(migrated, messageId, section, defaultExpanded);
       return {
-        ...current,
+        ...migrated,
         [messageId]: {
-          ...(current[messageId] ?? {}),
+          ...(migrated[messageId] ?? {}),
           [section]: !currentlyExpanded,
         },
+      };
+    });
+  }
+
+  function setExpansionState(messageId: string, section: string, expanded: boolean) {
+    setSectionExpansion((current) => {
+      const migrated = migrateSectionExpansionRecords(current, rowIdentityMigration.aliases);
+      return {
+        ...migrated,
+        [messageId]: { ...(migrated[messageId] ?? {}), [section]: expanded },
       };
     });
   }
@@ -213,11 +263,9 @@ export function useConversationProcessExpansion({
   // migration is idempotent: once a record moves, re-reported aliases for the
   // same overlay id find no source record and bail out of the state update.
   useEffect(() => {
-    if (!retiredOverlayAliases || retiredOverlayAliases.length === 0) {
-      return;
-    }
-    setSectionExpansion((current) => migrateSectionExpansionRecords(current, retiredOverlayAliases));
-  }, [retiredOverlayAliases]);
+    rowIdentityHistoryRef.current = { sessionId, rows: rowIdentityMigration.rows };
+    setSectionExpansion((current) => migrateSectionExpansionRecords(current, rowIdentityMigration.aliases));
+  }, [rowIdentityMigration, sessionId]);
 
   useEffect(() => {
     const prewarmMessages = timelineMessages
@@ -259,12 +307,13 @@ export function useConversationProcessExpansion({
   }, [agentRenderStatesByMessageId, sessionId, timelineMessages]);
 
   return {
-    sectionExpansion,
+    sectionExpansion: effectiveSectionExpansion,
     defaultExpandedResponseIds,
     preserveCurrentExpansionDefaults,
     resetSessionExpansion,
     getCachedResponseSegments,
     getExpansionState,
     toggleSection,
+    setExpansionState,
   };
 }
