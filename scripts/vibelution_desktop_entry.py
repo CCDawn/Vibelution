@@ -2015,7 +2015,8 @@ def _run_launcher_api_bridge(args: argparse.Namespace) -> dict[str, object]:
         body = json.loads(args.launcher_api_body) if isinstance(args.launcher_api_body, str) else dict(args.launcher_api_body)
     if not isinstance(body, dict):
         body = {}
-    from core.launcher import service as launcher_service
+    if path != "freshness" or method != "GET":
+        from core.launcher import service as launcher_service
 
     _append_log("desktop_entry_python.launcher_api.started", method=method, path=raw_path)
     try:
@@ -2052,7 +2053,9 @@ def _run_launcher_api_bridge(args: argparse.Namespace) -> dict[str, object]:
         elif path == "status" and method == "GET":
             response = launcher_service.get_launcher_status()
         elif path == "freshness" and method == "GET":
-            response = launcher_service.get_launcher_freshness()
+            from core.launcher.freshness import get_launcher_freshness
+
+            response = get_launcher_freshness()
         elif path == "branch-instances" and method == "GET":
             if _query_flag(query.get("cleanupMetadata", "")):
                 response = launcher_service.list_launcher_branch_instances(include_cleanup_metadata=True)

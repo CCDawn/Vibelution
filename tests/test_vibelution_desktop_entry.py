@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import builtins
 import contextlib
 import importlib.util
 import json
@@ -559,6 +560,9 @@ def test_launcher_api_bridge_dispatches_settings_and_maintenance(monkeypatch):
     monkeypatch.setattr(entry, "_append_log", lambda *a, **k: None)
     monkeypatch.setitem(sys.modules, "core.launcher", types.ModuleType("core.launcher"))
     monkeypatch.setitem(sys.modules, "core.launcher.service", _fake_launcher_service_module())
+    freshness_module = types.ModuleType("core.launcher.freshness")
+    freshness_module.get_launcher_freshness = lambda: {"marker": "freshness"}
+    monkeypatch.setitem(sys.modules, "core.launcher.freshness", freshness_module)
 
     payload = entry._run_launcher_api_bridge(
         argparse.Namespace(launcher_api_path="settings/workbench-window", launcher_api_method="GET", launcher_api_body="")
@@ -603,6 +607,92 @@ def test_launcher_api_bridge_dispatches_settings_and_maintenance(monkeypatch):
     )
     assert payload["ok"] is True
     assert payload["payload"]["marker"] == "branch_instances"
+
+
+def test_launcher_api_bridge_freshness_does_not_import_service(monkeypatch):
+    entry = _load_desktop_entry_py()
+    logs = []
+    monkeypatch.setattr(entry, "_append_log", lambda event, **fields: logs.append((event, fields)))
+    monkeypatch.setitem(sys.modules, "core.launcher", types.ModuleType("core.launcher"))
+    freshness_module = types.ModuleType("core.launcher.freshness")
+    expected = {"schemaVersion": 1, "stale": False, "startedHead": "abc123", "currentHead": "abc123"}
+    freshness_module.get_launcher_freshness = lambda: expected
+    monkeypatch.setitem(sys.modules, "core.launcher.freshness", freshness_module)
+    original_import = builtins.__import__
+
+    def reject_service_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "core.launcher.service" or (name == "core.launcher" and "service" in fromlist):
+            pytest.fail("freshness must not import the Launcher service")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", reject_service_import)
+
+    payload = entry._run_launcher_api_bridge(
+        argparse.Namespace(launcher_api_path="freshness?probe=1", launcher_api_method="GET", launcher_api_body="")
+    )
+
+    assert payload == {"schemaVersion": 1, "ok": True, "payload": expected}
+    assert logs == [
+        ("desktop_entry_python.launcher_api.started", {"method": "GET", "path": "freshness?probe=1"}),
+        ("desktop_entry_python.launcher_api.succeeded", {"method": "GET", "path": "freshness"}),
+    ]
+
+
+@pytest.mark.parametrize("failure_stage", ["import", "call"])
+def test_launcher_api_bridge_freshness_preserves_owner_error_envelope(monkeypatch, failure_stage):
+    entry = _load_desktop_entry_py()
+    logs = []
+    monkeypatch.setattr(entry, "_append_log", lambda event, **fields: logs.append((event, fields)))
+    monkeypatch.setitem(sys.modules, "core.launcher", types.ModuleType("core.launcher"))
+    freshness_module = types.ModuleType("core.launcher.freshness")
+
+    def fail_freshness():
+        raise ValueError("freshness owner failed")
+
+    freshness_module.get_launcher_freshness = fail_freshness
+    monkeypatch.setitem(sys.modules, "core.launcher.freshness", freshness_module)
+    launcher_module = _fake_launcher_service_module()
+
+    def service_freshness():
+        from core.launcher.freshness import get_launcher_freshness
+
+        return get_launcher_freshness()
+
+    launcher_module.get_launcher_freshness = service_freshness
+    monkeypatch.setitem(sys.modules, "core.launcher.service", launcher_module)
+    original_import = builtins.__import__
+
+    def fail_owner_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "core.launcher.freshness":
+            raise ImportError("freshness owner failed")
+        return original_import(name, globals, locals, fromlist, level)
+
+    if failure_stage == "import":
+        monkeypatch.setattr(builtins, "__import__", fail_owner_import)
+
+    payload = entry._run_launcher_api_bridge(
+        argparse.Namespace(launcher_api_path="freshness?probe=1", launcher_api_method="GET", launcher_api_body="")
+    )
+
+    assert payload == {
+        "schemaVersion": 1,
+        "ok": False,
+        "code": "launcher_api_bridge_failed",
+        "message": "freshness owner failed",
+    }
+    assert logs == [
+        ("desktop_entry_python.launcher_api.started", {"method": "GET", "path": "freshness?probe=1"}),
+        (
+            "desktop_entry_python.launcher_api.failed",
+            {
+                "level": "error",
+                "method": "GET",
+                "path": "freshness",
+                "error_type": "ImportError" if failure_stage == "import" else "ValueError",
+                "error": "freshness owner failed",
+            },
+        ),
+    ]
 
 
 def test_launcher_api_bridge_branch_instances_cleanup_metadata_is_opt_in(monkeypatch):

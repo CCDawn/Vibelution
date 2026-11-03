@@ -296,6 +296,131 @@ def test_builder_resolves_the_admitted_output_root_once(package_fixture, monkeyp
     assert resolutions == 1
 
 
+def test_owned_file_guard_accepts_an_exact_existing_path_without_fallback(tmp_path, monkeypatch):
+    from scripts import build_assistant_runtime as builder
+
+    _write(tmp_path, "one/two/data.bin", b"data")
+    root = builder._trusted_root(tmp_path)
+    monkeypatch.setattr(builder, "_checked", lambda *_args, **_kwargs: pytest.fail("unexpected fallback"))
+    assert builder._checked_built_file(root, "one/two/data.bin", resolved_root=root).read_bytes() == b"data"
+
+
+@pytest.mark.parametrize("phase", ["observe", "resolve"])
+def test_owned_file_guard_rechecks_the_legacy_chain_after_an_observation_error(tmp_path, monkeypatch, phase):
+    from scripts import build_assistant_runtime as builder
+
+    _write(tmp_path, "data.bin", b"data")
+    root = builder._trusted_root(tmp_path)
+    target = root / "data.bin"
+    original_checked, original_reject, original_resolve = builder._checked, builder._reject_link, Path.resolve
+    calls = []
+    faulted = False
+
+    def reject(path, **kwargs):
+        nonlocal faulted
+        if phase == "observe" and path == target and not faulted:
+            faulted = True
+            raise PermissionError("transient observation failure")
+        return original_reject(path, **kwargs)
+
+    def resolve(path, *args, **kwargs):
+        nonlocal faulted
+        if phase == "resolve" and kwargs.get("strict") is True:
+            faulted = True
+            raise PermissionError("normalization unavailable")
+        return original_resolve(path, *args, **kwargs)
+
+    def checked(path, relative, **kwargs):
+        calls.append(relative)
+        return original_checked(path, relative, **kwargs)
+
+    monkeypatch.setattr(builder, "_reject_link", reject)
+    monkeypatch.setattr(Path, "resolve", resolve)
+    monkeypatch.setattr(builder, "_checked", checked)
+    assert builder._checked_built_file(root, "data.bin", resolved_root=root).read_bytes() == b"data"
+    assert faulted and calls == ["data.bin"]
+
+
+@pytest.mark.parametrize("kind", ["inside", "outside", "broken", "case_only_resolution"])
+def test_owned_file_guard_retains_ancestor_junction_rejection(tmp_path, monkeypatch, kind):
+    from scripts import build_assistant_runtime as builder
+
+    if builder.os.name != "nt":
+        pytest.skip("Directory junctions require Windows")
+    import _winapi
+
+    root_path = tmp_path / "root"
+    root_path.mkdir()
+    target = root_path / "actual" if kind != "outside" else tmp_path / "outside"
+    _write(target, "data.bin", b"data")
+    link = root_path / "Pkg"
+    _winapi.CreateJunction(str(target), str(link))
+    if kind == "broken":
+        target.rename(root_path / "moved")
+    root = builder._trusted_root(root_path)
+    original_resolve = Path.resolve
+
+    def resolve(path, *args, **kwargs):
+        if kind == "case_only_resolution" and kwargs.get("strict") is True:
+            # Model a case-sensitive directory's Pkg -> pkg junction; the real
+            # junction still lets the fallback exercise the original guard.
+            return root / "pkg/data.bin"
+        return original_resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", resolve)
+    with pytest.raises(ValueError, match="links"):
+        builder._checked_built_file(root, "Pkg/data.bin", resolved_root=root)
+
+
+def test_owned_file_guard_preserves_case_alias_and_short_name_inputs(tmp_path):
+    from scripts import build_assistant_runtime as builder
+
+    if builder.os.name != "nt":
+        pytest.skip("Windows case and short-name behavior")
+    import ctypes
+
+    _write(tmp_path, "LongDirectoryNameForGuard/Case.bin", b"data")
+    root = builder._trusted_root(tmp_path)
+    if not (root / "LongDirectoryNameForGuard/case.bin").is_file():
+        pytest.skip("The temporary directory is case sensitive")
+    assert builder._checked_built_file(root, "LongDirectoryNameForGuard/case.bin", resolved_root=root).read_bytes() == b"data"
+    get_short = ctypes.WinDLL("kernel32", use_last_error=True).GetShortPathNameW
+    get_short.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
+    get_short.restype = ctypes.c_uint32
+    name = str(root / "LongDirectoryNameForGuard")
+    required = get_short(name, None, 0)
+    if not required:
+        pytest.skip("Short names are unavailable")
+    buffer = ctypes.create_unicode_buffer(required)
+    if not get_short(name, buffer, required):
+        pytest.skip("Short names are unavailable")
+    short_name = Path(buffer.value).name
+    if short_name == "LongDirectoryNameForGuard":
+        pytest.skip("Short-name creation is disabled on this volume")
+    assert builder._checked_built_file(root, f"{short_name}/Case.bin", resolved_root=root).read_bytes() == b"data"
+
+
+def test_owned_file_guard_preserves_hardlink_inputs(tmp_path):
+    from scripts import build_assistant_runtime as builder
+
+    target = _write(tmp_path, "original.bin", b"data")
+    linked = tmp_path / "hardlink.bin"
+    linked.hardlink_to(target)
+    root = builder._trusted_root(tmp_path)
+    assert builder._checked_built_file(root, "hardlink.bin", resolved_root=root).read_bytes() == b"data"
+
+
+@pytest.mark.parametrize("verify_content", [False, True])
+def test_public_verifier_retains_the_full_path_guard(package_fixture, monkeypatch, verify_content):
+    from scripts import build_assistant_runtime as builder
+
+    result = _build(package_fixture)
+    output = package_fixture[-1]
+    kwargs = _content_verification_kwargs(output, verify_content)
+    monkeypatch.setattr(builder, "_checked_built_file", lambda *_args, **_kwargs: pytest.fail("public guard changed"))
+    verify_launcher_assistant_payload(output, expected_manifest_sha256=result["manifestSha256"], **kwargs)
+
+
 @pytest.mark.parametrize("phase", ["copy", "verify"])
 def test_builder_rejects_output_ancestor_redirection_after_admission(
     package_fixture, tmp_path, monkeypatch, phase,
