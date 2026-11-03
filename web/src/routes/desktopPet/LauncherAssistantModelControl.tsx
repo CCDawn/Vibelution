@@ -1,7 +1,7 @@
 import { Bot, SlidersHorizontal } from "lucide-react";
 import { useState } from "react";
 import type { LauncherAssistantModelChoice } from "../../api/launcherAssistant";
-import styles from "../../components/conversation/ConversationTurnModelControl.styles";
+import styles from "./LauncherAssistantModelControl.styles";
 import { VButton, VNativeSelect, VPopover } from "../../components/vui";
 
 /** Native Launcher model actions in the shared conversation toolbar recipe. */
