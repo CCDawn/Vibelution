@@ -18,6 +18,7 @@ import {
 import researchStyles from "./TeamsRoute.research.styles";
 import shellStyles from "./TeamsRoute.styles";
 import workflowStyles from "./TeamsRoute.workflow.styles";
+import type { SourceCollectionStageAgentChatStatus } from "./teams/teamSourceCollectionShellModel";
 
 const styles = { ...shellStyles, ...researchStyles, ...workflowStyles } as Record<string, string>;
 
@@ -46,6 +47,10 @@ export type TeamKnowledgeCollectionCompletionFlowPanelProps = {
   sourceCollectionStagePrimaryAgentBinding: (stageId: SourceCollectionStageModuleId) => any;
   sourceCollectionStageReturnRoute: (stageId: SourceCollectionStageModuleId) => string;
   openSourceCollectionStageAgentChat?: (stageId: SourceCollectionStageModuleId) => void;
+  sourceCollectionStageAgentChatState?: (stageId: SourceCollectionStageModuleId) => {
+    status: SourceCollectionStageAgentChatStatus;
+  };
+  allowStageAgentConfigurationFallback?: boolean;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   sourceCollectionStepClassName: (state: any) => string;
   runKnowledgeCollectionCompletionAction?: () => void;
@@ -72,6 +77,8 @@ export function TeamKnowledgeCollectionCompletionFlowPanel(props: TeamKnowledgeC
     sourceCollectionStagePrimaryAgentBinding,
     sourceCollectionStageReturnRoute,
     openSourceCollectionStageAgentChat,
+    sourceCollectionStageAgentChatState,
+    allowStageAgentConfigurationFallback = false,
     sourceCollectionStepClassName,
     runKnowledgeCollectionCompletionAction,
     sourceCollectionCompletionActionDisabled,
@@ -136,6 +143,16 @@ export function TeamKnowledgeCollectionCompletionFlowPanel(props: TeamKnowledgeC
           const node = { ...rawNode, stageId };
           const nodeState = sourceCollectionCompletionFlowNodeState(node.status);
           const binding = sourceCollectionStagePrimaryAgentBinding(stageId);
+          const chatStatus = sourceCollectionStageAgentChatState?.(stageId).status;
+          const canOpenAgentConfiguration = allowStageAgentConfigurationFallback
+            && !String(binding?.agent?.agentId || "").trim();
+          const chatDisabledReason = !openSourceCollectionStageAgentChat
+            ? unavailableActionMessage
+            : chatStatus === "loading"
+              ? (lang === "zh" ? "正在加载阶段私聊，请稍候。" : "Stage chat is loading. Please wait.")
+              : chatStatus === "blocked" && !canOpenAgentConfiguration
+                ? (lang === "zh" ? "请先开始资料搜集，再打开阶段私聊。" : "Start source collection before opening stage chat.")
+                : "";
           const bindingDisplay = binding?.agent ? agentDisplayInfo(binding.agent, lang) : null;
           const agentLabel =
             bindingDisplay?.name
@@ -170,6 +187,9 @@ export function TeamKnowledgeCollectionCompletionFlowPanel(props: TeamKnowledgeC
                 {rail && node.detail ? (
                   <p className="line-clamp-2 m-0">{node.detail}</p>
                 ) : null}
+                {openSourceCollectionStageAgentChat && chatDisabledReason ? (
+                  <small role="status">{chatDisabledReason}</small>
+                ) : null}
                 {node.errorType ? <p className={styles.knowledgeCompletionFlowError}>{node.errorType}</p> : null}
               </div>
               <div className={styles.knowledgeCompletionFlowActions}>
@@ -179,8 +199,8 @@ export function TeamKnowledgeCollectionCompletionFlowPanel(props: TeamKnowledgeC
                 </Link>
                 <VNativeButton
                   type="button"
-                  disabled={!openSourceCollectionStageAgentChat}
-                  title={!openSourceCollectionStageAgentChat ? unavailableActionMessage : undefined}
+                  disabled={Boolean(chatDisabledReason)}
+                  title={chatDisabledReason || undefined}
                   onClick={() => openSourceCollectionStageAgentChat?.(node.stageId)}
                 >
                   <MessageSquare size={13} />

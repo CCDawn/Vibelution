@@ -21,7 +21,7 @@ function challengeTeam(): Team {
   } as Team;
 }
 
-function buildHelpers(agentId: string) {
+function buildHelpers(agentId: string, runId = "run-1", agent: AgentConfigWorkspaceAgent | null = null, taskSessionId = "old-session") {
   const seed = vi.fn(async () => ({ chatRoute: "/chat?session=new" }));
   const navigate = vi.fn();
   const helpers = createSourceCollectionStageAgentHelpers({
@@ -37,14 +37,14 @@ function buildHelpers(agentId: string) {
         zhFocus: "搜索",
         enFocus: "Search",
         agentId,
-        agent: null,
+        agent,
         bindingLabel: "",
         bindingSource: "member",
       }],
     },
-    selectedSourceCollectionRunEffectiveId: "run-1",
-    sourceCollectionSummaryQuery: query({ latestTasks: { finding: { sessionId: "old-session" } } }),
-    agentSummaryQuery: query<AgentConfigWorkspaceAgent[]>([]),
+    selectedSourceCollectionRunEffectiveId: runId,
+    sourceCollectionSummaryQuery: query({ latestTasks: { finding: { sessionId: taskSessionId } } }),
+    agentSummaryQuery: query<AgentConfigWorkspaceAgent[]>(agent ? [agent] : []),
     seedSourceCollectionAgentSessionContextMutation: { mutateAsync: seed },
     repairKnowledgeExpansionTeamAgentsMutation: { isPending: false, mutate: vi.fn() },
     navigate: navigate as never,
@@ -69,5 +69,53 @@ describe("createSourceCollectionStageAgentHelpers", () => {
 
     expect(seed).not.toHaveBeenCalled();
     expect(navigate).toHaveBeenCalledWith("/agents?pane=config");
+  });
+
+  it.each(["stale-agent", ""])("keeps configuration navigation for Agent %s without a run", async (agentId) => {
+    const { helpers, seed, navigate } = buildHelpers(agentId, "");
+
+    expect(helpers.sourceCollectionStageAgentChatState("finding").status).toBe("blocked");
+    await helpers.openSourceCollectionStageAgentChat("finding");
+
+    expect(seed).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledExactlyOnceWith(agentId ? `/agents?pane=config&agent=${agentId}` : "/agents?pane=config");
+  });
+
+  it("seeds the ready project session and navigates to the returned route", async () => {
+    const agent = { agentId: "source-agent" } as AgentConfigWorkspaceAgent;
+    const { helpers, seed, navigate } = buildHelpers(agent.agentId, "run-1", agent);
+
+    expect(helpers.sourceCollectionStageAgentChatState("finding").status).toBe("ready");
+    await helpers.openSourceCollectionStageAgentChat("finding");
+
+    expect(seed).toHaveBeenCalledExactlyOnceWith({
+      teamId: "research-team", runId: "run-1", stageId: "finding", agentId: "source-agent", agentRole: "source_finder",
+    });
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/chat?session=new");
+  });
+
+  it("marks a normal Agent without run context as blocked without seeding", async () => {
+    const agent = { agentId: "source-agent" } as AgentConfigWorkspaceAgent;
+    const { helpers, seed, navigate } = buildHelpers(agent.agentId, "", agent, "");
+
+    // No historic task route is available for the new run context.
+    expect(helpers.sourceCollectionStageAgentChatState("finding").status).toBe("blocked");
+    await helpers.openSourceCollectionStageAgentChat("finding");
+
+    expect(seed).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("opens the known native task route when a run does not need seeding", async () => {
+    const agent = { agentId: "source-agent" } as AgentConfigWorkspaceAgent;
+    const { helpers, seed, navigate } = buildHelpers(agent.agentId, "", agent);
+    const state = helpers.sourceCollectionStageAgentChatState("finding");
+
+    expect(state.status).toBe("ready");
+    expect(state.route).toContain("session=old-session");
+    await helpers.openSourceCollectionStageAgentChat("finding");
+
+    expect(seed).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledExactlyOnceWith(state.route);
   });
 });
