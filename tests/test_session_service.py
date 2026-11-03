@@ -2405,7 +2405,8 @@ def test_messages_with_live_output_does_not_reopen_a_terminal_turn(monkeypatch):
     [
         ("agent-target", "active", "main", False, True),
         ("", "active", "main", False, True),
-        ("agent-missing", "active", "main", False, True),
+        # A known missing owner cannot be replaced by another direct-session candidate.
+        ("agent-missing", "active", "main", False, False),
         ("agent-other", "active", "main", False, False),
         ("agent-target", "active", "child", False, False),
         ("agent-target", "archived", "main", False, False),
