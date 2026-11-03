@@ -1,10 +1,9 @@
-import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
-import { launcherAssistantPanelPath, resolveLauncherAssistantPanel, type LauncherAssistantPanel } from "../../app/launcherNavigationModel";
+import { useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
+import { resolveLauncherAssistantPanel, type LauncherAssistantPanel } from "../../app/launcherNavigationModel";
 import { useShellI18n } from "../../i18n/useShellI18n";
-import { VDialog } from "../../components/vui";
 import { LauncherAssistantBrowserWorkspace } from "./LauncherAssistantBrowserWorkspace";
-import { LauncherAssistantTaskCards } from "./assistantTasks/LauncherAssistantTaskCards";
+import { useLauncherTasks } from "./assistantTasks/LauncherTaskContext";
 import type { AssistantTask } from "./assistantTasks/assistantTeamRunTasks";
 
 /** Old bookmarks offer an explicit conversation request, never an automatic write. */
@@ -44,20 +43,13 @@ export function launcherTaskEntry(task: AssistantTask, lang: "zh" | "en") {
 
 export function LauncherAssistantWorkspaceRoute() {
   const [params] = useSearchParams();
-  const navigate = useNavigate();
   const panel = resolveLauncherAssistantPanel(params.toString());
   const { lang } = useShellI18n();
-  const [taskEntry, setTaskEntry] = useState<ReturnType<typeof launcherTaskEntry>>();
-  const tasksOpen = panel === "tasks";
-  const returnToDialogue = () => navigate(launcherAssistantPanelPath("dialogue"), { replace: true });
+  const reviewRequest=useLauncherTasks()?.reviewRequest;
+  const taskEntry=useMemo(()=>reviewRequest?launcherTaskEntry(reviewRequest.task,lang):undefined,[reviewRequest,lang]);
   return <>
     <LauncherAssistantBrowserWorkspace revealRequested={panel === "browser"}
       assistantProps={{ computerRequested: panel === "computer", entryIntent: panel === "dialogue" && taskEntry ? taskEntry : launcherAgentEntry(panel, lang) }} />
-    <VDialog open={tasksOpen} title={lang === "zh" ? "任务" : "Tasks"} size="lg"
-      onOpenChange={open => { if (!open && tasksOpen) returnToDialogue(); }}>
-      {tasksOpen ? <LauncherAssistantTaskCards lang={lang} onReview={task => { setTaskEntry(launcherTaskEntry(task, lang)); returnToDialogue(); }}
-        onApproval={returnToDialogue} /> : null}
-    </VDialog>
   </>;
 }
 

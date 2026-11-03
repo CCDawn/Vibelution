@@ -1,40 +1,86 @@
 # Launcher 个人助理任务卡
 
-已批准的任务卡方案；复用现有 VUI primitive，不新增按钮、卡片或对话框 renderer。
+用户已批准 agent-cards-v10。仅修改 Launcher 左栏任务与详情，不改变普通会话、Agent 目录或其他分支。
 
 ## LauncherAssistantTaskCards
 
 ### 功能
 
-在个人助理任务窗口展示当前已加载的派遣任务与已登记团队运行，帮助用户知道谁在处理什么、最新进展及哪些任务需要自己处理。原生执行成功只表示执行已结束，仍待业务验收。
+单一身份绑定 provider 复用现有原生派遣与团队运行查询、分页、可见性和轮询保护。桌面左栏和移动导航共享同一组读取与清理状态，不建立第二任务 store，不将任务伪装成 Agent 或 Session。
 
 ### 适用范围
 
-仅用于 Launcher 个人助理的身份绑定任务视图。普通 Agent 会话、Session transcript、团队执行控制和全平台任务统计由各自 owner 负责。
+仅 Launcher 的身份绑定任务工作区，不用于普通 Agent 会话。
 
 ### 使用方式
 
-`LauncherAssistantTaskCards` 接收 `lang`、`onReview`、`onApproval`。它复用 `VSurface`、`VChip`、`VButton`、`VStateSurface`、`VSkeleton`，由现有 `LauncherAssistantWorkspaceRoute` 的 `VDialog` 承载。
-
-卡片按「需要你处理 / 进行中 / 已结束」分组，可用 VButton 折叠；分组数只代表当前已加载记录。组内按真实更新时间、创建时间倒序排列；无时间记录稳定排在末尾，不用读取时间冒充任务更新时间。
-
-首屏包含短标题、负责人 Agent 名或团队名、项目名、当前状态、两行摘要或失败原因和更新时间。名称缺失时用对应 Agent、团队或项目身份编号标识；身份或时间也缺失时显示「未提供」。未命名任务显示「未命名任务 · 短编号」；不从 prompt、源码或回执正文推断标题。长摘要可展开；完整任务编号、创建时间、团队当前步骤、步骤数和尝试次数放在详情。来源提供当前 Agent 名时也在首屏显示，缺失时不推断。
+LauncherShell 持有 provider；LauncherTaskNavigationSlot 在原 LauncherNavigation 唯一任务入口之后挂载自有 portal host，显示 LauncherAssistantTaskSidebar；导航源码保持原样。WorkspaceRoute 保持原聊天和草稿挂载，只从当前助理身份的 reviewRequest 接收显式只读核对请求。旧 panel=tasks 书签进入相同工作区，列表直接在左栏呈现。
 
 ### 视觉与状态
 
-复用 `vui-fg-*`、`vui-border-subtle` 与现有卡片 surface token。首次无内容读取使用 skeleton；已有卡片刷新时只显示轻量文字，不替换卡片。通信失败显示「状态同步失败」，引用未绑定显示「身份未确认」，不会误报为执行失败。失败、待授权、待输入和未确认放在需要处理组；成功执行待验收与已停止放在已结束组。
+卡片原样复用当前 AgentConversationDirectory.styles 的 agentRow/agentAvatar/agentCopy/agentTitle/agentMeta/agentStatusSlot 展示 recipe：36px 方圆角头像、约62px两行结构、右侧运行或关注指示。此处是用户指定复用边界，普通目录源文件和普通会话行为零改动；不借用旧 DirectSessionIndexItem 的错误/提示条。
 
-所有卡片均提供删除入口，只有来源可用、身份绑定且已确认原生终态时启用。工具栏「清理已完成」仅包括当前已加载且原生 `succeeded` 的派遣任务及 `completed` 的团队运行；确认页说明业务验收仍未完成。
+卡片只显示可读任务名称、负责 Agent 与当前状态。状态不把同步失败误报执行失败，执行已结束不代表业务验收。团队来源未报告当前 Agent 时如实显示团队，详情说明未提供负责人。缺少历史标题时按可信负责人和任务种类标识，不展示“未命名任务”或数字后缀，不从 prompt、源码、结果正文猜标题。
 
-宿主仅在用户确认清理并核验终态后设置 `cleanupPending: true`。此类任务显示「清理未完成，可重试」，进入需要处理组并提供「重试清理」；即使后台读取原生回执返回 TASK_NOT_FOUND，仍可用保留的 project/nativeTaskId 引用重新向宿主预览。批量清理亦包含这些已确认但未完成的清理记录。缺失、字符串标记、无绑定引用或冲突观测不会开启恢复权限。
+待处理/进行中/已结束选项仅统计当前身份已加载记录；首次默认首个非空桶，用户切换后保留选择。任务刷新保留原卡片；身份或可见性丢失关闭详情并使清理失效。主导航、设置、项目与分支、网页、附件、聊天保持原有功能。
 
-### 实现落点
+### 实现落点与反冗余
 
-`routes/desktopPet/assistantTasks/LauncherAssistantTaskCards.tsx` 与同目录 projection / metadata / cleanup 模块。普通会话、LauncherAssistantRoute 不参与此组合。
+routes/desktopPet/assistantTasks/ 下 provider、context、sidebar、detail 与原 projection/cleanup；AgentConversationDirectory.styles 是卡片几何唯一来源，不复制 token 或引入 renderer。
 
-### 反冗余
+## LauncherAssistantTaskSidebar
 
-复用现有卡片组件，不建立第二套任务 store；查询缓存只持有服务端事实和展示信息，折叠状态只属于本次窗口。
+### 功能
+
+显示当前身份的任务列表、分类与必要操作。
+
+### 适用范围
+
+Launcher 原左栏及其移动导航。
+
+### 使用方式
+
+组合 VButton、VTabs、VSkeleton 和现有 Agent 卡片 recipe。桌面与移动导航两个真实消费者从同一 provider 读取模型；不独立发起 API 查询。
+
+### 视觉与交互
+
+卡片无摘要、编号、项目、时间或行内展开。点击完整行在居中 VDialog 查看详情；移动端先关闭原导航。清理已完成始终保留入口，未加载或不可清理时禁用；刷新为有名称的图标按钮。
+
+## LauncherAssistantTaskDetail
+
+### 功能
+
+查看单项任务的原生进展、结果和引用。
+
+### 适用范围
+
+仅 Launcher 已绑定身份的任务，不承载普通会话或全平台列表。
+
+### 使用方式
+
+仅 Launcher 卡片选择时显示；组合现有 VDialog/VChip/VButton，正文宽度最多560px、窄屏两侧留白，保持原聊天与草稿在后方挂载。
+
+### 视觉与状态
+
+显示名称、Agent、当前状态、项目与更新时间、公开进展/结果/错误；引用编号和步骤等放在“引用信息”。关闭、右上角关闭与Esc保留草稿并恢复可见焦点；原生终态可删除，运行/未知来源不可删，部分清理可重新预览后重试。所有删除继续走既有宿主 preview/fingerprint/execute 流程，UI不隐藏任务冒充清理。
+
+## LauncherTaskNavigationSlot
+
+### 功能
+
+把任务侧栏接入原 Launcher 导航位置，避免更改共享导航控制器或重画外壳。
+
+### 适用范围
+
+仅 LauncherShell 的桌面和移动导航包装层；不用于平台普通对话栏。
+
+### 使用方式
+
+局部 ref 内通过现有 launcherAssistantPanelPath("tasks") 定位唯一入口，useLayoutEffect 添加任务自有 host，React createPortal 保留上下文。仅 host 就绪后用 scoped Tailwind selector 隐藏旧入口；匹配失败保留原导航。卸载只移除自有 host，无全局 MutationObserver、事件总线或源组件修改。移动端先关闭导航，再由全局 provider 保持居中详情；关闭后焦点回到可见导航按钮。
+
+### 验证
+
+真实 LauncherNavigation 的 StrictMode 挂载、语言/路由重渲染、重复/缺失锚点与卸载验收不得产生双 host 或丢失既有设置、分支、返回桌面功能。
 
 ## LauncherTaskCleanupDialog
 
