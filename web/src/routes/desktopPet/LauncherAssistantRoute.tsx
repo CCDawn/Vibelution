@@ -1,7 +1,7 @@
 import "../../design/route-css/desktop-pet.tailwind.css";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { MessageCircle, RefreshCw, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { Bot, MessageCircle, RefreshCw, SlidersHorizontal, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import {
   getLauncherAssistantDetail, getLauncherAssistantDispatches, getLauncherAssistantStatus,
   hideLauncherAssistant, sendLauncherAssistantMessage, setLauncherAssistantExpanded,
@@ -12,6 +12,8 @@ import {
   getLauncherOperatorAsset, getLauncherAssistantAvatar, openLauncherFromAssistant, uploadLauncherAttachment,
   readLauncherAttachment, subscribeLauncherAssistantSessionEvent,
 } from "../../api/launcherAssistant";
+import { openLauncherModelConnection } from "../../api/launcher";
+import type { ConversationMessage } from "../../api/types";
 import type { SessionContinuationExpectation } from "../../api/chat";
 import { queryKeys } from "../../api/queryKeys";
 import type { SessionToolApprovalRequest } from "../../api/types";
@@ -47,7 +49,8 @@ import {
   launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
   launcherAssistantSendDefinitelyRejected, launcherAssistantSessionEventRefreshesDetail, launcherAssistantSseHealthy,
   launcherAssistantWaitInterval, launcherAssistantLiveTextFromEvent, launcherAssistantLiveTextIsStale,
-  launcherAssistantActiveTurnMessage,
+  launcherAssistantActiveTurnMessage, launcherAssistantContextRing, launcherAssistantModelDisplay,
+  launcherAssistantEditBackfillDraft,
   type LauncherAssistantSubmission, type LauncherAssistantQueuedAcceptance, type LauncherAssistantLiveText,
 } from "./launcherAssistantModel";
 import { loadLauncherComposer, restoreLauncherComposerAttachments, saveLauncherComposer } from "./launcherAssistantComposerStorage";
@@ -67,6 +70,8 @@ const COPY = {
     statusStale: "个人助理状态轮询暂不可用，会话内容可能未更新",
     pendingQuestion: "待你回答",
     answerBelow: "去回答", answerHint: "请在下方输入回答，再点击发送。",
+    modelSettings: "模型设置", currentModel: "当前模型",
+    editAsNew: "编辑为新消息",
   },
   en: {
     title: "Personal assistant", expand: "Open assistant chat", chat: "Chat", hide: "Hide assistant",
@@ -82,6 +87,8 @@ const COPY = {
     statusStale: "Assistant status polling is unavailable; conversation content may be stale",
     pendingQuestion: "Waiting for your answer",
     answerBelow: "Answer below", answerHint: "Type your answer below, then send it.",
+    modelSettings: "Model settings", currentModel: "Current model",
+    editAsNew: "Edit as new message",
   },
 } as const;
 
@@ -655,6 +662,21 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     finally { launcherGate.current = false; if (mounted.current) setLauncherPending(false); }
   }
 
+  // Opens the Workbench model-connection page: the honest configuration entry
+  // for the assistant's bound dialogue model (the launcher surface has no
+  // model-parameter write verb of its own).
+  const modelConfigGate = useRef(false);
+  const [modelConfigPending, setModelConfigPending] = useState(false);
+  async function openModelConnection() {
+    if (modelConfigGate.current) return;
+    modelConfigGate.current = true;
+    setModelConfigPending(true);
+    setFeedback("");
+    try { await openLauncherModelConnection(); }
+    catch (error) { if (mounted.current) setFeedback(errorMessage(error)); }
+    finally { modelConfigGate.current = false; if (mounted.current) setModelConfigPending(false); }
+  }
+
   const historyAttachments = useLauncherAttachmentHistory(detail.data?.messages || [], sessionId, reading && status.data?.attachmentVersion === 1, visibleMessageIds);
 
   function updateAttachments(next: ComposerImageAttachment[]) {
@@ -939,6 +961,11 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   // waiting state (kept probing by the backoff interval above) instead of a
   // dead-end unavailable error.
   const waitingForBackend = status.isError && !status.data;
+  // Read-only context-usage ring from the native detail's usage projections.
+  // Null before the first usage frame; diagnostics handoff and the auto-compaction
+  // countdown are absent because this surface mounts neither dialog nor setting.
+  const composerContextRing = useMemo(() => launcherAssistantContextRing(detail.data, lang), [detail.data, lang]);
+  const modelDisplay = launcherAssistantModelDisplay(status.data?.settings?.modelId, lang);
   const statusText = feedback || queueStatusText || (status.isError ? (waitingForBackend ? copy.waitingBackend : copy.unavailable) : status.isPending ? copy.checking
     : detail.data ? !detail.isError && !approval && !stopping && !acceptedTurnId && !sendPending && !sendUnconfirmed && preferences.idleMessage
         && (activity.execution === "idle" || (activity.execution === "settled" && activity.outcome === "completed"))
@@ -1030,6 +1057,15 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   const showWelcome = navigationOwned && Boolean(detail.data && !detail.isError && !detail.data.messages.length
     && !detail.data.activeTurnId && !detail.data.queuedTurns?.length && !approval && !dispatchApproval && !sendUnconfirmed);
   function changeDraft(value: string) { draftRef.current = value; setDraft(value); saveComposer({ draft: value }); }
+  // Assistant edit affordance: backfill the composer with a previous user
+  // message's text for a NEW send. The native facade owns no edit-resubmit
+  // verb, so history is never replaced and the button copy says "edit as new".
+  function editMessageToComposer(message: ConversationMessage) {
+    if (sendPending || sendUnconfirmed || controlPending || busy || stopping) return;
+    const backfill = launcherAssistantEditBackfillDraft(message);
+    if (backfill === null) return;
+    changeDraft(backfill);
+  }
   return <VDenseOpsPage hideHeader ariaLabel={displayName}
     className={embedded ? petStyles.launcherChatEmbedded : petStyles.launcherChatWindow} bodyClassName={`${petStyles.chatBody} ${navigationOwned ? petStyles.unifiedChatBody : ""}`} style={backgroundStyle}
     data-vui-domain-recipe="launcher-assistant" data-assistant-chat={embedded ? "embedded" : "compact"} data-expanded="true" data-tone={tone}
@@ -1096,7 +1132,19 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       composerActionDisabled={sendPending || controlPending || (attachments.length > 0 && status.data?.attachmentVersion !== 1) || (actionMode === "stop" ? stopping || !resolveSessionStopTurnId(detail.data, acceptedTurnId) : actionMode === "send" && !sendUnconfirmed && !draft.trim() && !attachments.length)}
       onComposerChange={changeDraft} onSubmit={() => void submit()}
       onStop={() => void stopTurn()} onContinueTurn={() => void continueTurn()}
-      composerPrecedingContent={<>{pendingQuestion ? <VStateSurface density="compact" tone="info" title={copy.pendingQuestion}
+      composerContextRing={composerContextRing}
+      onEditUserMessage={editMessageToComposer}
+      editUserMessageLabel={copy.editAsNew}
+      editUserMessageDisabled={sendPending || sendUnconfirmed || controlPending || busy || stopping}
+      composerPrecedingContent={<>{status.data ? <div className="flex min-w-0 shrink-0 items-center gap-2 px-4 py-1 text-vui-xs text-[var(--fg-secondary)]"
+        data-launcher-assistant-model-row aria-label={copy.currentModel}>
+        <Bot size={12} aria-hidden="true" />
+        <span className="truncate">{modelDisplay}</span>
+        <VButton density="compact" variant="ghost" className="shrink-0" isPending={modelConfigPending} isDisabled={modelConfigPending}
+          icon={<SlidersHorizontal size={12} aria-hidden="true" />}
+          onClick={() => void openModelConnection()}>{copy.modelSettings}</VButton>
+      </div> : null}
+      {pendingQuestion ? <VStateSurface density="compact" tone="info" title={copy.pendingQuestion}
         data-launcher-assistant-pending-question={pendingQuestion.id}
         actions={<VButton isDisabled={sendPending || sendUnconfirmed || controlPending} onClick={event => {
           // This explicit handoff releases button focus so the shared scheduler

@@ -4,12 +4,13 @@ import { act, createElement, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ConversationViewProps } from "../../components/conversation/conversationViewTypes";
-import type { SessionDetail, SessionToolApprovalRequest } from "../../api/types";
+import type { ConversationMessage, SessionDetail, SessionToolApprovalRequest } from "../../api/types";
 import type { LauncherAssistantSessionEvent } from "../../api/launcherAssistant";
 import {
   launcherAssistantActivity, launcherAssistantMessageOverLimit, launcherAssistantPollInterval, launcherAssistantSendDefinitelyRejected, launcherAssistantSubmission, launcherDispatchLabel, launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
   launcherAssistantSessionEventRefreshesDetail, launcherAssistantSseHealthy, launcherAssistantWaitInterval,
   launcherAssistantLiveTextFromEvent, launcherAssistantLiveTextIsStale, launcherAssistantActiveTurnMessage,
+  launcherAssistantContextRing, launcherAssistantModelDisplay, launcherAssistantEditBackfillDraft,
   LAUNCHER_ASSISTANT_MAX_MESSAGE_CHARS, LAUNCHER_ASSISTANT_SSE_HEALTH_WINDOW_MS, LAUNCHER_ASSISTANT_WAIT_POLL_FIRST_MS, LAUNCHER_ASSISTANT_WAIT_POLL_MAX_MS,
 } from "./launcherAssistantModel";
 import { LauncherAssistantRoute } from "./LauncherAssistantRoute";
@@ -1140,5 +1141,108 @@ describe("Launcher assistant route lifecycle", () => {
     await settle();
     expect(bridge.resolveLauncherAssistantApproval).toHaveBeenLastCalledWith(request, "decline");
     expect(container?.querySelector('[role="dialog"]')).toBeNull();
+  });
+});
+
+const RING_USAGE_DETAIL = {
+  id: "s", status: "ready", messages: [], defaultFileContext: "",
+  contextUsage: { used: 20_000, limit: 100_000, estimatedTokens: 20_000, messageCount: 4,
+    userMessageCount: 2, assistantMessageCount: 2, toolCallCount: 0, source: "estimated" },
+  lastContextComposition: { turnId: "t1", recordedAt: "2026-01-01T00:00:00Z", source: "assembly",
+    totalChars: 0, totalTokens: 20_000, limitTokens: 100_000, segments: [
+      { key: "history", label: "", chars: 0, tokens: 12_000, itemCount: 2, status: "observed", source: "history", description: "最近两轮" },
+      { key: "system_prompt", label: "", chars: 0, tokens: 8_000, itemCount: 1, status: "observed", source: "prompt", description: "" },
+    ] },
+  lastCacheComposition: { turnId: "t1", recordedAt: "2026-01-01T00:00:00Z", source: "provider_usage",
+    inputTokens: 10_000, cachedInputTokens: 8_000, cacheCreationInputTokens: 0, uncachedInputTokens: 2_000,
+    cacheHitRate: 0.8, cacheUsageObserved: true, segments: [] },
+  llmUsage: { source: "provider_usage", inputTokens: 10_000, outputTokens: 500, totalTokens: 10_500,
+    cachedInputTokens: 8_000, cacheCreationInputTokens: 0, uncachedInputTokens: 2_000, cacheHitRate: 0.8,
+    provider: "p", model: "m", recordedAt: "2026-01-01T00:00:00Z", tokensPerSecond: 42 },
+} as unknown as SessionDetail;
+
+describe("Launcher assistant composer surface model", () => {
+  it("displays the bound dialogue model and says so when unset", () => {
+    expect(launcherAssistantModelDisplay("test-model-x", "zh")).toBe("test-model-x");
+    expect(launcherAssistantModelDisplay("  ", "zh")).toBe("未绑定模型");
+    expect(launcherAssistantModelDisplay(undefined, "en")).toBe("No model bound");
+  });
+
+  it("backfills only user-authored non-empty text for the edit-as-new affordance", () => {
+    expect(launcherAssistantEditBackfillDraft({ role: "user", content: "  帮我查天气  " })).toBe("  帮我查天气  ");
+    expect(launcherAssistantEditBackfillDraft({ role: "assistant", content: "answer" })).toBeNull();
+    expect(launcherAssistantEditBackfillDraft({ role: "user", content: "   " })).toBeNull();
+  });
+
+  it("returns no ring before any usage projection exists", () => {
+    expect(launcherAssistantContextRing(undefined, "zh")).toBeNull();
+    expect(launcherAssistantContextRing({ id: "s" } as SessionDetail, "zh")).toBeNull();
+  });
+
+  it("builds a read-only context ring from the native usage projections", () => {
+    const ring = launcherAssistantContextRing(RING_USAGE_DETAIL, "zh");
+    expect(ring?.usagePercent).toBe(20);
+    expect(ring?.usedLabel).toBe("20K / 100K");
+    expect(ring?.cacheState).toBe("observed");
+    expect(ring?.cachedTokensLabel).toBe("8K");
+    expect(ring?.hitPercent).toBe(80);
+    expect(ring?.generationTokensPerSecond).toBe(42);
+    // The launcher mounts neither the cache-diagnostics dialog nor the runtime
+    // compression settings, so both handoffs stay off instead of dead ends.
+    expect(ring?.detailAvailable).toBe(false);
+    expect(ring?.autoCompact).toBeNull();
+    expect(ring?.groups.map(group => group.key)).toEqual(["history", "prompt"]);
+    expect(ring?.segments[0]?.contentPreview).toBe("最近两轮");
+  });
+
+  it("shows the bound model row and opens the model-connection page from it", async () => {
+    const openWorkbenchConfig = vi.fn().mockResolvedValue(undefined);
+    (globalThis as { vibelutionLauncher?: unknown }).vibelutionLauncher = { openWorkbenchConfig };
+    try {
+      await renderAssistant(undefined, { assistant: { agentId: "a", directSessionId: "s", displayName: "助理" },
+        settings: { ok: true, displayName: "助理", modelId: "test-model-x",
+          preferences: { characterId: "xiaoluo", showStatus: true, showTitles: true, showCompletion: false, idleMessage: "" } } });
+      await showConversation();
+      const row = container?.querySelector("[data-launcher-assistant-model-row]");
+      expect(row?.textContent).toContain("test-model-x");
+      const settingsButton = [...(row?.querySelectorAll<HTMLButtonElement>("button") ?? [])]
+        .find(button => button.textContent?.includes("模型设置"));
+      expect(settingsButton).toBeTruthy();
+      await act(async () => settingsButton?.click());
+      await settle();
+      expect(openWorkbenchConfig).toHaveBeenCalledTimes(1);
+    } finally {
+      delete (globalThis as { vibelutionLauncher?: unknown }).vibelutionLauncher;
+    }
+  });
+
+  it("projects the native context usage into the composer ring without a detail handoff", async () => {
+    await renderAssistant(RING_USAGE_DETAIL as unknown as Record<string, unknown>);
+    await showConversation();
+    expect(conversation?.composerContextRing?.usagePercent).toBe(20);
+    expect(conversation?.onOpenComposerContextDetail).toBeUndefined();
+    expect(conversation?.turnModelControl).toBeUndefined();
+    expect(conversation?.onOpenAgentModelConfig).toBeUndefined();
+  });
+
+  it("backfills the composer for edit-as-new without arming replacement semantics", async () => {
+    const message = { id: "m1", role: "user", content: "帮我查天气", timestamp: "2026-01-01T00:00:00Z" } as ConversationMessage;
+    await renderAssistant({ id: "s", status: "ready", messages: [message], defaultFileContext: "" });
+    await showConversation();
+    expect(conversation?.editUserMessageLabel).toBe("编辑为新消息");
+    expect(conversation?.editingMessageId).toBeUndefined();
+    await act(async () => conversation?.onEditUserMessage?.(message));
+    await settle();
+    expect(conversation?.composerValue).toBe("帮我查天气");
+  });
+
+  it("refuses edit backfill while a turn runs or the send is unconfirmed", async () => {
+    const message = { id: "m1", role: "user", content: "帮我查天气", timestamp: "2026-01-01T00:00:00Z" } as ConversationMessage;
+    await renderAssistant({ id: "s", status: "running", activeTurnId: "t1", messages: [message], defaultFileContext: "" });
+    await showConversation();
+    expect(conversation?.editUserMessageDisabled).toBe(true);
+    await act(async () => conversation?.onEditUserMessage?.(message));
+    await settle();
+    expect(conversation?.composerValue).toBe("");
   });
 });

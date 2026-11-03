@@ -2,6 +2,11 @@ import type { LauncherAssistantDispatch, LauncherAssistantSessionEvent } from ".
 import type { PetActivityTone, PetAnimationState } from "../../api/types/petActivity";
 import type { ConversationMessage, SessionDetail, SessionQueuedTurn } from "../../api/types";
 import { exactAcceptedSubmitTurnId, findSubmitAcceptanceEvidence } from "../chat/chatSubmitAcceptanceReadback";
+import {
+  buildComposerContextRingModel, resolveComposerContextUsage,
+  type ComposerContextRingModel,
+} from "../chat/composerContextModel";
+import { promptSegmentDisplayLabel } from "../chat/chatRoutePresentation";
 import { hasExecutionOwnership, resolveSessionActivity, type SessionActivitySource } from "../sessionActivityState";
 
 export type LauncherAssistantSubmission = { message: string; requestId: string; draftSnapshot?: string; attachmentIds?: string[]; attachmentSnapshotIds?: string[]; preserveDraft?: true };
@@ -250,4 +255,60 @@ export function launcherDispatchReceiptLabel(row: LauncherAssistantDispatch, lan
   if (status && words[status]) return words[status][lang === "zh" ? 0 : 1];
   return status ? `${lang === "zh" ? "原生任务状态" : "Native task status"}: ${status}`
     : lang === "zh" ? "待回执" : "Awaiting receipt";
+}
+
+/** The assistant identity's bound dialogue model, read-only. The launcher
+ * surface never edits model parameters (no native verb), so this stays a plain
+ * display string; an unset binding says so instead of pretending a model. */
+export function launcherAssistantModelDisplay(modelId: string | undefined | null, lang: "zh" | "en"): string {
+  const id = String(modelId ?? "").trim();
+  return id || (lang === "zh" ? "未绑定模型" : "No model bound");
+}
+
+/** The launcher host's lightweight dictionary avoids the workbench dictionary
+ * loader; segment labels fall back to promptSegmentDisplayLabel's built-in
+ * mapping, and only unknown keys degrade to the generic "other" name. */
+const launcherIdentityTranslator = (key: string) => key;
+
+/** Read-only composer context ring from the native detail's usage projections.
+ * Same builders as the chat page; the cache-diagnostics handoff and the
+ * auto-compression countdown stay off because the launcher surface mounts
+ * neither the diagnostics dialog nor the runtime compression settings. */
+export function launcherAssistantContextRing(
+  detail: Pick<SessionDetail, "contextUsage" | "lastContextComposition" | "lastCacheComposition" | "llmUsage"> | undefined,
+  lang: "zh" | "en",
+): ComposerContextRingModel | null {
+  if (!detail || (!detail.contextUsage && !detail.lastContextComposition)) return null;
+  const usage = resolveComposerContextUsage({
+    contextUsage: detail.contextUsage ?? null,
+    contextComposition: detail.lastContextComposition ?? null,
+  });
+  const cache = detail.lastCacheComposition;
+  return buildComposerContextRingModel({
+    usageUsed: usage.used,
+    usageLimit: usage.limit,
+    hitPercent: Math.round(Math.max(0, Math.min(1, cache?.cacheHitRate ?? 0)) * 100),
+    detailAvailable: false,
+    segments: (detail.lastContextComposition?.segments ?? []).map(segment => ({
+      ...segment,
+      label: promptSegmentDisplayLabel(segment, lang, launcherIdentityTranslator),
+      contentPreview: segment.description,
+    })),
+    lang,
+    cacheSource: cache?.source,
+    cacheUsageObserved: cache?.cacheUsageObserved,
+    cachedInputTokens: cache?.cachedInputTokens,
+    cacheCreationInputTokens: cache?.cacheCreationInputTokens,
+    tokensPerSecond: detail.llmUsage?.tokensPerSecond ?? null,
+  });
+}
+
+/** The assistant's edit affordance backfills the composer with a previous user
+ * message's text for a NEW send: the native facade has no edit-resubmit verb,
+ * so history is never replaced and the copy must not claim it. Returns null
+ * for non-user rows or empty content (nothing honest to backfill). */
+export function launcherAssistantEditBackfillDraft(message: { role: ConversationMessage["role"]; content?: string }): string | null {
+  if (message.role !== "user") return null;
+  const content = String(message.content ?? "");
+  return content.trim() ? content : null;
 }
