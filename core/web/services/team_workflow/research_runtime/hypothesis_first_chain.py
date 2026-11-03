@@ -4679,7 +4679,11 @@ def backfill_feedback_iterations_from_round_chain(
         summary["blockerCodes"] = ["feedback_iteration_backfill_identity_missing"]
         return summary
     if not normalized_source or not normalized_node_run_id:
-        summary["reason"] = "feedback_iteration_authority_missing"
+        summary["reason"] = (
+            "feedback_iteration_authority_missing"
+            if not normalized_source
+            else "feedback_iteration_node_run_missing"
+        )
         summary["blockerCodes"] = (
             ["feedback_iteration_authority_missing"]
             if not normalized_source

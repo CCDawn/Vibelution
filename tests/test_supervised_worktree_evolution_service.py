@@ -15,6 +15,43 @@ from tests.test_supervised_candidate_integration_service import (
 pytestmark = pytest.mark.slow
 
 
+@pytest.mark.parametrize(
+    "execution_mode,session_id,navigable",
+    [
+        ("simulation", "simulation-baseline-run", False),
+        ("simulation", "opaque-simulation-evidence", False),
+        ("", "simulation-judge-legacy-run", False),
+        ("real", "simulation-baseline-legacy-run", False),
+        ("real", "native-session", True),
+        ("", "native-session", True),
+    ],
+)
+def test_workflow_routes_only_link_native_conversations(execution_mode, session_id, navigable):
+    messages = [{"role": "assistant", "content": "Recorded evidence"}]
+    snapshot = {
+        "runId": "navigation-test",
+        "status": "done",
+        "phase": "complete",
+        "executionMode": execution_mode,
+        "baselineConversationSessionId": session_id,
+        "candidateModification": {"conversationSessionId": session_id},
+        "workflowProgress": {
+            "baseline_eval": {"conversationMessages": messages},
+            "improve": {"conversationMessages": messages},
+        },
+    }
+
+    workflow_step = service._build_workflow_steps(snapshot)[0]
+    self_step = service._build_self_evolution_workflow_steps(snapshot)[0]
+
+    for step in (workflow_step, self_step):
+        assert step["conversationSessionId"] == session_id
+        assert step["conversationMessages"] == messages
+        assert bool(step["chatRoute"]) is navigable
+        if navigable:
+            assert step["chatRoute"] == f"/chat?session={session_id}"
+
+
 @pytest.mark.parametrize("activation,expected", [("applied", "done"), ("activating", "running"), ("activation_failed", "failed")])
 def test_approval_step_tracks_integration_and_activation(activation, expected):
     decorated = service._decorate_snapshot({

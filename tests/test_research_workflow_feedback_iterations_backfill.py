@@ -43,6 +43,37 @@ _CHAIN_LENGTH = 10
 _ROUND_IDS = [f"hround-{index:02x}" for index in range(1, _CHAIN_LENGTH + 1)]
 
 
+@pytest.mark.parametrize(
+    "source,node,reason",
+    [
+        ("", _NODE_RUN_ID, "feedback_iteration_authority_missing"),
+        (_AUTHORITY_ID, "", "feedback_iteration_node_run_missing"),
+        ("", "", "feedback_iteration_authority_missing"),
+    ],
+)
+def test_missing_authority_reports_the_specific_blocker_without_reading_or_writing(
+    monkeypatch, source, node, reason
+):
+    store = _patch_store(monkeypatch)
+    monkeypatch.setattr(
+        chain,
+        "_question_hypothesis_rounds",
+        lambda *_args: pytest.fail("Missing authority must stop before reading rounds"),
+    )
+    result = chain.backfill_feedback_iterations_from_round_chain(
+        team_id=_TEAM_ID,
+        workflow_run_id=_FORMAL_RUN_ID,
+        question_id=_QUESTION_ID,
+        source_collection_run_id=source,
+        node_run_id=node,
+    )
+    assert result["status"] == "blocked"
+    assert result["reason"] == reason
+    assert result["blockerCodes"] == [reason]
+    assert result["rounds"] == result["written"] == 0
+    assert store.rows == []
+
+
 class _MemoryArtifactStore:
     """Append-only double of the scoped workflow artifact store."""
 

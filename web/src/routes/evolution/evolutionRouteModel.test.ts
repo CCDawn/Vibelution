@@ -14,6 +14,7 @@ import {
   proposalEditDraftFromDetail,
   supervisedDatasetLimitFromInput,
   supervisedMemberChatRoute,
+  supervisedConversationSessionIsNavigable,
   supervisedProposalStatusLabel,
   supervisedRoleConversationSession,
   supervisedWorkflowStepLabel,
@@ -24,6 +25,18 @@ import {
 } from "./evolutionRouteModel";
 
 describe("evolutionRouteModel", () => {
+  it.each(["simulation-baseline-run", " simulation-judge-legacy-run "])("does not route synthetic conversation %s to native chat", (sessionId) => {
+    expect(supervisedMemberChatRoute(sessionId, "/supervised-evolution", "Back")).toBe("");
+  });
+
+  it("uses execution mode to reject simulation evidence IDs while preserving legacy native sessions", () => {
+    expect(supervisedConversationSessionIsNavigable("evidence-id", "simulation")).toBe(false);
+    expect(supervisedMemberChatRoute("evidence-id", "/supervised-evolution", "Back", "simulation")).toBe("");
+    expect(supervisedConversationSessionIsNavigable("native-session", "real")).toBe(true);
+    expect(supervisedConversationSessionIsNavigable("native-session")).toBe(true);
+    expect(supervisedConversationSessionIsNavigable(" ")).toBe(false);
+  });
+
   it.each(["failed", "cancelled", "canceled", "stopped", "done", "completed"])("never presents an ended %s run as a running fallback phase", (status) => {
     expect(supervisedWorkflowFallbackStatus(status, true)).toBe(status);
     expect(supervisedWorkflowFallbackStatus(status, false)).toBe("pending");

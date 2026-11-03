@@ -3099,7 +3099,7 @@ def _build_self_evolution_workflow_steps(snapshot: dict[str, Any]) -> list[dict[
             },
             "conversationSessionId": candidate_session_id,
             "conversationTurnId": conversation_turn_id,
-            "chatRoute": _workflow_chat_route(candidate_session_id),
+            "chatRoute": _workflow_chat_route(candidate_session_id, snapshot.get("executionMode")),
             "conversationMessages": conversation_messages,
         },
         {
@@ -3147,7 +3147,7 @@ def _build_workflow_steps(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
         return {
             "conversationSessionId": session_id,
             "conversationTurnId": turn_id,
-            "chatRoute": _workflow_chat_route(session_id),
+            "chatRoute": _workflow_chat_route(session_id, snapshot.get("executionMode")),
             "conversationMessages": list(item.get("conversationMessages") or []),
         }
 
@@ -3381,9 +3381,13 @@ def _approval_summary(
     return str(snapshot.get("latestMessage") or "等待最终结果、改进提案和样本评审证据。")
 
 
-def _workflow_chat_route(session_id: str) -> str:
+def _workflow_chat_route(session_id: str, execution_mode: Any = "") -> str:
     normalized = str(session_id or "").strip()
-    if not normalized:
+    if (
+        not normalized
+        or str(execution_mode or "").strip().lower() == "simulation"
+        or normalized.lower().startswith("simulation-")
+    ):
         return ""
     return f"/chat?session={normalized}"
 

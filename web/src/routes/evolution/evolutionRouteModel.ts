@@ -33,6 +33,7 @@ export type SupervisedRunMember = {
   agentId: string;
   status: "active" | "configured" | "missing";
   conversationSession?: EvolutionRoleConversationSession;
+  executionMode?: string;
   chatRoute: string;
   configRoute: string;
 };
@@ -294,9 +295,18 @@ export function supervisedMemberAgentManagementRoute(agentId: string, returnTo: 
   return `/agents?${params.toString()}`;
 }
 
-export function supervisedMemberChatRoute(sessionId: string, returnTo: string, returnLabel: string) {
+export function isSupervisedSimulationConversation(sessionId: string, executionMode?: string) {
+  return String(executionMode || "").trim().toLowerCase() === "simulation"
+    || String(sessionId || "").trim().toLowerCase().startsWith("simulation-");
+}
+
+export function supervisedConversationSessionIsNavigable(sessionId: string, executionMode?: string) {
+  return Boolean(String(sessionId || "").trim()) && !isSupervisedSimulationConversation(sessionId, executionMode);
+}
+
+export function supervisedMemberChatRoute(sessionId: string, returnTo: string, returnLabel: string, executionMode?: string) {
   const normalizedSessionId = String(sessionId || "").trim();
-  if (!normalizedSessionId) {
+  if (!supervisedConversationSessionIsNavigable(normalizedSessionId, executionMode)) {
     return "";
   }
   const params = new URLSearchParams({ session: normalizedSessionId });

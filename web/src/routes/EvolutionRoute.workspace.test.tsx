@@ -175,7 +175,7 @@ vi.mock("./SupervisedConversationWorkspace", async () => {
   return {
     SupervisedConversationWorkspace: (props: any) => ReactModule.createElement(
       "section",
-      { "data-testid": "supervised-workspace", "data-active-track": props.activeTrack },
+      { "data-testid": "supervised-workspace", "data-active-track": props.activeTrack, "data-can-open-conversation": String(Boolean(props.onOpenConversation)) },
       ...navigationButtons(props.runGroups ?? [], props.onTrackChange),
       ReactModule.createElement("output", { "data-testid": "workspace-title" }, props.title),
       ReactModule.createElement("output", { "data-testid": "selected-step" }, props.selectedStepId),
@@ -238,6 +238,8 @@ vi.mock("./SupervisedAgentConversationPanel", async () => {
       return ReactModule.createElement("output", {
         "data-testid": "conversation-session",
         "data-live": String(Boolean(props.isLive)),
+        "data-chat-route": member?.chatRoute || "",
+        "data-execution-mode": member?.executionMode || "",
       }, member?.conversationSession?.conversationSessionId || "no-session");
     },
   };
@@ -560,6 +562,32 @@ describe("EvolutionRoute unified workspace run selection", () => {
     expect(apiMocks.fetchEvolutionWorktreeRun).toHaveBeenCalledWith(historyRunId);
     expect(mutationMocks.run.approvalWorktreeActionMutation.mutate)
       .toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["simulation", "opaque-simulation-evidence"],
+    ["", "simulation-baseline-legacy-run"],
+  ])("keeps historical %s simulation evidence out of native conversation navigation", async (executionMode, sessionId) => {
+    const simulationDetail = {
+      ...historicalDetail,
+      executionMode,
+      workflowSteps: historicalDetail.workflowSteps?.map((step) => ({
+        ...step,
+        conversationSessionId: step.role ? sessionId : "",
+        chatRoute: step.role ? `/chat?session=${sessionId}` : "",
+      })),
+    };
+    apiMocks.fetchEvolutionWorktreeRun.mockImplementation(async (runId: string) => runId === historyRunId ? simulationDetail : activeWorktree);
+    await renderRoute();
+    await waitFor(() => expect(elementByTestId("workspace-title").textContent).toBe("当前评估集"));
+
+    await click(Array.from(host?.querySelectorAll<HTMLButtonElement>('[data-testid="workspace-run"]') ?? [])
+      .find((button) => button.dataset.runKey === `supervised:worktree:${historyRunId}`)!);
+    await waitFor(() => expect(elementByTestId("conversation-session").textContent).toBe(sessionId));
+
+    expect(elementByTestId("conversation-session").getAttribute("data-chat-route")).toBe("");
+    expect(elementByTestId("conversation-session").getAttribute("data-execution-mode")).toBe(executionMode);
+    expect(elementByTestId("supervised-workspace").getAttribute("data-can-open-conversation")).toBe("false");
   });
 
   it("remembers the selected run and phase across track switches and snapshot refreshes", async () => {

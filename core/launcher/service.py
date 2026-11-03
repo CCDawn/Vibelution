@@ -55,6 +55,13 @@ from core.runtime_manager.workbench_controller import _is_process_alive, observe
 from core.runtime_manager.window_provider_state import window_provider_projection
 from . import desktop_session_store, lifecycle_action_dispatcher, lifecycle_intent_store
 from . import developer_mode as launcher_developer_mode
+from .status_projection import (
+    has_current_lifecycle_command,
+    project_root_matches,
+    runtime_manager_snapshot_is_fresh,
+    runtime_state_for_status,
+    status_timestamp as _status_timestamp,
+)
 from .branch_instance_cleanup import BranchInstanceCleanupError as BranchInstanceCleanupError  # noqa: F401
 from .branch_instance_lifecycle import BranchInstanceLifecycleError as BranchInstanceLifecycleError  # noqa: F401
 from . import maintenance_reset as launcher_maintenance_reset
@@ -434,7 +441,9 @@ def get_launcher_status() -> dict[str, Any]:
         runtime_state = _runtime_manager_state()
     elif _recover_stale_close_commands_when_manager_offline(runtime_state):
         runtime_state = _runtime_manager_state()
+    historical_last_error = runtime_state.get("lastError") if isinstance(runtime_state.get("lastError"), dict) else {}
     launcher_state = _load_launcher_state()
+    runtime_state = _status_runtime_state(runtime_state, launcher_state)
     observed_workbench = _status_observed_workbench(runtime_state)
     workbench = _workbench_payload(runtime_state=runtime_state, observed_workbench=observed_workbench)
     active_work_runs = launcher_active_work_runs()
@@ -445,7 +454,7 @@ def get_launcher_status() -> dict[str, Any]:
         active_work_runs=active_work_runs,
         runtime_state=runtime_state,
     )
-    last_error = runtime_state.get("lastError") if isinstance(runtime_state.get("lastError"), dict) else {}
+    last_error = historical_last_error
     last_error_message = str(last_error.get("message") or "").strip()
     last_error_scope = str(last_error.get("scope") or "").strip()
     last_error_at = str(last_error.get("at") or "").strip()
@@ -458,7 +467,8 @@ def get_launcher_status() -> dict[str, Any]:
     )
     failure_message = str(workbench.get("failureMessage") or "").strip()
     if not failure_message and not workbench_confirms_open:
-        failure_message = last_error_message
+        current_error = runtime_state.get("lastError") if isinstance(runtime_state.get("lastError"), dict) else {}
+        failure_message = str(current_error.get("message") or "").strip()
     # Flat string fields for native tray JSON extractors (regex string matcher only).
     return {
         "launcher": {
@@ -1738,7 +1748,6 @@ def _runtime_manager_state() -> dict[str, Any]:
         payload["runtimeState"] = "idle"
     payload["daemonRunning"] = manager_running
     payload["managerPid"] = int(manager_pid or 0)
-    payload.setdefault("projectRoot", str(PROJECT_ROOT))
     return payload
 
 
@@ -1829,6 +1838,14 @@ def _status_observed_workbench(runtime_state: dict[str, Any]) -> dict[str, Any]:
     return _observed_workbench()
 
 
+def _status_project_root_matches(value: object) -> bool:
+    return project_root_matches(value, PROJECT_ROOT)
+
+
+def _status_runtime_state(runtime_state: dict[str, Any], launcher_state: dict[str, Any]) -> dict[str, Any]:
+    return runtime_state_for_status(runtime_state, launcher_state, project_root=PROJECT_ROOT)
+
+
 def _in_flight_open_should_skip_live_observe(runtime_state: dict[str, Any]) -> bool:
     """Do not run observe_workbench while an open/restart is already in flight.
 
@@ -1840,7 +1857,18 @@ def _in_flight_open_should_skip_live_observe(runtime_state: dict[str, Any]) -> b
     workbench = runtime_state.get("workbench") if isinstance(runtime_state.get("workbench"), dict) else {}
     desired = str(workbench.get("desiredState") or "").strip().lower()
     phase = str(workbench.get("phase") or "").strip().lower()
-    if desired == "open" and phase in _IN_FLIGHT_OPEN_PHASES:
+    fresh_intent = has_current_lifecycle_command(
+        runtime_state, project_root=PROJECT_ROOT, max_age_seconds=_RUNTIME_MANAGER_STATUS_FAST_PATH_MAX_AGE_SECONDS,
+    )
+    if not fresh_intent and workbench.get("lastSource") == "electron_main":
+        updated_at = _status_timestamp(workbench.get("updatedAt"))
+        fresh_intent = bool(
+            _status_project_root_matches(runtime_state.get("projectRoot"))
+            and _status_project_root_matches(workbench.get("runtimeProjectRoot"))
+            and updated_at is not None
+            and (datetime.now(timezone.utc) - updated_at).total_seconds() <= _RUNTIME_MANAGER_STATUS_FAST_PATH_MAX_AGE_SECONDS
+        )
+    if desired == "open" and phase in _IN_FLIGHT_OPEN_PHASES and fresh_intent:
         return True
     return _has_young_processing_open_command()
 
@@ -1890,29 +1918,9 @@ def _runtime_state_matches_effective_backend_port(runtime_state: dict[str, Any])
 
 
 def _runtime_manager_state_is_fresh(runtime_state: dict[str, Any]) -> bool:
-    if not bool(runtime_state.get("daemonRunning")):
-        return False
-    workbench = runtime_state.get("workbench") if isinstance(runtime_state.get("workbench"), dict) else {}
-    if not workbench:
-        return False
-    updated_at = str(runtime_state.get("updatedAt") or "").strip()
-    if not updated_at:
-        return False
-    try:
-        parsed = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
-    except ValueError:
-        return False
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    age_seconds = (datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds()
-    if age_seconds < 0:
-        age_seconds = 0
-    if age_seconds > _RUNTIME_MANAGER_STATUS_FAST_PATH_MAX_AGE_SECONDS:
-        return False
-    phase = str(workbench.get("phase") or "").strip()
-    desired_state = str(workbench.get("desiredState") or "").strip()
-    observed_state = str(workbench.get("observedState") or "").strip()
-    return bool(phase and desired_state and observed_state)
+    return runtime_manager_snapshot_is_fresh(
+        runtime_state, project_root=PROJECT_ROOT, max_age_seconds=_RUNTIME_MANAGER_STATUS_FAST_PATH_MAX_AGE_SECONDS,
+    )
 
 
 def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dict[str, Any]) -> dict[str, Any]:
@@ -2051,12 +2059,13 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
         phase = "opening"
     elif desired_state == "closed" and observed_state != "closed" and phase != "failed":
         phase = "closing"
+    current_electron_failure = state_workbench.get("lastSource") == "electron_main" and phase == "failed"
     failure_message = (
         str(observed.get("failureMessage") or "").strip()
-        if observation_confirms_visible_workbench
+        if observation_confirms_visible_workbench and not current_electron_failure
         else str(state_workbench.get("failureMessage") or "").strip()
     )
-    if observation_confirms_visible_workbench and phase == "failed":
+    if observation_confirms_visible_workbench and phase == "failed" and not current_electron_failure:
         phase = "steady"
     # A non-empty failureMessage must win the status line. Dirty-main / start
     # failures previously left observedState=open + status "running" while the

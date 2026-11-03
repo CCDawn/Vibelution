@@ -1439,6 +1439,7 @@ export const ConversationView = React.memo(function ConversationView({
     imageArtifactUrlsBeforeMessage,
     timelineModelSwitchBoundaries,
     messageCurationMap,
+    messageCurationEnabled: Boolean(sessionId),
     sectionExpansion,
     computerUseSessionResults,
     computerUseSessionPending,

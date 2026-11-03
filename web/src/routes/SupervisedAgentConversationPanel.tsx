@@ -20,7 +20,12 @@ import {
 } from "../components/vui";
 import { fetchSessionDetailWindow } from "./chat/chatSessionDetailHelpers";
 import { mergeSessionDetailMessageWindow } from "./chatSessionState";
-import type { SupervisedMemberRole, SupervisedRunMember } from "./evolution/evolutionRouteModel";
+import {
+  isSupervisedSimulationConversation,
+  supervisedConversationSessionIsNavigable,
+  type SupervisedMemberRole,
+  type SupervisedRunMember,
+} from "./evolution/evolutionRouteModel";
 import styles from "./SupervisedAgentConversationPanel.styles";
 import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
 
@@ -154,7 +159,12 @@ export function SupervisedAgentConversationPanel({
 }: SupervisedAgentConversationPanelProps) {
   const navigate = useNavigate();
   const selectedMember = members.find((member) => member.role === selectedRole) ?? members[0];
-  const selectedChatRoute = selectedMember?.chatRoute;
+  const conversationSessionId = String(selectedMember?.conversationSession?.conversationSessionId || "").trim();
+  const simulationConversation = isSupervisedSimulationConversation(conversationSessionId, selectedMember?.executionMode);
+  const sessionId = supervisedConversationSessionIsNavigable(conversationSessionId, selectedMember?.executionMode)
+    ? conversationSessionId
+    : "";
+  const selectedChatRoute = sessionId ? selectedMember?.chatRoute : "";
   const fullSessionAction = selectedChatRoute ? (
     <VButton
       type="button"
@@ -166,7 +176,6 @@ export function SupervisedAgentConversationPanel({
       {lang === "zh" ? "完整会话" : "Full session"}
     </VButton>
   ) : null;
-  const sessionId = String(selectedMember?.conversationSession?.conversationSessionId || "").trim();
   const sessionDetailQuery = useQuery<SessionDetail>({
     queryKey: queryKeys.session(sessionId || "none"),
     enabled: Boolean(sessionId),
@@ -177,7 +186,7 @@ export function SupervisedAgentConversationPanel({
     refetchIntervalInBackground: false,
     retry: false,
   });
-  const detail = sessionDetailQuery.data?.id === sessionId ? sessionDetailQuery.data : undefined;
+  const detail = sessionId && sessionDetailQuery.data?.id === sessionId ? sessionDetailQuery.data : undefined;
   const messages = detail?.messages?.length ? detail.messages : fallbackMessages;
   const messageCount = Math.max(detail?.messageWindow?.totalMessages ?? 0, messages.length);
   const duration = conversationDuration(messages);
@@ -199,12 +208,16 @@ export function SupervisedAgentConversationPanel({
   const selectedTabId = `supervised-agent-tab-${selectedRole}`;
   const selectedPanelId = `supervised-agent-panel-${selectedRole}`;
   const endedRun = ["failed", "cancelled", "canceled", "stopped", "done", "completed"].includes(String(runStatus || "").toLowerCase());
-  const emptyTitle = endedRun
+  const emptyTitle = simulationConversation
+    ? lang === "zh" ? "模拟运行证据" : "Simulation evidence"
+    : endedRun
     ? lang === "zh" ? "本阶段没有可展示消息" : "No visible messages for this phase"
     : sessionId
     ? lang === "zh" ? `${assistantDisplayName} 暂无可展示消息` : `${assistantDisplayName} has no visible messages`
     : lang === "zh" ? `${assistantDisplayName} 尚未启动` : `${assistantDisplayName} has not started`;
-  const emptyCopy = endedRun
+  const emptyCopy = simulationConversation
+    ? taskSummary || (lang === "zh" ? "本轮为模拟运行，可在右侧查看运行摘要与评估结果。" : "Review this simulation's summary and evaluation results in the results panel.")
+    : endedRun
     ? lang === "zh" ? "本轮已结束，该阶段暂无可展示消息。请在右侧查看运行结果、改动与可执行操作。" : "This run ended with no visible messages for this phase. Review its results, changes and available actions in the results panel."
     : sessionId
     ? lang === "zh"
@@ -372,10 +385,10 @@ export function SupervisedAgentConversationPanel({
           <div className={styles.conversationContract}>
             <VStatusChip className={styles.contractChip} tone="success">
               <CheckCircle2 size={14} />
-              {lang === "zh" ? "统一消息链路" : "Unified message chain"}
+              {simulationConversation ? (lang === "zh" ? "模拟运行证据" : "Simulation evidence") : (lang === "zh" ? "统一消息链路" : "Unified message chain")}
             </VStatusChip>
             <small className={styles.contractMeta}>
-              ConversationView · {lang === "zh" ? "标准消息 DTO" : "standard message DTO"}
+              {simulationConversation ? (lang === "zh" ? "本轮模拟运行记录" : "Recorded simulation evidence") : <>ConversationView · {lang === "zh" ? "标准消息 DTO" : "standard message DTO"}</>}
             </small>
           </div>
           <div className={styles.toolbarActions}>
@@ -394,7 +407,7 @@ export function SupervisedAgentConversationPanel({
         </VToolbar> : null}
 
         <div className={compact ? styles.compactBody : styles.body} aria-live="polite">
-          {sessionDetailQuery.isError ? (
+          {sessionId && sessionDetailQuery.isError ? (
             <VStatusStrip
               className={styles.queryNotice}
               role="status"
@@ -407,7 +420,7 @@ export function SupervisedAgentConversationPanel({
           ) : null}
           {messages.length > 0 ? (
             <LazyConversationView
-              sessionId={sessionId || `${selectedRole}-supervised`}
+              sessionId={sessionId}
               className={compact ? styles.compactConversation : styles.conversation}
               density="compact"
               title={assistantDisplayName}
@@ -438,7 +451,7 @@ export function SupervisedAgentConversationPanel({
                 />
               )}
             />
-          ) : sessionDetailQuery.isLoading ? (
+          ) : sessionId && sessionDetailQuery.isLoading ? (
             <ProgressiveRegionSkeleton
               variant="conversation"
               className={styles.loading}
