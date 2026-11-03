@@ -17,17 +17,20 @@ export function LauncherAssistantTaskDetail({task,lang,actionsEnabled,onClose,on
  const team=task.kind==="team_run"?task.lastKnown??task:null;
  const time=(value:string|undefined)=>value?new Date(value).toLocaleString(lang==="zh"?"zh-CN":"en-GB"):copy.notProvided;
  const ref=(label:string,value:unknown)=><div key={label}><dt className={styles.referenceLabel}>{label}</dt><dd className={styles.referenceValue}>{value==null||value===""?copy.notBound:String(value)}</dd></div>;
- return <VDialog open title={title} size="lg" className="!w-[min(560px,calc(100vw_-_32px))]" contentClassName={styles.detail}
+ return <VDialog open title={title} size="lg" className={styles.modal}
   data-vui="launcher-task-detail" onOpenChange={open=>{if(!open)onClose();}} onCloseAutoFocus={onCloseAutoFocus}
   footer={<><VButton variant="ghost" isDisabled={!actionsEnabled||!taskCleanupTargets(task).length} onClick={()=>onDelete(task)}>{pending?copy.retryCleanup:copy.remove}</VButton>
    <VButton variant="secondary" onClick={onClose}>{lang==="zh"?"关闭":"Close"}</VButton>
    {task.kind==="dispatch"&&task.state==="waiting_user"?<VButton variant="primary" isDisabled={!actionsEnabled} onClick={()=>onApproval(task)}>{copy.approval}</VButton>
     :<VButton variant="primary" isDisabled={!actionsEnabled} onClick={()=>onReview(task)}>{copy.review}</VButton>}</>}>
+  <div className={styles.detail}>
+  <div className={styles.section}>
   <div className={styles.meta}><span>{copy.owner}：{taskCardOwner(task,lang)}</span><VChip tone={pending?"warning":COPY[lang].states[task.state].tone}>{taskCardState(task,lang)}</VChip></div>
   {titleMissing?<p className={styles.context}>{lang==="zh"?"原任务未提供可读名称，可在关联对话中核对。":"The original task has no readable name. Check its linked conversation."}</p>:null}
   <p className={styles.context}>{copy.project}：{task.projectName||copy.notProvided} · {copy.updated}：{time(task.updatedAt)}</p>
   {task.kind==="team_run"&&!task.currentAgentName?<p className={styles.context}>{lang==="zh"?"来源尚未提供当前负责的 Agent。":"The source has not reported a current responsible Agent."}</p>:null}
   {task.state==="unknown"&&!task.sourceAvailable?<p className={styles.context}>{copy.unknownCached}</p>:null}
+  </div>
   <section className={styles.section}><h2 className={styles.heading}>{task.state==="failed"?(lang==="zh"?"失败原因":"Failure reason"):task.state==="awaiting_verification"?(lang==="zh"?"执行结果":"Execution result"):copy.summary}</h2><p className={styles.summary}>{summary}</p></section>
   {task.state==="failed"&&task.resultSummary?<section className={styles.section}><h2 className={styles.heading}>{copy.summary}</h2><p className={styles.summary}>{task.resultSummary}</p></section>:null}
   {task.state==="awaiting_verification"?<p className={styles.context}>{copy.executionEnded}</p>:null}
@@ -39,5 +42,6 @@ export function LauncherAssistantTaskDetail({task,lang,actionsEnabled,onClose,on
     {ref(copy.requestId,task.requestId)}{ref(copy.teamId,team?.teamId)}{ref(copy.flowId,team?.flowId)}{ref(copy.runId,team?.runId)}{ref(copy.revision,team?.revision)}{ref(copy.observedAt,team?.observedAt)}
    </>}
   </dl></div>:null}
+  </div>
  </VDialog>;
 }

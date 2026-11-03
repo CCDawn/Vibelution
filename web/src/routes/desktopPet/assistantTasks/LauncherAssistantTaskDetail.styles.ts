@@ -1,4 +1,5 @@
 const styles={
+ modal:"!w-[min(560px,calc(100vw_-_32px))]",
  detail:"grid min-w-0 gap-4",
  meta:"flex min-w-0 flex-wrap items-center justify-between gap-2 text-[14px] text-vui-fg-secondary",
  context:"text-[12px] leading-relaxed text-vui-fg-tertiary",
