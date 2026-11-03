@@ -25,7 +25,7 @@ import { fetchJson } from "../../api/client";
 import { fetchConfigBootstrap } from "../../api/config";
 import { fetchSessionMessageCuration, isFetchJsonHttpError, setSessionMessageCuration } from "../../api/chat";
 import { queryKeys } from "../../api/queryKeys";
-import { VStateSurface } from "../../components/vui";
+import { VScrollRegion, VStateSurface } from "../../components/vui";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import type { ConversationImagePreviewRequest } from "./ConversationImagePreviewDialog";
 import { ConversationForkSessionDialog } from "./ConversationForkSessionDialog";
@@ -1597,7 +1597,7 @@ export const ConversationView = React.memo(function ConversationView({
       ) : null}
 
       <div ref={timelineAreaRef} className={styles.timelineArea}>
-      <div
+      <VScrollRegion
         ref={timelineRef}
         className={styles.timeline}
         data-conversation-following={followLatestRef.current ? "true" : "false"}
@@ -1756,7 +1756,7 @@ export const ConversationView = React.memo(function ConversationView({
             ) : null}
           </div>
         )}
-      </div>
+      </VScrollRegion>
 
 {selectionQuoteMenu}
 
