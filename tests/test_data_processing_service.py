@@ -337,3 +337,71 @@ def test_complete_collection_batch_preserves_terminal_statuses(tmp_path, monkeyp
 
     assert failed_advanced["status"] == "failed"
     assert cancelled_advanced["status"] == "cancelled"
+
+
+def _counting_json_loads(monkeypatch):
+    loads_count = {"count": 0}
+    real_loads = json.loads
+
+    def counting_loads(*args, **kwargs):
+        loads_count["count"] += 1
+        return real_loads(*args, **kwargs)
+
+    monkeypatch.setattr(json, "loads", counting_loads)
+    return loads_count
+
+
+def test_signature_cache_serves_second_read_without_rereading_disk(tmp_path, monkeypatch):
+    json_path = tmp_path / "payload.json"
+    json_path.write_text(json.dumps({"alpha": 1, "items": [1, 2]}), encoding="utf-8")
+    jsonl_path = tmp_path / "records.jsonl"
+    data_processing_service._write_jsonl(jsonl_path, [{"recordId": "r1"}, {"recordId": "r2"}])
+    loads_count = _counting_json_loads(monkeypatch)
+
+    first_json = data_processing_service._read_json(json_path)
+    first_lines = data_processing_service._read_jsonl(jsonl_path)
+    parses_after_first_read = loads_count["count"]
+    assert first_json == {"alpha": 1, "items": [1, 2]}
+    assert [item["recordId"] for item in first_lines] == ["r1", "r2"]
+    assert parses_after_first_read >= 3
+
+    second_json = data_processing_service._read_json(json_path)
+    second_lines = data_processing_service._read_jsonl(jsonl_path)
+    assert second_json == first_json
+    assert second_lines == first_lines
+    assert loads_count["count"] == parses_after_first_read
+
+    assert data_processing_service._read_json(tmp_path / "missing.json") == {}
+    assert data_processing_service._read_jsonl(tmp_path / "missing.jsonl") == []
+    assert loads_count["count"] == parses_after_first_read
+
+
+def test_signature_cache_invalidates_after_append_and_rewrite(tmp_path):
+    jsonl_path = tmp_path / "records.jsonl"
+    data_processing_service._write_jsonl(jsonl_path, [{"recordId": "r1"}])
+    assert [item["recordId"] for item in data_processing_service._read_jsonl(jsonl_path)] == ["r1"]
+
+    data_processing_service._append_jsonl(jsonl_path, {"recordId": "r2"})
+    assert [item["recordId"] for item in data_processing_service._read_jsonl(jsonl_path)] == ["r1", "r2"]
+
+    json_path = tmp_path / "run.json"
+    data_processing_service._write_json(json_path, {"status": "collecting"})
+    assert data_processing_service._read_json(json_path)["status"] == "collecting"
+    data_processing_service._write_json(json_path, {"status": "reviewing"})
+    assert data_processing_service._read_json(json_path)["status"] == "reviewing"
+
+
+def test_signature_cache_hits_return_deep_copies(tmp_path):
+    jsonl_path = tmp_path / "records.jsonl"
+    data_processing_service._write_jsonl(jsonl_path, [{"recordId": "r1", "tags": ["a"]}])
+    json_path = tmp_path / "run.json"
+    data_processing_service._write_json(json_path, {"status": "collecting", "meta": {"teamId": "t1"}})
+
+    first_lines = data_processing_service._read_jsonl(jsonl_path)
+    first_lines[0]["recordId"] = "drifted"
+    first_lines[0]["tags"].append("drift")
+    assert data_processing_service._read_jsonl(jsonl_path) == [{"recordId": "r1", "tags": ["a"]}]
+
+    first_json = data_processing_service._read_json(json_path)
+    first_json["meta"]["teamId"] = "drifted"
+    assert data_processing_service._read_json(json_path) == {"status": "collecting", "meta": {"teamId": "t1"}}

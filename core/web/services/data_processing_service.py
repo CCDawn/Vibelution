@@ -6,6 +6,7 @@ import json
 import shutil
 import threading
 import uuid
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -786,12 +787,43 @@ def _relative_path(path: Path) -> str:
         return str(path).replace("\\", "/")
 
 
+# 进程内读缓存：签名 = (路径, mtime_ns, size)。本模块的 append/rewrite 与
+# 其他进程的原子 os.replace 都必然推进 mtime，签名自然失效，写路径无需钩子。
+# run.json / records.jsonl 在 list_processing_runs、get_processing_status 的
+# 汇总路径上会被反复全量读盘，缓存把首轮后的重复读降到一次 stat。命中统一
+# 返回 deepcopy：调用方普遍 load→mutate→write，共享对象会被污染。缺文件与
+# 解析失败不缓存，保持原语义；容量超限整体清空防泄漏（GIL 下 dict 单操作
+# 原子，不加锁），键含 str(path) 以隔离不同 project_root / tmp 目录。
+_FILE_SIGNATURE_READ_CACHE_LIMIT = 512
+_JSON_SIGNATURE_READ_CACHE: dict[tuple[str, int, int], dict[str, Any]] = {}
+_JSONL_SIGNATURE_READ_CACHE: dict[tuple[str, int, int], list[dict[str, Any]]] = {}
+
+
+def _file_signature_read_cache_key(path: Path) -> tuple[str, int, int] | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return (str(path), int(stat.st_mtime_ns), int(stat.st_size))
+
+
 def _read_json(path: Path) -> dict[str, Any]:
+    signature = _file_signature_read_cache_key(path)
+    if signature is not None:
+        cached = _JSON_SIGNATURE_READ_CACHE.get(signature)
+        if cached is not None:
+            return deepcopy(cached)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
-    return data if isinstance(data, dict) else {}
+    payload = data if isinstance(data, dict) else {}
+    if signature is not None and payload:
+        if len(_JSON_SIGNATURE_READ_CACHE) > _FILE_SIGNATURE_READ_CACHE_LIMIT:
+            _JSON_SIGNATURE_READ_CACHE.clear()
+        _JSON_SIGNATURE_READ_CACHE[signature] = payload
+        return deepcopy(payload)
+    return payload
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -800,6 +832,11 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    signature = _file_signature_read_cache_key(path)
+    if signature is not None:
+        cached = _JSONL_SIGNATURE_READ_CACHE.get(signature)
+        if cached is not None:
+            return deepcopy(cached)
     if not path.exists():
         return []
     items: list[dict[str, Any]] = []
@@ -813,6 +850,11 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
                 items.append(value)
     except (OSError, json.JSONDecodeError):
         return []
+    if signature is not None:
+        if len(_JSONL_SIGNATURE_READ_CACHE) > _FILE_SIGNATURE_READ_CACHE_LIMIT:
+            _JSONL_SIGNATURE_READ_CACHE.clear()
+        _JSONL_SIGNATURE_READ_CACHE[signature] = items
+        return deepcopy(items)
     return items
 
 
