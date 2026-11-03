@@ -29,6 +29,12 @@ export type DesktopShellStatus = {
   refreshBlockedReason?: string;
   refreshBlockedDetail?: string;
   refreshBlockedAt?: string;
+  /** Python: a verified workspace active release exists (advisory precondition). */
+  activeFrontendReleaseUsable?: boolean;
+  /** Python: the active release matches the current source BuildKey; null when inspection failed. */
+  frontendBuildCurrent?: boolean | null;
+  /** Python: BuildKey computed from the current source inputs; the advisory ensure idempotency key. */
+  currentFrontendBuildKey?: string;
 };
 
 export type DesktopShellLaunchReadiness = {
@@ -130,6 +136,161 @@ export function decidePeriodicDesktopShellRefresh(input: {
   return "refresh";
 }
 
+// Advisory staleness used to be terminal: the probe notified once and the
+// old active release kept serving every launcher window until an operator
+// updated by hand. Frontend-only staleness still never stops the workspace,
+// but it now converges in the background through the same ensure chain the
+// lifecycle uses (ensureFrontendRelease -> ensure-frontend-build; the Python
+// build lock and contended reuse keep it single-flight across processes).
+// Idempotent per BuildKey: one attempt per distinct source state, so a build
+// that fails or legitimately leaves the snapshot stale cannot loop every tick.
+export const ADVISORY_FRONTEND_ENSURE_DEBOUNCE_MS = 2_000;
+
+export type AdvisoryFrontendEnsureRequest = { buildKey: string; reason: string };
+
+export type AdvisoryFrontendEnsureEvent =
+  | { kind: "scheduled"; buildKey: string; reason: string; delayMs: number }
+  | { kind: "deduplicated"; buildKey: string; reason: string }
+  | { kind: "started"; buildKey: string; reason: string }
+  | { kind: "completed"; buildKey: string; reason: string; rebuilt: boolean; skipped: boolean }
+  | { kind: "failed"; buildKey: string; reason: string; error: string };
+
+export type AdvisoryFrontendEnsureScheduler = {
+  /**
+   * Queue one debounced background ensure for this advisory. Never throws and
+   * never awaits the build; a same-key advisory while one is queued, running
+   * or already attempted is deduplicated.
+   */
+  schedule(request: AdvisoryFrontendEnsureRequest): "scheduled" | "deduplicated" | "skipped";
+  /** True while an ensure is queued or running. */
+  inFlight(): boolean;
+  /** Forget the attempted key so the next advisory for it runs again (operator refresh). */
+  reset(): void;
+  dispose(): void;
+};
+
+/**
+ * Idempotency key for an advisory: the source BuildKey when Python reported
+ * one, otherwise the stale reason (inspection failures carry no key, and a
+ * repeated failure must not re-queue a build every tick either).
+ */
+export function advisoryFrontendEnsureKey(
+  status: Pick<DesktopShellStatus, "reason" | "currentFrontendBuildKey">
+): string {
+  const key = String(status.currentFrontendBuildKey || "").trim();
+  return key || `reason:${String(status.reason || "").trim() || "unknown"}`;
+}
+
+export function createAdvisoryFrontendEnsureScheduler(input: {
+  run: (request: AdvisoryFrontendEnsureRequest) => Promise<{ rebuilt?: boolean; skipped?: boolean } | void>;
+  onEvent?: (event: AdvisoryFrontendEnsureEvent) => void;
+  debounceMs?: number;
+}): AdvisoryFrontendEnsureScheduler {
+  const debounceMs = Math.max(0, Math.round(input.debounceMs ?? ADVISORY_FRONTEND_ENSURE_DEBOUNCE_MS));
+  const emit = (event: AdvisoryFrontendEnsureEvent): void => {
+    try {
+      input.onEvent?.(event);
+    } catch {
+      // Observers never break the scheduler.
+    }
+  };
+  let disposed = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let pending: AdvisoryFrontendEnsureRequest | null = null;
+  let running: AdvisoryFrontendEnsureRequest | null = null;
+  // The last key handed to the ensure chain, whether it is queued, running,
+  // completed or failed. A new key supersedes it; the same key is a no-op.
+  let attemptedKey = "";
+
+  const start = (request: AdvisoryFrontendEnsureRequest): void => {
+    running = request;
+    emit({ kind: "started", buildKey: request.buildKey, reason: request.reason });
+    void Promise.resolve()
+      .then(() => input.run(request))
+      .then(
+        (result) => {
+          emit({
+            kind: "completed",
+            buildKey: request.buildKey,
+            reason: request.reason,
+            rebuilt: result?.rebuilt === true,
+            skipped: result?.skipped === true
+          });
+        },
+        (error: unknown) => {
+          // Failure is recorded, never escalated: the launcher keeps serving
+          // the usable release and the periodic probe keeps reporting.
+          emit({
+            kind: "failed",
+            buildKey: request.buildKey,
+            reason: request.reason,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+      )
+      .then(() => {
+        running = null;
+        // A different key arrived while this run was busy: honor it now.
+        if (pending && !disposed && timer === null) {
+          arm(pending);
+        }
+      });
+  };
+
+  const arm = (request: AdvisoryFrontendEnsureRequest): void => {
+    pending = request;
+    if (timer !== null) {
+      clearTimeout(timer);
+    }
+    timer = setTimeout(() => {
+      timer = null;
+      const next = pending;
+      pending = null;
+      if (disposed || next === null) {
+        return;
+      }
+      if (running !== null) {
+        // Single-flight: keep it queued until the current run settles.
+        pending = next;
+        return;
+      }
+      start(next);
+    }, debounceMs);
+    emit({ kind: "scheduled", buildKey: request.buildKey, reason: request.reason, delayMs: debounceMs });
+  };
+
+  return {
+    schedule(request) {
+      const buildKey = String(request.buildKey || "").trim();
+      if (disposed || !buildKey) {
+        return "skipped";
+      }
+      const normalized = { buildKey, reason: String(request.reason || "").trim() };
+      if (attemptedKey === buildKey) {
+        emit({ kind: "deduplicated", buildKey, reason: normalized.reason });
+        return "deduplicated";
+      }
+      attemptedKey = buildKey;
+      arm(normalized);
+      return "scheduled";
+    },
+    inFlight() {
+      return timer !== null || running !== null || pending !== null;
+    },
+    reset() {
+      attemptedKey = "";
+    },
+    dispose() {
+      disposed = true;
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      pending = null;
+    }
+  };
+}
+
 /**
  * Cheap gate before a shell inspection. Staleness is unknown until inspect,
  * so this must not treat "not yet read" as "current".
@@ -228,7 +389,14 @@ export function parseDesktopShellStatus(raw: string): DesktopShellStatus {
     ...(typeof parsed.refreshBlocked === "boolean" ? { refreshBlocked: parsed.refreshBlocked } : {}),
     ...(typeof parsed.refreshBlockedReason === "string" ? { refreshBlockedReason: parsed.refreshBlockedReason } : {}),
     ...(typeof parsed.refreshBlockedDetail === "string" ? { refreshBlockedDetail: parsed.refreshBlockedDetail } : {}),
-    ...(typeof parsed.refreshBlockedAt === "string" ? { refreshBlockedAt: parsed.refreshBlockedAt } : {})
+    ...(typeof parsed.refreshBlockedAt === "string" ? { refreshBlockedAt: parsed.refreshBlockedAt } : {}),
+    ...(typeof parsed.activeFrontendReleaseUsable === "boolean"
+      ? { activeFrontendReleaseUsable: parsed.activeFrontendReleaseUsable }
+      : {}),
+    ...(typeof parsed.frontendBuildCurrent === "boolean" || parsed.frontendBuildCurrent === null
+      ? { frontendBuildCurrent: parsed.frontendBuildCurrent }
+      : {}),
+    ...(typeof parsed.currentFrontendBuildKey === "string" ? { currentFrontendBuildKey: parsed.currentFrontendBuildKey } : {})
   };
 }
 
