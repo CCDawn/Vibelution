@@ -37,6 +37,7 @@ from core.orchestration.context_engine import build_agent_context, record_agent_
 from core.orchestration.turn_runner import AgentSingleTurnRequest, run_agent_single_turn
 from core.orchestration.turn_runtime import AgentTurnRuntimeRequest
 from core.runtime_manager.command_queue import submit_command, wait_for_result
+from core.runtime_manager import evolution_control
 from core.runtime_manager.evolution_store import (
     load_active_run_snapshot as load_manager_active_run_snapshot,
     load_latest_run_snapshot as load_manager_latest_run_snapshot,
@@ -1523,7 +1524,8 @@ def start_self_evolution_run(payload: dict[str, Any]) -> dict[str, Any]:
     return get_self_evolution_run_snapshot(run_id) or state
 
 
-def request_pause_self_evolution_run(run_id: str) -> dict[str, Any]:
+def request_pause_self_evolution_run(run_id: str, *, expected_revision: str | None = None,
+                                   expected_owner: dict[str, Any] | None = None) -> dict[str, Any]:
     """Request a graceful pause for one active self-evolution run."""
 
     lang = get_web_language()
@@ -1536,6 +1538,7 @@ def request_pause_self_evolution_run(run_id: str) -> dict[str, Any]:
     now = _now_timestamp()
     immediate_snapshot: dict[str, Any] | None = None
     with _RUN_STATE_LOCK:
+        _require_managed_evolution_fence_locked(normalized, expected_revision, expected_owner)
         current = _RUN_STATES.get(normalized)
         if current is None:
             raise SelfEvolutionRunNotFoundError(
@@ -1546,6 +1549,7 @@ def request_pause_self_evolution_run(run_id: str) -> dict[str, Any]:
             return _decorate_runtime_snapshot(_clone_payload(current))
         if status == "stopping":
             return _decorate_runtime_snapshot(_clone_payload(current))
+        evolution_control.advance_control_revision(current)
         if status == "queued":
             current.update(
                 {
@@ -1615,7 +1619,8 @@ def request_pause_self_evolution_run(run_id: str) -> dict[str, Any]:
     return get_self_evolution_run_snapshot(normalized) or {}
 
 
-def resume_self_evolution_run(run_id: str) -> dict[str, Any]:
+def resume_self_evolution_run(run_id: str, *, expected_revision: str | None = None,
+                              expected_owner: dict[str, Any] | None = None) -> dict[str, Any]:
     """Resume one paused self-evolution run."""
 
     lang = get_web_language()
@@ -1646,6 +1651,7 @@ def resume_self_evolution_run(run_id: str) -> dict[str, Any]:
     now = _now_timestamp()
     state_snapshot: dict[str, Any] | None = None
     with _RUN_STATE_LOCK:
+        _require_managed_evolution_fence_locked(normalized, expected_revision, expected_owner)
         current = _RUN_STATES.get(normalized)
         if current is None:
             raise SelfEvolutionRunNotFoundError(
@@ -1662,6 +1668,7 @@ def resume_self_evolution_run(run_id: str) -> dict[str, Any]:
                     en="Only a paused self-evolution pass can be resumed.",
                 )
             )
+        evolution_control.advance_control_revision(current)
         current.update(
             {
                 "status": "queued",
@@ -1715,7 +1722,8 @@ def resume_self_evolution_run(run_id: str) -> dict[str, Any]:
     return get_self_evolution_run_snapshot(normalized) or state_snapshot
 
 
-def request_stop_self_evolution_run(run_id: str) -> dict[str, Any]:
+def request_stop_self_evolution_run(run_id: str, *, expected_revision: str | None = None,
+                                  expected_owner: dict[str, Any] | None = None) -> dict[str, Any]:
     """Request termination for one active or paused self-evolution run."""
 
     global _ACTIVE_RUN_ID
@@ -1730,6 +1738,7 @@ def request_stop_self_evolution_run(run_id: str) -> dict[str, Any]:
     finalize_snapshot: dict[str, Any] | None = None
     publish_terminal = False
     with _RUN_STATE_LOCK:
+        _require_managed_evolution_fence_locked(normalized, expected_revision, expected_owner)
         current = _RUN_STATES.get(normalized)
         if current is None:
             stored = load_manager_run_snapshot("self", normalized)
@@ -1760,6 +1769,8 @@ def request_stop_self_evolution_run(run_id: str) -> dict[str, Any]:
         status = str(current.get("status") or "").strip().lower()
         if current is not None and status in _RUN_FINAL_STATUSES:
             return _decorate_runtime_snapshot(_clone_payload(current))
+        if current is not None:
+            evolution_control.advance_control_revision(current)
         if current is not None and status in {"queued", "paused"}:
             current.update(
                 {
@@ -3982,6 +3993,31 @@ def _build_result_message(result: dict[str, Any], fallback: str = "") -> str:
         if value:
             return value
     return str(fallback or "").strip()
+
+
+def _managed_evolution_context_locked(run_id: str) -> bool:
+    return _ACTIVE_RUN_ID == run_id and run_id in _RUN_STATES
+
+
+def read_managed_evolution_metadata(owner: dict[str, Any], *, run_id: str | None = None) -> list[dict[str, Any]]:
+    """Read native in-memory slots without persist, projection, or repair."""
+    with _RUN_STATE_LOCK:
+        if _ACTIVE_RUN_ID and _ACTIVE_RUN_ID not in _RUN_STATES:
+            raise evolution_control.Unavailable("Native self-evolution slot metadata missing")
+        if run_id is not None and run_id not in _RUN_STATES:
+            raise evolution_control.NotFound("Native self-evolution slot unavailable")
+        ids = [run_id] if run_id is not None else sorted(_RUN_STATES)
+        if len(ids) > evolution_control.MAX_ROWS:
+            raise evolution_control.Unavailable("Native self-evolution inventory exceeds limit")
+        if any(_RUN_STATES[rid].get("runId") != rid for rid in ids):
+            raise evolution_control.Unavailable("Native self-evolution slot identity mismatch")
+        return [evolution_control.metadata_row("self", _RUN_STATES[rid], owner,
+                    live_context=_managed_evolution_context_locked(rid)) for rid in ids]
+
+
+def _require_managed_evolution_fence_locked(run_id, expected_revision, expected_owner):
+    evolution_control.require_expected("self", _RUN_STATES.get(run_id), expected_revision, expected_owner,
+                                       live_context=_managed_evolution_context_locked(run_id))
 
 
 def _build_manager_control_payload() -> dict[str, Any]:

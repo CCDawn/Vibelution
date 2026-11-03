@@ -6,7 +6,9 @@ import hashlib
 import json
 import logging
 import os
+import re
 import time
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -14,6 +16,7 @@ from uuid import uuid4
 
 from core.infrastructure.atomic_io import atomic_write_json
 from core.infrastructure.canonical_json import canonical_json
+from core.infrastructure.file_lock import cross_process_file_lock, lock_path_for
 
 from .constants import (
     DEFAULT_COMMAND_WAIT_SECONDS,
@@ -53,6 +56,132 @@ LIFECYCLE_CANCEL_TYPES = {
     "shutdown": {"close_workbench"},
     "force-stop": {"force_close_workbench"},
 }
+
+_MANAGED_TYPE = "managed_evolution_control"
+_MANAGED_ID = re.compile(r"cmd_managed_[a-f0-9]{64}\Z")
+
+
+class ManagedCommandConflict(ValueError):
+    """A stable managed command's original binding differs."""
+
+
+class ManagedCommandUnavailable(RuntimeError):
+    """The original managed queue evidence cannot be read or resumed safely."""
+
+
+def managed_request_key(project_root, request_id, kind, run_id, action, expected_revision):
+    """Fixed-type address; it remains readable after the bound daemon exits."""
+    from . import evolution_control as control
+    from .constants import PROJECT_ROOT
+
+    root = Path(project_root).resolve()
+    if root != Path(PROJECT_ROOT).resolve():
+        raise ManagedCommandConflict("Managed command project changed")
+    control._token(request_id)
+    control._kind(kind)
+    control._token(run_id)
+    if (not isinstance(action, str) or action not in {"pause", "resume", "stop"}
+            or not isinstance(expected_revision, str) or not re.fullmatch(r"[a-f0-9]{64}", expected_revision)):
+        raise ValueError("Invalid managed command binding")
+    facts = {"schemaVersion": 1, "type": _MANAGED_TYPE, "projectRoot": os.path.normcase(str(root)),
+             "requestId": request_id, "kind": kind, "runId": run_id, "action": action,
+             "expectedRevision": expected_revision}
+    key = "cmd_managed_" + hashlib.sha256(canonical_json(facts).encode()).hexdigest()
+    return key, facts
+
+
+def _managed_binding(facts, args):
+    from .evolution_control import public_identity
+
+    if not isinstance(args, dict) or set(args) != {"kind", "runId", "action", "expectedRevision", "owner"}:
+        raise ManagedCommandConflict("Invalid managed native arguments")
+    if any(args[key] != facts[key] for key in ("kind", "runId", "action", "expectedRevision")):
+        raise ManagedCommandConflict("Managed command arguments changed")
+    owner = public_identity(args["owner"])
+    if owner != args["owner"]:
+        raise ManagedCommandConflict("Invalid managed owner binding")
+    return {**facts, "owner": owner, "argsSha256": hashlib.sha256(canonical_json(args).encode()).hexdigest()}
+
+
+def _read_managed_json(path):
+    from core.assistant_runtime.migration_io import read_stable_file, strict_json
+
+    try:
+        # The stable reader deliberately folds missing and unreadable sources
+        # together; only an explicit initial lstat can certify absence here.
+        path.lstat()
+        raw = read_stable_file(path, 2 * 1024 * 1024).raw
+        payload = strict_json(raw)
+        if not isinstance(payload, dict):
+            raise ValueError
+        return payload
+    except FileNotFoundError:
+        return None
+    except Exception:
+        raise ManagedCommandUnavailable("Original managed command evidence unavailable") from None
+
+
+def _verify_managed_record(command_id, facts, payload, *, result=False, binding=None):
+    record = payload.get("managedBinding")
+    if (not isinstance(record, dict) or set(record) != {*facts, "owner", "argsSha256"}
+            or any(record[key] != value for key, value in facts.items())
+            or payload.get("commandId") != command_id or payload.get("type") != _MANAGED_TYPE):
+        raise ManagedCommandConflict("Original managed command binding changed")
+    args = {key: record[key] for key in ("kind", "runId", "action", "expectedRevision", "owner")}
+    expected = _managed_binding(facts, args)
+    if record != expected or binding is not None and record != binding:
+        raise ManagedCommandConflict("Original managed command payload changed")
+    if result:
+        if payload.get("completed") is not True or type(payload.get("ok")) is not bool:
+            raise ManagedCommandUnavailable("Original managed result incomplete")
+    elif payload.get("args") != args:
+        raise ManagedCommandConflict("Original managed command arguments changed")
+    return record
+
+
+def read_managed_command_record(project_root, request_id, kind, run_id, action, expected_revision, *, binding=None):
+    """Point-read existing native queue evidence without locks, mkdir, or repair."""
+    command_id, facts = managed_request_key(project_root, request_id, kind, run_id, action, expected_revision)
+    for directory, result in ((RESULTS_DIR, True), (PROCESSING_DIR, False), (INBOX_DIR, False)):
+        payload = _read_managed_json(directory / f"{command_id}.json")
+        if payload is not None:
+            _verify_managed_record(command_id, facts, payload, result=result, binding=binding)
+            state = "pending"
+            if result:
+                # Only fixed pre-admission errors prove a rejection. A native
+                # controller may already have acted before publication failed.
+                state = "completed" if payload["ok"] else "rejected" if payload.get("errorType") in {
+                    "Conflict", "RuntimeManagerStoppingError"} else "unconfirmed"
+            return command_id, state, payload
+    return command_id, "unknown", None
+
+
+def submit_managed_evolution_command(project_root, request_id, *, args):
+    """Create or join one fixed-type request using only the existing queue files."""
+    command_id, facts = managed_request_key(project_root, request_id, args.get("kind"), args.get("runId"),
+                                             args.get("action"), args.get("expectedRevision"))
+    binding = _managed_binding(facts, args)
+    path = INBOX_DIR / f"{command_id}.json"
+    seen_lock = lock_path_for(path).exists()
+    ensure_runtime_manager_dirs()
+    with cross_process_file_lock(path):
+        _cid, state, original = read_managed_command_record(project_root, request_id, facts["kind"], facts["runId"],
+            facts["action"], facts["expectedRevision"], binding=binding)
+        if original is not None:
+            return {"commandId": command_id, "managedBinding": original["managedBinding"]}
+        # A leftover native sidecar is only a reason to refuse an unknown replay,
+        # never success evidence. No additional idempotency ledger is created.
+        if seen_lock:
+            raise ManagedCommandUnavailable("Original managed command record disappeared")
+        command = {**build_command(_MANAGED_TYPE, args=args, requested_by="external_management"),
+                   "commandId": command_id, "managedBinding": binding}
+        shutdown = _shutdown_in_progress_state()
+        if shutdown is not None:
+            _complete_rejected_shutdown_command(command, shutdown_state=shutdown)
+        else:
+            _atomic_write_json(path, command)
+            _append_queue_event("command_queue.command_queued", command_event_payload(command))
+        return {"commandId": command_id, "managedBinding": binding}
 
 
 def _command_timestamp() -> str:
@@ -230,6 +359,11 @@ def recover_processing_queue() -> list[str]:
     ensure_runtime_manager_dirs()
     recovered: list[str] = []
     for path in sorted(PROCESSING_DIR.glob("*.json")):
+        if _MANAGED_ID.fullmatch(path.stem):
+            # An interrupted native action may already have changed run state.
+            # Keep its original evidence; never turn lost acknowledgement into
+            # automatic replay or infer success from the current run snapshot.
+            continue
         command = _load_command_file(path)
         if _discard_recovered_command_with_existing_result(path, command):
             continue
@@ -314,6 +448,11 @@ def claim_next_command() -> tuple[Path, dict[str, Any]] | None:
     ensure_runtime_manager_dirs()
     now = datetime.now(timezone.utc)
     for path in sorted(INBOX_DIR.glob("*.json")):
+        if _MANAGED_ID.fullmatch(path.stem):
+            claimed = _claim_managed_command(path)
+            if claimed is not None:
+                return claimed
+            continue
         pending = _load_command_file(path)
         if pending and _command_is_deferred(pending, now=now):
             continue
@@ -348,6 +487,33 @@ def claim_next_command() -> tuple[Path, dict[str, Any]] | None:
         except OSError:
             pass
     return None
+
+
+def _claim_managed_command(path):
+    with cross_process_file_lock(path):
+        try:
+            command = _read_managed_json(path)
+        except ManagedCommandUnavailable:
+            return None
+        if command is None:
+            return None
+        binding = command.get("managedBinding") or {}
+        try:
+            command_id, facts = managed_request_key(binding.get("projectRoot"), binding.get("requestId"),
+                binding.get("kind"), binding.get("runId"), binding.get("action"), binding.get("expectedRevision"))
+            _verify_managed_record(command_id, facts, command)
+        except (ValueError, RuntimeError, TypeError):
+            return None
+        target = PROCESSING_DIR / path.name
+        if (RESULTS_DIR / path.name).exists() or target.exists():
+            return None
+        try:
+            os.replace(path, target)
+        except OSError:
+            return None
+        command["claimedAt"] = datetime.now(timezone.utc).isoformat()
+        _append_queue_event("command_queue.command_claimed", command_event_payload(command, queue_path=target.name))
+        return target, command
 
 
 def request_active_lifecycle_interrupt_for_close(command: dict[str, Any]) -> dict[str, Any] | None:
@@ -854,6 +1020,29 @@ def _live_observation_says_workbench_closed() -> bool:
 
 
 def complete_command(path: Path, result: dict[str, Any]) -> None:
+    managed = _MANAGED_ID.fullmatch(path.stem)
+    lock = cross_process_file_lock(INBOX_DIR / path.name) if managed else nullcontext()
+    with lock:
+        if managed:
+            command = _read_managed_json(path)
+            if command is None:
+                raise ManagedCommandUnavailable("Original managed command disappeared before acknowledgement")
+            binding = command.get("managedBinding") or {}
+            command_id, facts = managed_request_key(binding.get("projectRoot"), binding.get("requestId"),
+                binding.get("kind"), binding.get("runId"), binding.get("action"), binding.get("expectedRevision"))
+            _verify_managed_record(command_id, facts, command)
+            if (result.get("commandId") != command_id or result.get("completed") is not True
+                    or type(result.get("ok")) is not bool):
+                raise ManagedCommandConflict("Managed acknowledgement identity changed")
+            prior = _read_managed_json(RESULTS_DIR / path.name)
+            if prior is not None:
+                _verify_managed_record(command_id, facts, prior, result=True, binding=binding)
+                return  # First durable acknowledgement remains authoritative.
+            result = {**result, "type": _MANAGED_TYPE, "managedBinding": binding}
+        _complete_command_unlocked(path, result)
+
+
+def _complete_command_unlocked(path: Path, result: dict[str, Any]) -> None:
     command_id = str(result.get("commandId") or path.stem).strip() or path.stem
     completed_at = datetime.now(timezone.utc)
     result_path = RESULTS_DIR / f"{command_id}.json"
@@ -1339,6 +1528,12 @@ def _complete_rejected_shutdown_command(command: dict[str, Any], *, shutdown_sta
     }
     if not duplicate_shutdown:
         result["errorType"] = "RuntimeManagerStoppingError"
+    if _MANAGED_ID.fullmatch(str(command.get("commandId") or "")):
+        binding = command.get("managedBinding") or {}
+        command_id, facts = managed_request_key(binding.get("projectRoot"), binding.get("requestId"),
+            binding.get("kind"), binding.get("runId"), binding.get("action"), binding.get("expectedRevision"))
+        _verify_managed_record(command_id, facts, command)
+        result.update(type=_MANAGED_TYPE, managedBinding=binding)
     _atomic_write_json(RESULTS_DIR / f"{command['commandId']}.json", result)
 
 

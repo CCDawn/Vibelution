@@ -118,7 +118,13 @@ def reconcile(native, action, parameters, marker):
         result = outcome.read(action, parameters, marker) if outcome is not None else None
         if result is not None:
             return response("confirmed", "native_outcome", result)
-        if action == "research_command":
+        if action == "runtime_command" and parameters.get("kind") in {"supervised_run", "self_evolution_run"}:
+            from .runtime_operations import read_command_receipt
+            result = read_command_receipt(native, parameters, request_id=marker["requestKey"])
+            if result is None:
+                return response("requires_review")
+            evidence = "native_outcome"
+        elif action == "research_command":
             from .research_control import read_receipt
             result = read_receipt(native, parameters, request_id=marker["requestKey"])
             evidence = "research_ledger"

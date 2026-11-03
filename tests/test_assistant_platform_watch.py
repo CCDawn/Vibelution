@@ -16,7 +16,7 @@ from tests.test_launcher_assistant_runtime_operations import env as native_runti
 
 def operation(kind="external_task", resource="external-1", status="running", revision="1"):
     return {"kind": kind, "resourceId": resource, "status": status, "revision": revision,
-            "sessionId": "session-1" if kind == "session_turn" else "",
+            "sessionId": "session-1" if kind in {"session_turn", "session_queue"} else "",
             "teamId": "team-1" if kind in {"team_run", "research_run"} else "",
             "flowId": "flow-1" if kind in {"team_run", "research_run"} else ""}
 
@@ -72,7 +72,7 @@ def platform(dispatch_setup, monkeypatch):
     dispatch.management = Management()
     dispatch.project_ids = lambda: ("project-a",)
     dispatch._project_read_binding = lambda project: (1, root) if dispatch.enabled else (_ for _ in ()).throw(ValueError("revoked"))
-    monkeypatch.setattr(runtime_watch, "_CALLS", 8)
+    monkeypatch.setattr(runtime_watch, "_CALLS", len(runtime_watch.KINDS) + 1)
     runtime = patrol.LauncherPatrol(root, "pa", "session", dispatch)
     return root, dispatch, runtime
 
@@ -189,14 +189,14 @@ def test_bounded_fair_pages_resume_checkpoint_and_snapshot_changes_do_not_starve
     root, dispatch, runtime = platform
     monkeypatch.setattr(runtime_watch, "_CALLS", 1)
     dispatch.management.rows["external_task"] = [operation(resource=f"external-{i}") for i in range(8)]
-    for i in range(3):
+    for i in range(runtime_watch.KINDS.index("external_task") + 1):
         refresh(runtime, 10000 + i)
     first = next(call for call in dispatch.management.calls if call[2]["kind"] == "external_task")
     assert first[2]["offset"] == 0
     runtime.close()
     restarted = patrol.LauncherPatrol(root, "pa", "session", dispatch)
     dispatch.management.rows["external_task"][0]["revision"] = "2"
-    for i in range(16):
+    for i in range(2 * (len(runtime_watch.KINDS) + 1)):
         before = len(dispatch.management.calls)
         refresh(restarted, 11000 + i)
         assert len(dispatch.management.calls) - before <= 1

@@ -238,6 +238,20 @@ def load_pid_identity() -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def publish_evolution_control_endpoint(owner: dict[str, Any], endpoint: dict[str, Any]) -> None:
+    """Attach the daemon's read capability to its existing identity record."""
+    from .evolution_control import Unavailable, public_identity
+
+    expected = public_identity(owner)
+    record = load_pid_identity()
+    if (load_pid() != expected["pid"] or expected["pid"] != os.getpid()
+            or public_identity(record) != expected or public_identity(capture_process_identity(os.getpid())) != expected):
+        raise Unavailable("Manager identity changed before endpoint publication")
+    record["evolutionControl"] = dict(endpoint)
+    if not _atomic_write_text(DAEMON_IDENTITY_PATH, json.dumps(record, ensure_ascii=False, separators=(",", ":"))):
+        raise Unavailable("Manager metadata endpoint publication failed")
+
+
 def clear_pid(expected_pid: int | None = None) -> None:
     if expected_pid is not None and load_pid() != int(expected_pid):
         return

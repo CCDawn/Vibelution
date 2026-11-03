@@ -279,6 +279,38 @@ def test_policy_write_cas_failure_and_lost_ack_stay_unconfirmed(configured_agent
     assert after["compiledMatches"] is (failure == "lost_ack")
 
 
+@pytest.mark.parametrize("field,value", [
+    ("role", "R" * 161),
+    ("purpose", "P" * 1001),
+    ("responsibilities", ["D" * 1001]),
+])
+def test_team_read_accepts_native_roster_text_without_expanding_writes(knowledge_env, monkeypatch, field, value):
+    from core.web.services import team_service
+    from core.web.services.team.team_crud import team_record_fingerprint
+    from core.assistant_runtime.management_projection import project_management_asset
+
+    row = deepcopy(knowledge_env["team"])
+    member = {**row["members"][0], field: value}
+    row["members"] = team_service._normalize_members([member], require_active=True)
+    assert row["members"][0][field] == value
+    control = _control(Native())
+    monkeypatch.setattr(control, "_team_snapshot", lambda *_: deepcopy(row))
+    with server_operator_scope("operator-test", roles=("operator",)):
+        observed = control.read_team(row["teamId"])
+    assert observed["members"][0][field] == value
+    assert observed["fingerprint"] == team_record_fingerprint(row)
+    pointer = f"/asset/members/0/{field}" + ("/0" if isinstance(value, list) else "")
+    text = value[0] if isinstance(value, list) else value
+    page = project_management_asset("team_asset_get", observed, "project-a",
+        {"document_pointer": pointer, "limit": 100})
+    assert page["value"] == text[:100]
+    assert page["nextOffset"] == 100
+    assert page["untrustedContent"] is True
+    with pytest.raises(ValidationError):
+        contracts.TeamUpdate.model_validate({"team_id": row["teamId"],
+            "expected_team_fingerprint": observed["fingerprint"], "updates": {"members": [member]}})
+
+
 def test_team_change_reuses_native_roster_rules_and_exact_fingerprint(knowledge_env):
     control = _control(Native())
     team_id = knowledge_env["team"]["teamId"]

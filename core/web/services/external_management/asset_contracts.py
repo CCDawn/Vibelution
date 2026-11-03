@@ -58,6 +58,19 @@ class TeamMember(Closed):
     responsibilities: list[Annotated[str, Field(max_length=1000)]] = Field(default_factory=list, max_length=8)
 
 
+class TeamMemberView(Closed):
+    """Read native roster text without imposing management write limits.
+
+    Existing Teams may contain longer text accepted by their original owner.
+    The asset projection still pages every text value within its model budget.
+    """
+    memberId: str = ""
+    agentId: Reference
+    role: str = ""
+    purpose: str = ""
+    responsibilities: list[str] = Field(default_factory=list, max_length=8)
+
+
 class TeamPatch(Patch):
     name: str | None = Field(default=None, min_length=1, max_length=160)
     description: str | None = Field(default=None, max_length=4000)
@@ -152,7 +165,7 @@ class TeamAssetResponse(Closed):
     description: str
     purpose: str
     status: str
-    members: list[TeamMember]
+    members: list[TeamMemberView]
     updatedAt: str
     fingerprint: Fingerprint
     untrustedContent: Literal[True] = True

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+import re
 from collections import deque
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -485,6 +486,59 @@ class SessionTurnScheduler:
                 for queue_bucket in self._queues.values()
                 for queued_context in queue_bucket
             }
+
+    def snapshot_queued_turn_metadata(self, *, max_rows: int = 10000) -> dict[str, Any]:
+        """Copy bounded scheduling facts without returning execution contexts.
+
+        External reservations are not native Turns. Deferred plugin contexts
+        have a prospective identity, but have not crossed Session admission.
+        Neither classification changes scheduling or consults a Session body.
+        """
+        if type(max_rows) is not int or not 1 <= max_rows <= 10000:
+            raise ValueError("Invalid metadata inventory limit")
+        entries: list[dict[str, Any]] = []
+        invalid = external = pending = visited = 0
+        truncated = False
+        reasons = {"agent_external_active", "agent_external_waiting", "session_active",
+                   "session_runtime_active", "agent_concurrency_limit", ""}
+        with self._condition:
+            for bucket in self._queues.values():
+                for position, context in enumerate(bucket, start=1):
+                    if visited >= max_rows:
+                        truncated = True
+                        break
+                    visited += 1
+                    if not isinstance(context, dict):
+                        invalid += 1
+                        continue
+                    if context.get("_scheduler_cancelled") is True:
+                        continue
+                    if type(context.get("_scheduler_external", False)) is not bool:
+                        invalid += 1
+                        continue
+                    if self.is_external(context):
+                        external += 1
+                        continue
+                    sid, tid, aid = (context.get(name, "") for name in ("session_id", "turn_id", "agent_id"))
+                    if (not all(isinstance(value, str) and re.fullmatch(
+                            r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}", value) for value in (sid, tid))
+                            or not isinstance(aid, str) or aid and not re.fullmatch(
+                                r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}", aid)):
+                        invalid += 1
+                        continue
+                    deferred = context.get("_scheduler_deferred_session_admission", False)
+                    reason = context.get("_scheduler_queue_reason", "")
+                    if type(deferred) is not bool or not isinstance(reason, str) or reason not in reasons:
+                        invalid += 1
+                        continue
+                    pending += int(deferred)
+                    entries.append({"sessionId": sid, "turnId": tid, "agentId": aid,
+                                    "position": position, "queueReason": reason, "admissionPending": deferred})
+                if truncated:
+                    break
+        return {"entries": entries, "invalidCount": invalid, "truncated": truncated,
+                "externalReservationCount": external, "pendingAdmissionCount": pending,
+                "complete": not (invalid or truncated)}
 
     @staticmethod
     def is_external(context: dict[str, Any]) -> bool:

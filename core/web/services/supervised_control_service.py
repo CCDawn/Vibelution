@@ -38,6 +38,7 @@ from core.evaluation.supervised_evolution import (
 from core.evaluation.supervised_workbench import bundle_environment_preflight_block_message
 from core.runtime_manager.constants import RESULTS_DIR
 from core.runtime_manager.command_queue import submit_command, wait_for_result
+from core.runtime_manager import evolution_control
 from core.runtime_manager.evolution_store import (
     delete_run_snapshot as delete_manager_run_snapshot,
     load_active_run_snapshot as load_manager_active_run_snapshot,
@@ -252,6 +253,32 @@ class _SupervisedRunController:
         with self.condition:
             self.stop_requested = True
             self.condition.notify_all()
+
+
+def _managed_evolution_context_locked(run_id: str) -> bool:
+    return _ACTIVE_RUN_ID == run_id and run_id in _RUN_CONTROLLERS
+
+
+def read_managed_evolution_metadata(owner: dict[str, Any], *, run_id: str | None = None) -> list[dict[str, Any]]:
+    """Snapshot actual slots under their lock without repairing or decorating."""
+    with _RUN_STATE_LOCK:
+        if (_ACTIVE_RUN_ID and _ACTIVE_RUN_ID not in _RUN_STATES
+                or any(rid not in _RUN_STATES for rid in _RUN_CONTROLLERS)):
+            raise evolution_control.Unavailable("Native supervised slot metadata missing")
+        if run_id is not None and run_id not in _RUN_STATES:
+            raise evolution_control.NotFound("Native supervised slot unavailable")
+        ids = [run_id] if run_id is not None else sorted(_RUN_STATES)
+        if len(ids) > evolution_control.MAX_ROWS:
+            raise evolution_control.Unavailable("Native supervised inventory exceeds limit")
+        if any(_RUN_STATES[rid].get("runId") != rid for rid in ids):
+            raise evolution_control.Unavailable("Native supervised slot identity mismatch")
+        return [evolution_control.metadata_row("supervised", _RUN_STATES[rid], owner,
+                    live_context=_managed_evolution_context_locked(rid)) for rid in ids]
+
+
+def _require_managed_evolution_fence_locked(run_id, expected_revision, expected_owner):
+    evolution_control.require_expected("supervised", _RUN_STATES.get(run_id), expected_revision, expected_owner,
+                                       live_context=_managed_evolution_context_locked(run_id))
 
 
 def get_supervised_workbench(
@@ -765,7 +792,8 @@ def get_supervised_run_snapshot(run_id: str) -> dict[str, Any]:
         return _decorate_supervised_snapshot(_clone_locked(payload))
 
 
-def request_pause_supervised_run(run_id: str) -> dict[str, Any]:
+def request_pause_supervised_run(run_id: str, *, expected_revision: str | None = None,
+                                expected_owner: dict[str, Any] | None = None) -> dict[str, Any]:
     """Pause one active supervised run at the next safe checkpoint."""
 
     lang = get_web_language()
@@ -775,6 +803,7 @@ def request_pause_supervised_run(run_id: str) -> dict[str, Any]:
 
     publish_terminal = False
     with _RUN_STATE_LOCK:
+        _require_managed_evolution_fence_locked(normalized, expected_revision, expected_owner)
         state = _require_run_locked(normalized, lang=lang)
         controller = _require_controller_locked(normalized, lang=lang)
         status = str(state.get("status") or "").strip().lower()
@@ -791,6 +820,7 @@ def request_pause_supervised_run(run_id: str) -> dict[str, Any]:
         if status == "paused" or bool(state.get("pauseRequested")):
             return _clone_locked(state)
 
+        evolution_control.advance_control_revision(state)
         state["pauseRequested"] = True
         state["pauseRequestedAt"] = now
         _append_control_event_locked(
@@ -835,7 +865,8 @@ def request_pause_supervised_run(run_id: str) -> dict[str, Any]:
     return get_supervised_run_snapshot(normalized)
 
 
-def request_resume_supervised_run(run_id: str) -> dict[str, Any]:
+def request_resume_supervised_run(run_id: str, *, expected_revision: str | None = None,
+                                 expected_owner: dict[str, Any] | None = None) -> dict[str, Any]:
     """Resume one paused supervised run or cancel a pending pause request."""
 
     lang = get_web_language()
@@ -844,6 +875,7 @@ def request_resume_supervised_run(run_id: str) -> dict[str, Any]:
         raise SupervisedRunValidationError(text_for(lang, zh="缺少监督 run id。", en="Missing supervised run id."))
 
     with _RUN_STATE_LOCK:
+        _require_managed_evolution_fence_locked(normalized, expected_revision, expected_owner)
         state = _require_run_locked(normalized, lang=lang)
         controller = _require_controller_locked(normalized, lang=lang)
         status = str(state.get("status") or "").strip().lower()
@@ -859,6 +891,7 @@ def request_resume_supervised_run(run_id: str) -> dict[str, Any]:
         if status != "paused" and not pause_requested:
             return _clone_locked(state)
 
+        evolution_control.advance_control_revision(state)
         state["pauseRequested"] = False
         if status == "paused":
             if _has_session_started(state):
@@ -900,7 +933,8 @@ def request_resume_supervised_run(run_id: str) -> dict[str, Any]:
     return get_supervised_run_snapshot(normalized)
 
 
-def request_stop_supervised_run(run_id: str) -> dict[str, Any]:
+def request_stop_supervised_run(run_id: str, *, expected_revision: str | None = None,
+                               expected_owner: dict[str, Any] | None = None) -> dict[str, Any]:
     """Request a graceful stop for one active supervised run."""
 
     lang = get_web_language()
@@ -910,6 +944,7 @@ def request_stop_supervised_run(run_id: str) -> dict[str, Any]:
 
     publish_terminal = False
     with _RUN_STATE_LOCK:
+        _require_managed_evolution_fence_locked(normalized, expected_revision, expected_owner)
         state = _RUN_STATES.get(normalized)
         if state is None:
             return _cancel_file_only_supervised_run(normalized, lang=lang)
@@ -922,6 +957,7 @@ def request_stop_supervised_run(run_id: str) -> dict[str, Any]:
         if status == "stopping" or bool(state.get("stopRequested")):
             return _clone_locked(state)
 
+        evolution_control.advance_control_revision(state)
         state["stopRequested"] = True
         state["stopRequestedAt"] = now
         state["pauseRequested"] = False

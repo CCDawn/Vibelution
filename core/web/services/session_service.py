@@ -1080,6 +1080,7 @@ from core.web.services.session.publish import (
 
 
 from core.infrastructure.native_runtime import is_launcher_assistant_process, resolve_native_project_root
+from core.web.services.session.runtime_inventory import read_session_runtime_inventory
 
 PROJECT_ROOT = resolve_native_project_root(Path(__file__).resolve().parents[3])
 

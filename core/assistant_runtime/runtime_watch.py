@@ -18,7 +18,7 @@ import anyio
 from core.infrastructure.atomic_io import atomic_write_json
 from .migration_io import check_path
 
-KINDS = ("session_turn", "runtime_task", "external_task", "team_run", "supervised_run",
+KINDS = ("session_turn", "session_queue", "runtime_task", "external_task", "team_run", "supervised_run",
          "self_evolution_run", "research_run")
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}\Z")
 _REQUEST_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}\Z")
@@ -55,7 +55,7 @@ def _reference(project, row):
         if not isinstance(value, str) or value and not _ID.fullmatch(value):
             raise ValueError("runtime_watch_reference_invalid")
         ref[key] = value
-    if ((kind == "session_turn" and not ref["sessionId"])
+    if ((kind in {"session_turn", "session_queue"} and not ref["sessionId"])
             or (kind in {"team_run", "research_run"} and not ref["teamId"])):
         raise ValueError("runtime_watch_reference_invalid")
     if kind == "research_run" and not ref["flowId"]:
@@ -264,7 +264,7 @@ class RuntimeWatchObserver:
             # Keep coverage partial rather than manufacture a runtime task.
             return []
         ref = source.get("ref") or {"projectId": source["projectId"], "runtimeKind": kind, "resourceId": "source-coverage",
-               "sessionId": "source-coverage" if kind == "session_turn" else "",
+               "sessionId": "source-coverage" if kind in {"session_turn", "session_queue"} else "",
                "teamId": "source-coverage" if kind in {"team_run", "research_run"} else "",
                "flowId": "source-coverage" if kind == "research_run" else ""}
         issue = "coverage_unavailable" if coverage else "read_failed"
@@ -418,9 +418,17 @@ class RuntimeWatchObserver:
         command = result.get("command")
         if command not in {"stop", "pause", "resume", "confirm", "retry"}:
             raise ValueError("runtime_watch_command_unconfirmed")
+        # Queue withdrawal is an atomic deletion with an exact native ACK.
+        # Its disappearance on a later read is not additional completion proof.
+        if ref["runtimeKind"] == "session_queue":
+            if (command != "stop" or result.get("accepted") is not True
+                    or result.get("revisionCheck") != "native_cas" or result.get("stopRequested") is not False
+                    or result["operation"].get("status") != "cancelled"):
+                raise ValueError("runtime_watch_command_unconfirmed")
+            return [self._event(ref, "control_settled", "cancelled", [request_id, command], item["binding"])]
         refs = {key: ref[field] for key, field in (("session_id", "sessionId"), ("team_id", "teamId"), ("flow_id", "flowId"))
                 if ref[field] and (ref["runtimeKind"] in {"team_run", "research_run"} and field in {"teamId", "flowId"}
-                                  or ref["runtimeKind"] == "session_turn" and field == "sessionId")}
+                                  or ref["runtimeKind"] in {"session_turn", "session_queue"} and field == "sessionId")}
         detail = await self.dispatch.management.runtime(project, "get", kind=ref["runtimeKind"], resource_id=ref["resourceId"], **refs)
         if (not isinstance(detail, dict) or detail.get("projectId") != project or not isinstance(detail.get("operation"), dict)
                 or _reference(project, detail["operation"]) != ref or self._guard(project) != self._pass_guards[project]):

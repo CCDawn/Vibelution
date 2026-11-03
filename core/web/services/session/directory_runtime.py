@@ -105,6 +105,33 @@ def get_open_directory_store() -> ConversationStore | None:
         return _STORE
 
 
+@dataclass(frozen=True)
+class SessionDirectoryStorePin:
+    """An existing publication identity, without opening or owning its store."""
+
+    store: ConversationStore
+    project_root: Path
+    generation: int
+
+
+def pin_open_directory_store(project_root: Path) -> SessionDirectoryStorePin | None:
+    """Observe one project/store/generation binding under the lifecycle lock."""
+    root = Path(project_root).resolve()
+    with _RUNTIME_LOCK:
+        if _STORE is None or not getattr(_STORE, "_open", False):
+            return None
+        if _PROJECT_ROOT != root:
+            raise ValueError("Directory store project binding mismatch")
+        return SessionDirectoryStorePin(_STORE, root, _GENERATION)
+
+
+def directory_store_pin_is_current(pin: SessionDirectoryStorePin) -> bool:
+    """Check for close/reopen or root changes after a read-only observation."""
+    with _RUNTIME_LOCK:
+        return (_STORE is pin.store and _PROJECT_ROOT == pin.project_root
+                and _GENERATION == pin.generation and bool(getattr(_STORE, "_open", False)))
+
+
 def current_directory_runtime_status() -> SessionDirectoryRuntimeStatus | None:
     with _RUNTIME_LOCK:
         return _STATUS

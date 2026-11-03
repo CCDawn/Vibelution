@@ -247,6 +247,9 @@ class ManagementService:
             "list": (RuntimeOperationsQuery, RuntimeOperationsResponse, self.native.read_runtime_operations),
             "get": (RuntimeOperationQuery, RuntimeOperationResponse, self.native.read_runtime_operation),
         }[operation]
+        if legacy:
+            from .runtime_legacy_contracts import LegacyRuntimeOperationsQuery, LegacyRuntimeOperationQuery
+            query_type = LegacyRuntimeOperationsQuery if operation == "list" else LegacyRuntimeOperationQuery
         try:
             query = query_type.model_validate(parameters)
         except ValidationError:

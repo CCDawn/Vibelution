@@ -31,6 +31,12 @@
 
 控制使用对象当前返回的 `commands`、精确 owner 引用及 revision。`revisionCheck=preflight_only` 只代表预检，原生 owner 仍决定能否执行。`accepted`、`stopRequested`、`restart_queued`、外层管理 `completed` 均不等于业务终态，之后读取原对象核验。
 
+当前清单还包括 `session_queue`：以 Session ID 和 queue ID 定位持久排队项，区分用户消息、任务通知、子 Agent 消息与控制通知，仅返回队列类型、位置、暂停和分支版本。它尚未成为 Turn；`stop` 只撤回该项，执行时在原 ConversationWriter 事务内检查完整元数据及版本，不停止当前 Turn、不解除队列暂停；`starting` 不可撤回。成功的 `cancelled` 原生应答证明该条删除已经提交。
+
+Session 来源的 `coverage.details` 分别说明运行控制器、调度器、持久队列、Journal 和 work run 覆盖。Journal-only 未闭合记录标为 `unknown`，不证明 worker 正在运行；链接、损坏、变化或读取预算不足均保留不完整状态。监督进化及自主进化通过已验证进程身份的只读元数据通道发现实际控制器，命令在原生锁内执行 CAS。断线后只读取原稳定命令的持久结果，不按当前暂停标志猜成功，也不重放未确认的旧 processing。
+
+新来源及字段由 `/runtime/inventory`、`/runtime/item` 和同步更新的助理 SDK 使用；原 `/runtime/operations`、`/runtime/operation` 保留七种来源、原字段及原分页空间，不返回队列来源或新增元数据字段。无需存储迁移或权限扩容。
+
 `management_requests` 发现原请求引用；`management_receipt` / `management_reconcile` 按原 action/request ID 只读核对管理应答或原生结果，权限仍按原动作独立 scope。`requires_review` / `unavailable` 必须如实保留；确认管理应答不证明业务完成。超时、丢失确认或重启后继续查询原稳定 ID，不换 ID 重放。需要人工复核时报告证据和对象引用，不能无限轮询同一 unknown。
 
 ## 团队与成员
