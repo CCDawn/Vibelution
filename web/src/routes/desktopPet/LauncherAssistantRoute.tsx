@@ -46,8 +46,9 @@ import {
   launcherAssistantActivity, launcherAssistantMessageOverLimit, launcherAssistantPollInterval, launcherAssistantSubmission,
   launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
   launcherAssistantSendDefinitelyRejected, launcherAssistantSessionEventRefreshesDetail, launcherAssistantSseHealthy,
-  launcherAssistantWaitInterval,
-  type LauncherAssistantSubmission, type LauncherAssistantQueuedAcceptance,
+  launcherAssistantWaitInterval, launcherAssistantLiveTextFromEvent, launcherAssistantLiveTextIsStale,
+  launcherAssistantActiveTurnMessage,
+  type LauncherAssistantSubmission, type LauncherAssistantQueuedAcceptance, type LauncherAssistantLiveText,
 } from "./launcherAssistantModel";
 import { loadLauncherComposer, restoreLauncherComposerAttachments, saveLauncherComposer } from "./launcherAssistantComposerStorage";
 
@@ -303,8 +304,12 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   // never re-render the page by itself. Null when no push channel ever spoke,
   // which keeps the 2s active cadence bit-for-bit identical to a shell without it.
   const sseAliveAt = useRef<number | null>(null);
+  // The key deliberately excludes the visibility/epoch counter: swapping the key
+  // drops the cached conversation for a frame, `{detail.data ? ...}` flips to
+  // the loading shell and unmounts the chat view (resetting its expansion
+  // state). A visibility restore refreshes this query in place instead.
   const detail = useQuery({
-    queryKey: ["launcher-assistant", "detail", sessionId, epoch],
+    queryKey: ["launcher-assistant", "detail", sessionId],
     queryFn: async ({ signal }) => {
       const result = await getLauncherAssistantDetail(sessionId);
       signal.throwIfAborted();
@@ -323,6 +328,12 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     },
     refetchIntervalInBackground: false,
   });
+  // Newest streaming answer text from the push channel, attributed to its turn.
+  // A ref plus explicit repaint through the overlay row below would be enough,
+  // but state keeps the effect graph plain: deltas are throttled by the host,
+  // so re-renders per frame are acceptable and never re-render on their own
+  // when the pump is absent (the value just stays null).
+  const [liveText, setLiveText] = useState<LauncherAssistantLiveText | null>(null);
   useEffect(() => {
     if (!observingOwnSession) return;
     let active = true;
@@ -334,12 +345,23 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     const unsubscribe = subscribeLauncherAssistantSessionEvent(event => {
       if (!active) return;
       sseAliveAt.current = Date.now();
+      const delta = launcherAssistantLiveTextFromEvent(event, sessionId);
+      if (delta.finished) setLiveText(null);
+      else if (delta.update) setLiveText(delta.update);
       if (!launcherAssistantSessionEventRefreshesDetail(event, sessionId)) return;
       void client.invalidateQueries({ queryKey: ["launcher-assistant", "detail", sessionId] });
     });
     if (!unsubscribe) return;
     return () => { active = false; unsubscribe(); };
   }, [client, observingOwnSession, sessionId]);
+  // The detail authority retires the preview: once this turn's answer commits
+  // as a durable row (or another turn took over), the overlay row must not
+  // outlive it. A missed `done` still converges because the committed row lands
+  // through the existing snapshot/polling paths.
+  useEffect(() => {
+    if (liveText && launcherAssistantLiveTextIsStale(liveText, detail.data)) setLiveText(null);
+  }, [detail.data, liveText]);
+  useEffect(() => { setLiveText(null); }, [sessionId]);
   useEffect(() => {
     const submission = outstanding.current;
     const recovered = submission && launcherAssistantRequestReadback(detail.data, submission.requestId);
@@ -466,7 +488,14 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     function visibilityChanged() {
       const next = document.visibilityState !== "hidden";
       setVisible(next);
-      if (next) void status.refetch();
+      if (next) {
+        void status.refetch();
+        // Refresh content in place: the detail key stays stable, because a key
+        // swap drops the cached conversation for a frame and unmounts the chat
+        // view (expansion state reset with it). The counter below only retires
+        // in-flight transport ACKs and refreshes the small auxiliary queries.
+        void client.invalidateQueries({ queryKey: ["launcher-assistant", "detail"] });
+      }
       if (outstanding.current) setSendUnconfirmed(true);
       epochRef.current += 1;
       setEpoch(epochRef.current);
@@ -1041,6 +1070,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       runtimeApi={launcherConversationApi}
       sessionId={detail.data.id} title={detail.data.title || identity?.displayName || copy.title}
       phase={resolveSessionActivity(detail.data).execution} messages={historyAttachments.messages}
+      activeTurnMessage={liveText ? launcherAssistantActiveTurnMessage(sessionId, liveText) : undefined}
       onVisibleTimelineMessageIds={setVisibleMessageIds}
       turnError={detail.data.lastTurnError}
       defaultFileContext={detail.data.defaultFileContext} assistantDisplayName={displayName}

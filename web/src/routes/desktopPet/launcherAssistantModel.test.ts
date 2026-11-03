@@ -9,6 +9,7 @@ import type { LauncherAssistantSessionEvent } from "../../api/launcherAssistant"
 import {
   launcherAssistantActivity, launcherAssistantMessageOverLimit, launcherAssistantPollInterval, launcherAssistantSendDefinitelyRejected, launcherAssistantSubmission, launcherDispatchLabel, launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
   launcherAssistantSessionEventRefreshesDetail, launcherAssistantSseHealthy, launcherAssistantWaitInterval,
+  launcherAssistantLiveTextFromEvent, launcherAssistantLiveTextIsStale, launcherAssistantActiveTurnMessage,
   LAUNCHER_ASSISTANT_MAX_MESSAGE_CHARS, LAUNCHER_ASSISTANT_SSE_HEALTH_WINDOW_MS, LAUNCHER_ASSISTANT_WAIT_POLL_FIRST_MS, LAUNCHER_ASSISTANT_WAIT_POLL_MAX_MS,
 } from "./launcherAssistantModel";
 import { LauncherAssistantRoute } from "./LauncherAssistantRoute";
@@ -493,6 +494,67 @@ describe("Launcher assistant state", () => {
     expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 
+  it("streams the pushed answer preview into the active-turn row, replaces it wholesale and retires it on done", async () => {
+    let push: ((event: LauncherAssistantSessionEvent) => void) | undefined;
+    bridge.subscribeLauncherAssistantSessionEvent.mockImplementation((listener: (event: LauncherAssistantSessionEvent) => void) => { push = listener; return () => {}; });
+    await renderAssistant({ id: "s", status: "running", activeTurnId: "t1", messages: [], defaultFileContext: "" }, undefined, undefined, { embedded: true });
+    expect(conversation?.activeTurnMessage).toBeUndefined();
+    await act(async () => { push?.({ type: "assistant_delta", sessionId: "s", at: Date.now(), turnId: "t1", textPreview: "第一段" }); });
+    expect(conversation?.activeTurnMessage).toMatchObject({ role: "assistant", turnId: "t1", status: "running" });
+    expect(conversation?.activeTurnMessage?.turnItems?.[0]).toMatchObject({ type: "agent_message", text: "第一段" });
+    // The preview is the frame's whole answer text, never an increment.
+    await act(async () => { push?.({ type: "assistant_delta", sessionId: "s", at: Date.now(), turnId: "t1", textPreview: "第一段第二段" }); });
+    expect(conversation?.activeTurnMessage?.turnItems?.[0]).toMatchObject({ text: "第一段第二段" });
+    // Heartbeats and identity-only envelopes never clear or clobber it.
+    await act(async () => { push?.({ type: "heartbeat", sessionId: "s", at: Date.now() }); });
+    await act(async () => { push?.({ type: "assistant_delta", sessionId: "s", at: Date.now() }); });
+    expect(conversation?.activeTurnMessage?.turnItems?.[0]).toMatchObject({ text: "第一段第二段" });
+    const reads = bridge.getLauncherAssistantDetail.mock.calls.length;
+    await act(async () => { push?.({ type: "assistant_delta", sessionId: "s", at: Date.now(), turnId: "t1", textPreview: "第一段第二段", done: true }); });
+    await settle(); await settle();
+    expect(conversation?.activeTurnMessage).toBeUndefined();
+    // done re-reads detail for the committed answer.
+    expect(bridge.getLauncherAssistantDetail.mock.calls.length).toBeGreaterThan(reads);
+  });
+
+  it("retires the streaming preview once detail holds the committed answer for that turn", async () => {
+    let push: ((event: LauncherAssistantSessionEvent) => void) | undefined;
+    bridge.subscribeLauncherAssistantSessionEvent.mockImplementation((listener: (event: LauncherAssistantSessionEvent) => void) => { push = listener; return () => {}; });
+    await renderAssistant({ id: "s", status: "running", activeTurnId: "t1", messages: [], defaultFileContext: "" }, undefined, undefined, { embedded: true });
+    await act(async () => { push?.({ type: "assistant_delta", sessionId: "s", at: Date.now(), turnId: "t1", textPreview: "流式答案" }); });
+    expect(conversation?.activeTurnMessage).toBeTruthy();
+    bridge.getLauncherAssistantDetail.mockResolvedValue({
+      id: "s", status: "ready", defaultFileContext: "",
+      messages: [{ id: "m1", role: "assistant", turnId: "t1", status: "completed", turnItems: [] }],
+    });
+    await act(async () => { push?.({ type: "session_detail", sessionId: "s", at: Date.now() }); });
+    await settle(); await settle();
+    expect(conversation?.activeTurnMessage).toBeUndefined();
+  });
+
+  it("keeps the conversation mounted through a visibility restore and refreshes detail in place", async () => {
+    await renderAssistant({ id: "s", status: "ready", messages: [], defaultFileContext: "" }, undefined, undefined, { embedded: true });
+    expect(container?.querySelector("[data-testid=assistant-conversation]")).toBeTruthy();
+    const reads = bridge.getLauncherAssistantDetail.mock.calls.length;
+    const original = Object.getOwnPropertyDescriptor(document, "visibilityState");
+    const setVisibility = (value: string) => Object.defineProperty(document, "visibilityState", { configurable: true, value });
+    try {
+      setVisibility("hidden");
+      await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+      setVisibility("visible");
+      await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+      // The restore must repaint from the cached conversation synchronously:
+      // an epoch-keyed detail query would drop the cache for a frame and
+      // unmount the chat view right here.
+      expect(container?.querySelector("[data-testid=assistant-conversation]")).toBeTruthy();
+      await settle(); await settle(); await settle();
+      expect(bridge.getLauncherAssistantDetail.mock.calls.length).toBeGreaterThan(reads);
+    } finally {
+      if (original) Object.defineProperty(document, "visibilityState", original);
+      else delete (document as { visibilityState?: unknown }).visibilityState;
+    }
+  });
+
   it("backs an active session's polling off to the 10s safety net once the push channel proves healthy", async () => {
     let push: ((event: LauncherAssistantSessionEvent) => void) | undefined;
     bridge.subscribeLauncherAssistantSessionEvent.mockImplementation((listener: (event: LauncherAssistantSessionEvent) => void) => { push = listener; return () => {}; });
@@ -553,6 +615,49 @@ describe("Launcher assistant state", () => {
     expect(launcherAssistantQueueReadback(source, receipt)).toMatchObject({ receipt, admittedTurnId: "", removed: false });
     source.messages[0].metadata = { clientSubmissionId: "r", turnId: "native-turn" };
     expect(launcherAssistantQueueReadback(source, receipt)).toEqual({ receipt: null, admittedTurnId: "native-turn", removed: false });
+  });
+
+  it("reduces only this session's unfinished answer deltas into the live preview", () => {
+    const at = 1;
+    const delta = (patch: Record<string, unknown>) => ({ type: "assistant_delta", sessionId: "s", at, ...patch }) as LauncherAssistantSessionEvent;
+    expect(launcherAssistantLiveTextFromEvent({ type: "heartbeat", sessionId: "s", at }, "s")).toEqual({ update: null, finished: false });
+    expect(launcherAssistantLiveTextFromEvent(delta({}), "s")).toEqual({ update: null, finished: false });
+    // Identity-only envelope (older shell / oversized fallback): nothing to show.
+    expect(launcherAssistantLiveTextFromEvent(delta({ turnId: "t" }), "s")).toEqual({ update: null, finished: false });
+    expect(launcherAssistantLiveTextFromEvent(delta({ textPreview: "答案" }), "s")).toEqual({ update: null, finished: false });
+    expect(launcherAssistantLiveTextFromEvent(delta({ turnId: "t", textPreview: "  " }), "s")).toEqual({ update: null, finished: false });
+    expect(launcherAssistantLiveTextFromEvent(delta({ turnId: "t", textPreview: "答案" }), "other")).toEqual({ update: null, finished: false });
+    expect(launcherAssistantLiveTextFromEvent(delta({ turnId: "t", textPreview: "答案" }), "s"))
+      .toEqual({ update: { turnId: "t", text: "答案" }, finished: false });
+    // An explicit done finishes the preview without producing another update.
+    expect(launcherAssistantLiveTextFromEvent(delta({ done: true, turnId: "t", textPreview: "答案" }), "s"))
+      .toEqual({ update: null, finished: true });
+    expect(launcherAssistantLiveTextFromEvent({ type: "session_detail", sessionId: "s", at }, "s").finished).toBe(false);
+  });
+
+  it("retires the live preview when the answer commits or another turn takes over, not for the native overlay", () => {
+    const live = { turnId: "t1", text: "部分回答" };
+    expect(launcherAssistantLiveTextIsStale(live, undefined)).toBe(false);
+    expect(launcherAssistantLiveTextIsStale(live, { messages: [], activeTurnId: "" })).toBe(false);
+    expect(launcherAssistantLiveTextIsStale(live, { messages: [], activeTurnId: "t1" })).toBe(false);
+    // Another generating turn supersedes the preview.
+    expect(launcherAssistantLiveTextIsStale(live, { messages: [], activeTurnId: "t2" })).toBe(true);
+    // A committed durable row for the same turn retires it.
+    expect(launcherAssistantLiveTextIsStale(live, { messages: [{ id: "m", role: "assistant", turnId: "t1", status: "completed", turnItems: [] }], activeTurnId: "" } as never)).toBe(true);
+    // The native live-overlay row for the same turn is not a commitment.
+    expect(launcherAssistantLiveTextIsStale(live, { messages: [{ id: "s-message-live-t1", role: "assistant", turnId: "t1", status: "running", turnItems: [], metadata: { kind: "session_live_overlay" } }], activeTurnId: "t1" } as never)).toBe(false);
+    // live: prefixed transport ids compare on their canonical half.
+    expect(launcherAssistantLiveTextIsStale({ turnId: "live:t1", text: "x" }, { messages: [], activeTurnId: "t1" })).toBe(false);
+  });
+
+  it("shapes the live preview as the shared conversation's active-turn overlay row", () => {
+    const row = launcherAssistantActiveTurnMessage("s", { turnId: "t1", text: "流式答案" });
+    expect(row.role).toBe("assistant");
+    expect(row).toMatchObject({ turnId: "t1", status: "running", metadata: { kind: "session_active_turn_layer", sessionId: "s" } });
+    expect(row.turnItems).toHaveLength(1);
+    expect(row.turnItems![0]).toMatchObject({ type: "agent_message", phase: "final_answer", status: "running", text: "流式答案", version: 3, sessionId: "s", turnId: "t1" });
+    const next = launcherAssistantActiveTurnMessage("s", { turnId: "t1", text: "流式答案变长" });
+    expect(next.turnItems![0].text).toBe("流式答案变长");
   });
 });
 

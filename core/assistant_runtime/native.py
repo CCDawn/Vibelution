@@ -46,6 +46,15 @@ _LEGACY_LAUNCHER_TOOLS = (
 _INITIAL_TOOLS = (*_LEGACY_LAUNCHER_TOOLS,
                   "personal_assistant_computer_observe_tool", "personal_assistant_computer_action_tool")
 
+# Launcher detail reads a bounded recent window, aligned with the native session
+# detail window ceiling (_SESSION_DETAIL_MESSAGE_WINDOW_MAX_LIMIT) and the
+# ordinary chat page's windowed reads. An unbounded read re-serialized the whole
+# history into every polled host response until the 8 MiB IPC cap rejected it
+# permanently (ASSISTANT_RESPONSE_TOO_LARGE) on long sessions. The window scope
+# additionally slims per-turn diagnostics exactly like the chat page payload;
+# committed final answers and acceptance metadata stay intact.
+LAUNCHER_ASSISTANT_DETAIL_MESSAGE_LIMIT = 200
+
 
 class AssistantSessionError(RuntimeError):
     """Bounded command failure; native exceptions and paths remain private."""
@@ -240,8 +249,15 @@ def get_detail(session_id: str) -> dict[str, Any]:
             raise sessions.SessionNotFoundError("Launcher assistant session not found")
         # This endpoint is polled by the resident renderer. The native light
         # projection retains messages and execution state without computing
-        # project inbox/governance/next-state side lists on every read.
-        detail = sessions.get_session_detail(session_id, include_secondary=False)
+        # project inbox/governance/next-state side lists on every read, and the
+        # recent-window limit keeps every response under the desktop bridge's
+        # 8 MiB envelope regardless of session length.
+        detail = sessions.get_session_detail(
+            session_id,
+            include_secondary=False,
+            message_limit=LAUNCHER_ASSISTANT_DETAIL_MESSAGE_LIMIT,
+            transcript_scope="window",
+        )
         if detail is None or str(detail.get("agentId") or "") != assistant["agentId"]:
             raise sessions.SessionNotFoundError("Launcher assistant session not found")
         return detail

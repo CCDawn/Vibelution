@@ -488,10 +488,38 @@ def test_private_detail_uses_native_light_projection_and_keeps_identity_gate(mon
     monkeypatch.setattr(native, "_services", lambda: (None, None, SimpleNamespace(
         get_session_detail=detail, SessionNotFoundError=MissingSession), None))
     assert native.get_detail("session-1")["id"] == "session-1"
-    assert calls == [("session-1", {"include_secondary": False})]
+    # The resident renderer polls this endpoint: the recent-window limit and the
+    # chat-page window scope keep each response under the desktop bridge's
+    # 8 MiB envelope on long sessions.
+    assert calls == [("session-1", {
+        "include_secondary": False,
+        "message_limit": native.LAUNCHER_ASSISTANT_DETAIL_MESSAGE_LIMIT,
+        "transcript_scope": "window",
+    })]
+    assert 100 <= native.LAUNCHER_ASSISTANT_DETAIL_MESSAGE_LIMIT <= 200
     with pytest.raises(MissingSession):
         native.get_detail("another-session")
     assert len(calls) == 1
+
+
+def test_private_detail_returns_only_the_recent_message_window(assistant_command_session, tmp_path):
+    from core.chat.conversation_ledger import append_conversation_event
+
+    native, sessions, sid, _, _, _ = assistant_command_session
+    total = native.LAUNCHER_ASSISTANT_DETAIL_MESSAGE_LIMIT + 60
+    for index in range(total):
+        append_conversation_event(tmp_path, sid, f"window-turn-{index}", "user_message",
+                                  payload={"content": f"window message {index}"}, status="")
+    detail = native.get_detail(sid)
+    window = detail.get("messageWindow") or {}
+    assert window.get("hasEarlier") is True
+    assert window.get("hasLater") is False
+    assert window.get("returnedMessages") == native.LAUNCHER_ASSISTANT_DETAIL_MESSAGE_LIMIT
+    assert window.get("totalMessages") >= total
+    # The newest window keeps the recent tail that acceptance readback and the
+    # conversation view rely on; the oldest rows are the truncated ones.
+    assert detail["messages"][-1]["content"] == f"window message {total - 1}"
+    assert len(detail["messages"]) == native.LAUNCHER_ASSISTANT_DETAIL_MESSAGE_LIMIT
 
 
 @pytest.fixture
