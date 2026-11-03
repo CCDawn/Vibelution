@@ -1,8 +1,11 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  ADVISORY_FRONTEND_ENSURE_DEBOUNCE_MS,
+  advisoryFrontendEnsureKey,
+  createAdvisoryFrontendEnsureScheduler,
   decideLauncherShellRestart,
   decidePackagedDesktopShellRefresh,
   decidePeriodicDesktopShellRefresh,
@@ -16,7 +19,9 @@ import {
   shouldDeferWorkbenchOpenUntilLifecycleStart,
   shouldInspectDesktopShellBeforeLifecycle,
   shouldRefreshBeforeLifecycle,
-  thenLifecycleFromDesktopCli
+  thenLifecycleFromDesktopCli,
+  type AdvisoryFrontendEnsureEvent,
+  type AdvisoryFrontendEnsureRequest
 } from "../src/process/desktopShellFreshness.js";
 
 type SpawnChild = {
@@ -459,5 +464,207 @@ describe("desktop shell freshness", () => {
         reason: "missing_package"
       }).label
     ).toBe("Launcher 壳未就绪 · missing_package");
+  });
+
+  it("passes the frontend BuildKey and release facts through the status parser", () => {
+    const parsed = parseDesktopShellStatus(JSON.stringify({
+      schemaVersion: 1,
+      stale: true,
+      launchBlocking: false,
+      reason: "frontend_source_stale",
+      activeFrontendReleaseUsable: true,
+      frontendBuildCurrent: false,
+      currentFrontendBuildKey: "key-123"
+    }));
+    expect(parsed.activeFrontendReleaseUsable).toBe(true);
+    expect(parsed.frontendBuildCurrent).toBe(false);
+    expect(parsed.currentFrontendBuildKey).toBe("key-123");
+
+    const failed = parseDesktopShellStatus(JSON.stringify({
+      schemaVersion: 1, stale: true, launchBlocking: false, reason: "frontend_inspection_failed", frontendBuildCurrent: null
+    }));
+    expect(failed.frontendBuildCurrent).toBeNull();
+    expect("currentFrontendBuildKey" in failed).toBe(false);
+  });
+
+  it("keys the advisory ensure on the source BuildKey, falling back to the reason", () => {
+    expect(advisoryFrontendEnsureKey({ reason: "frontend_source_stale", currentFrontendBuildKey: " key-1 " })).toBe("key-1");
+    expect(advisoryFrontendEnsureKey({ reason: "frontend_inspection_failed" })).toBe("reason:frontend_inspection_failed");
+    expect(advisoryFrontendEnsureKey({ reason: "", currentFrontendBuildKey: "" })).toBe("reason:unknown");
+  });
+});
+
+describe("advisory frontend ensure scheduler", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  type Deferred = { resolve: (value: { rebuilt?: boolean; skipped?: boolean }) => void; reject: (error: Error) => void };
+
+  function harness(options: { debounceMs?: number; manual?: boolean } = {}) {
+    const events: AdvisoryFrontendEnsureEvent[] = [];
+    const runs: AdvisoryFrontendEnsureRequest[] = [];
+    const deferred: Deferred[] = [];
+    const run = vi.fn(async (request: AdvisoryFrontendEnsureRequest) => {
+      runs.push(request);
+      if (!options.manual) {
+        return { rebuilt: true, skipped: false };
+      }
+      return await new Promise<{ rebuilt?: boolean; skipped?: boolean }>((resolve, reject) => {
+        deferred.push({ resolve, reject });
+      });
+    });
+    const scheduler = createAdvisoryFrontendEnsureScheduler({
+      run,
+      onEvent: (event) => events.push(event),
+      ...(options.debounceMs === undefined ? {} : { debounceMs: options.debounceMs })
+    });
+    return { scheduler, events, runs, run, deferred, kinds: () => events.map((event) => event.kind) };
+  }
+
+  it("runs one debounced background ensure without blocking the caller", async () => {
+    const h = harness({ debounceMs: 2_000 });
+    expect(h.scheduler.schedule({ buildKey: "key-a", reason: "frontend_source_stale" })).toBe("scheduled");
+    expect(h.scheduler.inFlight()).toBe(true);
+    expect(h.run).not.toHaveBeenCalled();
+    expect(h.kinds()).toEqual(["scheduled"]);
+    expect(h.events[0]).toMatchObject({ kind: "scheduled", buildKey: "key-a", reason: "frontend_source_stale", delayMs: 2_000 });
+
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(h.run).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(h.run).toHaveBeenCalledTimes(1);
+    expect(h.runs[0]).toEqual({ buildKey: "key-a", reason: "frontend_source_stale" });
+    await vi.runAllTimersAsync();
+    expect(h.kinds()).toEqual(["scheduled", "started", "completed"]);
+    expect(h.events[2]).toMatchObject({ kind: "completed", rebuilt: true, skipped: false });
+    expect(h.scheduler.inFlight()).toBe(false);
+  });
+
+  it("is idempotent per BuildKey: repeated advisories for one key never re-queue", async () => {
+    const h = harness({ debounceMs: 1_000 });
+    expect(h.scheduler.schedule({ buildKey: "key-a", reason: "frontend_source_stale" })).toBe("scheduled");
+    expect(h.scheduler.schedule({ buildKey: "key-a", reason: "frontend_source_stale" })).toBe("deduplicated");
+    await vi.runAllTimersAsync();
+    expect(h.run).toHaveBeenCalledTimes(1);
+
+    // The same key after completion (snapshot still stale for a reason the
+    // workspace build cannot fix) must not loop every probe tick.
+    expect(h.scheduler.schedule({ buildKey: "key-a", reason: "frontend_package_content_mismatch" })).toBe("deduplicated");
+    await vi.runAllTimersAsync();
+    expect(h.run).toHaveBeenCalledTimes(1);
+    expect(h.kinds().filter((kind) => kind === "deduplicated")).toHaveLength(2);
+
+    // A new key is a new source state and runs again.
+    expect(h.scheduler.schedule({ buildKey: "key-b", reason: "frontend_source_stale" })).toBe("scheduled");
+    await vi.runAllTimersAsync();
+    expect(h.run).toHaveBeenCalledTimes(2);
+    expect(h.runs[1].buildKey).toBe("key-b");
+  });
+
+  it("coalesces a burst within the debounce window to the latest key", async () => {
+    const h = harness({ debounceMs: 1_000 });
+    h.scheduler.schedule({ buildKey: "key-a", reason: "frontend_source_stale" });
+    await vi.advanceTimersByTimeAsync(500);
+    h.scheduler.schedule({ buildKey: "key-b", reason: "frontend_source_stale" });
+    await vi.advanceTimersByTimeAsync(999);
+    expect(h.run).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(h.run).toHaveBeenCalledTimes(1);
+    expect(h.runs[0].buildKey).toBe("key-b");
+    await vi.runAllTimersAsync();
+    expect(h.run).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the ensure single-flight: a new key waits for the running build", async () => {
+    const h = harness({ debounceMs: 100, manual: true });
+    h.scheduler.schedule({ buildKey: "key-a", reason: "frontend_source_stale" });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(h.run).toHaveBeenCalledTimes(1);
+    expect(h.scheduler.inFlight()).toBe(true);
+
+    expect(h.scheduler.schedule({ buildKey: "key-b", reason: "frontend_source_stale" })).toBe("scheduled");
+    await vi.advanceTimersByTimeAsync(1_000);
+    // key-a is still running: key-b must not start concurrently.
+    expect(h.run).toHaveBeenCalledTimes(1);
+
+    h.deferred[0].resolve({ rebuilt: false, skipped: true });
+    await vi.runAllTimersAsync();
+    expect(h.run).toHaveBeenCalledTimes(2);
+    expect(h.runs[1].buildKey).toBe("key-b");
+    expect(h.kinds()).toEqual(["scheduled", "started", "scheduled", "completed", "scheduled", "started"]);
+    expect(h.events[3]).toMatchObject({ kind: "completed", buildKey: "key-a", rebuilt: false, skipped: true });
+
+    h.deferred[1].resolve({ rebuilt: true });
+    await vi.runAllTimersAsync();
+    expect(h.scheduler.inFlight()).toBe(false);
+  });
+
+  it("records a failed ensure as an event and never throws or escalates", async () => {
+    const h = harness({ debounceMs: 10, manual: true });
+    h.scheduler.schedule({ buildKey: "key-a", reason: "frontend_source_stale" });
+    await vi.advanceTimersByTimeAsync(10);
+    h.deferred[0].reject(new Error("tsc exploded"));
+    await vi.runAllTimersAsync();
+    expect(h.kinds()).toEqual(["scheduled", "started", "failed"]);
+    expect(h.events[2]).toMatchObject({ kind: "failed", buildKey: "key-a", error: "tsc exploded" });
+    expect(h.scheduler.inFlight()).toBe(false);
+
+    // The failed key is not retried on the next tick; a new key still runs.
+    expect(h.scheduler.schedule({ buildKey: "key-a", reason: "frontend_source_stale" })).toBe("deduplicated");
+    expect(h.scheduler.schedule({ buildKey: "key-b", reason: "frontend_source_stale" })).toBe("scheduled");
+    await vi.advanceTimersByTimeAsync(10);
+    expect(h.run).toHaveBeenCalledTimes(2);
+  });
+
+  it("survives a throwing observer and a synchronously throwing run", async () => {
+    const run = vi.fn(() => { throw new Error("sync boom"); });
+    const events: AdvisoryFrontendEnsureEvent[] = [];
+    const scheduler = createAdvisoryFrontendEnsureScheduler({
+      run: run as unknown as (request: AdvisoryFrontendEnsureRequest) => Promise<void>,
+      onEvent: (event) => {
+        events.push(event);
+        throw new Error("observer boom");
+      },
+      debounceMs: 1
+    });
+    expect(scheduler.schedule({ buildKey: "key-a", reason: "r" })).toBe("scheduled");
+    await vi.runAllTimersAsync();
+    expect(events.map((event) => event.kind)).toEqual(["scheduled", "started", "failed"]);
+    expect(scheduler.inFlight()).toBe(false);
+  });
+
+  it("skips empty keys, honors reset, and cancels on dispose", async () => {
+    const h = harness({ debounceMs: 50 });
+    expect(h.scheduler.schedule({ buildKey: "", reason: "frontend_source_stale" })).toBe("skipped");
+    expect(h.scheduler.schedule({ buildKey: "   ", reason: "frontend_source_stale" })).toBe("skipped");
+    expect(h.events).toEqual([]);
+
+    h.scheduler.schedule({ buildKey: "key-a", reason: "r" });
+    await vi.runAllTimersAsync();
+    expect(h.run).toHaveBeenCalledTimes(1);
+    expect(h.scheduler.schedule({ buildKey: "key-a", reason: "r" })).toBe("deduplicated");
+    h.scheduler.reset();
+    expect(h.scheduler.schedule({ buildKey: "key-a", reason: "r" })).toBe("scheduled");
+    await vi.runAllTimersAsync();
+    expect(h.run).toHaveBeenCalledTimes(2);
+
+    h.scheduler.schedule({ buildKey: "key-b", reason: "r" });
+    expect(h.scheduler.inFlight()).toBe(true);
+    h.scheduler.dispose();
+    expect(h.scheduler.inFlight()).toBe(false);
+    await vi.runAllTimersAsync();
+    expect(h.run).toHaveBeenCalledTimes(2);
+    expect(h.scheduler.schedule({ buildKey: "key-c", reason: "r" })).toBe("skipped");
+  });
+
+  it("uses the default debounce when none is configured", () => {
+    const h = harness();
+    h.scheduler.schedule({ buildKey: "key-a", reason: "r" });
+    expect(h.events[0]).toMatchObject({ kind: "scheduled", delayMs: ADVISORY_FRONTEND_ENSURE_DEBOUNCE_MS });
+    h.scheduler.dispose();
   });
 });

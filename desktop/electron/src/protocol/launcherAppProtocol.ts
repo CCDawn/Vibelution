@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, statSync } from "node:fs";
 import { basename, extname, resolve, sep } from "node:path";
 import { protocol } from "electron";
 
@@ -43,25 +43,227 @@ export function resolveLauncherAppUrl(): string {
   return `${LAUNCHER_APP_ORIGIN}/launcher`;
 }
 
-function resolveWorkspaceActiveRelease(workspaceRoot: string): string | null {
-  const releasesRoot = resolve(workspaceRoot, "web", ".vibelution-builds");
+// Mirrors core/launcher/frontend_build.py (BUILD_SCHEMA_VERSION,
+// _validate_release_assets, _is_complete_release). The shell must apply the
+// same completeness contract as the Python publisher: a pointer that names a
+// directory with only an index.html is not a verified release.
+const FRONTEND_BUILD_SCHEMA_VERSION = 2;
+const RELEASE_PROVENANCE_NAME = ".vibelution-build.json";
+const INDEX_ASSET_REFERENCE = /(?:src|href)=["']\/assets\/([^"']+)["']/g;
+
+export type LauncherDistSource = "explicit" | "active-release" | "packaged-snapshot" | "legacy-dist";
+
+export type LauncherDistResolution = {
+  distRoot: string;
+  source: LauncherDistSource;
+  /** Active release directory name when `source` is `active-release`. */
+  release?: string;
+  /** Verified provenance buildKey for `active-release`, or legacy provenance when present. */
+  buildKey?: string;
+  /** Set when an active pointer existed but did not pass the completeness contract. */
+  rejectedActiveRelease?: { release: string; reason: string };
+  /** For `legacy-dist`: whether `.vibelution-build.json` with a buildKey exists. */
+  legacyProvenance?: "present" | "missing";
+  warnings: string[];
+};
+
+export type LauncherDistResolutionEvent = {
+  kind: "launcher_dist_resolution";
+  level: "warning" | "info";
+  message: string;
+  resolution: LauncherDistResolution;
+};
+
+type ReleaseProvenance = { schemaVersion: number; buildKey: string };
+
+function readJsonObject(path: string): Record<string, unknown> | null {
   try {
-    const active = JSON.parse(readFileSync(resolve(releasesRoot, "active.json"), "utf8")) as { release?: unknown };
-    const release = String(active.release || "").trim();
-    if (
-      release.startsWith("release-")
-      && basename(release) === release
-      && resolve(releasesRoot, release).startsWith(`${releasesRoot}${sep}`)
-    ) {
-      const candidate = resolve(releasesRoot, release);
-      if (existsSync(resolve(candidate, "index.html"))) {
-        return candidate;
-      }
-    }
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
   } catch {
-    // Old workspaces and interrupted builds leave no usable active release.
+    return null;
+  }
+}
+
+function readReleaseProvenance(releaseRoot: string): ReleaseProvenance | null {
+  const provenance = readJsonObject(resolve(releaseRoot, RELEASE_PROVENANCE_NAME));
+  if (!provenance) {
+    return null;
+  }
+  const schemaVersion = Number(provenance.schemaVersion || 0);
+  const buildKey = typeof provenance.buildKey === "string" ? provenance.buildKey.trim() : "";
+  return { schemaVersion, buildKey };
+}
+
+/**
+ * Same completeness contract as frontend_build._is_complete_release: a
+ * non-empty index.html whose `/assets/*` references all exist, plus a schema
+ * 2 provenance whose buildKey matches the pointer when the pointer names one.
+ * Returns the rejection reason, or null when the release is complete.
+ */
+function releaseRejectionReason(releaseRoot: string, pointerBuildKey: string): string | null {
+  const index = resolve(releaseRoot, "index.html");
+  let indexContent: string;
+  try {
+    if (statSync(index).size <= 0) {
+      return "empty_index";
+    }
+    indexContent = readFileSync(index, "utf8");
+  } catch {
+    return "missing_index";
+  }
+  for (const match of indexContent.matchAll(INDEX_ASSET_REFERENCE)) {
+    if (!existsSync(resolve(releaseRoot, "assets", match[1]))) {
+      return `missing_asset:${match[1]}`;
+    }
+  }
+  const provenance = readReleaseProvenance(releaseRoot);
+  if (!provenance) {
+    return "missing_provenance";
+  }
+  if (provenance.schemaVersion !== FRONTEND_BUILD_SCHEMA_VERSION) {
+    return `provenance_schema:${provenance.schemaVersion}`;
+  }
+  if (!provenance.buildKey) {
+    return "provenance_missing_build_key";
+  }
+  if (pointerBuildKey && provenance.buildKey !== pointerBuildKey) {
+    return "build_key_mismatch";
   }
   return null;
+}
+
+type ActiveReleaseOutcome =
+  | { kind: "none" }
+  | { kind: "rejected"; release: string; reason: string }
+  | { kind: "accepted"; distRoot: string; release: string; buildKey: string; warnings: string[] };
+
+function resolveWorkspaceActiveRelease(workspaceRoot: string): ActiveReleaseOutcome {
+  const releasesRoot = resolve(workspaceRoot, "web", ".vibelution-builds");
+  const active = readJsonObject(resolve(releasesRoot, "active.json"));
+  if (!active) {
+    // Old workspaces and interrupted builds leave no usable active release.
+    return { kind: "none" };
+  }
+  const release = String(active.release || "").trim();
+  if (
+    !release.startsWith("release-")
+    || basename(release) !== release
+    || !resolve(releasesRoot, release).startsWith(`${releasesRoot}${sep}`)
+  ) {
+    return { kind: "rejected", release, reason: "invalid_pointer_release" };
+  }
+  const pointerBuildKey = typeof active.buildKey === "string" ? active.buildKey.trim() : "";
+  const candidate = resolve(releasesRoot, release);
+  const reason = releaseRejectionReason(candidate, pointerBuildKey);
+  if (reason) {
+    return { kind: "rejected", release, reason };
+  }
+  const provenance = readReleaseProvenance(candidate);
+  const warnings: string[] = [];
+  if (!pointerBuildKey) {
+    // The Python publisher always writes buildKey; its absence means a
+    // hand-edited or pre-v2 pointer. Serve the verified release but say so.
+    warnings.push("active release pointer carries no buildKey; verified through provenance only");
+  }
+  return { kind: "accepted", distRoot: candidate, release, buildKey: provenance?.buildKey ?? "", warnings };
+}
+
+let lastReportedResolutionSignature = "";
+let lastResolution: LauncherDistResolution | null = null;
+
+function resolutionSignature(resolution: LauncherDistResolution): string {
+  return JSON.stringify([
+    resolution.source,
+    resolution.distRoot,
+    resolution.release ?? "",
+    resolution.buildKey ?? "",
+    resolution.rejectedActiveRelease?.reason ?? "",
+    resolution.legacyProvenance ?? "",
+    resolution.warnings
+  ]);
+}
+
+/** The last dist-root resolution outcome; the usage fact behind the served shell. */
+export function lastLauncherDistResolution(): LauncherDistResolution | null {
+  return lastResolution;
+}
+
+export function resetLauncherDistResolutionStateForTests(): void {
+  lastReportedResolutionSignature = "";
+  lastResolution = null;
+}
+
+function defaultLauncherDistEventSink(event: LauncherDistResolutionEvent): void {
+  if (event.level === "warning") {
+    console.warn(event.message);
+  }
+}
+
+/**
+ * Resolve the launcher dist root with full provenance. Pure except for the
+ * filesystem reads; `resolveLauncherDistRoot` layers event reporting on top.
+ */
+export function resolveLauncherDistResolution(input: {
+  resourcesRoot: string;
+  workspaceRoot: string;
+  packaged: boolean;
+  env: NodeJS.ProcessEnv;
+}): LauncherDistResolution {
+  const explicit = String(input.env.VIBELUTION_LAUNCHER_DIST_ROOT || "").trim();
+  if (explicit) {
+    return { distRoot: resolve(explicit), source: "explicit", warnings: [] };
+  }
+  // The packaged launcher window must observe the workspace active release so
+  // web changes reach the shell without a full package rebuild; the packaged
+  // snapshot stays as the fallback when no workspace release exists.
+  const outcome: ActiveReleaseOutcome = input.workspaceRoot
+    ? resolveWorkspaceActiveRelease(input.workspaceRoot)
+    : { kind: "none" };
+  if (outcome.kind === "accepted") {
+    return {
+      distRoot: outcome.distRoot,
+      source: "active-release",
+      release: outcome.release,
+      buildKey: outcome.buildKey,
+      warnings: outcome.warnings
+    };
+  }
+  const warnings: string[] = [];
+  const rejected = outcome.kind === "rejected" ? { release: outcome.release, reason: outcome.reason } : undefined;
+  if (rejected) {
+    warnings.push(
+      `active frontend release "${rejected.release}" rejected (${rejected.reason}); serving a fallback shell that may be stale`
+    );
+  }
+  if (input.packaged) {
+    return {
+      distRoot: resolve(input.resourcesRoot, "web-dist"),
+      source: "packaged-snapshot",
+      ...(rejected ? { rejectedActiveRelease: rejected } : {}),
+      warnings
+    };
+  }
+  // Legacy web/dist is unverified by construction: no pointer, no immutable
+  // release directory, and typically no provenance. It stays as the last
+  // resort, but never silently: the missing provenance is reported so a
+  // stale developer build cannot masquerade as a verified release.
+  const legacyRoot = resolve(input.workspaceRoot, "web", "dist");
+  const legacy = readReleaseProvenance(legacyRoot);
+  const legacyProvenance: "present" | "missing" = legacy?.buildKey ? "present" : "missing";
+  if (legacyProvenance === "missing") {
+    warnings.push("legacy web/dist served without provenance/buildKey; frontend freshness cannot be verified");
+  }
+  return {
+    distRoot: legacyRoot,
+    source: "legacy-dist",
+    ...(legacy?.buildKey ? { buildKey: legacy.buildKey } : {}),
+    ...(rejected ? { rejectedActiveRelease: rejected } : {}),
+    legacyProvenance,
+    warnings
+  };
 }
 
 export function resolveLauncherDistRoot(input: {
@@ -69,22 +271,23 @@ export function resolveLauncherDistRoot(input: {
   workspaceRoot: string;
   packaged: boolean;
   env: NodeJS.ProcessEnv;
+  /** Receives one event per distinct resolution outcome; defaults to console.warn for warnings. */
+  onEvent?: (event: LauncherDistResolutionEvent) => void;
 }): string {
-  const explicit = String(input.env.VIBELUTION_LAUNCHER_DIST_ROOT || "").trim();
-  if (explicit) {
-    return resolve(explicit);
+  const resolution = resolveLauncherDistResolution(input);
+  lastResolution = resolution;
+  // This runs per protocol request. Report each distinct outcome once, so a
+  // fallback is visible in the log without a line per asset fetch.
+  const signature = resolutionSignature(resolution);
+  if (signature !== lastReportedResolutionSignature) {
+    lastReportedResolutionSignature = signature;
+    const level: "warning" | "info" = resolution.warnings.length > 0 ? "warning" : "info";
+    const message = level === "warning"
+      ? `launcher dist resolution (${resolution.source}): ${resolution.warnings.join("; ")}`
+      : `launcher dist resolution (${resolution.source}): ${resolution.distRoot}`;
+    (input.onEvent ?? defaultLauncherDistEventSink)({ kind: "launcher_dist_resolution", level, message, resolution });
   }
-  // The packaged launcher window must observe the workspace active release so
-  // web changes reach the shell without a full package rebuild; the packaged
-  // snapshot stays as the fallback when no workspace release exists.
-  const activeRelease = input.workspaceRoot ? resolveWorkspaceActiveRelease(input.workspaceRoot) : null;
-  if (activeRelease) {
-    return activeRelease;
-  }
-  if (input.packaged) {
-    return resolve(input.resourcesRoot, "web-dist");
-  }
-  return resolve(input.workspaceRoot, "web", "dist");
+  return resolution.distRoot;
 }
 
 function launcherAppProtocolResponse(input: {

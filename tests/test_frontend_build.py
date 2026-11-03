@@ -275,6 +275,134 @@ def test_build_key_tracks_production_inputs_but_not_git_audit(monkeypatch: pytes
     assert frontend_build.compute_build_key(after_vite_environment) != frontend_build.compute_build_key(changed_vite_environment)
 
 
+def _key(root: Path) -> str:
+    return frontend_build.compute_build_key(frontend_build.build_inputs(root))
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        "scripts/parallelBuild.mjs",
+        "scripts/checkBundleBudget.mjs",
+        "probes/workflow-elk-handshake.html",
+        "probes/workflow-elk-handshake.ts",
+        "vite.config.node-shims.d.ts",
+    ],
+)
+def test_build_key_tracks_every_consumed_build_input(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, relative: str) -> None:
+    """The scan covers scripts/, probes/ and the tsc node shim, not only src/public."""
+    web = _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    before = _key(tmp_path)
+
+    target = web / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("// v1\n", encoding="utf-8")
+    added = _key(tmp_path)
+    assert added != before
+
+    target.write_text("// v2\n", encoding="utf-8")
+    assert _key(tmp_path) != added
+
+    target.unlink()
+    assert _key(tmp_path) == before
+
+
+def test_build_key_ignores_test_files_under_scripts(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    web = _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    (web / "scripts").mkdir()
+    (web / "scripts" / "parallelBuild.mjs").write_text("// build\n", encoding="utf-8")
+    before = _key(tmp_path)
+    (web / "scripts" / "parallelBuild.test.ts").write_text("test('x', () => {})\n", encoding="utf-8")
+    assert _key(tmp_path) == before
+
+
+def test_build_key_tracks_vite_config_local_references(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Alias and entry paths named by vite.config.ts outside src/public are fingerprinted."""
+    web = _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    (web / "vendor-shims").mkdir()
+    shim = web / "vendor-shims" / "composeRefs.ts"
+    shim.write_text("export const shim = 1;\n", encoding="utf-8")
+    (web / "extra").mkdir()
+    entry = web / "extra" / "entry.html"
+    entry.write_text("<html></html>", encoding="utf-8")
+    (web / "extra" / "entry.test.ts").write_text("test('x', () => {})\n", encoding="utf-8")
+    (web / "vite.config.ts").write_text(
+        "\n".join(
+            [
+                "const webRoot = '.';",
+                'const shim = resolve(webRoot, "vendor-shims", "composeRefs.ts");',
+                'const entry = fileURLToPath(new URL("./extra/entry.html", import.meta.url));',
+                'const src = resolve(webRoot, "src/App.tsx");',
+                'const escape = resolve(webRoot, "../outside.ts");',
+                "export default { resolve: { alias: { '@radix-ui/react-compose-refs': shim } } };",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "outside.ts").write_text("export const outside = 1;\n", encoding="utf-8")
+
+    references = frontend_build._vite_config_local_references(web)
+    assert shim in references
+    assert entry in references
+    assert all(path.name != "entry.test.ts" for path in references)
+    assert all("outside.ts" != path.name for path in references)
+    # References below src/ are already fingerprinted by the directory scan.
+    assert all(path != web / "src" / "App.tsx" for path in references)
+
+    inputs = frontend_build.build_inputs(tmp_path)
+    scanned = frontend_build._production_input_paths(web)
+    assert scanned.count((web / "src" / "App.tsx").resolve()) == 1
+    before = frontend_build.compute_build_key(inputs)
+
+    shim.write_text("export const shim = 2;\n", encoding="utf-8")
+    after_shim = _key(tmp_path)
+    assert after_shim != before
+
+    entry.write_text("<html>v2</html>", encoding="utf-8")
+    after_entry = _key(tmp_path)
+    assert after_entry != after_shim
+
+    # A reference that escapes the frontend root is never fingerprinted.
+    (tmp_path / "outside.ts").write_text("export const outside = 2;\n", encoding="utf-8")
+    assert _key(tmp_path) == after_entry
+
+
+def test_build_key_changes_with_the_production_input_scan_version(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Widening the fingerprint surface must invalidate every existing release exactly once."""
+    _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    inputs = frontend_build.build_inputs(tmp_path)
+    assert inputs["productionInputScanVersion"] == frontend_build._PRODUCTION_INPUT_SCAN_VERSION
+    before = frontend_build.compute_build_key(inputs)
+    monkeypatch.setattr(frontend_build, "_PRODUCTION_INPUT_SCAN_VERSION", frontend_build._PRODUCTION_INPUT_SCAN_VERSION + 1)
+    assert _key(tmp_path) != before
+
+
+def test_widened_scan_invalidates_an_active_release_built_with_the_old_surface(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An active release published before scripts/ was fingerprinted is judged stale once."""
+    web = _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    (web / "scripts").mkdir()
+    (web / "scripts" / "parallelBuild.mjs").write_text("// build\n", encoding="utf-8")
+    key = frontend_build.inspect_frontend_build(tmp_path)["buildKey"]
+    dist = _release(tmp_path, "release-current", schema=frontend_build.BUILD_SCHEMA_VERSION, key=key)
+    _activate(tmp_path, dist.name, key=key)
+    assert frontend_build.inspect_frontend_build(tmp_path)["current"] is True
+
+    # A sibling script the old surface never saw now participates in the key.
+    (web / "scripts" / "checkBundleBudget.mjs").write_text("// budget\n", encoding="utf-8")
+    inspection = frontend_build.inspect_frontend_build(tmp_path)
+    assert inspection["current"] is False
+    # The contended reuse snapshot observes the same mismatch and declines
+    # to reuse the old release instead of serving it past the lock.
+    assert frontend_build._current_release_during_build_contention(tmp_path, "npm") is None
+
+
 def test_build_inputs_scans_once_and_detects_added_changed_and_removed_files(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

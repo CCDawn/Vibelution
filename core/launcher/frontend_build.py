@@ -39,6 +39,25 @@ RELEASES_DIR_NAME = ".vibelution-builds"
 ACTIVE_RELEASE_NAME = "active.json"
 LOCK_DIR_NAME = "frontend-build.lockdir"
 LOCK_INITIALIZATION_GRACE_SECONDS = 5.0
+# BuildKey fingerprint surface. Everything the production build consumes must
+# be listed here or under ``_BUILD_INPUT_DIRS``; a consumed-but-unlisted input
+# lets an edit leave the BuildKey unchanged, so the stale active release is
+# judged "current" and the rebuild is skipped (the launcher then serves the old
+# release indefinitely because frontend-only staleness is advisory).
+#
+# Scan version 2 (2026-11) widened the surface: ``scripts/`` (the ``npm run
+# build`` entry ``parallelBuild.mjs`` and its siblings), ``probes/`` (consumed
+# by ``vite.config.ts`` when ``VIBELUTION_PROBE_BUILD=1``),
+# ``vite.config.node-shims.d.ts`` (``tsc -b`` via ``tsconfig.node.json``), and
+# every local path ``vite.config.ts`` references (alias targets and
+# ``resolve(webRoot, ...)`` / ``new URL("./...", import.meta.url)`` entries).
+# Backward compatibility: a scan-version change alters every BuildKey, so the
+# first ensure after upgrading judges the existing active release stale and
+# performs one full rebuild. That single rebuild is intended; the contended
+# reuse path (``_current_release_during_build_contention``) sees the same key
+# mismatch and falls back to the locked path instead of reusing the old release.
+_PRODUCTION_INPUT_SCAN_VERSION = 2
+_BUILD_INPUT_DIRS = ("src", "public", "scripts", "probes")
 _BUILD_INPUT_FILES = (
     "index.html",
     "package.json",
@@ -47,12 +66,25 @@ _BUILD_INPUT_FILES = (
     "tsconfig.app.json",
     "tsconfig.node.json",
     "vite.config.ts",
-    "scripts/parallelBuild.mjs",
+    "vite.config.node-shims.d.ts",
     ".env",
     ".env.local",
     ".env.production",
     ".env.production.local",
 )
+_VITE_CONFIG_NAME = "vite.config.ts"
+# Local-path references inside vite.config.ts. Only string literals are
+# followed: ``resolve(webRoot, "a", "b")`` joins its literal segments and
+# ``new URL("./x", import.meta.url)`` keeps the relative target. Each resolves
+# against the frontend root; targets outside it are not fingerprinted because
+# the scan boundary (``_scan_production_inputs``) rejects them.
+_VITE_CONFIG_RESOLVE_PATTERN = re.compile(
+    r"resolve\(\s*webRoot\s*((?:,\s*[\"'][^\"']+[\"']\s*)+)\)"
+)
+_VITE_CONFIG_URL_PATTERN = re.compile(
+    r"new\s+URL\(\s*[\"'](\.{1,2}/[^\"']+)[\"']\s*,\s*import\.meta\.url\s*\)"
+)
+_VITE_CONFIG_LITERAL_PATTERN = re.compile(r"[\"']([^\"']+)[\"']")
 _BUILD_ENV_NAMES = ("VIBELUTION_PROBE_BUILD", "NODE_ENV")
 _VITE_ENV_PREFIX = "VITE_"
 _AUDIT_INPUT_NAMES = frozenset(("sourceCommit", "frontendTree"))
@@ -217,11 +249,63 @@ def _is_test_path(relative: Path) -> bool:
     return "__tests__" in parts or "__mocks__" in parts or name.endswith((".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx"))
 
 
+def _vite_config_local_references(web_dir: Path) -> list[Path]:
+    """Local paths ``vite.config.ts`` references through string literals.
+
+    Returns lexical (unresolved) candidates below ``web_dir`` that exist on
+    disk. Files are returned as-is; directories are expanded to their
+    non-test files. Candidates already below a ``_BUILD_INPUT_DIRS`` root are
+    skipped because the directory scan fingerprints them.
+    """
+    config = web_dir / _VITE_CONFIG_NAME
+    try:
+        text = config.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    relative_targets: list[str] = []
+    for match in _VITE_CONFIG_RESOLVE_PATTERN.finditer(text):
+        segments = _VITE_CONFIG_LITERAL_PATTERN.findall(match.group(1))
+        if segments:
+            relative_targets.append("/".join(segments))
+    relative_targets.extend(_VITE_CONFIG_URL_PATTERN.findall(text))
+    scanned_roots = tuple((web_dir / name) for name in _BUILD_INPUT_DIRS)
+    web_depth = len(web_dir.parts)
+    references: list[Path] = []
+    seen: set[str] = set()
+    for target in relative_targets:
+        normalized = target.replace("\\", "/").strip()
+        if not normalized or normalized.startswith("/") or re.match(r"^[A-Za-z]:", normalized):
+            continue
+        candidate = (web_dir / normalized)
+        # Lexical containment only: resolution happens in the caller's scan so
+        # link targets are judged by the same boundary as every other input.
+        try:
+            candidate_relative = candidate.relative_to(web_dir)
+        except ValueError:
+            continue
+        if os.pardir in candidate_relative.parts:
+            continue
+        if any(candidate == root or root in candidate.parents for root in scanned_roots):
+            continue
+        key = candidate.as_posix().lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        if candidate.is_file():
+            references.append(candidate)
+        elif candidate.is_dir():
+            references.extend(
+                path for path in candidate.rglob("*")
+                if path.is_file() and not _is_test_path(Path(*path.parts[web_depth:]))
+            )
+    return references
+
+
 def _production_input_paths(web_dir: Path) -> list[Path]:
     paths: list[Path] = []
     web_depth = len(web_dir.parts)
-    for relative_root in (Path("src"), Path("public")):
-        root = web_dir / relative_root
+    for name in _BUILD_INPUT_DIRS:
+        root = web_dir / name
         if root.is_dir():
             # rglob supplies lexical descendants of this exact root. Avoid
             # walking every ancestor merely to classify each test filename;
@@ -230,6 +314,7 @@ def _production_input_paths(web_dir: Path) -> list[Path]:
                 path for path in root.rglob("*")
                 if path.is_file() and not _is_test_path(Path(*path.parts[web_depth:]))
             )
+    paths.extend(_vite_config_local_references(web_dir))
     resolved_paths: set[Path] = set()
     resolved_parents: dict[Path, Path] = {}
     for path in paths:
@@ -428,6 +513,7 @@ def build_inputs(project_root: Path | str, *, package_manager: str | None = None
         with _build_phase("gitAuditWaitMs"):
             git_inputs = audit.result()
     return {
+        "productionInputScanVersion": _PRODUCTION_INPUT_SCAN_VERSION,
         "productionInputDigest": source_digest,
         "productionInputCount": input_count,
         "productionInputStateDigest": input_state_digest,

@@ -1,17 +1,21 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   handleLauncherAppProtocolRequest,
   isLauncherAppUrl,
+  lastLauncherDistResolution,
   launcherAppOriginFor,
   LAUNCHER_APP_ORIGIN,
   LAUNCHER_APP_PROTOCOL,
   registerLauncherAppProtocolHandle,
+  resetLauncherDistResolutionStateForTests,
   resolveLauncherAppUrl,
+  resolveLauncherDistResolution,
   resolveLauncherDistRoot,
+  type LauncherDistResolutionEvent,
 } from "../src/protocol/launcherAppProtocol.js";
 import {
   resolveLauncherWindowUrl,
@@ -36,6 +40,50 @@ function handlerFor(requestUrl: string, distRoot = FAKE_DIST): Response {
     },
   });
 }
+
+/**
+ * Writes a release that satisfies the same completeness contract as
+ * core/launcher/frontend_build.py: non-empty index.html, every referenced
+ * /assets/* present, schema 2 provenance carrying the buildKey.
+ */
+function writeCompleteRelease(
+  releasesRoot: string,
+  release: string,
+  options: { buildKey?: string; body?: string; schemaVersion?: number; provenance?: boolean; assets?: boolean } = {}
+): string {
+  const buildKey = options.buildKey ?? `key-${release}`;
+  const root = join(releasesRoot, release);
+  mkdirSync(join(root, "assets"), { recursive: true });
+  writeFileSync(
+    join(root, "index.html"),
+    `<!doctype html><script src="/assets/app.js"></script>${options.body ?? release}`,
+    "utf8"
+  );
+  if (options.assets !== false) {
+    writeFileSync(join(root, "assets", "app.js"), "console.log('app');", "utf8");
+  }
+  if (options.provenance !== false) {
+    writeFileSync(
+      join(root, ".vibelution-build.json"),
+      JSON.stringify({ schemaVersion: options.schemaVersion ?? 2, buildKey }),
+      "utf8"
+    );
+  }
+  return buildKey;
+}
+
+function activate(releasesRoot: string, release: string, buildKey?: string): void {
+  mkdirSync(releasesRoot, { recursive: true });
+  writeFileSync(
+    join(releasesRoot, "active.json"),
+    JSON.stringify({ schemaVersion: 2, release, ...(buildKey === undefined ? {} : { buildKey }) }),
+    "utf8"
+  );
+}
+
+beforeEach(() => {
+  resetLauncherDistResolutionStateForTests();
+});
 
 describe("launcher app protocol URLs", () => {
   it("resolves the launcher window to the packaged app protocol origin", () => {
@@ -131,9 +179,8 @@ describe("launcher app protocol file serving", () => {
     const releasesRoot = join(workspaceRoot, "web", ".vibelution-builds");
     const release = "release-current";
     try {
-      mkdirSync(join(releasesRoot, release), { recursive: true });
-      writeFileSync(join(releasesRoot, release, "index.html"), "<!doctype html>", "utf8");
-      writeFileSync(join(releasesRoot, "active.json"), JSON.stringify({ release }), "utf8");
+      const buildKey = writeCompleteRelease(releasesRoot, release);
+      activate(releasesRoot, release, buildKey);
 
       expect(
         resolveLauncherDistRoot({
@@ -153,9 +200,8 @@ describe("launcher app protocol file serving", () => {
     const releasesRoot = join(workspaceRoot, "web", ".vibelution-builds");
     const release = "release-live";
     try {
-      mkdirSync(join(releasesRoot, release), { recursive: true });
-      writeFileSync(join(releasesRoot, release, "index.html"), "<!doctype html>", "utf8");
-      writeFileSync(join(releasesRoot, "active.json"), JSON.stringify({ release }), "utf8");
+      const buildKey = writeCompleteRelease(releasesRoot, release);
+      activate(releasesRoot, release, buildKey);
 
       expect(
         resolveLauncherDistRoot({
@@ -187,7 +233,11 @@ describe("launcher app protocol file serving", () => {
   });
 
   it("falls back to the packaged snapshot when the active release is invalid", () => {
-    const expectPackagedFallback = (release: unknown, setup: (releasesRoot: string) => void): void => {
+    const expectPackagedFallback = (
+      release: unknown,
+      setup: (releasesRoot: string) => void,
+      expectedReason: string
+    ): void => {
       const workspaceRoot = mkdtempSync(join(tmpdir(), "vibelution-packaged-invalid-"));
       const releasesRoot = join(workspaceRoot, "web", ".vibelution-builds");
       try {
@@ -195,38 +245,34 @@ describe("launcher app protocol file serving", () => {
         setup(releasesRoot);
         writeFileSync(join(releasesRoot, "active.json"), JSON.stringify({ release }), "utf8");
 
-        expect(
-          resolveLauncherDistRoot({
-            resourcesRoot: "C:/app/resources",
-            workspaceRoot,
-            packaged: true,
-            env: {},
-          })
-        ).toBe(resolve("C:/app/resources/web-dist"));
+        const input = { resourcesRoot: "C:/app/resources", workspaceRoot, packaged: true, env: {} };
+        expect(resolveLauncherDistRoot(input)).toBe(resolve("C:/app/resources/web-dist"));
+        const resolution = resolveLauncherDistResolution(input);
+        expect(resolution.source).toBe("packaged-snapshot");
+        expect(resolution.rejectedActiveRelease?.reason).toBe(expectedReason);
+        expect(resolution.warnings.join("\n")).toContain(expectedReason);
       } finally {
         rmSync(workspaceRoot, { recursive: true, force: true });
       }
     };
     // Path escape attempt.
-    expectPackagedFallback("../evil", () => undefined);
+    expectPackagedFallback("../evil", () => undefined, "invalid_pointer_release");
     // Baseline name mismatch inside the releases root.
     expectPackagedFallback("release-evil/inner", (releasesRoot) => {
-      mkdirSync(join(releasesRoot, "release-evil", "inner"), { recursive: true });
-      writeFileSync(join(releasesRoot, "release-evil", "inner", "index.html"), "<!doctype html>", "utf8");
-    });
+      writeCompleteRelease(releasesRoot, join("release-evil", "inner"));
+    }, "invalid_pointer_release");
     // Release directory without an index.html entrypoint.
     expectPackagedFallback("release-blank", (releasesRoot) => {
       mkdirSync(join(releasesRoot, "release-blank"), { recursive: true });
-    });
+    }, "missing_index");
   });
 
   it("keeps the explicit dist root override above the workspace active release", () => {
     const workspaceRoot = mkdtempSync(join(tmpdir(), "vibelution-packaged-override-"));
     const releasesRoot = join(workspaceRoot, "web", ".vibelution-builds");
     try {
-      mkdirSync(join(releasesRoot, "release-live"), { recursive: true });
-      writeFileSync(join(releasesRoot, "release-live", "index.html"), "<!doctype html>", "utf8");
-      writeFileSync(join(releasesRoot, "active.json"), JSON.stringify({ release: "release-live" }), "utf8");
+      const buildKey = writeCompleteRelease(releasesRoot, "release-live");
+      activate(releasesRoot, "release-live", buildKey);
 
       expect(
         resolveLauncherDistRoot({
@@ -259,11 +305,9 @@ describe("launcher app protocol file serving", () => {
       env: {}
     };
     try {
-      mkdirSync(join(releasesRoot, "release-a"), { recursive: true });
-      mkdirSync(join(releasesRoot, "release-b"), { recursive: true });
-      writeFileSync(join(releasesRoot, "release-a", "index.html"), "<!doctype html>release-a", "utf8");
-      writeFileSync(join(releasesRoot, "release-b", "index.html"), "<!doctype html>release-b", "utf8");
-      writeFileSync(join(releasesRoot, "active.json"), JSON.stringify({ release: "release-a" }), "utf8");
+      const keyA = writeCompleteRelease(releasesRoot, "release-a");
+      const keyB = writeCompleteRelease(releasesRoot, "release-b");
+      activate(releasesRoot, "release-a", keyA);
 
       const handle = vi.fn();
       registerLauncherAppProtocolHandle({
@@ -275,7 +319,7 @@ describe("launcher app protocol file serving", () => {
       const first = handler(new Request(`${LAUNCHER_APP_ORIGIN}/launcher`));
       expect(first.status).toBe(200);
 
-      writeFileSync(join(releasesRoot, "active.json"), JSON.stringify({ release: "release-b" }), "utf8");
+      activate(releasesRoot, "release-b", keyB);
 
       const second = handler(new Request(`${LAUNCHER_APP_ORIGIN}/launcher`));
       expect(second.status).toBe(200);
@@ -295,5 +339,179 @@ describe("launcher app protocol file serving", () => {
 
     const asset = handlerFor(`${LAUNCHER_APP_ORIGIN}/assets/app.js`);
     expect(asset.headers.get("cache-control")).toBeNull();
+  });
+});
+
+describe("launcher dist resolution contract", () => {
+  function withWorkspace<T>(prefix: string, run: (workspaceRoot: string, releasesRoot: string) => T): T {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), prefix));
+    try {
+      return run(workspaceRoot, join(workspaceRoot, "web", ".vibelution-builds"));
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  }
+
+  it("accepts only a release that satisfies the Python completeness contract", () => {
+    withWorkspace("vibelution-contract-", (workspaceRoot, releasesRoot) => {
+      const buildKey = writeCompleteRelease(releasesRoot, "release-ok");
+      activate(releasesRoot, "release-ok", buildKey);
+      const resolution = resolveLauncherDistResolution({ resourcesRoot: "C:/app/resources", workspaceRoot, packaged: true, env: {} });
+      expect(resolution).toEqual({
+        distRoot: resolve(releasesRoot, "release-ok"),
+        source: "active-release",
+        release: "release-ok",
+        buildKey,
+        warnings: []
+      });
+    });
+  });
+
+  it.each([
+    ["missing_provenance", { provenance: false }],
+    ["provenance_schema:1", { schemaVersion: 1 }],
+    ["missing_asset:app.js", { assets: false }],
+  ] as const)("rejects an active release with %s instead of serving it", (reason, options) => {
+    withWorkspace("vibelution-reject-", (workspaceRoot, releasesRoot) => {
+      const buildKey = writeCompleteRelease(releasesRoot, "release-bad", options);
+      activate(releasesRoot, "release-bad", buildKey);
+      const resolution = resolveLauncherDistResolution({ resourcesRoot: "C:/app/resources", workspaceRoot, packaged: true, env: {} });
+      expect(resolution.source).toBe("packaged-snapshot");
+      expect(resolution.distRoot).toBe(resolve("C:/app/resources/web-dist"));
+      expect(resolution.rejectedActiveRelease).toEqual({ release: "release-bad", reason });
+      expect(resolution.warnings).toHaveLength(1);
+    });
+  });
+
+  it("rejects an empty index.html like the Python validator", () => {
+    withWorkspace("vibelution-empty-index-", (workspaceRoot, releasesRoot) => {
+      const buildKey = writeCompleteRelease(releasesRoot, "release-empty");
+      writeFileSync(join(releasesRoot, "release-empty", "index.html"), "", "utf8");
+      activate(releasesRoot, "release-empty", buildKey);
+      const resolution = resolveLauncherDistResolution({ resourcesRoot: "C:/app/resources", workspaceRoot, packaged: true, env: {} });
+      expect(resolution.rejectedActiveRelease?.reason).toBe("empty_index");
+    });
+  });
+
+  it("rejects a release whose provenance buildKey disagrees with the pointer", () => {
+    withWorkspace("vibelution-key-mismatch-", (workspaceRoot, releasesRoot) => {
+      writeCompleteRelease(releasesRoot, "release-drift", { buildKey: "provenance-key" });
+      activate(releasesRoot, "release-drift", "pointer-key");
+      const resolution = resolveLauncherDistResolution({ resourcesRoot: "C:/app/resources", workspaceRoot, packaged: true, env: {} });
+      expect(resolution.source).toBe("packaged-snapshot");
+      expect(resolution.rejectedActiveRelease).toEqual({ release: "release-drift", reason: "build_key_mismatch" });
+    });
+  });
+
+  it("rejects a release whose provenance carries no buildKey", () => {
+    withWorkspace("vibelution-no-prov-key-", (workspaceRoot, releasesRoot) => {
+      writeCompleteRelease(releasesRoot, "release-keyless");
+      writeFileSync(join(releasesRoot, "release-keyless", ".vibelution-build.json"), JSON.stringify({ schemaVersion: 2 }), "utf8");
+      activate(releasesRoot, "release-keyless", "any");
+      const resolution = resolveLauncherDistResolution({ resourcesRoot: "C:/app/resources", workspaceRoot, packaged: true, env: {} });
+      expect(resolution.rejectedActiveRelease?.reason).toBe("provenance_missing_build_key");
+    });
+  });
+
+  it("serves a complete release behind a pointer without buildKey, but says so", () => {
+    withWorkspace("vibelution-pointer-no-key-", (workspaceRoot, releasesRoot) => {
+      const buildKey = writeCompleteRelease(releasesRoot, "release-legacy-pointer");
+      activate(releasesRoot, "release-legacy-pointer");
+      const resolution = resolveLauncherDistResolution({ resourcesRoot: "C:/app/resources", workspaceRoot, packaged: true, env: {} });
+      expect(resolution.source).toBe("active-release");
+      expect(resolution.buildKey).toBe(buildKey);
+      expect(resolution.warnings).toEqual([
+        "active release pointer carries no buildKey; verified through provenance only"
+      ]);
+    });
+  });
+
+  it("reports the legacy web/dist fallback instead of serving it silently", () => {
+    withWorkspace("vibelution-legacy-", (workspaceRoot) => {
+      mkdirSync(join(workspaceRoot, "web", "dist"), { recursive: true });
+      writeFileSync(join(workspaceRoot, "web", "dist", "index.html"), "<!doctype html>", "utf8");
+      const events: LauncherDistResolutionEvent[] = [];
+      const input = { resourcesRoot: "C:/app/resources", workspaceRoot, packaged: false, env: {}, onEvent: (event: LauncherDistResolutionEvent) => events.push(event) };
+
+      expect(resolveLauncherDistRoot(input)).toBe(resolve(workspaceRoot, "web", "dist"));
+      expect(events).toHaveLength(1);
+      expect(events[0].level).toBe("warning");
+      expect(events[0].kind).toBe("launcher_dist_resolution");
+      expect(events[0].message).toContain("legacy web/dist served without provenance/buildKey");
+      expect(events[0].resolution.source).toBe("legacy-dist");
+      expect(events[0].resolution.legacyProvenance).toBe("missing");
+      // The usage fact is recorded for anyone who asks later.
+      expect(lastLauncherDistResolution()).toEqual(events[0].resolution);
+
+      // Legacy dist carrying provenance is still legacy, but it is verifiable.
+      writeFileSync(
+        join(workspaceRoot, "web", "dist", ".vibelution-build.json"),
+        JSON.stringify({ schemaVersion: 2, buildKey: "legacy-key" }),
+        "utf8"
+      );
+      resolveLauncherDistRoot(input);
+      expect(events).toHaveLength(2);
+      expect(events[1].level).toBe("info");
+      expect(events[1].resolution.legacyProvenance).toBe("present");
+      expect(events[1].resolution.buildKey).toBe("legacy-key");
+      expect(events[1].resolution.warnings).toEqual([]);
+    });
+  });
+
+  it("carries the rejection reason into the legacy fallback for an unpackaged shell", () => {
+    withWorkspace("vibelution-legacy-reject-", (workspaceRoot, releasesRoot) => {
+      writeCompleteRelease(releasesRoot, "release-bad", { provenance: false });
+      activate(releasesRoot, "release-bad", "key");
+      const resolution = resolveLauncherDistResolution({ resourcesRoot: "C:/app/resources", workspaceRoot, packaged: false, env: {} });
+      expect(resolution.source).toBe("legacy-dist");
+      expect(resolution.rejectedActiveRelease).toEqual({ release: "release-bad", reason: "missing_provenance" });
+      expect(resolution.legacyProvenance).toBe("missing");
+      expect(resolution.warnings).toHaveLength(2);
+    });
+  });
+
+  it("emits one event per distinct outcome across per-request resolutions", () => {
+    withWorkspace("vibelution-dedupe-", (workspaceRoot, releasesRoot) => {
+      const keyA = writeCompleteRelease(releasesRoot, "release-a");
+      const keyB = writeCompleteRelease(releasesRoot, "release-b");
+      activate(releasesRoot, "release-a", keyA);
+      const events: LauncherDistResolutionEvent[] = [];
+      const input = { resourcesRoot: "C:/app/resources", workspaceRoot, packaged: true, env: {}, onEvent: (event: LauncherDistResolutionEvent) => events.push(event) };
+
+      resolveLauncherDistRoot(input);
+      resolveLauncherDistRoot(input);
+      resolveLauncherDistRoot(input);
+      expect(events).toHaveLength(1);
+      expect(events[0].level).toBe("info");
+      expect(events[0].resolution.release).toBe("release-a");
+
+      activate(releasesRoot, "release-b", keyB);
+      resolveLauncherDistRoot(input);
+      resolveLauncherDistRoot(input);
+      expect(events).toHaveLength(2);
+      expect(events[1].resolution.release).toBe("release-b");
+
+      // A pointer that stops validating is a new outcome, reported once.
+      activate(releasesRoot, "release-b", "drifted");
+      resolveLauncherDistRoot(input);
+      resolveLauncherDistRoot(input);
+      expect(events).toHaveLength(3);
+      expect(events[2].level).toBe("warning");
+      expect(events[2].resolution.rejectedActiveRelease?.reason).toBe("build_key_mismatch");
+    });
+  });
+
+  it("falls back to console.warn for warnings when no event sink is wired", () => {
+    withWorkspace("vibelution-console-", (workspaceRoot) => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      try {
+        resolveLauncherDistRoot({ resourcesRoot: "C:/app/resources", workspaceRoot, packaged: false, env: {} });
+        resolveLauncherDistRoot({ resourcesRoot: "C:/app/resources", workspaceRoot, packaged: false, env: {} });
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(String(warn.mock.calls[0][0])).toContain("legacy web/dist served without provenance/buildKey");
+      } finally {
+        warn.mockRestore();
+      }
+    });
   });
 });

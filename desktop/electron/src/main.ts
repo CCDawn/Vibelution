@@ -213,6 +213,8 @@ import {
 } from "./process/pythonJsonBridge.js";
 import { resolveWorkbenchUrlFromBridge } from "./process/resolveWorkbenchBridge.js";
 import {
+  advisoryFrontendEnsureKey,
+  createAdvisoryFrontendEnsureScheduler,
   decideLauncherShellRestart,
   decidePackagedDesktopShellRefresh,
   decidePeriodicDesktopShellRefresh,
@@ -226,6 +228,7 @@ import {
   shouldInspectDesktopShellBeforeLifecycle,
   shouldRefreshBeforeLifecycle,
   thenLifecycleFromDesktopCli,
+  type AdvisoryFrontendEnsureScheduler,
   type DesktopShellStatus,
   type DesktopShellLaunchReadiness
 } from "./process/desktopShellFreshness.js";
@@ -563,6 +566,7 @@ let shellRefreshRequest: {
 let lastKnownDesktopShell: DesktopShellStatus | undefined;
 let periodicShellFreshnessTimer: ReturnType<typeof setInterval> | null = null;
 let periodicAdvisoryStaleNotified = false;
+let advisoryFrontendEnsure: AdvisoryFrontendEnsureScheduler | null = null;
 let workbenchBackendWatchdog: WorkbenchBackendWatchdogHandle | null = null;
 
 type DesktopActionLoopContext = {
@@ -5053,6 +5057,10 @@ function startPeriodicShellFreshnessWatch(): void {
             "info"
           );
         }
+        // Converge the workspace active release in the background so the
+        // next launcher window observes current source without an operator
+        // update. Debounced and idempotent per BuildKey; failure only logs.
+        scheduleAdvisoryFrontendEnsure(status);
         return;
       }
       if (decision !== "refresh") {
@@ -5064,6 +5072,38 @@ function startPeriodicShellFreshnessWatch(): void {
     });
   }, PERIODIC_SHELL_FRESHNESS_MS);
   void periodicShellFreshnessTimer;
+}
+
+function scheduleAdvisoryFrontendEnsure(status: DesktopShellStatus): void {
+  if (advisoryFrontendEnsure === null) {
+    advisoryFrontendEnsure = createAdvisoryFrontendEnsureScheduler({
+      // Same ensure chain as a lifecycle start: the build gate publishes
+      // `building` to the launcher window and ensure-frontend-build serializes
+      // through the Python build lock, so a concurrent start reuses the result.
+      run: () => runWithFrontendBuildGate(
+        "main",
+        { operation: "advisory-ensure", notify: () => updateLauncherWindowTruth() },
+        () => {
+          const pythonPath = desktopPythonPath();
+          if (!pythonPath) {
+            throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to ensure the frontend release");
+          }
+          return ensureFrontendRelease({ workspaceRoot: createDesktopPathsForApp().workspaceRoot, pythonPath });
+        }
+      ),
+      onEvent: (event) => {
+        const detail = `advisory frontend ensure (${event.reason || "unknown"}, ${event.buildKey.slice(0, 12)})`;
+        if (event.kind === "failed") {
+          console.warn(`${detail}: failed: ${event.error.slice(0, 300)}`);
+        } else if (event.kind === "completed") {
+          console.warn(`${detail}: ${event.rebuilt ? "rebuilt" : event.skipped ? "already current" : "completed"}`);
+        } else if (event.kind === "scheduled") {
+          console.warn(`${detail}: scheduled in ${event.delayMs}ms`);
+        }
+      }
+    });
+  }
+  advisoryFrontendEnsure.schedule({ buildKey: advisoryFrontendEnsureKey(status), reason: status.reason });
 }
 
 async function runTrayBranchInstance(operation: string, instanceId: string, label: string): Promise<void> {
