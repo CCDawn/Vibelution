@@ -11196,3 +11196,60 @@ def test_source_collection_batch_terminal_writes_collection_batch_completed_even
     assert fields["recordCount"] >= 1
     assert fields["openAssignmentCount"] == 0
     assert data_processing_service.get_processing_run(run_id)["status"] == "reviewing"
+
+
+def test_candidate_and_exclusion_store_reads_use_signature_cache(tmp_path, monkeypatch):
+    from core.web.services.team_workflow.source_collection import residual
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="SC store read cache")
+    read_calls = {"count": 0}
+    real_read_json = team_workflow_orchestration_service._read_json
+
+    def counted_read_json(path):
+        read_calls["count"] += 1
+        return real_read_json(path)
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "_read_json", counted_read_json)
+
+    # Missing candidate store: bootstrapped by writing an empty store without
+    # going through _read_json; the next reader repopulates the cache from disk.
+    first = residual._load_candidate_store(team["teamId"])
+    store_path = team_workflow_orchestration_service._candidate_store_path(team["teamId"])
+    assert store_path.exists()
+    assert first["candidates"] == []
+    assert read_calls["count"] == 0
+
+    second = residual._load_candidate_store(team["teamId"])
+    assert second["candidates"] == []
+    assert read_calls["count"] == 1
+
+    third = residual._load_candidate_store(team["teamId"])
+    assert third["candidates"] == []
+    assert read_calls["count"] == 1  # signature hit: no further disk read
+
+    second["candidates"].append({"candidateId": "drift"})
+    fourth = residual._load_candidate_store(team["teamId"])
+    assert fourth["candidates"] == []
+    assert read_calls["count"] == 1  # deepcopy hit: caller mutation does not leak
+
+    # Exclusion ledger: repeated per-record loads stay on the signature cache.
+    residual._write_source_collection_exclusion_store(
+        team["teamId"],
+        {
+            "schemaVersion": 1,
+            "teamId": team["teamId"],
+            "entries": [{"sourceIdentityKey": "k1", "scopeKey": "s1"}],
+        },
+    )
+    ledger_first = residual._load_source_collection_exclusion_store(team["teamId"])
+    assert [entry["sourceIdentityKey"] for entry in ledger_first["entries"]] == ["k1"]
+    parses_before_ledger_hit = read_calls["count"]
+
+    ledger_second = residual._load_source_collection_exclusion_store(team["teamId"])
+    assert ledger_second["entries"] == ledger_first["entries"]
+    assert read_calls["count"] == parses_before_ledger_hit
+
+    ledger_second["entries"].append({"sourceIdentityKey": "drift"})
+    ledger_third = residual._load_source_collection_exclusion_store(team["teamId"])
+    assert [entry["sourceIdentityKey"] for entry in ledger_third["entries"]] == ["k1"]

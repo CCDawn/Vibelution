@@ -18,6 +18,7 @@ import time
 import urllib.parse
 import uuid
 import xml.etree.ElementTree as ET
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -32,11 +33,38 @@ from .writeback_materialize import FINDING_REQUIRED_PERSPECTIVES
 ARXIV_ATOM_NAMESPACE = "http://www.w3.org/2005/Atom"
 ARXIV_SCHEMA_NAMESPACE = "http://arxiv.org/schemas/atom"
 
+# Candidate / exclusion store 的进程内读缓存：签名 = (路径, mtime_ns, size)。
+# 写方统一走 s._write_json（原子替换必然推进 mtime），签名自然失效，写路径
+# 无需钩子；跨进程写同样被覆盖。排除台账在过滤链里按 record 反复读盘
+# （search_execution._source_collection_exclusion_match），缓存把 O(records)
+# 次读盘降为一次 stat。命中统一返回 deepcopy：knowledge.py 等消费方是
+# load→mutate→write 惯例，共享对象会被污染。键含 str(path) 以隔离不同
+# project_root / tmp 目录；缺文件与解析失败不缓存，保持原语义；容量超限
+# 整体清空防泄漏（GIL 下 dict 单操作原子，不加锁）。
+_SOURCE_COLLECTION_STORE_READ_CACHE_LIMIT = 512
+_SOURCE_COLLECTION_STORE_READ_CACHE: dict[tuple[str, int, int], dict[str, Any]] = {}
+
 
 def _service():
     from core.web.services import team_workflow_orchestration_service
 
     return team_workflow_orchestration_service
+
+
+def _source_collection_store_read_cache_signature(path: Path) -> tuple[str, int, int] | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return (str(path), int(stat.st_mtime_ns), int(stat.st_size))
+
+
+def _cache_source_collection_store_read(signature: tuple[str, int, int] | None, payload: dict[str, Any]) -> None:
+    if signature is None:
+        return
+    if len(_SOURCE_COLLECTION_STORE_READ_CACHE) > _SOURCE_COLLECTION_STORE_READ_CACHE_LIMIT:
+        _SOURCE_COLLECTION_STORE_READ_CACHE.clear()
+    _SOURCE_COLLECTION_STORE_READ_CACHE[signature] = payload
 
 
 def _append_source_collection_seed(seeds: list[str], value: Any) -> None:
@@ -596,10 +624,16 @@ def _load_candidate_store(
         normalized_run_id,
         research_project_id,
     )
+    signature = _source_collection_store_read_cache_signature(path)
+    if signature is not None:
+        cached = _SOURCE_COLLECTION_STORE_READ_CACHE.get(signature)
+        if cached is not None:
+            return deepcopy(cached)
     if path.exists():
         payload = s._read_json(path)
         if isinstance(payload.get("candidates"), list):
-            return payload
+            _cache_source_collection_store_read(signature, payload)
+            return deepcopy(payload)
     now = s.utc_now_iso()
     payload = {
         "schemaVersion": s.SCHEMA_VERSION,
@@ -612,6 +646,9 @@ def _load_candidate_store(
     if normalized_run_id:
         payload["sourceCollectionRunId"] = normalized_run_id
     s._write_json(path, payload)
+    # 缺文件自写空 store 的路径不直接入缓存：写入已推进 mtime，下一读者会
+    # 以新签名 miss 后从盘上读到刚写入的空 store 并自行入缓存，保证不会把
+    # 内存默认值盖到其他写方的新签名上。
     return payload
 def _normalize_managed_root_request(payload: dict[str, Any]) -> dict[str, Any]:
     """解析 run payload 中的受管根选择：managedSourceRoots / managedSourceRootIds。"""
@@ -1164,14 +1201,21 @@ def _bridge_managed_root_records_to_candidates(
 
 def _load_source_collection_exclusion_store(team_id: str) -> dict[str, Any]:
     s = _service()
-    store = s._read_json(s._source_collection_exclusion_store_path(team_id))
+    path = s._source_collection_exclusion_store_path(team_id)
+    signature = _source_collection_store_read_cache_signature(path)
+    if signature is not None:
+        cached = _SOURCE_COLLECTION_STORE_READ_CACHE.get(signature)
+        if cached is not None:
+            return deepcopy(cached)
+    store = s._read_json(path)
     if not store:
         return s._source_collection_exclusion_store_default(team_id)
     entries = [item for item in list(store.get("entries") or []) if isinstance(item, dict)]
     store["schemaVersion"] = s._source_collection_count(store.get("schemaVersion")) or s.SCHEMA_VERSION
     store["teamId"] = s._trim_text(store.get("teamId"), max_length=160) or team_id
     store["entries"] = entries
-    return store
+    _cache_source_collection_store_read(signature, store)
+    return deepcopy(store)
 
 
 def _load_stage_round_store(
