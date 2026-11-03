@@ -19,7 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_project_prepare_is_rejected_before_build_import(tmp_path, capsys):
     assert cli.main(["--project", str(tmp_path)], managed_root=tmp_path / "managed") == 1
-    assert '"MANAGED_INSTALL_FAILED"' in capsys.readouterr().out
+    assert json.loads(capsys.readouterr().out)["error"] == (
+        "MANAGED_INSTALL_FAILED stage=arguments ValueError: Project builds require explicit apply")
     assert not (tmp_path / "managed").exists()
 
 
@@ -75,8 +76,9 @@ def test_source_apply_uses_existing_sealed_publisher_in_temp(package, tmp_path, 
     ["--source-package", ".", "--managed-root", "elsewhere"], ["--source", "."]])
 def test_closed_cli_rejects_relative_conflicting_and_free_root_arguments(tmp_path, capsys, flags):
     assert cli.main(flags, managed_root=tmp_path / "managed") == 1
-    assert json.loads(capsys.readouterr().out) == {
-        "schemaVersion": 1, "status": "failed", "error": "MANAGED_INSTALL_FAILED"}
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["schemaVersion"] == 1 and receipt["status"] == "failed"
+    assert receipt["error"].startswith("MANAGED_INSTALL_FAILED stage=arguments ValueError: ")
     assert not (tmp_path / "managed").exists()
 
 
@@ -122,7 +124,70 @@ def test_bad_build_result_or_missing_package_never_publishes(tmp_path, monkeypat
     assert cli.main(["--project", str(tmp_path), "--apply"], managed_root=managed) == 1
     assert calls == [(tmp_path, "dir")]
     assert pointer.read_bytes() == b"previous active bytes"
-    assert json.loads(capsys.readouterr().out)["error"] == "MANAGED_INSTALL_FAILED"
+    if isinstance(result, Exception):
+        expected = f"MANAGED_INSTALL_FAILED stage=node-build RuntimeError: {result}"
+    elif isinstance(result, dict) and result.get("built") is True and result.get("mode") == "dir":
+        expected = "MANAGED_INSTALL_FAILED stage=publish ValueError: An existing absolute directory is required"
+    else:
+        expected = "MANAGED_INSTALL_FAILED stage=publish ValueError: Desktop package build did not succeed"
+    assert json.loads(capsys.readouterr().out)["error"] == expected
+
+
+def test_failure_receipt_reports_tagged_stage_and_output_tail(tmp_path, monkeypatch, capsys):
+    failure = RuntimeError("desktop shell package:dir failed with exit code 1: gyp ERR! find VS\nignored detail")
+    failure.build_stage = "node-build"
+    failure.build_output_tail = "npm WARN deprecated\ngyp ERR! find VS msvs_version not set\ngyp ERR! not ok"
+    _fake_build(monkeypatch, failure)
+    assert cli.main(["--project", str(tmp_path), "--apply"], managed_root=tmp_path / "managed") == 1
+    out = capsys.readouterr().out
+    assert out.count("\n") == 1, "the receipt stays one JSON line"
+    assert json.loads(out) == {
+        "schemaVersion": 1, "status": "failed",
+        "error": "MANAGED_INSTALL_FAILED stage=node-build RuntimeError: "
+                 "desktop shell package:dir failed with exit code 1: gyp ERR! find VS; "
+                 "tail: npm WARN deprecated\ngyp ERR! find VS msvs_version not set\ngyp ERR! not ok"}
+
+
+@pytest.mark.parametrize("stage", ["assistant-payload", "publish"])
+def test_failure_receipt_prefers_the_build_chain_stage_over_installer_phase(tmp_path, monkeypatch, capsys, stage):
+    failure = OSError("[WinError 32] sharing violation")
+    failure.build_stage = stage
+    _fake_build(monkeypatch, failure)
+    assert cli.main(["--project", str(tmp_path), "--apply"], managed_root=tmp_path / "managed") == 1
+    assert json.loads(capsys.readouterr().out)["error"] == (
+        f"MANAGED_INSTALL_FAILED stage={stage} OSError: [WinError 32] sharing violation")
+
+
+def test_failure_receipt_keeps_first_message_line_without_tail(tmp_path, monkeypatch, capsys):
+    _fake_build(monkeypatch, TimeoutError("build lock was not available\nsecond line stays private"))
+    assert cli.main(["--project", str(tmp_path), "--apply"], managed_root=tmp_path / "managed") == 1
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert error == "MANAGED_INSTALL_FAILED stage=node-build TimeoutError: build lock was not available"
+    assert "second line" not in error and "tail:" not in error
+
+
+def test_failure_receipt_bounds_an_oversized_message_head(tmp_path, monkeypatch, capsys):
+    _fake_build(monkeypatch, RuntimeError("x" * 5000))
+    assert cli.main(["--project", str(tmp_path), "--apply"], managed_root=tmp_path / "managed") == 1
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert error == "MANAGED_INSTALL_FAILED stage=node-build RuntimeError: " + "x" * cli.FAILURE_HEAD_MAX_CHARS
+
+
+def test_failure_receipt_reports_verify_apply_stage_for_owner_rejection(package, tmp_path, capsys):
+    (package / "resources/launcher-assistant/manifest.json").write_text("{}", encoding="utf-8")
+    assert cli.main(["--source-package", str(package), "--apply"], managed_root=tmp_path / "managed") == 1
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert error.startswith("MANAGED_INSTALL_FAILED stage=verify-apply ")
+    assert "tail:" not in error
+
+
+def test_success_receipt_schema_is_unchanged_by_failure_transparency(tmp_path, monkeypatch, capsys):
+    (tmp_path / "dist/desktop/win-unpacked").mkdir(parents=True)
+    _fake_build(monkeypatch, {"built": True, "mode": "dir", "output": "ignored"})
+    monkeypatch.setattr(owner, "install_managed_desktop_package", lambda *a, **k: {"packageId": "c" * 64})
+    assert cli.main(["--project", str(tmp_path), "--apply"], managed_root=tmp_path / "managed") == 0
+    out = capsys.readouterr().out
+    assert out == '{"schemaVersion":1,"status":"installed","packageId":"' + "c" * 64 + '"}\n'
 
 
 def test_project_apply_only_publishes_canonical_producer_output(tmp_path, monkeypatch, capsys):
@@ -188,12 +253,26 @@ def _run_install_function(tmp_path, name, body):
     if os.name != "nt":
         pytest.skip("Windows PowerShell installer functions")
     source = (ROOT / "scripts/install_windows.ps1").read_text(encoding="utf-8")
-    function = re.search(r"(?ms)^function " + re.escape(name) + r" \{.*?^\}", source)
-    assert function is not None
+    blocks = {match.group(1): match.group()
+              for match in re.finditer(r"(?ms)^function (\S+) \{.*?^\}", source)}
+    assert name in blocks, name
+    # An extracted helper may delegate to sibling functions (e.g.
+    # Ensure-DesktopElectronDependencies now calls Ensure-ElectronBinary), so
+    # every referenced definition is pulled in transitively; the mock helpers
+    # written in the body come last and still win at call time.
+    parts, seen, queue = [blocks[name]], {name}, [name]
+    while queue:
+        current = queue.pop()
+        for sibling, text in blocks.items():
+            if sibling not in seen and re.search(
+                    r"(?<![A-Za-z0-9-])" + re.escape(sibling) + r"(?![A-Za-z0-9-])", text):
+                seen.add(sibling)
+                parts.append(text)
+                queue.append(sibling)
     script = tmp_path / "function-only.ps1"
     script.write_text('Set-StrictMode -Version Latest\n$ErrorActionPreference = "Stop"\n'
                       '$OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)\n'
-                      + function.group() + "\n" + body, encoding="utf-8-sig")
+                      + "\n".join(parts) + "\n" + body, encoding="utf-8-sig")
     powershell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
     env = {k: v for k, v in os.environ.items() if not k.upper().startswith("VIBELUTION_")}
     env.update(USERPROFILE=str(tmp_path / "private"), HOME=str(tmp_path / "private"),
@@ -219,6 +298,11 @@ function Invoke-Native {
     $script:calls += ,@{ file=$FilePath; args=$ArgumentList }
     if ($ArgumentList[0] -eq 'ls' -and MODE -eq 'stale') { throw 'mock dependency mismatch' }
 }
+# The extracted body now delegates to the real Ensure-ElectronBinary; stubbing
+# it keeps this case scoped to the npm validate-reuse-or-ci decision (electron
+# binary reuse/download is covered by install_windows_hardening.tests.ps1).
+# Defined last, it wins at call time over the pulled-in sibling.
+function Ensure-ElectronBinary { }
 Ensure-DesktopElectronDependencies -DesktopDir DESKTOP
 @{calls=$script:calls} | ConvertTo-Json -Depth 6 -Compress
 '''.replace("MODE", _ps_quote(mode)).replace("DESKTOP", _ps_quote(desktop))

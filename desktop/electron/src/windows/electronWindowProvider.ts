@@ -2,7 +2,19 @@ import type { DesktopPaths } from "../paths.js";
 import { isLauncherAppUrl, launcherAppOriginFor } from "../protocol/launcherAppProtocol.js";
 import { assertLocalHttpUrl } from "../security/urlPolicy.js";
 import { isExternalOpenableUrl } from "../security/externalOpenPolicy.js";
-import { isWorkbenchErrorPageUrl, workbenchErrorPageDataUrl } from "./workbenchErrorPage.js";
+import {
+  isWorkbenchStatusPageUrl,
+  isWorkbenchWaitingPageUrl,
+  workbenchErrorPageDataUrl,
+  workbenchWaitingPageDataUrl
+} from "./workbenchErrorPage.js";
+import {
+  runWorkbenchWaitingRecovery,
+  WORKBENCH_WAITING_RECOVERY_POLL_INTERVAL_MS,
+  WORKBENCH_WAITING_RECOVERY_TIMEOUT_MS,
+  type WorkbenchHttpWait,
+  type WorkbenchWaitingRecoveryResult
+} from "./workbenchWaitingRecovery.js";
 import { closedWindowState, type ElectronWindowRole, type ManagedWindowState } from "./windowProviderTypes.js";
 
 type ElectronWindowEventListener = (...args: unknown[]) => void;
@@ -85,6 +97,16 @@ export type ElectronWindowProviderOptions = {
   onWorkbenchFocusAttentionClear?: (sender: ElectronWindowLike["webContents"]) => void;
   onOsSessionEnd?: (event: "query-session-end" | "session-end", role: ElectronWindowRole) => void;
   hungCloseDestroyAfterMs?: number;
+  /**
+   * Bounded HTTP poll behind the workbench waiting status (see
+   * workbenchWaitingRecovery). Defaults to waitForWorkbenchHttp; tests inject
+   * a fake so no run ever touches the network.
+   */
+  waitForWorkbenchHttp?: WorkbenchHttpWait;
+  workbenchWaitingRecoveryTimeoutMs?: number;
+  workbenchWaitingRecoveryPollIntervalMs?: number;
+  /** Telemetry hook: one call per finished waiting-recovery run. */
+  onWorkbenchWaitingRecovery?: (result: WorkbenchWaitingRecoveryResult) => void;
 };
 
 export const DEFAULT_HUNG_CLOSE_DESTROY_AFTER_MS = 500;
@@ -187,6 +209,14 @@ export class ElectronWindowProvider {
   private readonly isLauncherControlWindow: (window: ElectronWindowLike) => boolean;
   private readonly listWorkbenchWindows: (workbenchOrigin: string) => ElectronWindowLike[];
   private readonly hungCloseDestroyAfterMs: number;
+  private readonly waitForWorkbenchHttp: WorkbenchHttpWait | undefined;
+  private readonly workbenchWaitingRecoveryTimeoutMs: number;
+  private readonly workbenchWaitingRecoveryPollIntervalMs: number;
+  private readonly onWorkbenchWaitingRecovery: (result: WorkbenchWaitingRecoveryResult) => void;
+  /** The single live waiting-recovery run for the main workbench window; a newer run supersedes it. */
+  private workbenchWaitingRecovery: { controller: AbortController } | null = null;
+  /** >0 while a recovery-triggered reload is in flight: a failure nested inside it gets the terminal page. */
+  private workbenchRecoveryReloadDepth = 0;
 
   constructor(
     private readonly paths: DesktopPaths,
@@ -223,6 +253,10 @@ export class ElectronWindowProvider {
         ? Math.max(0, options.hungCloseDestroyAfterMs)
         : DEFAULT_HUNG_CLOSE_DESTROY_AFTER_MS;
     this.launcherContentVersion = options.launcherContentVersion;
+    this.waitForWorkbenchHttp = options.waitForWorkbenchHttp;
+    this.workbenchWaitingRecoveryTimeoutMs = positiveOr(options.workbenchWaitingRecoveryTimeoutMs, WORKBENCH_WAITING_RECOVERY_TIMEOUT_MS);
+    this.workbenchWaitingRecoveryPollIntervalMs = positiveOr(options.workbenchWaitingRecoveryPollIntervalMs, WORKBENCH_WAITING_RECOVERY_POLL_INTERVAL_MS);
+    this.onWorkbenchWaitingRecovery = options.onWorkbenchWaitingRecovery ?? (() => undefined);
   }
 
   async openLauncher(): Promise<ManagedWindowState> {
@@ -1038,6 +1072,8 @@ export class ElectronWindowProvider {
         this.workbenchReadyUrl = null;
         this.workbenchCloseAuthorized = false;
         this.workbenchCloseInFlight = false;
+        // A closed window has nothing left to recover into.
+        this.cancelWorkbenchWaitingRecovery();
       }
       if (!wasLauncher && !wasWorkbench) {
         return;
@@ -1143,9 +1179,16 @@ export class ElectronWindowProvider {
    * Workbench window instead of destroying it; present=false suppresses this
    * call's restore/show/focus. Reused by the navigation
    * failure path and by main.ts when the backend start attempt itself failed
-   * before any navigation could happen. Best-effort: if even the local error
+   * before any navigation could happen. Best-effort: if even the local status
    * document cannot load, the window stays hidden rather than masking the
    * original failure.
+   *
+   * The status is staged: the WAITING page goes up first and a bounded
+   * background recovery run (workbenchWaitingRecovery) polls the real origin
+   * and reloads it once it answers; only when the budget runs out does the
+   * window switch to the terminal ERROR page carrying `detail`. A failure
+   * nested inside a recovery reload goes straight to the terminal page so one
+   * episode never chains into another waiting run.
    */
   async presentWorkbenchErrorStatus(input: { origin: string; detail: string; present?: boolean }, generation = this.workbenchCloseGeneration): Promise<ManagedWindowState> {
     this.assertWorkbenchOpenAllowed(generation);
@@ -1157,20 +1200,104 @@ export class ElectronWindowProvider {
       this.attachWindowEvents("workbench", workbenchWindow);
     }
     this.workbenchReadyUrl = null;
+    const waiting = this.workbenchRecoveryReloadDepth === 0;
     try {
       this.invalidateWorkbenchDocument(workbenchWindow);
-      await workbenchWindow.loadURL(workbenchErrorPageDataUrl(input));
+      await workbenchWindow.loadURL(waiting
+        ? workbenchWaitingPageDataUrl({ origin: input.origin })
+        : workbenchErrorPageDataUrl(input));
     } catch {
-      // The error document is best-effort; never mask the original failure.
+      // The status document is best-effort; never mask the original failure.
     }
     this.assertWorkbenchOpenAllowed(generation);
     if (workbenchWindow.isDestroyed() || this.workbenchWindow !== workbenchWindow) {
       throw new Error("Workbench window closed before error status completed");
     }
+    if (waiting) {
+      this.startWorkbenchWaitingRecovery(workbenchWindow, input, generation);
+    }
     if (input.present !== false) {
       presentElectronWindow(workbenchWindow);
     }
     return this.reportAndReturn(this.stateFor("workbench"));
+  }
+
+  /**
+   * One live run per main workbench window: a newer status presentation
+   * aborts the previous poll instead of stacking a second one, and a window
+   * close aborts it outright. The run only acts while the window still shows
+   * the waiting page it owns, so a user retry or a successful reload makes it
+   * step aside ("superseded") rather than reload on top of a live page.
+   */
+  private startWorkbenchWaitingRecovery(
+    window: ElectronWindowLike,
+    input: { origin: string; detail: string; present?: boolean },
+    generation: number
+  ): void {
+    this.cancelWorkbenchWaitingRecovery();
+    const controller = new AbortController();
+    const run = { controller };
+    this.workbenchWaitingRecovery = run;
+    const targetUrl = this.workbenchUrl;
+    const present = input.present !== false;
+    const isStillWaiting = (): boolean =>
+      this.workbenchWaitingRecovery === run
+      && this.workbenchCloseGeneration === generation
+      && this.workbenchWindow === window
+      && !window.isDestroyed()
+      && isWorkbenchWaitingPageUrl(currentWindowUrl(window));
+    void runWorkbenchWaitingRecovery({
+      targetUrl,
+      timeoutMs: this.workbenchWaitingRecoveryTimeoutMs,
+      pollIntervalMs: this.workbenchWaitingRecoveryPollIntervalMs,
+      signal: controller.signal,
+      ...(this.waitForWorkbenchHttp ? { waitForHttp: this.waitForWorkbenchHttp } : {}),
+      isStillWaiting,
+      recover: async () => {
+        this.workbenchRecoveryReloadDepth += 1;
+        try {
+          await this.openOrFocusWorkbench(targetUrl, { present });
+        } finally {
+          this.workbenchRecoveryReloadDepth -= 1;
+        }
+      },
+      showFinalError: async () => {
+        // Same gate as presentWorkbenchErrorStatus: never load a document
+        // into a window whose close transaction is in flight.
+        if (!isStillWaiting() || this.shouldBlockWorkbenchOpen()) {
+          return;
+        }
+        this.workbenchReadyUrl = null;
+        this.invalidateWorkbenchDocument(window);
+        await window.loadURL(workbenchErrorPageDataUrl(input));
+        void Promise.resolve(this.reportState(this.stateFor("workbench"))).catch(() => undefined);
+      }
+    }).then(
+      (result) => {
+        if (this.workbenchWaitingRecovery === run) {
+          this.workbenchWaitingRecovery = null;
+        }
+        try {
+          this.onWorkbenchWaitingRecovery(result);
+        } catch {
+          // Telemetry must never break the window flow.
+        }
+      },
+      () => {
+        if (this.workbenchWaitingRecovery === run) {
+          this.workbenchWaitingRecovery = null;
+        }
+      }
+    );
+  }
+
+  private cancelWorkbenchWaitingRecovery(): void {
+    const run = this.workbenchWaitingRecovery;
+    if (!run) {
+      return;
+    }
+    this.workbenchWaitingRecovery = null;
+    run.controller.abort();
   }
 
   private assertWorkbenchOpenAllowed(generation = this.workbenchCloseGeneration): void {
@@ -1307,11 +1434,11 @@ export class ElectronWindowProvider {
 
   private syncWorkbenchUrlFromWindow(window: ElectronWindowLike): void {
     const currentUrl = window.webContents.getURL().trim();
-    if (isWorkbenchErrorPageUrl(currentUrl)) {
-      // The error document is not a ready Workbench page: keep the ready
-      // marker unset so sends, attention overlays and focus tracking stay
-      // disabled, and keep the previous workbench URL so the next open
-      // reloads the real origin.
+    if (isWorkbenchStatusPageUrl(currentUrl)) {
+      // Neither the waiting nor the error document is a ready Workbench
+      // page: keep the ready marker unset so sends, attention overlays and
+      // focus tracking stay disabled, and keep the previous workbench URL so
+      // the next open (or the recovery reload) targets the real origin.
       this.workbenchReadyUrl = null;
       return;
     }
@@ -1520,4 +1647,16 @@ function preventWindowClose(event: unknown): void {
       preventDefault.call(event);
     }
   }
+}
+
+function currentWindowUrl(window: ElectronWindowLike): string {
+  try {
+    return window.webContents.getURL();
+  } catch {
+    return "";
+  }
+}
+
+function positiveOr(value: number | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : fallback;
 }
