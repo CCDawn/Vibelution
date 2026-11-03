@@ -243,11 +243,33 @@ function staggeredRowStyle(index: number, count: number): CSSProperties {
   } as CSSProperties;
 }
 
-/** Native <details> hides content immediately; keep it mounted for its exit sequence. */
-function useStaggeredDetails(openByDefault: boolean) {
-  const [isExpanded, setIsExpanded] = useState(openByDefault);
+/**
+ * Native <details> hides content immediately; keep it mounted for its exit
+ * sequence. With `persistence`, the open choice round-trips through the shared
+ * per-session localStorage store (same rules as tool rows and category
+ * groups: only OPEN is stored, so a collapse is a removal) and survives the
+ * remounts caused by the group's div→details root swap. A `openByDefault`
+ * force-open (failed turn scene) is scene preservation, not a user choice, so
+ * it never writes the store.
+ */
+function useStaggeredDetails(
+  openByDefault: boolean,
+  persistence?: { sessionId: string; key: string },
+) {
+  const { sessionId = "", key = "" } = persistence ?? {};
+  const [isExpanded, setIsExpanded] = useState(
+    () => openByDefault
+      || (Boolean(sessionId) && Boolean(key) && readOpenToolKeys(sessionId).has(key)),
+  );
   const [isClosing, setIsClosing] = useState(false);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const persistOpen = useCallback((open: boolean) => {
+    if (!sessionId || !key) {
+      return;
+    }
+    setToolRowOpen(sessionId, key, open);
+  }, [key, sessionId]);
 
   const cancelClose = useCallback(() => {
     if (closeTimer.current !== null) {
@@ -261,19 +283,22 @@ function useStaggeredDetails(openByDefault: boolean) {
     if (isClosing) {
       cancelClose();
       setIsExpanded(true);
+      persistOpen(true);
       return;
     }
     if (!isExpanded) {
       setIsExpanded(true);
+      persistOpen(true);
       return;
     }
     setIsClosing(true);
+    persistOpen(false);
     closeTimer.current = setTimeout(() => {
       closeTimer.current = null;
       setIsClosing(false);
       setIsExpanded(false);
     }, STAGGERED_DETAILS_CLOSE_DURATION_MS);
-  }, [cancelClose, isClosing, isExpanded]);
+  }, [cancelClose, isClosing, isExpanded, persistOpen]);
 
   useEffect(() => {
     if (!openByDefault) return;
@@ -591,7 +616,9 @@ function ToolActivityBatch({
 } & ToolRowScopeProps) {
   // A failed turn force-opens the batch so its work history stays on scene;
   // batches have no running→completed auto-collapse (they never self-open).
-  const staggeredDetails = useStaggeredDetails(turnFailed);
+  // The user's expand choice persists per session (keyed by the batch's
+  // anchored id) so the settle-time group remount reopens it.
+  const staggeredDetails = useStaggeredDetails(turnFailed, { sessionId, key: item.id });
   const descriptor = conversationToolActivityRendererForCell(item.cells[0], language);
   const Icon = descriptor.icon;
   const countLabel = language === "zh" ? `${item.count} 次` : `${item.count} calls`;

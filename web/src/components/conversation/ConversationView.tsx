@@ -1053,6 +1053,7 @@ export const ConversationView = React.memo(function ConversationView({
     agentRenderStatesByMessageId,
     agentTimelineItemsByMessageId,
     agentOperationGroupsByMessageId,
+    retiredOverlayAliases: activeAgentMessageTimelineProjection.retiredOverlayAliases,
   });
 
   const {

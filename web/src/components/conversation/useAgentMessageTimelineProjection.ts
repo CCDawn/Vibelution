@@ -31,6 +31,19 @@ export type AgentMessageTimelineProjection = {
   agentMessages: AgentMessage[];
   streamingMessages: ConversationMessage[];
   rowIdentities: AgentMessageTimelineRowIdentity[];
+  /**
+   * Overlay rows (live/active) that this projection retired together with the
+   * row id that replaced them. The conversation expansion store consumes these
+   * to carry explicit user expand toggles across the live→durable identity
+   * change instead of resetting the sections to their collapsed defaults.
+   */
+  retiredOverlayAliases: readonly RetiredOverlayAlias[];
+};
+
+/** A retired overlay row id and the row id that now paints the same turn. */
+export type RetiredOverlayAlias = {
+  fromMessageId: string;
+  toMessageId: string;
 };
 
 function hasVisibleTurnData(message: ConversationMessage) {
@@ -234,10 +247,31 @@ export function dedupeSettledUserSubmissions(
   });
 }
 
+/**
+ * Mirrors the durable-segment fold winner in `mergeSameAssistantTurn`: the
+ * chronologically last highest-status segment keeps its row id after the fold,
+ * so an overlay retiring on settle must alias to exactly that id.
+ */
+function durableSegmentStatusRank(
+  message: Extract<ConversationMessage, { role: "assistant" }>,
+): number {
+  switch (message.status) {
+    case "failed":
+      return 3;
+    case "completed":
+      return 2;
+    case "running":
+      return 1;
+    default:
+      return 0;
+  }
+}
+
 function dedupeAssistantTurnOverlays(
   messages: ConversationMessage[],
   activeTurnMessage?: ConversationMessage,
-): ConversationMessage[] {  const isOverlay = (message: ConversationMessage) => (
+): { messages: ConversationMessage[]; aliases: RetiredOverlayAlias[] } {
+  const isOverlay = (message: ConversationMessage) => (
     message === activeTurnMessage
     || message.metadata?.kind === "session_active_turn_layer"
     || message.metadata?.kind === "session_live_overlay"
@@ -246,6 +280,7 @@ function dedupeAssistantTurnOverlays(
   const winnerByTurnId = new Map<string, ConversationMessage>();
   const settledTurnIds = new Set<string>();
   const overlaysByTurnId = new Map<string, Extract<ConversationMessage, { role: "assistant" }>[]>();
+  const durablesByTurnId = new Map<string, Extract<ConversationMessage, { role: "assistant" }>[]>();
   for (const message of messages) {
     if (message.role !== "assistant") {
       continue;
@@ -257,6 +292,9 @@ function dedupeAssistantTurnOverlays(
     // Durable segments can contain different items from the same turn. Only
     // their terminal outcome competes with overlays; never discard a segment.
     if (!isOverlay(message)) {
+      const durables = durablesByTurnId.get(turnId) ?? [];
+      durables.push(message);
+      durablesByTurnId.set(turnId, durables);
       if (hasTerminalCanonicalTurnOutcome(message) || hasCommittedAssistantProtocolAnswer(message)) {
         settledTurnIds.add(turnId);
       }
@@ -273,9 +311,41 @@ function dedupeAssistantTurnOverlays(
     }
   }
   if (winnerByTurnId.size === 0) {
-    return messages;
+    return { messages, aliases: [] };
   }
-  return messages.flatMap((message) => {
+  const aliases: RetiredOverlayAlias[] = [];
+  const aliasIdentities = new Set<string>();
+  const recordAlias = (fromMessageId: string, toMessageId: string) => {
+    if (!fromMessageId || !toMessageId || fromMessageId === toMessageId) {
+      return;
+    }
+    const identity = `${fromMessageId}\u0000${toMessageId}`;
+    if (aliasIdentities.has(identity)) {
+      return;
+    }
+    aliasIdentities.add(identity);
+    aliases.push({ fromMessageId, toMessageId });
+  };
+  const settledDurableWinnerByTurnId = new Map<string, string>();
+  const settledDurableWinnerId = (turnId: string): string => {
+    const cached = settledDurableWinnerByTurnId.get(turnId);
+    if (cached !== undefined) {
+      return cached;
+    }
+    let winner: Extract<ConversationMessage, { role: "assistant" }> | undefined;
+    for (const candidate of chronologicalConversationMessages(durablesByTurnId.get(turnId) ?? [])) {
+      if (candidate.role !== "assistant") {
+        continue;
+      }
+      if (!winner || durableSegmentStatusRank(candidate) >= durableSegmentStatusRank(winner)) {
+        winner = candidate;
+      }
+    }
+    const winnerId = winner?.id ?? "";
+    settledDurableWinnerByTurnId.set(turnId, winnerId);
+    return winnerId;
+  };
+  const nextMessages = messages.flatMap((message) => {
     if (message.role !== "assistant" || !isOverlay(message)) {
       return [message];
     }
@@ -283,7 +353,16 @@ function dedupeAssistantTurnOverlays(
     if (!turnId) {
       return [message];
     }
-    if (settledTurnIds.has(turnId) || winnerByTurnId.get(turnId) !== message) {
+    if (settledTurnIds.has(turnId)) {
+      // The durable turn committed and replaced this overlay; hand any
+      // expansion bound to the overlay id to the surviving durable row.
+      recordAlias(message.id, settledDurableWinnerId(turnId));
+      return [];
+    }
+    if (winnerByTurnId.get(turnId) !== message) {
+      // A better overlay took over the turn (rank swap): chain the state onto
+      // the winner so a later settle can move it to the durable row.
+      recordAlias(message.id, winnerByTurnId.get(turnId)?.id ?? "");
       return [];
     }
     const overlays = overlaysByTurnId.get(turnId) ?? [];
@@ -291,6 +370,7 @@ function dedupeAssistantTurnOverlays(
       ? [{ ...message, turnItems: consolidateSessionTurnItemsV2(...overlays.map((overlay) => overlay.turnItems)) }]
       : [message];
   });
+  return { messages: nextMessages, aliases };
 }
 
 /**
@@ -308,11 +388,13 @@ export function projectAgentMessageTimelineMessages({
   const canonicalActiveTurn = activeTurnMessage
     ? normalizeConversationMessageForRenderer(projectConversationMessageFromTurnItemsV2(activeTurnMessage))
     : undefined;
+  const deduplicated = dedupeAssistantTurnOverlays([
+    ...canonicalTimeline,
+    ...(canonicalActiveTurn ? [canonicalActiveTurn] : []),
+  ], canonicalActiveTurn);
   const folded = projectTimelineProcessMessages(
-dedupeSettledUserSubmissions(dedupeAssistantTurnOverlays([
-      ...canonicalTimeline,
-      ...(canonicalActiveTurn ? [canonicalActiveTurn] : []),
-    ], canonicalActiveTurn)),  );
+    dedupeSettledUserSubmissions(deduplicated.messages),
+  );
   const ordered = chronologicalConversationMessages(folded);
   const orderedMessages = (companionMode ? ordered : projectGuidanceWorkSegments(ordered)).filter(hasVisibleTurnData);
   const messages = companionMode
@@ -326,5 +408,6 @@ dedupeSettledUserSubmissions(dedupeAssistantTurnOverlays([
     agentMessages,
     streamingMessages: messages.filter(assistantTurnIsStreaming),
     rowIdentities: buildAgentMessageTimelineRowIdentities(agentMessages),
+    retiredOverlayAliases: deduplicated.aliases,
   };
 }

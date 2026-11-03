@@ -355,3 +355,78 @@ describe("ConversationToolActivity complete-edge auto-collapse", () => {
     await manual.unmount();
   });
 });
+
+describe("ConversationToolActivity batch open persistence", () => {
+  function batchCells() {
+    return [
+      namedToolCell("batch-persist-1", "web_fetch_tool"),
+      namedToolCell("batch-persist-2", "web_fetch_tool"),
+    ];
+  }
+
+  it("persists the batch expand choice across unmount and remount", async () => {
+    const first = mountActivity(batchCells());
+    await act(async () => first.render());
+    const batch = first.host.querySelector('[data-codex-tool-activity-batch="true"]')!;
+    expect(batch.hasAttribute("open")).toBe(false);
+
+    await act(async () => batch.querySelector("summary")!.click());
+    expect(batch.hasAttribute("open")).toBe(true);
+    expect(readOpenToolKeys(DEFAULT_SESSION).has("tool-batch:batch-persist-1:batch-persist-2")).toBe(true);
+    await first.unmount();
+
+    const second = mountActivity(batchCells());
+    await act(async () => second.render());
+    expect(second.host.querySelector('[data-codex-tool-activity-batch="true"]')!.hasAttribute("open")).toBe(true);
+
+    // Collapsing frees the stored entry again.
+    await act(async () => second.host.querySelector('[data-codex-tool-activity-batch="true"] summary')!.click());
+    expect(second.host.querySelector('[data-codex-tool-activity-batch="true"]')!.hasAttribute("open")).toBe(false);
+    expect(readOpenToolKeys(DEFAULT_SESSION).has("tool-batch:batch-persist-1:batch-persist-2")).toBe(false);
+    await second.unmount();
+
+    const third = mountActivity(batchCells());
+    await act(async () => third.render());
+    expect(third.host.querySelector('[data-codex-tool-activity-batch="true"]')!.hasAttribute("open")).toBe(false);
+    await third.unmount();
+  });
+
+  it("keeps the batch open across the settle-time collapsible-group root swap", async () => {
+    // Phase 1 — a settled batch plus one running off-category row keeps the
+    // activity root a plain div (no collapsible group while running).
+    const phase1Cells = () => [
+      namedToolCell("batch-swap-1", "web_fetch_tool"),
+      namedToolCell("batch-swap-2", "web_fetch_tool"),
+      namedToolCell("batch-swap-3", "web_fetch_tool"),
+      (() => {
+        const cell = namedToolCell("batch-swap-tail", "zephyr_calc_tool");
+        cell.status = "running";
+        cell.tone = "running";
+        return cell;
+      })(),
+    ];
+    const mount = mountActivity(phase1Cells());
+    await act(async () => mount.render());
+    expect(mount.host.querySelector('[data-codex-tool-activity-group="true"]')).toBeNull();
+    const runningBatch = mount.host.querySelector('[data-codex-tool-activity-batch="true"]')!;
+    await act(async () => runningBatch.querySelector("summary")!.click());
+    expect(runningBatch.hasAttribute("open")).toBe(true);
+
+    // Phase 2 — the tail settles: the activity root becomes a <details> group
+    // (count >= 3, settled), which remounts the whole row subtree. The batch
+    // must come back open from the per-session store, not collapsed.
+    const phase2Cells = () => [
+      namedToolCell("batch-swap-1", "web_fetch_tool"),
+      namedToolCell("batch-swap-2", "web_fetch_tool"),
+      namedToolCell("batch-swap-3", "web_fetch_tool"),
+      namedToolCell("batch-swap-tail", "zephyr_calc_tool"),
+    ];
+    await act(async () => mount.render(phase2Cells()));
+    const group = mount.host.querySelector('[data-codex-tool-activity-group="true"]')!;
+    expect(group).not.toBeNull();
+    const settledBatch = mount.host.querySelector('[data-codex-tool-activity-batch="true"]')!;
+    expect(settledBatch.hasAttribute("open")).toBe(true);
+    expect(readOpenToolKeys(DEFAULT_SESSION).has("tool-batch:batch-swap-1:batch-swap-3")).toBe(true);
+    await mount.unmount();
+  });
+});

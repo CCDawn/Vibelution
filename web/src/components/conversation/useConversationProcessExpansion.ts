@@ -16,10 +16,39 @@ import {
 import { projectedConversationMessageIds } from "./conversationMessageIdentity";
 import type { ResponseSegment } from "./messageResponseSegments";
 import { getCachedResponseSegments as getCachedResponseSegmentsFromCache } from "./conversationResponseSegmentCache";
+import type { RetiredOverlayAlias } from "./useAgentMessageTimelineProjection";
 
 const DEFAULT_EXPANDED_RESPONSE_TAIL_COUNT = 3;
 const RESPONSE_PARSE_CACHE_LIMIT = 80;
 const RESPONSE_PREWARM_MESSAGE_LIMIT = 8;
+
+/**
+ * Moves explicit expansion records from retired overlay row ids onto the rows
+ * that replaced them (pure; exported for tests). A target section the user
+ * already toggled explicitly wins, and re-reported aliases are natural no-ops
+ * because the source record moves away on the first application.
+ */
+export function migrateSectionExpansionRecords(
+  expansion: ConversationSectionExpansion,
+  aliases: ReadonlyArray<RetiredOverlayAlias>,
+): ConversationSectionExpansion {
+  let next: ConversationSectionExpansion | null = null;
+  for (const { fromMessageId, toMessageId } of aliases) {
+    if (!fromMessageId || !toMessageId || fromMessageId === toMessageId) {
+      continue;
+    }
+    const source = (next ?? expansion)[fromMessageId];
+    if (!source) {
+      continue;
+    }
+    if (!next) {
+      next = { ...expansion };
+    }
+    delete next[fromMessageId];
+    next[toMessageId] = { ...source, ...(next[toMessageId] ?? {}) };
+  }
+  return next ?? expansion;
+}
 
 export type UseConversationProcessExpansionInput = {
   sessionId: string;
@@ -28,6 +57,14 @@ export type UseConversationProcessExpansionInput = {
   agentRenderStatesByMessageId: Map<string, AgentMessageRenderState>;
   agentTimelineItemsByMessageId: Map<string, AgentMessageTimelineItem[]>;
   agentOperationGroupsByMessageId: Map<string, AgentMessageOperationGroups>;
+  /**
+   * Overlay→durable row id pairs reported by the timeline projection when a
+   * settled turn retires its live overlay rows. Explicit toggles bound to a
+   * retired id migrate onto the replacing row so the user's expand choices
+   * survive the live→durable identity change. Absent/empty = no-op, so
+   * callers that do not project overlays keep today's behavior exactly.
+   */
+  retiredOverlayAliases?: ReadonlyArray<RetiredOverlayAlias>;
 };
 
 export type UseConversationProcessExpansionResult = {
@@ -49,7 +86,9 @@ export type UseConversationProcessExpansionResult = {
  * Expanded-response tail, section defaults, explicit toggles, response-segment
  * parse cache, and idle prewarm. Extracted from ConversationView; the shell
  * still calls this beside `useConversationTimelineFollow` and passes
- * `preserveCurrentExpansionDefaults` into that follow hook.
+ * `preserveCurrentExpansionDefaults` into that follow hook. Explicit toggles
+ * follow their row across the live→durable identity change via the projection's
+ * `retiredOverlayAliases`.
  */
 export function useConversationProcessExpansion({
   sessionId,
@@ -58,6 +97,7 @@ export function useConversationProcessExpansion({
   agentRenderStatesByMessageId,
   agentTimelineItemsByMessageId,
   agentOperationGroupsByMessageId,
+  retiredOverlayAliases,
 }: UseConversationProcessExpansionInput): UseConversationProcessExpansionResult {
   const defaultExpansionRef = useRef<Record<string, Record<string, boolean>>>({});
   const responseSegmentCacheRef = useRef<Map<string, ResponseSegment[]>>(new Map());
@@ -168,6 +208,16 @@ export function useConversationProcessExpansion({
       };
     });
   }
+
+  // Carry explicit toggles across the live→durable row identity change. The
+  // migration is idempotent: once a record moves, re-reported aliases for the
+  // same overlay id find no source record and bail out of the state update.
+  useEffect(() => {
+    if (!retiredOverlayAliases || retiredOverlayAliases.length === 0) {
+      return;
+    }
+    setSectionExpansion((current) => migrateSectionExpansionRecords(current, retiredOverlayAliases));
+  }, [retiredOverlayAliases]);
 
   useEffect(() => {
     const prewarmMessages = timelineMessages
