@@ -1642,14 +1642,31 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
         stopLauncherAssistantReminders = startAssistantReminderPump({
           host,
           available: () => !shutdownApproved,
-          notify: (notice, recoveredFallback, onClick, onFailure, onFallback, onLateFallback) => new Promise((resolve, reject) => {
+          notify: (notice, recoveredFallback, onClick, onFailure, onFallback, onLateFallback, signal) => new Promise((resolve, reject) => {
+            if (signal.aborted) { reject(new Error("ASSISTANT_STOPPED")); return; }
             let settled = false;
+            let notification: Notification | undefined;
             let resultChannel: "system_notification" | "attention_fallback" | "unknown" = "unknown";
             let lateFallbackStarted = false;
             const timeout = setTimeout(() => {
-              if (!settled) { settled = true; reject(new Error("ASSISTANT_REMINDER_NOTIFICATION_UNKNOWN")); }
+              if (!settled) {
+                settled = true;
+                signal.removeEventListener("abort", abortPending);
+                reject(new Error("ASSISTANT_REMINDER_NOTIFICATION_UNKNOWN"));
+              }
             }, 10_000);
+            const abortPending = () => {
+              if (settled) return;
+              settled = true;
+              clearTimeout(timeout);
+              signal.removeEventListener("abort", abortPending);
+              try { notification?.close(); } catch { /* Its durable receipt remains unknown. */ }
+              reject(new Error("ASSISTANT_STOPPED"));
+            };
+            signal.addEventListener("abort", abortPending, { once: true });
+            if (signal.aborted) { abortPending(); return; }
             const fallback = () => {
+              if (signal.aborted) return;
               if (settled) {
                 if (resultChannel === "attention_fallback" || lateFallbackStarted) return;
                 lateFallbackStarted = true;
@@ -1660,17 +1677,24 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
               settled = true;
               resultChannel = "attention_fallback";
               clearTimeout(timeout);
+              signal.removeEventListener("abort", abortPending);
               if (!recoveredFallback) console.warn("ASSISTANT_REMINDER_NOTIFICATION_FAILED");
               onFallback(showReminderFallback(notice).then(result => result.response === 0));
               resolve("attention_fallback");
             };
             if (recoveredFallback || !Notification.isSupported()) { fallback(); return; }
             try {
-              const notification = new Notification({ title: notice.title, body: notice.body, silent: false });
+              notification = new Notification({ title: notice.title, body: notice.body, silent: false });
               notification.on("click", onClick);
               notification.on("failed", fallback);
               notification.on("show", () => {
-                if (!settled) { settled = true; resultChannel = "system_notification"; clearTimeout(timeout); resolve("system_notification"); }
+                if (!settled && !signal.aborted) {
+                  settled = true;
+                  resultChannel = "system_notification";
+                  clearTimeout(timeout);
+                  signal.removeEventListener("abort", abortPending);
+                  resolve("system_notification");
+                }
               });
               nativeNotificationLifetime.retain(notification);
               notification.show();
@@ -1679,7 +1703,7 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
           openAssistant: () => { void launcherAssistantWindow?.open({ show: true }).then(() => flushAssistantMigrationFeedback?.()).catch(() => console.warn("ASSISTANT_WINDOW_FAILED")); },
           onError: reason => {
             console.warn(reason === "notification" ? "ASSISTANT_REMINDER_NOTIFICATION_FAILED" : "ASSISTANT_REMINDER_TRANSPORT_FAILED");
-            if (!shutdownApproved) void dialog.showMessageBox({
+            if (!shutdownApproved && !launcherAssistantStopping) void dialog.showMessageBox({
               type: "warning", title: "个人助理提醒暂不可用",
               message: reason === "notification"
                 ? "系统通知未能显示，已有事务和发送记录仍会保留。"
@@ -4357,6 +4381,10 @@ async function requestDesktopShellExit(
               closeDesktopSession: async (signal) => {
                 signal.throwIfAborted();
                 await closeDesktopSessionIfRegistered();
+                if (operatorRequested && !interruptActiveWork) {
+                  await windowProvider?.approveWorkbenchCloseOnce({ deadlineAt: deadline.expiresAt });
+                  signal.throwIfAborted();
+                }
               },
               recordEvent: (event) => {
                 recordSupervisorEventFallbackLocally({

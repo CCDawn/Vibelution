@@ -19,6 +19,60 @@ function fixture(recoveredFallback = false) {
 }
 
 describe("Launcher assistant reminders", () => {
+  it("does not notify when a reminder claim returns after permanent stop", async () => {
+    vi.useFakeTimers();
+    const { host, event } = fixture();
+    let release!: (event: AssistantReminder) => void;
+    host.nextReminder.mockReset().mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    const notify = vi.fn(async () => "system_notification" as const);
+    const pump = startAssistantReminderPump({ host, available: () => true, notify, openAssistant: vi.fn(), onError: vi.fn() });
+    await vi.advanceTimersByTimeAsync(1);
+    const stopping = pump();
+    release(event);
+    await stopping;
+    expect(notify).not.toHaveBeenCalled();
+    expect(host.settleReminder).not.toHaveBeenCalled();
+  });
+
+  it("still waits for an admitted delivery receipt after the notification was shown", async () => {
+    vi.useFakeTimers();
+    const { host } = fixture();
+    let release!: () => void;
+    host.settleReminder.mockImplementationOnce(() => new Promise<void>(resolve => { release = resolve; }));
+    const pump = startAssistantReminderPump({ host, available: () => true,
+      notify: vi.fn(async () => "system_notification" as const), openAssistant: vi.fn(), onError: vi.fn() });
+    await vi.advanceTimersByTimeAsync(1);
+    let stopped = false;
+    const stopping = pump().then(() => { stopped = true; });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(stopped).toBe(false);
+    release();
+    await stopping;
+    expect(host.settleReminder).toHaveBeenCalledOnce();
+  });
+
+  it("cancels a pending native notification wait on permanent stop without settling its unknown receipt", async () => {
+    vi.useFakeTimers();
+    const { host } = fixture();
+    const onError = vi.fn();
+    let signal: AbortSignal | undefined;
+    const notify = vi.fn((_notice, _recovered, _click, _failure, _fallback, _late, stopSignal?: AbortSignal) => {
+      signal = stopSignal;
+      return new Promise<"system_notification">((_resolve, reject) => {
+        stopSignal?.addEventListener("abort", () => reject(new Error("ASSISTANT_STOPPED")), { once: true });
+      });
+    });
+    const pump = startAssistantReminderPump({ host, available: () => true, notify, openAssistant: vi.fn(), onError });
+    await vi.advanceTimersByTimeAsync(1);
+    const stopping = pump();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(signal?.aborted).toBe(true);
+    await stopping;
+    expect(host.settleReminder).not.toHaveBeenCalled();
+    expect(host.fallbackReminder).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
   it("pauses an idle sender for automatic lifecycle and resumes the same owner", async () => {
     vi.useFakeTimers();
     const { host } = fixture();

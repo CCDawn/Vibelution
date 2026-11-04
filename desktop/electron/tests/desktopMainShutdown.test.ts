@@ -29,6 +29,7 @@ function harness() {
   const stopMain = vi.fn(async (_interrupt: boolean, _signal?: AbortSignal) => undefined);
   const stopIsolated = vi.fn(async () => undefined);
   const closeSession = vi.fn(async () => undefined);
+  const closeWindow = vi.fn(async (_options: { deadlineAt: number }) => ({ open: false }));
   const dialog = vi.fn(async () => ({ response: 0 }));
   const quit = vi.fn();
   const context = {
@@ -61,6 +62,7 @@ function harness() {
     stopIsolatedInstancesForApprovedShutdown: stopIsolated,
     stopMainRuntimeForApprovedShutdown: stopMain,
     closeDesktopSessionIfRegistered: closeSession,
+    windowProvider: { approveWorkbenchCloseOnce: closeWindow },
     stopOwnedPythonLauncherService: async () => ({ schemaVersion: 1, status: "skipped", reason: "no_owner",
       expectedBackendPid: 0, launcherBackendPid: 0, terminatedPids: [] }),
     recordSupervisorEventFallbackLocally: vi.fn(),
@@ -79,14 +81,109 @@ function harness() {
     requestDesktopShellExit: (reason: string, confirm: boolean) => Promise<ShutdownDecision>;
     runTrayStopAll: () => Promise<void>;
   };
-  return { context, workspace, release, acquire, stopMain, stopIsolated, closeSession, dialog, quit,
+  return { context, workspace, release, acquire, stopMain, stopIsolated, closeSession, closeWindow, dialog, quit,
     exit: (operatorRequested = true) => actions.requestDesktopShellExit("desktop_shell_quit", operatorRequested),
     tray: () => actions.runTrayStopAll() };
 }
 
 afterEach(() => vi.useRealTimers());
 
+function reminderNotificationHarness() {
+  let initializer: ts.Expression | undefined;
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "startAssistantReminderPump") {
+      const options = node.arguments[0];
+      if (options && ts.isObjectLiteralExpression(options)) {
+        const property = options.properties.find(item => ts.isPropertyAssignment(item) && item.name.getText(parsed) === "notify");
+        if (property && ts.isPropertyAssignment(property)) initializer = property.initializer;
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(parsed);
+  if (!initializer) throw new Error("Missing native reminder notify implementation");
+  const notifications: NativeNotification[] = [];
+  class NativeNotification {
+    static isSupported() { return true; }
+    handlers = new Map<string, () => void>();
+    show = vi.fn();
+    close = vi.fn(() => this.handlers.get("failed")?.());
+    constructor() { notifications.push(this); }
+    on(event: string, listener: () => void) { this.handlers.set(event, listener); return this; }
+  }
+  const fallback = vi.fn(async () => ({ response: 0 }));
+  const context = { setTimeout, clearTimeout, Error, console: { warn: vi.fn() }, Notification: NativeNotification,
+    nativeNotificationLifetime: { retain: vi.fn() }, showReminderFallback: fallback };
+  const code = ts.transpileModule(`(${initializer.getText(parsed)})`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  const notify = runInNewContext(code, context) as (...args: unknown[]) => Promise<string>;
+  const onFallback = vi.fn(), onLateFallback = vi.fn();
+  return { notifications, fallback, onFallback, onLateFallback,
+    notify: (signal: AbortSignal) => notify({ title: "Reminder", body: "Due" }, false, vi.fn(), vi.fn(), onFallback, onLateFallback, signal) };
+}
+
+describe("actual native reminder notification", () => {
+  it("cancels the ten-second wait and blocks synchronous failed and late show callbacks", async () => {
+    vi.useFakeTimers();
+    const h = reminderNotificationHarness();
+    const controller = new AbortController();
+    const pending = h.notify(controller.signal).catch(error => error.message);
+    controller.abort();
+    expect(await pending).toBe("ASSISTANT_STOPPED");
+    expect(h.notifications[0].close).toHaveBeenCalledOnce();
+    h.notifications[0].handlers.get("show")?.();
+    h.notifications[0].handlers.get("failed")?.();
+    expect(h.fallback).not.toHaveBeenCalled();
+    expect(h.onFallback).not.toHaveBeenCalled();
+    expect(h.onLateFallback).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("does not create a notification after stop already aborted its signal", async () => {
+    const h = reminderNotificationHarness();
+    const controller = new AbortController();
+    controller.abort();
+    await expect(h.notify(controller.signal)).rejects.toThrow("ASSISTANT_STOPPED");
+    expect(h.notifications).toHaveLength(0);
+    expect(h.fallback).not.toHaveBeenCalled();
+  });
+
+  it("keeps an acknowledged notification delivered when stop follows show", async () => {
+    vi.useFakeTimers();
+    const h = reminderNotificationHarness();
+    const controller = new AbortController();
+    const pending = h.notify(controller.signal);
+    h.notifications[0].handlers.get("show")?.();
+    controller.abort();
+    expect(await pending).toBe("system_notification");
+    expect(h.notifications[0].close).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
 describe("actual Electron main shutdown functions", () => {
+  it("releases the idle workbench renderer before waiting for backend process exit", async () => {
+    const h = harness();
+    h.stopMain.mockImplementation(async () => {
+      expect(h.closeWindow).toHaveBeenCalledOnce();
+      expect(h.closeSession).toHaveBeenCalledOnce();
+    });
+    await h.tray();
+    expect(h.closeWindow).toHaveBeenCalledWith({ deadlineAt: expect.any(Number) });
+    expect(h.stopMain).toHaveBeenCalledOnce();
+    expect(h.quit).toHaveBeenCalledOnce();
+  });
+
+  it("can retry an idle exit after its renderer closed but backend retirement failed", async () => {
+    const h = harness();
+    h.stopMain.mockRejectedValueOnce(new Error("backend retirement pending"));
+    await h.exit();
+    expect(h.closeWindow).toHaveBeenCalledOnce();
+    expect(h.quit).not.toHaveBeenCalled();
+    await h.exit();
+    expect(h.stopMain).toHaveBeenCalledTimes(2);
+    expect(h.quit).toHaveBeenCalledOnce();
+  });
+
   it("quits an idle tray without a dialog, duplicate stop, or fixed delay", async () => {
     vi.useFakeTimers();
     const h = harness();
