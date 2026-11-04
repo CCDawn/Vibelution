@@ -4,7 +4,7 @@ import { getLauncherAssistantDispatches, getLauncherAssistantStatus, getLauncher
 import { projectAssistantDispatchTasks, type AssistantDispatchTask } from "./assistantDispatchTasks";
 import { projectAssistantTeamRunTasks, retainAssistantTeamRunDisplay, type AssistantTask, type AssistantTeamRunObservationPage } from "./assistantTeamRunTasks";
 import { assistantTaskErrorProbeInterval } from "./assistantTaskProbes";
-import { taskCleanupTargets, taskGroup, taskTime, useAssistantTaskCleanup } from "./assistantTaskCleanup";
+import { taskCleanupTargets, taskGroup, taskTime, useAssistantTaskCleanup, type AssistantCleanupCollection, type AssistantCleanupSourceError } from "./assistantTaskCleanup";
 import { LauncherTaskCleanupDialog } from "./LauncherTaskCleanupDialog";
 import { LauncherAssistantTaskDetail } from "./LauncherAssistantTaskDetail";
 import { LauncherTaskContext, type TaskReviewRequest } from "./LauncherTaskContext";
@@ -13,13 +13,15 @@ import { readLauncherAssistantTaskSource } from "../launcherAssistantTaskReads";
 
 const PAGE_SIZE=10;
 type Props={lang?:"zh"|"en";routePath?:string;children?:ReactNode;onReview?:(task:AssistantTask)=>void;onApproval?:(task:AssistantDispatchTask)=>void;onOpenConversation?:()=>void};
+type TaskFocus = { identity: string; id: string | null; action: "open" | "cleanup"; prior: HTMLElement | null };
 
 /** One Launcher owner for identity-scoped reads, selection and guarded cleanup.
  * Desktop/mobile navigation share this provider; native stores remain authoritative. */
 export function LauncherAssistantTaskCards({onReview,onApproval,onOpenConversation,children,routePath,lang="zh"}:Props){
  const [selection,setSelection]=useState<{id:string;identity:string}|null>(null);
  const [reviewRequest,setReviewRequest]=useState<TaskReviewRequest|null>(null);
- const returnFocus=useRef<HTMLElement|null>(null);
+ const returnFocus=useRef<TaskFocus|null>(null);
+ const cleanupFocus=useRef<TaskFocus|null>(null);
  const previousPath=useRef(routePath);
  useEffect(()=>{
   if(previousPath.current?.replace(/\/+$/, "").endsWith("/assistant")&&!routePath?.replace(/\/+$/, "").endsWith("/assistant"))setReviewRequest(null);
@@ -140,8 +142,10 @@ export function LauncherAssistantTaskCards({onReview,onApproval,onOpenConversati
   const teamFeed = projectAssistantTeamRunTasks(teamPages.flatMap(page => page.teamRuns), { sourceAvailable: !status.isError && !teamRuns.isError });
   const tasks: AssistantTask[] = [...feed.tasks.map(task => ({ ...task, kind: "dispatch" as const })), ...teamFeed.tasks]
     .sort((left, right) => taskTime(right) - taskTime(left) || left.id.localeCompare(right.id));
-  const teamPartial = teamPages.some(page => page.state === "partial" || page.coverage.invalidRecords > 0 || page.coverage.legacyUnrecoverable > 0)
+  const teamPartial = teamPages.some(page => page.state === "partial" || page.coverage.invalidRecords > 0)
     || teamFeed.invalidRecords > 0;
+  const historyIncomplete = teamPages.some(page => !page.coverage.historyComplete);
+  const legacyUnrecoverable = Math.max(0, ...teamPages.map(page => page.coverage.legacyUnrecoverable));
   const refreshing = status.isFetching || dispatches.isFetching || (teamEnabled && teamRuns.isFetching);
   const refresh = async () => {
     const result = await status.refetch();
@@ -167,34 +171,54 @@ export function LauncherAssistantTaskCards({onReview,onApproval,onOpenConversati
   const cleanable = tasks.filter(task => taskCleanupTargets(task).length > 0);
   const cleanCompleted = () => {
     if (!reading) return;
+    cleanupFocus.current = { identity, id: null, action: "cleanup", prior: document.activeElement instanceof HTMLElement ? document.activeElement : null };
     void cleanup.open(async signal => {
-      const dispatchRows = await readLauncherAssistantTaskSource(identity, signal, getLauncherAssistantDispatches, canReadSource);
-      signal.throwIfAborted();
-      const allTasks = projectAssistantDispatchTasks(dispatchRows).tasks.map(task => ({ ...task, kind: "dispatch" as const }));
-      if (!teamEnabled) return allTasks;
-      const pages: AssistantTeamRunObservationPage[] = [];
-      const cursors = new Set<string>();
-      let cursor: string | undefined;
-      do {
+      const assertCurrent = () => {
         signal.throwIfAborted();
-        if (!canReadSource()) throw new Error(lang === "zh" ? "任务视图已变化，请重试。" : "The task view changed. Please retry.");
-        const page = await readLauncherAssistantTaskSource(identity, signal,
-          () => getLauncherAssistantTeamRuns({ agentId, directSessionId: sessionId }, cursor), canReadSource);
-        signal.throwIfAborted();
-        if (!canReadSource()) throw new Error(lang === "zh" ? "任务视图已变化，请重试。" : "The task view changed. Please retry.");
-        pages.push(page);
-        cursor = page.nextCursor ?? undefined;
-        if (cursor && cursors.has(cursor)) throw new Error(lang === "zh" ? "任务分页重复，请重试。" : "Task pagination repeated. Please retry.");
-        if (cursor) cursors.add(cursor);
-      } while (cursor);
-      return [...allTasks, ...projectAssistantTeamRunTasks(pages.flatMap(page => page.teamRuns)).tasks];
+        if (!canReadSource()) throw new DOMException("Launcher task view changed", "AbortError");
+      };
+      const collect = async (source: AssistantCleanupSourceError["source"], read: () => Promise<AssistantTask[]>): Promise<AssistantCleanupCollection> => {
+        try { return { tasks: await read() }; }
+        catch (error) {
+          // Identity, hidden and unmount cancellation invalidate every source.
+          assertCurrent();
+          return { tasks: [], sourceErrors: [{ source, message: error instanceof Error ? error.message : String(error) }] };
+        }
+      };
+      const sources = await Promise.all([
+        collect("dispatch", async () => {
+          const rows = await readLauncherAssistantTaskSource(identity, signal, getLauncherAssistantDispatches, canReadSource);
+          assertCurrent();
+          return projectAssistantDispatchTasks(rows).tasks.map(task => ({ ...task, kind: "dispatch" as const }));
+        }),
+        collect("team_run", async () => {
+          if (!teamEnabled) return [];
+          const pages: AssistantTeamRunObservationPage[] = [];
+          const cursors = new Set<string>();
+          let cursor: string | undefined;
+          do {
+            assertCurrent();
+            const page = await readLauncherAssistantTaskSource(identity, signal,
+              () => getLauncherAssistantTeamRuns({ agentId, directSessionId: sessionId }, cursor), canReadSource);
+            assertCurrent();
+            pages.push(page);
+            cursor = page.nextCursor ?? undefined;
+            if (cursor && cursors.has(cursor)) throw new Error(lang === "zh" ? "任务分页重复，请重试。" : "Task pagination repeated. Please retry.");
+            if (cursor) cursors.add(cursor);
+          } while (cursor);
+          // A later page failure discards this source's entire candidate list.
+          return projectAssistantTeamRunTasks(pages.flatMap(page => page.teamRuns)).tasks;
+        }),
+      ]);
+      assertCurrent();
+      return { tasks: sources.flatMap(source => source.tasks), sourceErrors: sources.flatMap(source => source.sourceErrors ?? []) };
     }, true);
   };
 
  const selected=identityConfirmed && selection?.identity===identity ? tasks.find(task=>task.id===selection.id) : undefined;
  const openTask=(task:AssistantTask,trigger?:HTMLElement)=>{
   if(!activeView.current.mounted || !activeView.current.canAct || activeView.current.identity!==identity)return;
-  returnFocus.current=trigger??null;setSelection({id:task.id,identity});
+  returnFocus.current={identity,id:task.id,action:"open",prior:trigger??null};setSelection({id:task.id,identity});
  };
  const closeTask=()=>setSelection(null);
  const review=(task:AssistantTask)=>{
@@ -205,9 +229,27 @@ export function LauncherAssistantTaskCards({onReview,onApproval,onOpenConversati
   if(!activeView.current.canAct || activeView.current.identity!==identity)return;
   setReviewRequest(null);closeTask();onApproval?.(task);onOpenConversation?.();
  };
- const remove=(task:AssistantTask)=>{if(reading&&!cleanup.busy){closeTask();void cleanup.open([task]);}};
- const context={tasks,loading,unavailable,refreshing,teamUnavailable:teamSupported&&teamRuns.isError,
-  partial:teamPartial,invalid:feed.invalidRecords,enabled:reading,shown,hasNextPage:teamEnabled&&Boolean(teamRuns.hasNextPage)&&!teamRuns.isError,
+ const remove=(task:AssistantTask)=>{if(reading&&!cleanup.busy){
+  cleanupFocus.current={identity,id:task.id,action:"cleanup",prior:document.activeElement instanceof HTMLElement?document.activeElement:null};
+  closeTask();void cleanup.open([task]);}};
+ const restoreFocus=(event:Event,anchor:TaskFocus|null)=>{
+  event.preventDefault();
+  if(!anchor)return;
+  requestAnimationFrame(()=>{
+   if(!activeView.current.mounted||!activeView.current.canAct||activeView.current.identity!==anchor.identity
+    ||document.visibilityState==="hidden"||document.querySelector('[role="dialog"][data-state="open"]'))return;
+   const visible=(node:HTMLElement|null|undefined):node is HTMLElement=>Boolean(node&&node!==document.body&&node!==document.documentElement&&node.isConnected&&node.getClientRects().length
+    &&!node.closest('[hidden],[inert],[aria-hidden="true"]')&&!(node instanceof HTMLButtonElement&&node.disabled));
+   const rows=Array.from(document.querySelectorAll<HTMLElement>('[data-assistant-task-id]')).filter(row=>row.dataset.assistantTaskId===anchor.id);
+   const currentButtons=rows.map(row=>row.querySelector<HTMLElement>(anchor.action==="cleanup"?'[data-assistant-task-cleanup]':'[data-assistant-task-open]'));
+   const otherButtons=rows.map(row=>row.querySelector<HTMLElement>('[data-assistant-task-open]'));
+   const toolbar=Array.from(document.querySelectorAll<HTMLElement>('[data-assistant-task-bulk-cleanup],[data-assistant-task-refresh]'));
+   const navigation=Array.from(document.querySelectorAll<HTMLElement>('button[aria-label="打开功能导航"],button[aria-label="Open navigation"]'));
+   [...currentButtons,...otherButtons,...rows,anchor.prior,...toolbar,...navigation].find(visible)?.focus();
+  });
+ };
+ const context={identity,tasks,loading,unavailable,refreshing,teamUnavailable:teamSupported&&teamRuns.isError,
+  partial:teamPartial,historyIncomplete,legacyUnrecoverable,invalid:feed.invalidRecords,enabled:reading,shown,hasNextPage:teamEnabled&&Boolean(teamRuns.hasNextPage)&&!teamRuns.isError,
   loadingMore:teamRuns.isFetchingNextPage,selectedId:selected?.id??null,cleanableCount:cleanable.length,
   cleanupBusy:cleanup.busy,canCleanCompleted:cleanable.length>0||(teamEnabled&&Boolean(teamRuns.hasNextPage)),
   refresh,more,openTask,remove,cleanCompleted,reviewRequest:identityConfirmed&&reviewRequest?.identity===identity?reviewRequest:null};
@@ -215,10 +257,8 @@ export function LauncherAssistantTaskCards({onReview,onApproval,onOpenConversati
   {children??<LauncherAssistantTaskSidebar lang={lang}/>}
   {selected?<LauncherAssistantTaskDetail key={JSON.stringify([identity,selected.id])} task={selected} lang={lang}
    actionsEnabled={reading} cleanupBusy={cleanup.busy} onClose={closeTask} onReview={review} onApproval={approve} onDelete={remove}
-   onCloseAutoFocus={event=>{event.preventDefault();requestAnimationFrame(()=>{if(document.querySelector('[role="dialog"][data-state="open"]'))return;
-    const prior=returnFocus.current;
-    const target=prior?.isConnected&&prior.getClientRects().length?prior:Array.from(document.querySelectorAll<HTMLElement>('button[aria-label="打开功能导航"],button[aria-label="Open navigation"]')).find(node=>node.getClientRects().length);
-    target?.focus();});}}/>:null}
-  <LauncherTaskCleanupDialog state={cleanup.state} lang={lang} onClose={cleanup.close} onRetry={()=>{void cleanup.retry();}}/>
+   onCloseAutoFocus={event=>restoreFocus(event,returnFocus.current)}/>:null}
+  <LauncherTaskCleanupDialog state={cleanup.state} lang={lang} onClose={cleanup.close} onRetry={()=>{void cleanup.retry();}}
+   onCloseAutoFocus={event=>restoreFocus(event,cleanupFocus.current)}/>
  </LauncherTaskContext.Provider>;
 }

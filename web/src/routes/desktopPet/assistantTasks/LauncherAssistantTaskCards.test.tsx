@@ -254,7 +254,7 @@ describe("task card facts and direct cleanup", () => {
         status: cleanupKey(target) === dispatchCleanupKey ? "deleted" : "partial", releasedBytes: 512,
         retained: [{ kind: "session", reason: "仍有共享引用" }], failures: cleanupKey(target) === dispatchCleanupKey
           ? [] : [{ code: "FILE_BUSY", message: "文件正在使用" }] })) });
-    await render(); await click("清理已完成");
+    await render(); await click("清理已结束");
     expect(container.querySelectorAll("article")).toHaveLength(2);
     expect(document.body.textContent).toContain("文件正在使用");
     expect(document.body.textContent).toContain("仍有共享引用");
@@ -296,7 +296,7 @@ describe("task card facts and direct cleanup", () => {
       items: (request.targets as LauncherTaskCleanupTarget[]).map(target => ({ key: cleanupKey(target), title: "待同步任务",
         status: "blocked", estimatedBytes: 0, resources: [], retained: [], reason: "任务尚未结束" })) });
     await render();
-    expect(button("清理已完成").disabled).toBe(false);
+    expect(button("清理已结束").disabled).toBe(false);
     const remove = button("移除记录“待同步任务”");
     expect(remove.textContent).toBe("");
     expect(remove.querySelector("svg")).not.toBeNull();
@@ -352,7 +352,7 @@ describe("task card facts and direct cleanup", () => {
     const card = container.querySelector('article[data-task-state="unknown"]')!;
     expect(card.textContent).toContain("待清理");
     expect(card.closest('[data-task-group="ended"]')).toBeTruthy();
-    await click("清理已完成");
+    await click("清理已结束");
     expect(operationCalls("previewTaskCleanup")).toHaveLength(1);
     expect(operationCalls("executeTaskCleanup")).toHaveLength(1);
   });
@@ -364,7 +364,7 @@ describe("task card facts and direct cleanup", () => {
     expect(button("已结束 1")).toBeTruthy();
     expect(button("待处理 1")).toBeTruthy();
     expect(container.querySelector("article")?.getAttribute("data-task-state")).toBe("unknown");
-    await click("清理已完成");
+    await click("清理已结束");
     const targets = (operationCalls("previewTaskCleanup")[0][0] as unknown as { targets: LauncherTaskCleanupTarget[] }).targets;
     expect(targets).toEqual([{ kind: "dispatch", projectId: "project-1", dispatchId: "dispatch-1" },
       { kind: "dispatch", projectId: "project-1", dispatchId: "unbound" }]);
@@ -393,7 +393,7 @@ describe("task card facts and direct cleanup", () => {
     teamReply = async () => teamPage(teamRows);
     await render();
     expect(button("已结束 7")).toBeTruthy();
-    await click("清理已完成");
+    await click("清理已结束");
     const targets = operationCalls("previewTaskCleanup").flatMap(([request]) => (request as unknown as { targets: LauncherTaskCleanupTarget[] }).targets);
     expect(targets).toHaveLength(9);
     expect(targets.filter(target => target.kind === "dispatch").map(target => target.dispatchId).sort()).toEqual(["cancelled", "dispatch-1", "failed", "timed_out", "unknown"]);
@@ -411,7 +411,7 @@ describe("task card facts and direct cleanup", () => {
     };
     await render();
     expect(container.querySelectorAll("article")).toHaveLength(10);
-    await click("清理已完成");
+    await click("清理已结束");
     const targets = operationCalls("executeTaskCleanup").flatMap(([request]) => (request as unknown as { targets: LauncherTaskCleanupTarget[] }).targets);
     expect(targets).toHaveLength(41);
     expect(new Set(targets.map(cleanupKey)).size).toBe(41);
@@ -425,7 +425,7 @@ describe("task card facts and direct cleanup", () => {
     await render();
     rows = rows.map(value => value.dispatchId === "newly-ended"
       ? { ...value, receipt: { taskId: "native-1", status: "failed" } } : value);
-    await click("清理已完成");
+    await click("清理已结束");
     const targets = operationCalls("previewTaskCleanup").flatMap(([request]) => (request as unknown as { targets: LauncherTaskCleanupTarget[] }).targets);
     expect(targets).toHaveLength(2);
     expect(targets).toContainEqual({ kind: "dispatch", projectId: "project-1", dispatchId: "newly-ended" });
@@ -440,8 +440,8 @@ describe("task card facts and direct cleanup", () => {
     await render();
     expect(button("待处理 1")).toBeTruthy();
     expect(button("已结束 0")).toBeTruthy();
-    expect(button("清理已完成").disabled).toBe(false);
-    await click("清理已完成");
+    expect(button("清理已结束").disabled).toBe(false);
+    await click("清理已结束");
     expect((operationCalls("previewTaskCleanup")[0][0] as unknown as { targets: unknown[] }).targets)
       .toEqual([{ kind: "team_run", projectId: "project-1", requestId: "request-1", originAction: "team_run" }]);
     expect(document.body.textContent).toContain("团队运行仍在执行");
@@ -453,7 +453,7 @@ describe("task card facts and direct cleanup", () => {
     await render();
     expect(button("已结束 0")).toBeTruthy();
     expect(container.querySelector("article")?.querySelectorAll("button")).toHaveLength(1);
-    expect(button("清理已完成").disabled).toBe(true);
+    expect(button("清理已结束").disabled).toBe(true);
     onlyReads();
   });
 
@@ -463,8 +463,8 @@ describe("task card facts and direct cleanup", () => {
     teamReply = async value => value ? teamPage([teamRun({ status: "failed" })], { offset: 1, total: 2 })
       : teamPage([teamRun({ requestId: "active", runId: "active", status: "running" })], { total: 2, nextCursor: cursor });
     await render();
-    expect(button("清理已完成").disabled).toBe(false);
-    await click("清理已完成");
+    expect(button("清理已结束").disabled).toBe(false);
+    await click("清理已结束");
     expect(operationCalls("executeTaskCleanup")).toHaveLength(1);
   });
 
@@ -472,10 +472,10 @@ describe("task card facts and direct cleanup", () => {
     rows = []; status.teamRunsVersion = 1;
     const cursor = btoa(JSON.stringify({ snapshot: "c".repeat(64), offset: 1 })).replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
     teamReply = async value => teamPage([teamRun()], { offset: value ? 1 : 0, total: 3, nextCursor: cursor });
-    await render(); await click("清理已完成");
+    await render(); await click("清理已结束");
     expect(document.body.textContent).toContain("团队运行暂不可用");
     expect(operationCalls("previewTaskCleanup")).toHaveLength(0);
-    expect(button("重试清理").disabled).toBe(false);
+    expect(button("重试未核验来源与剩余项").disabled).toBe(false);
   });
 
   it.each(["identity", "hidden", "unmounted"] as const)("stops cleanup collection if the view becomes %s", async change => {
@@ -485,7 +485,7 @@ describe("task card facts and direct cleanup", () => {
     await render();
     let resolvePage!: (value: LauncherAssistantTeamRunsPage) => void;
     teamReply = () => new Promise(resolve => { resolvePage = resolve; });
-    await click("清理已完成");
+    await click("清理已结束");
     if (change === "identity") {
       status = { teamRunsVersion: 1, assistant: { agentId: "assistant-2", directSessionId: "session-2", displayName: "新助理" } };
       teamReply = async () => teamPage([]);
@@ -526,7 +526,7 @@ describe("task card facts and direct cleanup", () => {
     let resolveExecute!: (value: LauncherTaskCleanupResult) => void;
     let firstTargets: LauncherTaskCleanupTarget[] = [];
     executeReply = request => { firstTargets = request.targets as LauncherTaskCleanupTarget[]; return new Promise(resolve => { resolveExecute = resolve; }); };
-    await render(); await click("清理已完成");
+    await render(); await click("清理已结束");
     expect(operationCalls("executeTaskCleanup")).toHaveLength(1);
     status = { assistant: { agentId: "assistant-2", directSessionId: "session-2", displayName: "新助理" } };
     await act(async () => { client.setQueryData(["launcher-assistant", "status"], status); }); await settle();
@@ -542,12 +542,12 @@ describe("task card facts and direct cleanup", () => {
     let resolveExecute!: (value: LauncherTaskCleanupResult) => void;
     executeReply = () => new Promise(resolve => { resolveExecute = resolve; });
     await render();
-    const single = button("清理“核对周报”"), bulk = button("清理已完成");
+    const single = button("清理“核对周报”"), bulk = button("清理已结束");
     await act(async () => { single.click(); bulk.click(); single.click(); }); await settle();
     expect(operationCalls("previewTaskCleanup")).toHaveLength(1);
     expect(operationCalls("executeTaskCleanup")).toHaveLength(1);
     expect(button("清理“核对周报”").disabled).toBe(true);
-    expect(button("清理已完成").disabled).toBe(true);
+    expect(button("清理已结束").disabled).toBe(true);
     await act(async () => { resolveExecute({ schemaVersion: 1, releasedBytes: 0,
       items: [{ key: dispatchCleanupKey, status: "deleted", releasedBytes: 0, retained: [], failures: [] }] }); }); await settle();
   });
@@ -753,6 +753,7 @@ describe("Launcher assistant task cards", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(3_000); }); await settle();
     expect(dispatchReads()).toBe(2);
     expect(client.getQueryState(["launcher-assistant", "task-cards", "assistant-1", "session-1"])).toMatchObject({ status: "error" });
+    await click("待处理 1");
     expect(container.textContent).toContain("核对周报");
     expect(container.querySelector('[data-task-state="unknown"]')).toBeTruthy();
     const dialog = await openTask();
@@ -934,7 +935,7 @@ describe("Launcher assistant task cards", () => {
     status.teamRunsVersion = 1;
     teamReply = async () => { throw new Error("team offline"); };
     await render();
-    expect(container.textContent).toContain("任务状态暂不可用");
+    expect(container.textContent).toContain("团队运行状态暂不可用");
     expect(container.querySelector('article[data-task-kind="dispatch"]')?.getAttribute("data-task-state")).toBe("running");
     await act(async () => { await vi.advanceTimersByTimeAsync(3_000); }); await settle();
     expect(teamReads()).toBe(2); // the dispatch cadence plus the first bounded probe of the failed team source
@@ -953,6 +954,7 @@ describe("Launcher assistant task cards", () => {
     teamReply = async () => { throw new Error("team offline"); };
     await act(async () => { await vi.advanceTimersByTimeAsync(3_000); }); await settle();
     expect(teamReads()).toBe(2);
+    await click("待处理 1");
     expect(container.querySelector('article[data-task-kind="team_run"]')?.getAttribute("data-task-state")).toBe("unknown");
     const dialog = await openTask(container.querySelector('article[data-task-kind="team_run"]')!);
     await click("去对话核对", dialog);
@@ -972,7 +974,7 @@ describe("Launcher assistant task cards", () => {
     rows = [];
     teamReply = async () => teamPage([teamRun({ status: null, observedAt: null, readState: "unknown" })], { state: "partial" });
     await render();
-    expect(container.textContent).toContain("部分团队运行待核对");
+    expect(container.textContent).toContain("部分团队关联或状态暂无法核验");
     await act(async () => { await vi.advanceTimersByTimeAsync(9_000); });
     expect(teamReads()).toBe(1);
     teamReply = async () => teamPage([teamRun({ status: "running" })]);
@@ -1042,7 +1044,7 @@ describe("Launcher assistant task cards", () => {
     teamReply = async () => teamPage([], { state: "partial",
       coverage: { kind: "local_associations", historyComplete: false, legacyUnrecoverable: 1, invalidRecords: 1 } });
     await render();
-    expect(container.textContent).toContain("部分团队运行待核对");
+    expect(container.textContent).toContain("部分团队关联或状态暂无法核验");
     expect(container.textContent).not.toContain("暂无此类任务");
   });
 
@@ -1059,6 +1061,7 @@ describe("Launcher assistant task cards", () => {
     });
     await act(async () => { await client.refetchQueries({ queryKey: ["launcher-assistant", "status"], exact: true }); });
     await settle();
+    await click("待处理 2");
     expect(container.querySelectorAll('article[data-task-state="unknown"]')).toHaveLength(2);
     expect(container.textContent).toContain("团队周报");
     const dispatchCount = dispatchReads(), teamCount = teamReads();
@@ -1077,6 +1080,7 @@ describe("Launcher assistant task cards", () => {
     await click("刷新");
     expect(dispatchReads()).toBeGreaterThan(dispatchCount);
     expect(teamReads()).toBeGreaterThan(teamCount);
+    await click("进行中 2");
     expect(container.querySelectorAll('article[data-task-state="running"]')).toHaveLength(2);
   });
 
@@ -1092,11 +1096,9 @@ describe("Launcher assistant task cards", () => {
       title: "", observedAt: null, readState: "unknown" });
     teamReply = async () => teamPage([unknown], { state: "partial" });
     await act(async () => { await vi.advanceTimersByTimeAsync(3_000); }); await settle();
-    let card = container.querySelector('article[data-task-kind="team_run"]')!;
+    expect(container.querySelector('article[data-task-kind="team_run"]')).toBeNull();
     // The selected receipt stays in the dialog while its card moves categories.
     dialog = taskDialog();
-    expect(card.getAttribute("data-task-state")).toBe("unknown");
-    expect(card.textContent).toContain("团队周报");
     expect(dialog.textContent).toContain("以下为上次核验的信息");
     expect(dialog.textContent).toContain("运行编号：run-1");
     expect(dialog.textContent).toContain("版本：r1");
@@ -1105,12 +1107,17 @@ describe("Launcher assistant task cards", () => {
     expect(onReview).toHaveBeenCalledWith(expect.objectContaining({ teamId: null, flowId: null, runId: null,
       nativeStatus: null, revision: null, observedAt: null, receiptBound: false, shouldPoll: false,
       lastKnown: expect.objectContaining({ runId: "run-1" }) }));
+    await click("待处理 1");
+    let card = container.querySelector('article[data-task-kind="team_run"]')!;
+    expect(card.getAttribute("data-task-state")).toBe("unknown");
+    expect(card.textContent).toContain("团队周报");
     await act(async () => { await vi.advanceTimersByTimeAsync(9_000); });
     expect(teamReads()).toBe(2);
     await click("刷新");
     expect(card.textContent).toContain("团队周报");
     teamReply = async () => teamPage([teamRun({ title: "更新后的周报", status: "completed", revision: "r2", observedAt: "2026-11-02T02:00:00Z" })]);
     await click("刷新");
+    await click("已结束 1");
     card = container.querySelector('article[data-task-kind="team_run"]')!;
     dialog = await openTask(card);
     await click("引用信息", dialog);
@@ -1125,6 +1132,7 @@ describe("Launcher assistant task cards", () => {
     teamReply = async () => teamPage([unknown], { state: "partial" });
     await click("刷新");
     expect(container.textContent).not.toContain("更新后的周报");
+    await click("待处理 1");
     dialog = await openTask();
     await click("引用信息", dialog);
     expect(dialog.textContent).not.toContain("上次核验的信息");
@@ -1160,6 +1168,7 @@ describe("Launcher assistant task cards", () => {
       observedAt: null, readState: "unknown" as const };
     teamReply = async () => teamPage([teamRun(unknown), teamRun({ ...unknown, ...alias })], { state: "partial" });
     await click("刷新");
+    await click("待处理 1");
     expect(container.querySelectorAll("article")).toHaveLength(1);
     await openTask();
     await click("去对话核对");

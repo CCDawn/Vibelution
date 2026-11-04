@@ -6,8 +6,10 @@ import anyio
 import pytest
 from fastapi import HTTPException
 
+from core.assistant_runtime.dispatch import DispatchError
+from core.assistant_runtime.management import ManagementAdapter
 from core.assistant_runtime.task_cleanup import CleanupExecute, CleanupPreview, TaskCleanup
-from core.external_agent.backend_client import BackendClientError
+from core.external_agent.backend_client import BackendClientError, ManagedAgentBackendClient
 
 
 @pytest.fixture
@@ -854,3 +856,234 @@ async def test_unbound_cleanup_read_budget_includes_project_admission_and_preser
     assert time.monotonic() - started < 1
     assert preview["items"][0]["status"] == "blocked" and scene.path.exists()
     assert "未及时响应" in preview["items"][0]["reason"] and scene.client.calls == 0
+
+
+@pytest.fixture
+def management_scene(scene):
+    writes, reads = [], []
+    run = {"teamId": "team-1", "flowId": "flow-1", "runId": "run-1", "revision": 3, "status": "completed"}
+
+    class Client:
+        async def management_action(self, **values):
+            writes.append(values)
+            return self.result(values)
+
+        async def management_receipt(self, **values):
+            reads.append(values)
+            return self.result(values)
+
+        @staticmethod
+        def result(values):
+            return {"action": values["action"], "requestId": values["request_id"], "verified": True,
+                    "status": "completed", "teamRun": dict(run),
+                    "flow": {**run, "action": "flow_start", "verified": True}}
+
+        async def management_runtime(self, operation, **values):
+            assert operation == "get" and values["resource_id"] == run["runId"]
+            return {"operation": {"kind": "team_run", "resourceId": run["runId"], **run}}
+
+    client = Client()
+
+    async def call(project_id, operation):
+        assert project_id in {"project-1", "project-2"}
+        return await operation(client)
+
+    profile = scene.root / "profile"
+    projects = {"project-1": scene.root, "project-2": scene.root / "other"}
+    adapter = ManagementAdapter(profile, projects, call, read_binding=scene.service.dispatch._project_read_binding)
+    scene.service.dispatch.management = adapter
+    return SimpleNamespace(adapter=adapter, service=scene.service, identity=scene.identity,
+                           client=client, writes=writes, reads=reads, profile=profile, projects=projects)
+
+
+async def _cleanup_management(case, action, local_only):
+    await case.adapter.invoke("project-1", action=action, request_id="request-1", parameters={"goal": "private body"})
+    payload = CleanupPreview(**case.identity, targets=[{"kind": "team_run", "projectId": "project-1",
+        "requestId": "request-1", "originAction": action, "localOnly": local_only}])
+    preview = await case.service.preview(payload)
+    assert preview["items"][0]["status"] == "ready"
+    result = await case.service.execute(CleanupExecute(**payload.model_dump(), fingerprint=preview["fingerprint"]))
+    assert result["items"][0]["status"] == "deleted"
+    marker = case.service._marker_path(payload.targets[0])
+    path = case.adapter._root / (case.adapter._key("project-1", action, "request-1") + ".json")
+    assert marker.is_file() and not path.exists()
+    return marker, path
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("action", ["team_run", "flow_start"])
+@pytest.mark.parametrize("local_only", [False, True])
+async def test_cleaned_management_identity_cannot_replay_after_reload(management_scene, action, local_only):
+    case = management_scene
+    marker, path = await _cleanup_management(case, action, local_only)
+    original = marker.read_bytes()
+    read_count = len(case.reads)
+    case.identity.update(agentId="assistant-new", directSessionId="session-new")
+    restarted = ManagementAdapter(case.profile, case.projects, case.adapter._call)
+    for parameters in ({"goal": "private body"}, {"goal": "changed body"}):
+        with pytest.raises(DispatchError) as denied:
+            await restarted.invoke("project-1", action=action, request_id="request-1", parameters=parameters)
+        assert denied.value.code == "MANAGEMENT_ALREADY_CLEANED"
+    assert len(case.writes) == 1 and len(case.reads) == read_count
+    assert marker.read_bytes() == original and not path.exists()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("local_only", [False, True])
+async def test_cleaned_management_request_cannot_rebind_missing_sdk_credentials(management_scene, monkeypatch, local_only):
+    case = management_scene
+    marker, path = await _cleanup_management(case, "team_run", local_only)
+    state = case.profile / "missing-sdk-state.json"
+    sdk = ManagedAgentBackendClient(case.projects["project-1"], state_path=state)
+    assert sdk._state["management"] == {} and not state.exists()
+    sdk_calls = []
+
+    async def unexpected(*args, **kwargs):
+        sdk_calls.append((args, kwargs))
+        pytest.fail("A cleaned request must not enter the SDK binding or native admission path")
+
+    monkeypatch.setattr(sdk, "_request_json", unexpected)
+
+    async def call(project_id, operation):
+        return await operation(sdk)
+
+    restarted = ManagementAdapter(case.profile, case.projects, call)
+    with pytest.raises(DispatchError) as denied:
+        await restarted.invoke("project-1", action="team_run", request_id="request-1", parameters={"goal": "private body"})
+    assert denied.value.code == "MANAGEMENT_ALREADY_CLEANED"
+    assert sdk_calls == [] and sdk._state["management"] == {} and not state.exists()
+    assert marker.is_file() and not path.exists() and len(case.writes) == 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("action", ["team_run", "flow_start"])
+async def test_management_replay_waiting_for_cleanup_rechecks_fence_under_same_lock(management_scene, monkeypatch, action):
+    case = management_scene
+    await case.adapter.invoke("project-1", action=action, request_id="request-1", parameters={"goal": "private body"})
+    payload = CleanupPreview(**case.identity, targets=[{"kind": "team_run", "projectId": "project-1",
+        "requestId": "request-1", "originAction": action}])
+    preview = await case.service.preview(payload)
+    reading, release = anyio.Event(), anyio.Event()
+    original = case.client.management_receipt
+
+    async def paused(**values):
+        reading.set()
+        await release.wait()
+        return await original(**values)
+
+    monkeypatch.setattr(case.client, "management_receipt", paused)
+    results = []
+
+    async def cleanup():
+        results.append(await case.service.execute(CleanupExecute(**payload.model_dump(), fingerprint=preview["fingerprint"])))
+
+    async def replay():
+        with pytest.raises(DispatchError) as denied:
+            await case.adapter.invoke("project-1", action=action, request_id="request-1", parameters={"goal": "private body"})
+        assert denied.value.code == "MANAGEMENT_ALREADY_CLEANED"
+
+    with anyio.fail_after(5):
+        async with anyio.create_task_group() as tasks:
+            tasks.start_soon(cleanup)
+            await reading.wait()
+            tasks.start_soon(replay)
+            lock = case.adapter._locks[case.adapter._key("project-1", action, "request-1")]
+            while lock.statistics().tasks_waiting != 1:
+                await anyio.sleep(0)
+            release.set()
+    assert results[0]["items"][0]["status"] == "deleted" and len(case.writes) == 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("content", ["{}", "not json", '{"schemaVersion":0,"agentId":"old-assistant"}',
+    '{"projectId":"other","requestId":"other","originAction":"flow_start"}'])
+async def test_existing_management_cleanup_marker_is_consumed_even_if_legacy_or_invalid(management_scene, content):
+    case = management_scene
+    key = case.adapter._key("project-1", "team_run", "request-1")
+    marker = case.adapter._root / "cleanup_tombstones" / (key + ".json")
+    marker.parent.mkdir(parents=True)
+    marker.write_text(content, encoding="utf-8")
+    with pytest.raises(DispatchError) as denied:
+        await case.adapter.invoke("project-1", action="team_run", request_id="request-1", parameters={})
+    assert denied.value.code == "MANAGEMENT_ALREADY_CLEANED"
+    assert marker.read_text(encoding="utf-8") == content and case.writes == case.reads == []
+    assert not (case.adapter._root / (key + ".json")).exists()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("kind", ["directory", "dangling_marker", "linked_marker", "linked_parent"])
+async def test_management_cleanup_marker_links_and_nonfiles_never_admit_new_writes(management_scene, kind):
+    case = management_scene
+    key = case.adapter._key("project-1", "team_run", "request-1")
+    marker = case.adapter._root / "cleanup_tombstones" / (key + ".json")
+    marker.parent.mkdir(parents=True)
+    outside = case.profile / "outside"
+    if kind == "directory":
+        marker.mkdir()
+    else:
+        if kind == "linked_marker":
+            outside.write_text("{}", encoding="utf-8")
+        elif kind == "linked_parent":
+            outside.mkdir()
+            marker.parent.rmdir()
+        try:
+            if kind == "linked_parent":
+                marker.parent.symlink_to(outside, target_is_directory=True)
+            else:
+                marker.symlink_to(outside)
+        except OSError:
+            pytest.skip("This host does not permit creation of fixture symlinks")
+    with pytest.raises(DispatchError) as denied:
+        await case.adapter.invoke("project-1", action="team_run", request_id="request-1", parameters={})
+    assert denied.value.code == ("MANAGEMENT_STATE_INVALID" if kind == "linked_parent" else "MANAGEMENT_ALREADY_CLEANED")
+    assert case.writes == case.reads == [] and not (case.adapter._root / (key + ".json")).exists()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("fault", ["marker_denied", "parent_denied", "parent_reparse", "parent_non_directory"])
+async def test_management_cleanup_fence_cannot_treat_unsafe_or_unreadable_path_as_absent(management_scene, monkeypatch, fault):
+    from pathlib import Path
+
+    case = management_scene
+    key = case.adapter._key("project-1", "team_run", "request-1")
+    marker = case.adapter._root / "cleanup_tombstones" / (key + ".json")
+    marker.parent.mkdir(parents=True)
+    target = marker if fault == "marker_denied" else marker.parent
+    original = Path.lstat
+
+    def unavailable(path, *args, **kwargs):
+        if path == target:
+            if fault.endswith("denied"):
+                raise PermissionError("private local path must not escape")
+            info = original(path, *args, **kwargs)
+            return SimpleNamespace(st_mode=info.st_mode if fault == "parent_reparse" else 0,
+                                   st_file_attributes=0x400 if fault == "parent_reparse" else 0)
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", unavailable)
+    with pytest.raises(DispatchError) as denied:
+        await case.adapter.invoke("project-1", action="team_run", request_id="request-1", parameters={})
+    assert denied.value.code == "MANAGEMENT_STATE_INVALID" and "private" not in str(denied.value)
+    assert case.writes == case.reads == [] and not (case.adapter._root / (key + ".json")).exists()
+
+
+@pytest.mark.anyio
+async def test_management_cleanup_fence_preserves_other_request_scopes_and_receipt_reads(management_scene):
+    case = management_scene
+    await case.adapter.invoke("project-1", action="team_run", request_id="request-1", parameters={})
+    # A crash after the marker write can leave the original association behind.
+    key = case.adapter._key("project-1", "team_run", "request-1")
+    marker = case.adapter._root / "cleanup_tombstones" / (key + ".json")
+    marker.parent.mkdir()
+    marker.write_text("{}", encoding="utf-8")
+    with pytest.raises(DispatchError) as denied:
+        await case.adapter.invoke("project-1", action="team_run", request_id="request-1", parameters={})
+    assert denied.value.code == "MANAGEMENT_ALREADY_CLEANED"
+    result = await case.adapter.receipt("project-1", action="team_run", request_id="request-1")
+    assert result["verified"] is True and len(case.writes) == 1 and len(case.reads) == 1
+    for project_id, action, request_id in (("project-2", "team_run", "request-1"),
+            ("project-1", "flow_start", "request-1"), ("project-1", "team_run", "request-2")):
+        await case.adapter.invoke(project_id, action=action, request_id=request_id, parameters={})
+        await case.adapter.invoke(project_id, action=action, request_id=request_id, parameters={})
+    assert len(case.writes) == 4 and len(case.reads) == 4
+    assert all(row["require_existing_subject"] is False for row in case.writes)

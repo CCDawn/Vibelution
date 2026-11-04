@@ -294,6 +294,7 @@ class DispatchService:
         self._active_project_clients: dict[str, _ActiveProjectClient] = {}
         self._dispatch_admission = anyio.Lock()
         self._dispatch_state = RLock()
+        self._task_card_agent_labels: dict[tuple[str, tuple[int, Path], str], str] = {}
         self._dispatch_fence_owner: object | None = None
         from .management import ManagementAdapter
         self.management = ManagementAdapter(profile_root, self._admitted_projects, self._call,
@@ -312,6 +313,7 @@ class DispatchService:
             self._check_registry_unfenced()
             self._projects_suspended.set()
             self._registry_gate_generation += 1
+            self._task_card_agent_labels.clear()
             return {"schemaVersion": 1, "revision": self._registry_revision, "projectsSuspended": True}
 
     def _admitted_projects(self) -> Mapping[str, Path]:
@@ -514,6 +516,7 @@ class DispatchService:
         self._projects = MappingProxyType(projects)
         self._registry_revision = revision
         self._registry_gate_generation += 1
+        self._task_card_agent_labels.clear()
         if not retain_suspension:
             self._projects_suspended.clear()
         return {"schemaVersion": 1, "revision": revision, "projectCount": len(projects)}

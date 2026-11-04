@@ -1,13 +1,18 @@
 import { VButton, VDialog } from "../../../components/vui";
 import type { AssistantCleanupDialogState } from "./assistantTaskCleanup";
 import styles from "./LauncherTaskCleanupDialog.styles";
+import { COPY } from "./assistantTaskCopy";
 
-export function LauncherTaskCleanupDialog({ state, onClose, onRetry, lang }: {
+export function LauncherTaskCleanupDialog({ state, onClose, onRetry, onCloseAutoFocus, lang }: {
   state: AssistantCleanupDialogState | null; onClose: () => void; onRetry: () => void; lang: "zh" | "en";
+  onCloseAutoFocus?: (event: Event) => void;
 }) {
   if (!state) return null;
   const zh = lang === "zh", pending = state.pending !== null;
-  const retryable = Boolean(state.error || state.result?.items.some(item => item.status !== "deleted"));
+  const sourceErrors = state.sourceErrors ?? [];
+  const retryable = Boolean(state.error || sourceErrors.length || state.result?.items.some(item => item.status !== "deleted"));
+  const counts = { deleted: 0, partial: 0, blocked: 0 };
+  for (const item of state.result?.items ?? []) counts[item.status] += 1;
   const bytes = (value: number) => `${value.toLocaleString(zh ? "zh-CN" : "en-GB")} ${zh ? "字节" : "bytes"}`;
   const resourceName = (kind: string) => {
     const names: Record<string, [string, string]> = {
@@ -24,21 +29,28 @@ export function LauncherTaskCleanupDialog({ state, onClose, onRetry, lang }: {
     : value === "native_recovery_and_admission_guards"
       ? zh ? "保留会话恢复与接收所需的保护记录。" : "Session recovery and admission guards are retained." : value;
   return <VDialog open title={pending ? zh ? "正在清理任务" : "Cleaning up tasks" : zh ? "任务清理结果" : "Task cleanup result"}
-    description={state.bulk ? zh ? "核验当前助理全部任务，清理已结束事项的记录与可清理文件。" : "Verify all assistant tasks and clean up records and eligible files for ended tasks."
+    description={state.bulk ? COPY[lang].cleanupHint
       : state.scope.targets.length > 0 && state.scope.targets.every(target => target.localOnly === true)
         ? zh ? "核验后仅移除本地记录，保留源任务和文件。" : "After verification, remove only the local record and retain the source task and files."
-        : zh ? "核验所选任务后清理，实际处理范围以结果为准。" : "Verify the selected task before cleanup. The result reports what was changed."}
+        : state.scope.targets.length > 0 && state.scope.targets.every(target => target.kind === "team_run")
+          ? COPY[lang].teamCleanupHint : COPY[lang].dispatchCleanupHint}
     data-vui="launcher-task-cleanup" size="md" onOpenChange={open => { if (!open && !pending) onClose(); }} hideClose={pending}
+    onCloseAutoFocus={onCloseAutoFocus}
     footer={<>
       <VButton isDisabled={pending} onClick={onClose}>{zh ? "关闭" : "Close"}</VButton>
-      {retryable ? <VButton onClick={onRetry} isDisabled={pending}>{zh ? "重试清理" : "Retry cleanup"}</VButton> : null}
+      {retryable ? <VButton onClick={onRetry} isDisabled={pending}>{sourceErrors.length ? zh ? "重试未核验来源与剩余项" : "Retry unverified sources and remaining tasks" : zh ? "重试清理" : "Retry cleanup"}</VButton> : null}
     </>}>
     <div className={styles.cleanupBody}>
       {state.pending === "loading" ? <p role="status">{zh ? "正在收集任务…" : "Collecting tasks…"}</p> : null}
       {state.pending === "execute" ? <p role="status">{zh ? "正在核验并清理…" : "Verifying and cleaning up…"}</p> : null}
       {state.error ? <p role="alert">{zh ? "清理未完成，可重试。" : "Cleanup is incomplete. Retry is available."} {state.error}</p> : null}
+      {sourceErrors.map(error => <p role="alert" key={error.source}>{error.source === "dispatch"
+        ? zh ? "普通委派来源未核验，未清理该来源的任务。" : "The delegated-task source was not verified. Its tasks were not cleaned up."
+        : zh ? "团队运行来源未核验，未清理该来源的任务。" : "The team-run source was not verified. Its tasks were not cleaned up."} {error.message}</p>)}
       {state.result ? <>
-        <p role="status">{state.result.items.length ? <>{zh ? "实际释放 " : "Released "}{bytes(state.result.releasedBytes)}</>
+        <p role="status">{state.result.items.length || sourceErrors.length ? <>{zh
+          ? `已清理 ${counts.deleted} 项 · 部分清理 ${counts.partial} 项 · 受阻 ${counts.blocked} 项`
+          : `Cleaned up ${counts.deleted} · Partially cleaned up ${counts.partial} · Blocked ${counts.blocked}`} · {zh ? "实际释放 " : "Released "}{bytes(state.result.releasedBytes)}</>
           : zh ? "当前没有可批量清理的已结束任务。" : "There are no ended tasks available for bulk cleanup."}</p>
         {state.result.items.some(item => item.failures.some(failure => failure.code === "cleanup_batch_unconfirmed"))
           ? <p>{zh ? "已发送的请求尚待核对，重试会重新检查任务状态。" : "Sent requests need verification. Retrying checks task state again."}</p> : null}
