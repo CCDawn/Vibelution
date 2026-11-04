@@ -1,0 +1,131 @@
+@import "../../src/design/tokens.css";
+@import "../../src/design/base.css";
+@import "../../src/design/tailwind.css";
+@import "../../src/design/vui-provider-theme.css";
+@import "../../src/design/vui-native-controls.css";
+@import "../../src/design/workbench-frame.css";
+@source "./**/*.{ts,tsx}";
+
+html, body, #root { width: 100%; height: 100%; min-width: 0; margin: 0; overflow: hidden; }
+body { font-family: "Inter", "Segoe UI", "Microsoft YaHei", sans-serif; }
+/* Preview-only graph geometry and annotation colors. Product controls use the existing VUI facade. */
+.kg-app { display: flex; flex-direction: column; height: 100dvh; min-width: 0; color: var(--fg-primary); background: var(--bg-canvas); }
+.kg-app-header { display: flex; flex: 0 0 54px; align-items: center; gap: 32px; padding: 0 24px; border-bottom: 1px solid var(--vui-border-subtle); background: var(--vui-surface-panel); }
+.kg-product-mark { display: flex; align-items: center; gap: 10px; color: var(--fg-primary); }
+.kg-product-mark svg { color: var(--accent-cool); }
+.kg-product-mark strong { font-size: 14px; font-weight: 600; letter-spacing: .01em; }
+.kg-breadcrumb { display: flex; align-items: center; gap: 12px; color: var(--fg-secondary); font-size: 12px; }
+.kg-breadcrumb > span:first-child { color: var(--fg-tertiary); }
+.kg-header-preview { margin-left: auto; padding: 3px 8px; border: 1px solid var(--vui-border-subtle); border-radius: 4px; color: var(--fg-tertiary); font-size: 11px; }
+.kg-main { display: flex; flex: 1; min-width: 0; min-height: 0; }
+.kg-page { min-width: 0; }
+.kg-rail-wrapper, .kg-inspector-wrapper { padding: 0 !important; border-radius: 0 !important; }
+.kg-canvas-wrapper { padding: 0 !important; border-radius: 0 !important; border: 0 !important; }
+.kg-rail { display: flex; flex-direction: column; min-height: 0; background: var(--vui-surface-rail) !important; }
+.kg-rail-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 23px 18px 19px; color: var(--fg-secondary); font-size: 12px; font-weight: 500; }
+.kg-rail-heading svg { color: var(--fg-tertiary); }
+.kg-search { display: flex; align-items: center; min-width: 0; height: 34px; margin: 0 12px; padding: 0 10px; gap: 7px; border: 1px solid var(--vui-border-subtle); border-radius: 5px; background: var(--vui-surface-input); color: var(--fg-tertiary); }
+.kg-search > svg { flex-shrink: 0; }
+.kg-search input { width: 100%; min-width: 0; min-height: 32px !important; padding: 0 !important; border: 0 !important; outline: 0 !important; box-shadow: none !important; background: transparent !important; font-size: 12px !important; }
+.kg-search:focus-within { outline: 2px solid color-mix(in srgb, var(--accent-cool) 30%, transparent); outline-offset: 1px; }
+.kg-search-clear { width: 22px; min-width: 22px !important; height: 26px !important; padding: 0 !important; }
+.kg-nav-label { margin: 29px 18px 10px; font-size: 11px; color: var(--fg-tertiary); }
+.kg-topic-nav { display: grid; gap: 5px; padding: 0 8px; }
+.kg-topic { display: flex !important; justify-content: flex-start !important; width: 100%; min-height: 40px; padding: 9px 10px !important; gap: 9px !important; border: 1px solid transparent !important; border-radius: 5px !important; color: var(--fg-secondary) !important; text-align: left; font-size: 12px !important; }
+.kg-topic > span { flex: 1; white-space: normal; line-height: 1.5; }
+.kg-topic > svg { flex-shrink: 0; }
+.kg-topic[data-active="true"] { background: var(--vui-selection-bg) !important; color: var(--fg-primary) !important; }
+.kg-topic[data-active="true"] > svg:first-child { color: var(--accent-cool); }
+.kg-unfiled { color: var(--fg-tertiary) !important; }
+.kg-rail-bottom { display: flex; align-items: center; gap: 7px; margin-top: auto; padding: 18px; font-size: 11px; color: var(--fg-tertiary); }
+.kg-preview-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--fg-tertiary); }
+.kg-inline-icon { padding: 0 !important; margin-left: auto; width: 26px; height: 26px !important; }
+.kg-canvas-workspace { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; height: 100%; container-type: inline-size; }
+.kg-topic-toolbar { display: flex; flex-shrink: 0; justify-content: space-between; align-items: center; gap: 20px; height: 56px; padding: 0 20px; border-bottom: 1px solid var(--vui-border-subtle); background: var(--vui-surface-panel); }
+.kg-title-group { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+.kg-title-group h1 { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; line-height: 1.5; font-weight: 600; }
+.kg-title-group > span { color: var(--fg-tertiary); font-size: 12px; white-space: nowrap; }
+.kg-toolbar-actions { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.kg-settings-button { color: var(--fg-secondary) !important; flex-shrink: 0; width: 36px; min-width: 36px !important; height: 36px !important; padding: 0 !important; }
+.kg-toolbar-actions [role="tablist"] { background: var(--vui-surface-workspace) !important; border: 0 !important; border-radius: 6px; padding: 3px !important; gap: 2px; }
+.kg-toolbar-actions [role="tab"] { min-width: 48px; height: 30px; padding: 0 10px !important; border: 0 !important; border-radius: 4px !important; box-shadow: none !important; background: transparent !important; font-size: 12px; color: var(--fg-tertiary); }
+.kg-toolbar-actions [role="tab"][data-state="active"] { color: var(--fg-primary) !important; background: var(--vui-surface-panel) !important; box-shadow: 0 1px 3px #00000012 !important; }
+.kg-graph { position: relative; flex: 1; min-height: 0; min-width: 0; overflow: hidden; background: #171c24; color: #e5eaf0; }
+.kg-legend { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; flex-shrink: 0; gap: 24px; min-height: 42px; padding: 8px 16px; border-top: 1px solid #ffffff09; background: #171c24; color: #8996a8; font-size: 11px; }
+.kg-legend > span { display: flex; align-items: center; gap: 8px; }
+.kg-legend-dot { width: 6px; height: 6px; border-radius: 50%; background: #a8c5e9; }
+.kg-legend-square { width: 5px; height: 5px; border-radius: 1px; background: #7d899b; }
+.kg-legend-line { width: 19px; height: 1px; background: #63738a; }
+.kg-legend-dashed { height: 0; border-top: 1px dashed #63738a; background: transparent; }
+.kg-inspector { display: flex; flex-direction: column; min-height: 0; background: var(--vui-surface-panel) !important; }
+.kg-inspector-bar { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; height: 55px; padding: 0 16px 0 22px; border-bottom: 1px solid var(--vui-border-subtle); color: var(--fg-secondary); font-size: 12px; }
+.kg-icon-button { width: 30px; height: 30px !important; padding: 0 !important; color: var(--fg-tertiary) !important; }
+.kg-inspector-content { min-height: 0; overflow-y: auto; padding: 28px 24px; }
+.kg-kicker { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--fg-tertiary); }
+.kg-mini-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent-cool); }
+.kg-inspector h2 { margin: 14px 0 8px; font-size: 20px; font-weight: 500; line-height: 1.6; overflow-wrap: anywhere; }
+.kg-detail-english { font-size: 12px; line-height: 1.7; color: var(--fg-tertiary); overflow-wrap: anywhere; }
+.kg-summary { margin-top: 24px; font-size: 13px; line-height: 1.9; color: var(--fg-secondary); }
+.kg-detail-section { margin-top: 28px; padding-top: 23px; border-top: 1px solid var(--vui-border-subtle); }
+.kg-detail-section h3 { margin: 0; font-size: 12px; font-weight: 500; }
+.kg-small-note { margin: 9px 0 14px; font-size: 11px; line-height: 1.8; color: var(--fg-tertiary); }
+.kg-source-card { display: flex !important; align-items: center; justify-content: flex-start !important; gap: 10px !important; width: 100%; padding: 13px 0 !important; text-align: left; border: 0 !important; }
+.kg-source-card-icon { display: grid; width: 35px; height: 40px; flex-shrink: 0; place-items: center; color: var(--fg-tertiary); background: var(--vui-surface-workspace); border: 1px solid var(--vui-border-subtle); border-radius: 4px; }
+.kg-source-card > span:nth-child(2) { display: grid; flex: 1; gap: 6px; min-width: 0; }
+.kg-source-card strong { font-size: 12px; font-weight: 500; }
+.kg-source-card small { font-size: 10px; color: var(--fg-tertiary); white-space: normal; line-height: 1.6; }
+.kg-source-card > svg { flex-shrink: 0; color: var(--fg-tertiary); }
+.kg-topic-path { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 12px; color: var(--fg-secondary); }
+.kg-detail-note { display: flex; align-items: flex-start; gap: 7px; margin-top: 36px; padding-top: 20px; border-top: 1px solid var(--vui-border-subtle); color: var(--fg-tertiary); font-size: 11px; line-height: 1.8; }
+.kg-detail-note svg { flex-shrink: 0; margin-top: 3px; }
+.kg-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; text-align: center; }
+.kg-empty > svg { color: #8394ac; }
+.kg-empty h2 { margin: 0; font-size: 17px; font-weight: 500; }
+.kg-empty p { margin: 0 0 8px; font-size: 12px; color: #96a4b6; }
+.kg-setting-list { display: grid; }
+.kg-setting-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 17px 0; border-bottom: 1px solid var(--vui-border-subtle); }
+.kg-setting-row strong { font-size: 13px; font-weight: 500; }
+.kg-setting-row p { margin: 5px 0 0; font-size: 11px; line-height: 1.6; color: var(--fg-tertiary); }
+.kg-setting-toggle { flex-shrink: 0; min-width: 73px !important; }
+.kg-setting-toggle[data-on="true"] { color: var(--accent-cool) !important; }
+.kg-settings-explanation { padding-top: 12px; }
+.kg-settings-explanation h3 { display: flex; align-items: center; gap: 7px; margin: 20px 0 8px; font-size: 12px; font-weight: 500; }
+.kg-settings-explanation p { margin: 0; font-size: 12px; line-height: 1.9; color: var(--fg-secondary); }
+.kg-source-dialog { display: grid; gap: 16px; padding: 12px 0; }
+.kg-source-dialog > svg { color: var(--fg-tertiary); }
+.kg-source-dialog h3 { margin: 0; font-size: 13px; font-weight: 500; }
+.kg-source-dialog p { margin: 0; font-size: 13px; line-height: 1.9; color: var(--fg-secondary); }
+@media (max-width: 899px) {
+  .kg-app-header { flex-basis: 48px; gap: 20px; padding: 0 16px; }
+  .kg-product-mark strong { font-size: 13px; }
+  .kg-title-group > span { font-size: 11px; }
+  .kg-legend { gap: 18px; min-height: 37px; font-size: 10px; }
+  .kg-search input { font-size: 16px !important; }
+  .kg-search { height: 42px; }
+  .kg-topic { min-height: 44px; }
+  .kg-icon-button, .kg-inline-icon { width: 44px; min-width: 44px !important; height: 44px !important; }
+}
+@container (max-width: 560px) {
+  .kg-topic-toolbar { height: auto; min-height: 96px; flex-direction: column; align-items: stretch; justify-content: center; gap: 4px; padding: 8px 14px; }
+  .kg-title-group { min-height: 28px; }
+  .kg-toolbar-actions { justify-content: space-between; gap: 8px; }
+  .kg-toolbar-actions [role="tab"] { height: 38px; min-width: 56px; }
+  .kg-settings-button { width: 44px; min-width: 44px !important; height: 44px !important; }
+}
+@media (max-width: 480px) {
+  .kg-breadcrumb { gap: 7px; font-size: 11px; }
+  .kg-header-preview { padding: 2px 6px; font-size: 10px; }
+  .kg-app-header { gap: 16px; }
+  .kg-product-mark { gap: 7px; }
+  .kg-setting-row { gap: 12px; }
+}
+
+/* Isolated preview styling only: geometry, depth and all gestures remain owned by VMemoryGraphCanvas. */
+.kg-real-3d > section { height: 100%; border: 0; border-radius: 0; }
+.kg-real-3d [aria-label="图谱节点与关系"] > button { background: rgba(5, 12, 24, .55); border-color: transparent; font-size: 12px; text-shadow: 0 1px 5px #02040c; }
+.kg-real-3d [aria-label="图谱节点与关系"] > button:hover,
+.kg-real-3d [aria-label="图谱节点与关系"] > button[aria-pressed="true"] { background: #182b43; border-color: #8caed5; }
+.kg-real-3d [aria-label="图谱节点与关系"] > button > span { font-weight: 500; }
+.kg-real-3d [aria-label="图谱节点与关系"] > button[data-node-id],
+.kg-real-3d [aria-label="图谱节点与关系"] > button[data-edge-id] { box-sizing: border-box; height: 32px; min-height: 32px; max-height: 32px; white-space: nowrap; overflow: hidden; }
+.kg-real-3d [aria-label="图谱节点与关系"] > button[data-node-id] > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 22px; }

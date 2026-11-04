@@ -18,8 +18,8 @@ export function createMemoryGraphCosmosBatches(options: Options & { compact: boo
     theme: { ...options.theme, clusterColors: colors, edgeColor: 0x7f9aa8 },
     getNodeScale: node => node.type === "topic" ? 1.1 : 1,
     createNodeGeometry: node => {
-      const geometry = node.type === "source_artifact" ? new THREE.BoxGeometry(0.19, 0.19, 0.19)
-        : new THREE.IcosahedronGeometry(node.type === "topic" ? 0.21 : overview ? 0.11 : 0.135, 2);
+      const geometry = node.type === "source_artifact" ? new THREE.BoxGeometry(0.12, 0.12, 0.12)
+        : new THREE.IcosahedronGeometry(node.type === "topic" ? 0.19 : overview ? 0.1 : 0.15, 0);
       geometry.userData.cosmosKind = node.type;
       geometry.userData.cosmosCluster = positioned.get(node.id)?.clusterKey;
       return geometry;
@@ -31,7 +31,28 @@ export function createMemoryGraphCosmosBatches(options: Options & { compact: boo
     const accent = colors.get(body.geometry.userData.cosmosCluster) ?? 0x9abfdc;
     material.color.setHex(accent).lerp(new THREE.Color(0xffffff), 0.65);
     material.emissive.setHex(accent); material.emissiveIntensity = 0.7;
-    material.roughness = 0.6; material.metalness = 0.05; material.depthWrite = true;
+    material.roughness = 1;
+    material.metalness = 0;
+    material.depthWrite = true;
+    material.flatShading = true;
+    // Compose with the shared per-instance opacity shader so selecting a node
+    // still dims unrelated instances without splitting their draw batches.
+    const originalCompile = material.onBeforeCompile;
+    const sourceNode = body.geometry.userData.cosmosKind === "source_artifact";
+    material.onBeforeCompile = (shader, renderer) => {
+      originalCompile.call(material, shader, renderer);
+      shader.uniforms.cosmosTint = { value: new THREE.Color(sourceNode ? 0x879bb7 : 0x56c5d8) };
+      shader.fragmentShader = "uniform vec3 cosmosTint;\n" + shader.fragmentShader;
+      shader.fragmentShader = shader.fragmentShader.replace("#include <opaque_fragment>", `
+        vec3 lightDirection = normalize((viewMatrix * vec4(-0.55, 0.8, 0.6, 0.0)).xyz);
+        float matteLight = max(dot(normalize(normal), lightDirection), 0.0);
+        float rim = pow(1.0 - abs(dot(normalize(normal), normalize(vViewPosition))), 3.0);
+        float depthFade = mix(1.0, 0.48, smoothstep(8.0, 20.0, length(vViewPosition)));
+        outgoingLight = cosmosTint * (0.12 + 0.82 * matteLight + 0.10 * rim) * depthFade;
+        #include <opaque_fragment>
+      `);
+    };
+    material.customProgramCacheKey = () => "memory-graph-cosmos-matte-v1-" + sourceNode;
   }
   const haloGeometry = disposeGeometry(new THREE.BufferGeometry());
   haloGeometry.setAttribute("position", new THREE.Float32BufferAttribute(nodes.flatMap(node => [node.x, node.y, node.z]), 3));

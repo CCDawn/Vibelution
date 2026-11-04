@@ -18,6 +18,7 @@ import { nebulaMaterial } from "./NebulaField";
 import { createMemoryGraphBatches } from "./MemoryGraphBatches";
 import { createMemoryGraphCosmosBatches } from "./MemoryGraphCosmosBatches";
 import { createMemoryGraphCosmosLabelElements, positionMemoryGraphCosmosLabels } from "./memoryGraphCosmosLabels";
+import { memoryGraphCosmosOverviewDistance } from "./memoryGraphCosmosCamera";
 import { memoryGraphClusterSeed } from "../../../product/memory/memoryGraphModel";
 import { memoryGraphRendererStyles as styles } from "./memoryGraphRenderer.styles";
 
@@ -328,9 +329,12 @@ function initializeMemoryGraphEngine(
     18,
     Math.max(contentHeight / (2 * tangent), contentWidth / (2 * tangent * initialAspect)) * 1.1,
   );
-  const initialDistance = planarFitDistance + contentDepth * 0.5;
+  const perspectiveDirection = new THREE.Vector3(cosmos ? 0.5 : 0.32, cosmos ? 0.28 : 0.22, 1).normalize();
+  const fitOverviewDistance = (aspect: number, distance: number) => cosmos
+    ? memoryGraphCosmosOverviewDistance({ THREE, nodes, target: initialTarget, perspectiveDirection, tangent, aspect, preferredDistance: distance * 0.56 })
+    : distance;
+  const initialDistance = fitOverviewDistance(initialAspect, planarFitDistance + contentDepth * 0.5);
   let overviewDistance = initialDistance;
-  const perspectiveDirection = new THREE.Vector3(cosmos ? 0.16 : 0.32, cosmos ? 0.1 : 0.22, 1).normalize();
   const initialCameraPosition = initialTarget.clone().add(perspectiveDirection.clone().multiplyScalar(overviewDistance));
   const flatOverviewPosition = initialTarget.clone().add(new THREE.Vector3(0, 0, overviewDistance));
   camera.position.copy(options.flat ? flatOverviewPosition : initialCameraPosition);
@@ -525,6 +529,19 @@ function initializeMemoryGraphEngine(
     edgePaths.push({ edge, curve });
   }
 
+  if (cosmos && nodes.length) {
+    const grid = new THREE.GridHelper(12, 12, 0x486879, 0x486879);
+    grid.name = "memory-graph-spatial-reference";
+    grid.position.set(initialTarget.x, bounds.minY - 0.75, initialTarget.z);
+    disposeGeometry(grid.geometry);
+    for (const material of Array.isArray(grid.material) ? grid.material : [grid.material]) {
+      material.transparent = true;
+      material.opacity = 0.13;
+      material.depthWrite = false;
+      disposeMaterial(material);
+    }
+    scene.add(grid);
+  }
   const batches = (cosmos ? createMemoryGraphCosmosBatches : createMemoryGraphBatches)({
     THREE, scene, nodes, edgePaths, theme,
     createNodeGeometry: (node) => createNodeGeometry(THREE, node),
@@ -656,7 +673,12 @@ function initializeMemoryGraphEngine(
   function focus(id: string) {
     setOrbit(false);
     if (!id) {
-      animateCamera(initialTarget, overviewDistance);
+      const direction = camera.position.clone().sub(controls.target).normalize();
+      const distance = cosmos ? memoryGraphCosmosOverviewDistance({
+        THREE, nodes, target: initialTarget, perspectiveDirection: direction,
+        tangent, aspect: camera.aspect, preferredDistance: overviewDistance,
+      }) : overviewDistance;
+      animateCamera(initialTarget, distance, direction);
       return;
     }
     const position = positions.get(id);
@@ -735,7 +757,7 @@ function initializeMemoryGraphEngine(
       18,
       Math.max(contentHeight / (2 * tangent), contentWidth / (2 * tangent * camera.aspect)) * 1.1,
     );
-    const nextDistance = planarFitDistance + contentDepth * 0.5;
+    const nextDistance = fitOverviewDistance(camera.aspect, planarFitDistance + contentDepth * 0.5);
     overviewDistance = nextDistance;
     initialCameraPosition.copy(initialTarget).add(perspectiveDirection.clone().multiplyScalar(nextDistance));
     flatOverviewPosition.copy(initialTarget).add(new THREE.Vector3(0, 0, nextDistance));
