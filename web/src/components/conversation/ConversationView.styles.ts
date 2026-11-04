@@ -1401,6 +1401,14 @@ timeline:
     "vui-components-conversationview turnStatusLabel min-w-0 shrink-0 text-vui-xs font-semibold leading-tight text-[var(--fg-tertiary)]",
   turnStatusNote:
     "vui-components-conversationview turnStatusNote min-w-0 inline-grid w-[min(100%,920px)] grid-cols-[auto_minmax(0,1fr)] items-start gap-2 bg-transparent py-1 text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  // Persistent, dismissible curation result under the turn: excerpt-granularity
+  // summary and 409 conflict guidance must outlive a hover title.
+  turnCurationNotice:
+    "vui-components-conversationview turnCurationNotice min-w-0 inline-flex w-fit max-w-[min(100%,920px)] items-center gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--border-hairline)_82%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_38%,transparent)] px-2 py-1 mt-1 text-vui-2xs leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  turnCurationNoticeText:
+    "vui-components-conversationview turnCurationNoticeText min-w-0 [overflow-wrap:anywhere]",
+  turnCurationNoticeDismiss:
+    "vui-components-conversationview turnCurationNoticeDismiss !h-5 !min-h-5 !w-5 !min-w-5 shrink-0 !rounded-full !p-0 text-[var(--fg-tertiary)] hover:!bg-[color-mix(in_srgb,var(--vui-control-muted-hover)_62%,transparent)] hover:!text-[var(--fg-primary)]",
   turnStatusText:
     "vui-components-conversationview turnStatusText min-w-0 max-w-[min(100%,128ch)] whitespace-normal [overflow-wrap:anywhere]",
   // Settled-turn work header (ZCode AssistantHistoryStatus alignment): a thin

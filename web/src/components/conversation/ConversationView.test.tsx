@@ -1579,6 +1579,16 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(html).toContain("lucide-circle-minus");
   });
 
+  it("surfaces curation results as a persistent dismissible notice under the turn", () => {
+    expect(conversationTimelineRowsSource).toContain("data-conversation-curation-feedback");
+    expect(conversationTimelineRowsSource).toContain("dismissCurationFeedback(message.id)");
+    // The 3-second auto-dismiss (and its hover-only title delivery) is gone:
+    // excerpt summaries and conflict guidance must outlive a hover.
+    expect(conversationViewSource).not.toContain("curationFeedbackTimerRef");
+    expect(conversationViewSource).toContain("dismissCurationFeedback");
+    expect(conversationViewSource).toContain("result.summary");
+  });
+
   it("shows the measured token usage on settled turns and stays quiet without wire facts", () => {
     const answerItem = {
       id: "message-assistant-usage-item-answer",

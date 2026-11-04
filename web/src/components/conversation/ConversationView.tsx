@@ -457,7 +457,9 @@ export const ConversationView = React.memo(function ConversationView({
   const copyAnswerFeedbackTimerRef = useRef<number | null>(null);
   // In-chat SFT curation: server map + optimistic overlay for instant button
   // feedback; a failed POST rolls the overlay entry back (ZCode like/dislike
-  // rollback pattern) and the 409 copy surfaces briefly on the button title.
+  // rollback pattern) and the result copy surfaces as a persistent, dismissible
+  // notice under the turn (a 3-second hover-only title hid both the segment
+  // summary and the conflict guidance).
   const queryClient = useQueryClient();
   const [curationOverrides, setCurationOverrides] = useState<Map<string, MessageCurationDecision>>(new Map());
   const [curationFeedback, setCurationFeedback] = useState<{
@@ -465,7 +467,6 @@ export const ConversationView = React.memo(function ConversationView({
     action: SessionMessageCurationAction;
     message: string;
   } | null>(null);
-  const curationFeedbackTimerRef = useRef<number | null>(null);
   const messageCurationQuery = useQuery({
     queryKey: runtimeApi ? [runtimeApi.cacheKey, "curation", sessionId] : queryKeys.sessionMessageCuration(sessionId),
     queryFn: () => (runtimeApi?.fetchMessageCuration ?? fetchSessionMessageCuration)(sessionId),
@@ -1263,16 +1264,13 @@ export const ConversationView = React.memo(function ConversationView({
     }).catch(() => undefined);
   }
 
-  /** Bounded visible feedback for a rejected curation click (~3s on the title). */
+  /** Persistent per-turn curation result; the notice dismisses explicitly. */
   function showCurationFeedback(messageId: string, action: SessionMessageCurationAction, message: string) {
     setCurationFeedback({ messageId, action, message });
-    if (curationFeedbackTimerRef.current !== null) {
-      window.clearTimeout(curationFeedbackTimerRef.current);
-    }
-    curationFeedbackTimerRef.current = window.setTimeout(() => {
-      curationFeedbackTimerRef.current = null;
-      setCurationFeedback((current) => (current?.messageId === messageId ? null : current));
-    }, 3000);
+  }
+
+  function dismissCurationFeedback(messageId: string) {
+    setCurationFeedback((current) => (current?.messageId === messageId ? null : current));
   }
 
   function handleCurateMessage(messageId: string, action: SessionMessageCurationAction) {
@@ -1283,7 +1281,7 @@ export const ConversationView = React.memo(function ConversationView({
     // success and the overlay entry is dropped again on failure (rollback).
     setCurationOverrides((current) => applyOptimisticCuration(current, messageId, action));
     void (runtimeApi?.setMessageCuration ?? setSessionMessageCuration)(sessionId, messageId, action)
-      .then(() => {
+      .then((result) => {
         setCurationOverrides((current) => {
           if (!current.has(messageId)) {
             return current;
@@ -1293,6 +1291,16 @@ export const ConversationView = React.memo(function ConversationView({
           return next;
         });
         void queryClient.invalidateQueries({ queryKey: runtimeApi ? [runtimeApi.cacheKey, "curation", sessionId] : queryKeys.sessionMessageCuration(sessionId) });
+        // The backend names the curated unit (the multi-turn excerpt from the
+        // session start through this message); show its summary instead of
+        // silently dropping it.
+        showCurationFeedback(
+          messageId,
+          action,
+          result.summary || (lang === "zh"
+            ? "已把这条消息所在的片段纳入数据集。"
+            : "Added this message's excerpt to the dataset."),
+        );
       })
       .catch((error) => {
         setCurationOverrides((current) => {
@@ -1303,11 +1311,15 @@ export const ConversationView = React.memo(function ConversationView({
           next.delete(messageId);
           return next;
         });
-        showCurationFeedback(
-          messageId,
-          action,
-          isFetchJsonHttpError(error) && error.message ? error.message : t("curationActionFailed"),
-        );
+        const base = isFetchJsonHttpError(error) && error.message ? error.message : t("curationActionFailed");
+        // A 409 means the excerpt already sits on the other side (or was
+        // discarded): switching sides must go through the review workspace.
+        const reviewHint = isFetchJsonHttpError(error) && error.status === 409
+          ? (lang === "zh"
+            ? "请在 review 工作区处理这条片段后再换边。"
+            : "Handle this excerpt in the review workspace before switching sides.")
+          : "";
+        showCurationFeedback(messageId, action, reviewHint ? `${base} ${reviewHint}` : base);
       });
   }
 
@@ -1497,6 +1509,7 @@ export const ConversationView = React.memo(function ConversationView({
     inlineEditInputRef,
     copiedAnswerMessageId,
     curationFeedback,
+    dismissCurationFeedback,
     openForkDialog,
     formatTimestamp,
     compactPreview,
