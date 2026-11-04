@@ -37,6 +37,34 @@ LAUNCHER_ROUTE = REPO_ROOT / "core" / "web" / "routes" / "launcher.py"
 client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
 
 
+def test_standalone_launcher_branch_instances_runtime_only_keeps_cleanup_precedence(monkeypatch):
+    from fastapi import FastAPI
+    from core.launcher import app as launcher_app
+
+    standalone_app = FastAPI()
+    standalone_app.include_router(launcher_app.router)
+    standalone_client = TestClient(standalone_app)
+    expected = {"items": [{"id": "worktree:task", "customInstance": True}], "customList": True}
+    calls: list[dict[str, object]] = []
+
+    def capture_list(**kwargs):
+        calls.append(kwargs)
+        return expected
+
+    monkeypatch.setattr(launcher_app.launcher_service, "list_launcher_branch_instances", capture_list)
+    for params, expected_kwargs in [
+        ({}, {}),
+        ({"runtimeOnly": False}, {}),
+        ({"cleanupMetadata": True}, {"include_cleanup_metadata": True}),
+        ({"runtimeOnly": True}, {"runtime_only": True}),
+        ({"runtimeOnly": True, "cleanupMetadata": True}, {"include_cleanup_metadata": True}),
+    ]:
+        response = standalone_client.get("/api/launcher/branch-instances", params=params)
+        assert response.status_code == 200
+        assert response.json() == expected
+        assert calls[-1] == expected_kwargs
+
+
 def test_active_work_projection_uses_canonical_guard_without_full_status(monkeypatch):
     def no_full_scan():
         raise AssertionError("active-work check must not scan full status or diagnostic history")

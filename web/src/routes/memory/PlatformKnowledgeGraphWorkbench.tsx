@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { ArrowLeft, FileText, Globe2, Maximize2, Network, Search, Settings2, ShieldCheck, X } from "lucide-react";
 import { fetchPlatformKnowledgeGraph, fetchPlatformKnowledgeGraphNodeDetail, platformKnowledgeGraphKeys } from "../../api/memory";
 import type { MemoryKnowledgeGraphEdge, MemoryKnowledgeGraphNode } from "../../api/types";
-import { VButton, VCanvasWorkbenchPage, VDialog, VMemoryGraphCanvas, VNativeInput, VNativeSelect, VSurface, VTabs } from "../../components/vui";
+import { VButton, VCanvasWorkbenchPage, VDialog, VMemoryGraphCanvas, VNativeInput, VSurface, VStringSelect, VTabs } from "../../components/vui";
 import { WORKBENCH_LAYOUT_IDS } from "../../components/layout/workbenchLayoutIds";
 import { MemoryGraphRelationInspector } from "../MemoryGraphRelationInspector";
 import { isAdministrativeRelation, isContentRelation, platformLayerLabels, platformSpatialOverview, platformTopicOverview, platformTopicSlice, relationLayer, topicBasisLabels, type PlatformRelationLayer } from "./platformKnowledgeGraphModel";
@@ -121,7 +121,7 @@ export function PlatformKnowledgeGraphWorkbench({ onAgentView }: { onAgentView: 
       {spatial && layer === "knowledge" && <label className={styles.settingRow}><span className={styles.settingTitle}>来源连线</span><VNativeInput type="checkbox" checked={showSources} onChange={event => { setShowSources(event.target.checked); resetSelection(); }} /></label>}
       <label className={styles.settingRow}><span className={styles.settingTitle}>包含待确认关系</span><VNativeInput type="checkbox" checked={candidates} onChange={event => { setCandidates(event.target.checked); resetSelection(); }} /></label>
       {layer === "evidence" && <label className={styles.settingRow}><span className={styles.settingTitle}>显示入库审核记录</span><VNativeInput type="checkbox" checked={administrative} onChange={event => { setAdministrative(event.target.checked); resetSelection(); }} /></label>}
-      <label className={styles.settingRow}><span className={styles.settingTitle}>关系筛选</span><VNativeSelect aria-label="关系筛选" value={relationType} onChange={event => { setRelationType(event.target.value); resetSelection(); }}><option value="">全部关系</option>{legend.map(label => <option key={label} value={label}>{label}</option>)}</VNativeSelect></label>
+      <label className={styles.settingRow}><span className={styles.settingTitle}>关系筛选</span><VStringSelect ariaLabel="关系筛选" value={relationType} options={[{ value: "", label: "全部关系" }, ...legend.map(label => ({ value: label, label }))]} onValueChange={value => { setRelationType(value); resetSelection(); }} /></label>
       <div className={styles.settingsExplanation}><h3>分组依据</h3><p>{topic ? `${topicBasisLabels[topic.groupingBasis]}。` : `${payload?.topics.length ?? 0} 个已加载主题，按内容标签、标题关键词或知识库分组。`}分组和空间距离都不表示因果或支持关系。</p>
         <h3>{platformLayerLabels[layer]}</h3><p>{visibleEdges.length} 条已显示关系。{spatial ? "拖动旋转，右拖平移，滚轮缩放。" : "箭头表示关系方向，点选可看依据。"}</p>
         {payload && layer === "knowledge" && !(topicId ? slice.edges.some(isContentRelation) : hasContentRelations) && <p role="status">{topicId ? "本主题尚未记录支持、反驳或引用等内容关系。可切换“证据”查看来源。" : "当前数据主要记录知识收录和来源，内容关系尚未建立。星域表示内容分组，不代表主题互相支持。"}</p>}

@@ -1,14 +1,18 @@
 import { randomUUID } from "node:crypto";
+import { basename } from "node:path";
 
 import { assertLifecycleAdmitted, recordAdmissionOutcome } from "./instanceAdmissionStore.js";
 import {
+  clearStaleRuntimeManagerDaemonRecords,
   clearWorkbenchLauncherRuntimeState,
+  executableLooksLikePythonDaemon,
   readDaemonIdentity,
   readDaemonPid,
   launcherStatePath,
   readLauncherStateFile,
   sameProjectRoot,
   reclaimStaleWorkbenchBackend,
+  type RuntimeManagerDaemonRecordCleanupResult,
   type WorkbenchRuntimeStateCleanupResult
 } from "../process/workbenchBackend.js";
 import {
@@ -98,6 +102,12 @@ type IsolatedStartRetireDependencies = {
   clearRuntimeState: (workspaceRoot: string) => WorkbenchRuntimeStateCleanupResult;
   readDaemonPid: (workspaceRoot: string) => number;
   readDaemonIdentity: (workspaceRoot: string) => PythonProcessIdentity | null;
+  captureDaemonIdentity: (input: {
+    pythonPath: string;
+    workspaceRoot: string;
+    pid: number;
+  }) => Promise<PythonProcessIdentity | null>;
+  clearDaemonRecords: (workspaceRoot: string) => RuntimeManagerDaemonRecordCleanupResult;
   connect: (port: number, host: string) => Promise<boolean>;
   upsert: (
     registryPath: string,
@@ -116,6 +126,8 @@ const DEFAULT_ISOLATED_START_RETIRE_DEPENDENCIES: IsolatedStartRetireDependencie
   clearRuntimeState: clearWorkbenchLauncherRuntimeState,
   readDaemonPid,
   readDaemonIdentity,
+  captureDaemonIdentity: (input) => capturePythonProcessIdentity(input),
+  clearDaemonRecords: clearStaleRuntimeManagerDaemonRecords,
   connect: (port, host) => probeTcpConnect(port, host),
   upsert: (registryPath, instanceId, fields, expectedGeneration) =>
     upsert(registryPath, instanceId, fields, expectedGeneration),
@@ -623,10 +635,13 @@ export async function retireClaimedIsolatedRuntime(input: {
     return settleFailed("isolated backend retirement was superseded before health-identity reclaim");
   }
   let staleReclaim: { reclaimed: boolean; reason: string; verifiedPid?: number };
+  let verifiedDaemonPid = 0;
+  let daemonPid = 0;
+  let retirePythonPath = "";
   try {
-    const daemonPid = dependencies.readDaemonPid(workspaceRoot);
-    const pythonPath = String(input.pythonPath || "").trim();
-    if (!pythonPath) {
+    daemonPid = dependencies.readDaemonPid(workspaceRoot);
+    retirePythonPath = String(input.pythonPath || "").trim();
+    if (!retirePythonPath) {
       return settleFailed("isolated backend retirement cannot verify process ownership: python path missing; registered handles retained");
     }
     const expectedIdentities: Record<string, PythonProcessIdentity> = {};
@@ -640,7 +655,7 @@ export async function retireClaimedIsolatedRuntime(input: {
       };
     }
     const daemonIdentity = dependencies.readDaemonIdentity(workspaceRoot);
-    const verifiedDaemonPid = daemonIdentity
+    verifiedDaemonPid = daemonIdentity
       && daemonPid > 0
       && daemonIdentity.pid === daemonPid
       && Number.isFinite(Number(daemonIdentity.createTime))
@@ -665,7 +680,7 @@ export async function retireClaimedIsolatedRuntime(input: {
     const reclaimRegisteredPids = registeredPids.filter((pid) => !reconciledPids.has(pid));
     const reclaimExtraPids = extraPids.filter((pid) => !reconciledPids.has(pid));
     const terminateProcessTree = createPythonOwnedProcessTreeTerminator({
-      pythonPath,
+      pythonPath: retirePythonPath,
       workspaceRoot,
       allowedKinds: ["managed_workbench_backend", "runtime_manager_daemon"],
       expectedIdentities
@@ -699,6 +714,37 @@ export async function retireClaimedIsolatedRuntime(input: {
   const stillCurrentAfterReclaim = fenceOpen();
   const registeredSpawnPidAlive = registeredSpawnPid > 0 && dependencies.pidAlive(registeredSpawnPid);
   const backendConfirmedClosed = staleReclaim.reclaimed && !registeredSpawnPidAlive;
+  if (backendConfirmedClosed && daemonPid > 0) {
+    // Retirement-time daemon-record reconciliation, mirroring the main-line
+    // stop path: once the reclaim pass proved the registered runtime is gone,
+    // only provably stale record files are dropped. A recorded pid that is
+    // still alive keeps its records unless a captured identity proves a
+    // foreign (non-python) reuse; the record handling never signals a
+    // process, and the start-time daemon preflight stays the sole authority
+    // over live unverified daemons. Retirement completes either way.
+    if (!dependencies.pidAlive(daemonPid)) {
+      const cleanup = dependencies.clearDaemonRecords(workspaceRoot);
+      if (cleanup.failedPaths.length > 0) {
+        return settleFailed(
+          `Runtime Manager daemon records for exited pid ${daemonPid} could not be cleared: ${cleanup.failedPaths.join(", ")}`
+        );
+      }
+    } else if (!verifiedDaemonPid) {
+      const liveIdentity = await dependencies.captureDaemonIdentity({
+        pythonPath: retirePythonPath,
+        workspaceRoot,
+        pid: daemonPid
+      });
+      if (liveIdentity && !executableLooksLikePythonDaemon(liveIdentity.executable)) {
+        const cleanup = dependencies.clearDaemonRecords(workspaceRoot);
+        if (cleanup.failedPaths.length > 0) {
+          return settleFailed(
+            `Runtime Manager daemon pid ${daemonPid} was reused by ${basename(liveIdentity.executable.trim())} but its stale records could not be cleared: ${cleanup.failedPaths.join(", ")}`
+          );
+        }
+      }
+    }
+  }
   const runtimeCleanup = backendConfirmedClosed
     ? dependencies.clearRuntimeState(workspaceRoot)
     : null;

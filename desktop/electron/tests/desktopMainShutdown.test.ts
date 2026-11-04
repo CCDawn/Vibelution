@@ -6,11 +6,14 @@ import { combineAssistantActiveWork } from "../src/assistant/lifecycleGuard.js";
 import { DesktopLifecycleCoordinator } from "../src/lifecycle/desktopLifecycleCoordinator.js";
 import { createDesktopShellExitDeadline, executeApprovedDesktopShellShutdown, withDesktopShellExitTimeout } from "../src/shutdown/desktopShellExit.js";
 import { decideShutdown, executeShutdownAuthorizationBoundary, resolveQuitActiveWorkStatus, type ActiveWorkStatus, type ShutdownDecision } from "../src/shutdown/shutdownCoordinator.js";
+import { projectBranchInstanceStates } from "../src/state/launcherStateStore.js";
+import { classifyTrayBranchInstances } from "../src/protocol/launcherControlClient.js";
+import { captureShutdownInstanceIds, captureRunningInstanceIds, registryEntriesToShutdownInstanceSnapshots, isVerifiedClosedBranchInventory } from "../src/tray/trayRestartAllCoordinator.js";
 
 const source = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
 const parsed = ts.createSourceFile("main.ts", source, ts.ScriptTarget.ES2022, true);
 const names = ["confirmDesktopShellExit", "requestDesktopShellExit", "residentAssistantStatus",
-  "residentAssistantActiveWork", "acquireResidentAssistantShutdownGuard", "runTrayStopAll"];
+  "residentAssistantActiveWork", "acquireResidentAssistantShutdownGuard", "runTrayStopAll", "captureShutdownIsolatedInstanceIds"];
 const declarations = names.map(name => {
   const declaration = parsed.statements.find(statement => ts.isFunctionDeclaration(statement) && statement.name?.text === name);
   if (!declaration) throw new Error(`Missing main function ${name}`);
@@ -39,6 +42,17 @@ function harness() {
     QUIT_ACTIVE_WORK_STATUS_TIMEOUT_MS: 8_000,
     ASSISTANT_START_SETTLE_WAIT_MS: 5_000,
     launcherBootstrap: { mode: "attached" },
+    launcherStateStore: { snapshot: vi.fn(() => ({ instances: [] as unknown[] })),
+      refresh: vi.fn(async (_reason: string) => ({ instances: [] as unknown[] })) },
+    orchestrateLauncherApi: vi.fn(async (_path: string, _payload: unknown, _signal?: AbortSignal) => ({ items: [] as unknown[] })),
+    readRegistry: vi.fn(async (_path: string) => ({ instances: {} })),
+    instancesRegistryPath: () => "registry.json",
+    knownPidIsAlive: () => true,
+    currentLauncherWindowTruth: vi.fn(() => ({ workbench: null,
+      instances: [] as { instanceId: string; open: boolean; rendererProcessId: number }[] })),
+    projectBranchInstanceStates, classifyTrayBranchInstances,
+    captureShutdownInstanceIds, captureRunningInstanceIds, registryEntriesToShutdownInstanceSnapshots, isVerifiedClosedBranchInventory,
+    resolveTrayControlContextOrLoopback: async () => ({}),
     launcherAssistantStarting: null,
     launcherAssistantHost: {
       snapshot: () => ({ state: hostState }),
@@ -80,9 +94,15 @@ function harness() {
   const actions = context as typeof context & {
     requestDesktopShellExit: (reason: string, confirm: boolean) => Promise<ShutdownDecision>;
     runTrayStopAll: () => Promise<void>;
+    captureShutdownIsolatedInstanceIds: (deadline: ReturnType<typeof createDesktopShellExitDeadline>) => Promise<string[]>;
   };
   return { context, workspace, release, acquire, stopMain, stopIsolated, closeSession, closeWindow, dialog, quit,
     exit: (operatorRequested = true) => actions.requestDesktopShellExit("desktop_shell_quit", operatorRequested),
+    capture: async () => {
+      const deadline = createDesktopShellExitDeadline();
+      try { return await actions.captureShutdownIsolatedInstanceIds(deadline); }
+      finally { deadline.dispose(); }
+    },
     tray: () => actions.runTrayStopAll() };
 }
 
@@ -161,6 +181,70 @@ describe("actual native reminder notification", () => {
 });
 
 describe("actual Electron main shutdown functions", () => {
+  it("skips full workspace and cleanup refresh when fresh inventories prove every isolated row closed", async () => {
+    const h = harness();
+    h.context.orchestrateLauncherApi.mockResolvedValue({ items: [
+      { id: "worktree:closed", kind: "worktree", current: false, alive: false, checkedOut: true,
+        pids: { backend: 0, window: 0, manager: 0 }, runtime: { observedState: "closed", phase: "steady", desiredState: "closed",
+          backend: { pid: 0, alive: false, healthy: false, listening: false, portConflict: false }, window: { pid: 0, open: false } } }
+    ] });
+    expect(await h.capture()).toEqual([]);
+    expect(h.context.orchestrateLauncherApi).toHaveBeenCalledOnce();
+    expect(h.context.readRegistry).toHaveBeenCalledOnce();
+    expect(h.context.launcherStateStore.refresh).not.toHaveBeenCalled();
+  });
+
+  it.each(["open", "starting"])("refreshes target-root material for a newly discovered %s row", async state => {
+    const h = harness();
+    h.context.orchestrateLauncherApi.mockResolvedValue({ items: [
+      { id: "worktree:new", path: "D:/new-checkout", checkedOut: true,
+        runtime: { observedState: state, phase: state === "starting" ? "building" : "steady", desiredState: "open", backend: { pid: state === "open" ? 12 : 0 } } }
+    ] });
+    expect(await h.capture()).toContain("worktree:new");
+    expect(h.context.launcherStateStore.refresh).toHaveBeenCalledExactlyOnceWith("desktop_shell_exit");
+  });
+
+  it("keeps canonical registry transitional rows in the stop inventory", async () => {
+    const h = harness();
+    h.context.readRegistry.mockResolvedValue({ instances: {
+      "worktree:starting": { status: "starting", phase: "building", desiredState: "open", spawnPid: 0 }
+    } });
+    expect(await h.capture()).toContain("worktree:starting");
+    expect(h.context.launcherStateStore.refresh).toHaveBeenCalledOnce();
+  });
+
+  it("falls back to full refresh when a live source is unavailable", async () => {
+    const h = harness();
+    h.context.readRegistry.mockRejectedValue(new Error("registry read failed"));
+    await h.capture();
+    expect(h.context.launcherStateStore.refresh).toHaveBeenCalledOnce();
+  });
+
+  it("does not fast-exit an unlisted native isolated window", async () => {
+    const h = harness();
+    h.context.currentLauncherWindowTruth.mockReturnValue({ workbench: null, instances: [
+      { instanceId: "worktree:unlisted-window", open: true, rendererProcessId: 23 }
+    ] });
+    await h.capture();
+    expect(h.context.launcherStateStore.refresh).toHaveBeenCalledOnce();
+  });
+
+  it("does not treat malformed inventory rows as a verified empty inventory", async () => {
+    const h = harness();
+    h.context.orchestrateLauncherApi.mockResolvedValue({ items: [{}] });
+    await h.capture();
+    expect(h.context.launcherStateStore.refresh).toHaveBeenCalledOnce();
+  });
+
+  it("reconciles a stale cached live row before dropping it from the inventory", async () => {
+    const h = harness();
+    h.context.launcherStateStore.snapshot.mockReturnValue({ instances: [
+      { id: "worktree:old", observedState: "closed", phase: "steady", pid: 42, port: 0, window: { open: false } }
+    ] });
+    expect(await h.capture()).toEqual([]);
+    expect(h.context.launcherStateStore.refresh).toHaveBeenCalledOnce();
+  });
+
   it("releases the idle workbench renderer before waiting for backend process exit", async () => {
     const h = harness();
     h.stopMain.mockImplementation(async () => {

@@ -29,6 +29,30 @@ export type ShutdownInstanceSnapshot = {
   window: { open: boolean };
 };
 
+/** UI defaults cannot prove that an unknown or malformed runtime is closed. */
+export function isVerifiedClosedBranchInventory(payload: unknown): boolean {
+  const items = payload && typeof payload === "object" ? (payload as { items?: unknown }).items : undefined;
+  if (!Array.isArray(items)) return false;
+  const seen = new Set<string>();
+  return items.every(value => {
+    if (!value || typeof value !== "object") return false;
+    const row = value as Record<string, unknown>;
+    if (typeof row.id !== "string" || !row.id || row.id !== row.id.trim() || seen.has(row.id)) return false;
+    seen.add(row.id);
+    if (row.id === "main") return row.kind === "main" && row.current === true;
+    const runtime = row.runtime as Record<string, unknown> | undefined;
+    const backend = runtime?.backend as Record<string, unknown> | undefined;
+    const window = runtime?.window as Record<string, unknown> | undefined;
+    const pids = row.pids as Record<string, unknown> | undefined;
+    return row.current === false && row.alive === false
+      && runtime?.desiredState === "closed" && runtime.observedState === "closed" && runtime.phase === "steady"
+      && backend?.pid === 0 && backend.alive === false && backend.healthy === false
+      && backend.listening === false && backend.portConflict === false
+      && window?.pid === 0 && window.open === false
+      && pids?.backend === 0 && pids.window === 0 && pids.manager === 0;
+  });
+}
+
 export function registryEntriesToShutdownInstanceSnapshots(
   instances: Record<string, RegistryEntry>,
   pidAlive?: (pid: number) => boolean

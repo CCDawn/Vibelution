@@ -3,11 +3,46 @@ import { describe, expect, it } from "vitest";
 import {
   captureRunningInstanceIds,
   captureShutdownInstanceIds,
+  isVerifiedClosedBranchInventory,
   registryEntriesToShutdownInstanceSnapshots,
   summarizeTrayRestartAllRestore
 } from "../src/tray/trayRestartAllCoordinator.js";
 
 describe("tray restart-all coordinator", () => {
+  function closedRow() {
+    return { id: "worktree:closed", kind: "worktree", current: false, alive: false,
+      pids: { backend: 0, window: 0, manager: 0 },
+      runtime: { desiredState: "closed", observedState: "closed", phase: "steady",
+        backend: { pid: 0, alive: false, healthy: false, listening: false, portConflict: false },
+        window: { pid: 0, open: false } } };
+  }
+
+  it("requires explicit raw closed-runtime evidence for the empty shutdown inventory", () => {
+    expect(isVerifiedClosedBranchInventory({ items: [] })).toBe(true);
+    expect(isVerifiedClosedBranchInventory({ items: [closedRow()] })).toBe(true);
+  });
+
+  it.each([
+    ["missing desired state", (row: ReturnType<typeof closedRow>) => { delete (row.runtime as { desiredState?: string }).desiredState; }],
+    ["string pid", (row: ReturnType<typeof closedRow>) => { (row.runtime.backend as { pid: unknown }).pid = "123"; }],
+    ["missing window", (row: ReturnType<typeof closedRow>) => { delete (row.runtime as { window?: unknown }).window; }],
+    ["string alive flag", (row: ReturnType<typeof closedRow>) => { (row as { alive: unknown }).alive = "false"; }],
+    ["open window", (row: ReturnType<typeof closedRow>) => { row.runtime.window.open = true; }],
+    ["remaining manager", (row: ReturnType<typeof closedRow>) => { row.pids.manager = 123; }],
+    ["foreign current row", (row: ReturnType<typeof closedRow>) => { row.current = true; }],
+    ["port conflict", (row: ReturnType<typeof closedRow>) => { row.runtime.backend.portConflict = true; }],
+  ] as const)("keeps %s out of the verified closed fast path", (_name, mutate) => {
+    const row = closedRow();
+    mutate(row);
+    expect(isVerifiedClosedBranchInventory({ items: [row] })).toBe(false);
+  });
+
+  it("rejects duplicate identities and incomplete inventory envelopes", () => {
+    expect(isVerifiedClosedBranchInventory({ items: [closedRow(), closedRow()] })).toBe(false);
+    expect(isVerifiedClosedBranchInventory({})).toBe(false);
+    expect(isVerifiedClosedBranchInventory({ items: [{ id: "worktree:unknown" }] })).toBe(false);
+  });
+
   it("captures only currently running branch instances", () => {
     expect(
       captureRunningInstanceIds([

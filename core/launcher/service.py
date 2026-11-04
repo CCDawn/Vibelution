@@ -224,18 +224,26 @@ def get_launcher_current_instance_identity() -> dict[str, Any]:
     return current_branch_instance_identity(PROJECT_ROOT)
 
 
-def list_launcher_branch_instances(*, include_cleanup_metadata: bool = False) -> dict[str, Any]:
+def list_launcher_branch_instances(
+    *, include_cleanup_metadata: bool = False, runtime_only: bool = False
+) -> dict[str, Any]:
     """Return Git-governed branch instances for the Launcher first screen.
 
     Tray refresh and the status table only need worktree identity plus runtime
     overlay. ``merge-base --is-ancestor`` cleanup annotation is opt-in because
     it is only required when the user filters unmerged rows or confirms cleanup.
+    Runtime-only shutdown inventory skips Git dirtiness; cleanup requests always
+    retain the full scan so unchecked worktrees cannot be treated as clean.
     """
 
     from core.launcher.branch_instance_lifecycle import list_overlayed_branch_instances
 
     current_bundle = _current_project_bundle_for_branch_list()
-    payload = list_overlayed_branch_instances(current_bundle=current_bundle)
+    payload = (
+        list_overlayed_branch_instances(current_bundle=current_bundle, include_dirty=False)
+        if runtime_only and not include_cleanup_metadata
+        else list_overlayed_branch_instances(current_bundle=current_bundle)
+    )
     if not include_cleanup_metadata:
         return payload
     from core.launcher.branch_instance_cleanup import annotate_cleanup_metadata

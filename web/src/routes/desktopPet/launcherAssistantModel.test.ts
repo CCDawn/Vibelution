@@ -9,7 +9,7 @@ import type { LauncherAssistantSessionEvent } from "../../api/launcherAssistant"
 import {
   launcherAssistantActivity, launcherAssistantMessageOverLimit, launcherAssistantPollInterval, launcherAssistantSendBusyCode,
   launcherAssistantSendDefinitelyRejected, launcherAssistantSendRetryableBusy, launcherAssistantSubmission,
-  launcherDispatchLabel, launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
+  launcherDispatchLabel, launcherDispatchReceiptLabel, launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
   launcherAssistantSessionEventRefreshesDetail, launcherAssistantSseHealthy, launcherAssistantWaitInterval,
   launcherAssistantStatusDegradeTone,
   launcherAssistantContextRing, launcherAssistantModelDisplay, launcherAssistantEditBackfillDraft,
@@ -706,6 +706,17 @@ describe("Launcher assistant state", () => {
     expect(launcherDispatchLabel({ dispatchId: "d", lastError: { code: "unavailable" } }, "zh")).toBe("回执暂不可用");
   });
 
+  it("reads a known failure code as its short label and keeps the generic fallback for unknown codes", () => {
+    expect(launcherDispatchLabel({ dispatchId: "d", lastError: { code: "TASK_NOT_FOUND" } }, "zh")).toBe("任务不存在");
+    expect(launcherDispatchLabel({ dispatchId: "d", lastError: { code: "BACKEND_TIMEOUT" } }, "en")).toBe("Backend timeout");
+    expect(launcherDispatchLabel({ dispatchId: "d", lastError: { code: "FUTURE_CODE" } }, "en")).toBe("Receipt unavailable");
+    expect(launcherDispatchLabel({ dispatchId: "d", lastError: { message: "no code" } }, "zh")).toBe("回执暂不可用");
+    expect(launcherDispatchReceiptLabel({ dispatchId: "d", lastError: { code: "RUNTIME_IDENTITY_MISMATCH" } }, "zh")).toBe("运行时身份不匹配");
+    expect(launcherDispatchReceiptLabel({ dispatchId: "d", lastError: { code: "FUTURE_CODE" } }, "en")).toBe("Receipt unavailable");
+    // Receipt statuses stay plain words; the classification only applies to a lastError.
+    expect(launcherDispatchReceiptLabel({ dispatchId: "d", receipt: { status: "failed", error: { code: "TASK_NOT_FOUND" } } }, "zh")).toBe("失败");
+  });
+
   it("waits for accepted native queue readback, then follows queued status instead of idle polling", () => {
     const receipt = { id: "q", clientSubmissionId: "r", observed: false };
     expect(launcherAssistantPollInterval(true, { status: "ready" }, "", receipt)).toBe(2_000);
@@ -1305,9 +1316,11 @@ describe("Launcher assistant composer surface model", () => {
     bridge.setLauncherAssistantModel.mockResolvedValue({ modelId: "m2" });
     bridge.getLauncherAssistantStatus.mockResolvedValue({ ...status, settings: { ...status.settings, modelId: "m2" } });
     await act(async () => container?.querySelector<HTMLButtonElement>('[data-launcher-assistant-model-control] button')?.click());
-    const select = document.querySelector<HTMLSelectElement>('select[aria-label="切换助理模型"]')!;
-    expect(select.disabled).toBe(false);
-    await act(async () => { select.value = "m2"; select.dispatchEvent(new Event("change", { bubbles: true })); });
+    const selectTrigger = document.querySelector<HTMLButtonElement>('[role="combobox"][aria-label="切换助理模型"]')!;
+    expect(selectTrigger.disabled).toBe(false);
+    await act(async () => selectTrigger.click());
+    const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(node => node.textContent === "模型二")!;
+    await act(async () => option.click());
     await settle(); await settle();
     expect(bridge.setLauncherAssistantModel).toHaveBeenCalledWith("m2");
     expect(container?.querySelector('[data-launcher-assistant-model-control] button')?.textContent).toBe("模型二");

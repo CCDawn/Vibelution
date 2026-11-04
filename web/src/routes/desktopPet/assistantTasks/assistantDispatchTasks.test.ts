@@ -28,6 +28,35 @@ describe("assistant task projection from native dispatch receipts", () => {
     expect(result.tasks[0].state).toBe("unknown");
   });
 
+  it("keeps a coded lastError as display evidence only: the task stays unknown, never failed", () => {
+    const result = projectAssistantDispatchTasks([dispatch({
+      receipt: { taskId: "native-1", status: "failed", error: { code: "TASK_NOT_FOUND", message: "stale receipt" } },
+      lastError: { code: "BACKEND_UNAVAILABLE", message: "暂不可用" } })]);
+    expect(result.tasks[0]).toMatchObject({ state: "unknown", errorCode: "BACKEND_UNAVAILABLE", sourceAvailable: false, shouldPoll: false });
+    expect(result.counts).toMatchObject({ unknown: 1, failed: 0 });
+  });
+
+  it("preserves the bound receipt error code on a genuinely failed task", () => {
+    const task = projectAssistantDispatchTasks([dispatch({
+      receipt: { taskId: "native-1", status: "failed", error: { code: "TURN_FAILED", message: "agent turn failed" } } })]).tasks[0];
+    expect(task).toMatchObject({ state: "failed", error: "agent turn failed", errorCode: "TURN_FAILED" });
+  });
+
+  it("falls back to an empty code when a legacy receipt error is a plain string", () => {
+    const task = projectAssistantDispatchTasks([dispatch({
+      receipt: { taskId: "native-1", status: "failed", error: "旧版纯文本失败原因" } })]).tasks[0];
+    expect(task).toMatchObject({ state: "failed", error: "旧版纯文本失败原因", errorCode: "" });
+  });
+
+  it("ignores empty or oversized error codes without losing the failure message", () => {
+    const blank = projectAssistantDispatchTasks([dispatch({
+      receipt: { taskId: "native-1", status: "failed", error: { code: "   ", message: "blank code" } } })]).tasks[0];
+    const oversized = projectAssistantDispatchTasks([dispatch({
+      receipt: { taskId: "native-1", status: "failed", error: { code: "X".repeat(121), message: "huge code" } } })]).tasks[0];
+    expect(blank).toMatchObject({ errorCode: "", error: "blank code" });
+    expect(oversized).toMatchObject({ errorCode: "", error: "huge code" });
+  });
+
   it.each(["running", "awaiting_approval"])("requires an exact native task binding for approvals in %s", status => {
     const approval = { approvalId: "approval-1", revision: "r1", toolName: "write", risk: "write",
       targetSummary: {}, availableDecisions: ["accept", "decline"] };

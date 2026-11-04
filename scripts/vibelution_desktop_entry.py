@@ -2059,6 +2059,8 @@ def _run_launcher_api_bridge(args: argparse.Namespace) -> dict[str, object]:
         elif path == "branch-instances" and method == "GET":
             if _query_flag(query.get("cleanupMetadata", "")):
                 response = launcher_service.list_launcher_branch_instances(include_cleanup_metadata=True)
+            elif _query_flag(query.get("runtimeOnly", "")):
+                response = launcher_service.list_launcher_branch_instances(runtime_only=True)
             else:
                 response = launcher_service.list_launcher_branch_instances()
         elif path == "state-refresh" and method == "POST":

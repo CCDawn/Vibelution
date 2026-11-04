@@ -314,6 +314,12 @@ function branchItems(payload: unknown): unknown[] {
   return Array.isArray(items) ? items : [];
 }
 
+export function projectBranchInstanceStates(payload: unknown, truth: LauncherWindowTruth): LauncherInstanceState[] {
+  return branchItems(payload)
+    .map(item => branchInstance(item, truth))
+    .filter((item): item is LauncherInstanceState => item !== null);
+}
+
 function nextReconcileAtFrom(value: unknown, fallback = ""): string {
   const raw = text(value).trim();
   if (!raw) {
@@ -351,9 +357,8 @@ export class LauncherStateStore {
 
   snapshot(): LauncherStateSnapshotV1 {
     const main = mainInstance(this.sources.status, this.truth);
-    const instances = branchItems(this.sources.branchInstances)
-      .map((item) => branchInstance(item, this.truth))
-      .filter((item): item is LauncherInstanceState => item !== null && item.id !== main.id && !item.current);
+    const instances = projectBranchInstanceStates(this.sources.branchInstances, this.truth)
+      .filter(item => item.id !== main.id && !item.current);
     return {
       schemaVersion: 1,
       revision: this.revision,

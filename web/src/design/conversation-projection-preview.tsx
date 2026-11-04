@@ -8,7 +8,7 @@ import type { ConversationMessage, SessionTurnItem } from "../api/types";
 import { ConversationView } from "../components/conversation/ConversationView";
 import { ActiveTurnStreamStateContext } from "../components/conversation/activeTurnStreamState";
 import { VButton, VuiProvider } from "../components/vui";
-import styles from "./conversation-projection-preview.module.css";
+import styles from "./conversation-projection-preview.styles";
 import "./tokens.css";
 import "./base.css";
 import "./tailwind.css";

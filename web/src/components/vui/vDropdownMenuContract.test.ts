@@ -62,9 +62,13 @@ describe("VDropdownMenu contract", () => {
     expect(lifecycleActions).toContain("requestWorkbenchLifecycleOperation");
     expect(lifecycleActions).toContain("app_shell_shutdown_button");
     expect(lifecycleActions).toContain("launcher_route_stop_button");
-    expect(tray).toContain("startProject:");
-    expect(tray).toContain("stopProject:");
-    expect(tray).toContain("restartLauncher:");
-    expect(tray).toContain("stopAll:");
+    // The tray is intentionally open + exit only (1e6c6ceec): per-project
+    // lifecycle lives behind audited lifecycle actions above, never in
+    // hand-rolled native menus on AppShell or the Launcher page.
+    expect(tray).toContain("DESKTOP_TRAY_MENU_LABELS.openAssistant");
+    expect(tray).toContain("DESKTOP_TRAY_MENU_LABELS.openLauncher");
+    expect(tray).toContain("DESKTOP_TRAY_MENU_LABELS.stopAll");
+    expect(tray).not.toContain("startProject:");
+    expect(tray).not.toContain("stopProject:");
   });
 });
