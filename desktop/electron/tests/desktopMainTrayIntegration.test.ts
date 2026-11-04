@@ -133,6 +133,11 @@ describe("Electron main tray integration", () => {
     expect(quitSource).not.toContain("delayWithAbortSignal(1_500");
     expect(quitSource.match(/stopMainRuntimeForApprovedShutdown\(/g)).toHaveLength(1);
     expect(quitSource).toContain('decision.reason === "operator_confirmed"');
+    expect(quitSource).toContain("if (operatorRequested)");
+    const ipcStart = mainSource.indexOf("ipcMain.handle(IPC_CHANNELS.requestDesktopShellExit,");
+    const ipc = mainSource.slice(ipcStart, mainSource.indexOf("\n});", ipcStart));
+    expect(ipc).toContain("assertTrustedIpcSender");
+    expect(ipc).toContain('requestDesktopShellExit("desktop_shell_quit", true)');
     const execution = quitSource.slice(quitSource.indexOf("runApproved:"));
     expect(execution).toContain("createDesktopShellExitDeadline(DESKTOP_QUIT_TOTAL_BUDGET_MS)");
     const confirmStart = mainSource.indexOf("async function confirmDesktopShellExit(");

@@ -80,7 +80,7 @@ function harness() {
     runTrayStopAll: () => Promise<void>;
   };
   return { context, workspace, release, acquire, stopMain, stopIsolated, closeSession, dialog, quit,
-    exit: () => actions.requestDesktopShellExit("desktop_shell_quit", true),
+    exit: (operatorRequested = true) => actions.requestDesktopShellExit("desktop_shell_quit", operatorRequested),
     tray: () => actions.runTrayStopAll() };
 }
 
@@ -95,6 +95,17 @@ describe("actual Electron main shutdown functions", () => {
     expect(h.stopMain).toHaveBeenCalledExactlyOnceWith(false, expect.anything());
     expect(h.quit).toHaveBeenCalledOnce();
     expect(h.context.trayQuitAllInFlight).toBe(false);
+  });
+
+  it("finishes explicit idle exit even when the migration-only idle lease is busy", async () => {
+    const h = harness();
+    h.acquire.mockRejectedValue(new Error("ASSISTANT_LIFECYCLE_BUSY"));
+    await h.tray();
+    expect(h.context.stopLauncherAssistant).toHaveBeenCalledOnce();
+    expect(h.acquire).not.toHaveBeenCalled();
+    expect(h.dialog).not.toHaveBeenCalled();
+    expect(h.stopMain).toHaveBeenCalledExactlyOnceWith(false, expect.anything());
+    expect(h.quit).toHaveBeenCalledOnce();
   });
 
   it("keeps all producers running when the user cancels", async () => {
@@ -134,7 +145,7 @@ describe("actual Electron main shutdown functions", () => {
     expect(h.context.launcherAssistantExitReady).toBe(true);
     expect(h.quit).not.toHaveBeenCalled();
     h.workspace.state = "idle";
-    await h.exit();
+    await h.exit(false);
     expect(h.acquire).not.toHaveBeenCalled();
     expect(h.dialog).toHaveBeenCalledOnce();
     expect(h.quit).toHaveBeenCalledOnce();
@@ -146,7 +157,7 @@ describe("actual Electron main shutdown functions", () => {
     const h = harness();
     let resolveLease!: (value: { release: typeof h.release; commit: () => void }) => void;
     h.acquire.mockImplementation(() => new Promise(resolve => { resolveLease = resolve; }));
-    const pending = h.exit();
+    const pending = h.exit(false);
     await vi.advanceTimersByTimeAsync(30_000);
     await pending;
     expect(h.quit).not.toHaveBeenCalled();
@@ -154,5 +165,21 @@ describe("actual Electron main shutdown functions", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(h.release).toHaveBeenCalledOnce();
     expect(h.stopMain).not.toHaveBeenCalled();
+  });
+
+  it("does not stop projects when an explicit assistant stop finishes after timeout", async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    let finishStop!: () => void;
+    h.context.stopLauncherAssistant.mockImplementation(() => new Promise(resolve => { finishStop = resolve; }));
+    const pending = h.tray();
+    await vi.advanceTimersByTimeAsync(30_000);
+    await pending;
+    finishStop();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.stopIsolated).not.toHaveBeenCalled();
+    expect(h.stopMain).not.toHaveBeenCalled();
+    expect(h.closeSession).not.toHaveBeenCalled();
+    expect(h.quit).not.toHaveBeenCalled();
   });
 });

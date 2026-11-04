@@ -4246,7 +4246,7 @@ async function confirmDesktopShellExit(
 
 async function requestDesktopShellExit(
   closeReason: DesktopCloseReason = "desktop_shell_quit",
-  confirmActiveWork = false
+  operatorRequested = false
 ): Promise<ShutdownDecision> {
   return desktopLifecycleCoordinator.request(closeReason, async () => {
     const ownershipMode = launcherBootstrap?.mode ?? "attached";
@@ -4305,7 +4305,7 @@ async function requestDesktopShellExit(
           probeDeadline.dispose();
         }
       },
-      confirmStopActiveWork: confirmActiveWork ? async (decision) => {
+      confirmStopActiveWork: operatorRequested ? async (decision) => {
         const startedAt = Date.now();
         try { return await confirmDesktopShellExit(decision, observedActiveWork); }
         finally { confirmationMs = Math.max(0, Date.now() - startedAt); }
@@ -4321,7 +4321,7 @@ async function requestDesktopShellExit(
         try {
           await withDesktopShellExitTimeout(async (signal) => {
             signal.throwIfAborted();
-            if (interruptActiveWork) {
+            if (operatorRequested) {
               await stopLauncherAssistant();
             } else {
               const pendingGuard = acquireResidentAssistantShutdownGuard();
@@ -5289,7 +5289,7 @@ ipcMain.on(IPC_CHANNELS.endDesktopPetWindowDrag, (event) => {
 
 ipcMain.handle(IPC_CHANNELS.requestDesktopShellExit, async (event) => {
   assertTrustedIpcSender(event, trustedIpcOrigins());
-  return await requestDesktopShellExit();
+  return await requestDesktopShellExit("desktop_shell_quit", true);
 });
 
 ipcMain.handle(IPC_CHANNELS.notifyConversationCompleted, async (event, payload: DesktopConversationCompletionNotification) => {
