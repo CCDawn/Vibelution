@@ -66,11 +66,13 @@ import { readLauncherManagementStatus, useLauncherManagementPermission } from ".
 import { LauncherManagementPermissionControl } from "./LauncherManagementPermissionControl";
 import { useLauncherAssistantBudget } from "./useLauncherAssistantBudget";
 import { agentPurgeBatchPreviewIsValid, launcherAgentPurgeBatchActionPreview } from "./launcherAgentPurgeBatchPreview";
+import { usePublishLauncherNotices } from "../../app/LauncherNotifications";
+import { launcherAssistantPageNotices, launcherNoticeReadFailed } from "./launcherAssistantPageNotices";
 
 const COPY = {
   zh: {
     title: "个人助理", expand: "展开个人助理聊天", chat: "聊一聊", hide: "隐藏个人助理",
-    collapse: "收起聊天", loading: "正在打开对话…", unavailable: "个人助理暂不可用",
+    collapse: "收起聊天", loading: "正在打开对话…", unavailable: "个人助理暂不可用", conversationUnavailable: "暂时无法加载对话",
     retry: "重试", refresh: "刷新", placeholder: "和个人助理聊一聊…", send: "发送", sending: "正在发送…",
     unknownSend: "尚未确认消息是否收到。输入已保留，重试会核对同一条消息。",
     sendRejected: "本次发送已被拒绝，未进入对话；请修改后重新发送。",
@@ -90,7 +92,7 @@ const COPY = {
   },
   en: {
     title: "Personal assistant", expand: "Open assistant chat", chat: "Chat", hide: "Hide assistant",
-    collapse: "Collapse chat", loading: "Opening conversation…", unavailable: "Assistant unavailable",
+    collapse: "Collapse chat", loading: "Opening conversation…", unavailable: "Assistant unavailable", conversationUnavailable: "Conversation could not be loaded",
     retry: "Retry", refresh: "Refresh", placeholder: "Chat with your assistant…", send: "Send", sending: "Sending…",
     unknownSend: "Delivery is unconfirmed. Your input is retained; retry checks the same message.",
     sendRejected: "This send was rejected and never entered the conversation; edit and send again.",
@@ -1170,6 +1172,22 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     now: Date.now(), sseHealthy: launcherAssistantSseHealthy(sseAliveAt.current, Date.now()),
   });
   const statusHardDown = statusDegradeTone === "error";
+  const notificationsHosted = usePublishLauncherNotices(expanded ? launcherAssistantPageNotices({
+    lang,
+    reads: [
+      { label: lang === "zh" ? "状态刷新" : "Status refresh", failed: launcherNoticeReadFailed(status) || statusDegradeTone !== "quiet", pending: status.isFetching, error: status.error, retry: status.refetch },
+      { label: lang === "zh" ? "会话刷新" : "Conversation refresh", failed: reading && launcherNoticeReadFailed(detail), pending: detail.isFetching, error: detail.error, retry: detail.refetch },
+      { label: lang === "zh" ? "待授权查询" : "Pending approvals", failed: reading && launcherNoticeReadFailed(approvals), pending: approvals.isFetching, error: approvals.error, retry: approvals.refetch },
+      { label: lang === "zh" ? "任务状态" : "Task status", failed: reading && launcherNoticeReadFailed(dispatches), pending: dispatches.isFetching, error: dispatches.error, retry: dispatches.refetch },
+    ],
+    appearance: [
+      { label: lang === "zh" ? "用户头像" : "User avatar", failed: readingAssets && launcherNoticeReadFailed(avatar), pending: avatar.isFetching, error: avatar.error, retry: avatar.refetch },
+      { label: lang === "zh" ? "背景图片" : "Background image", failed: readingAssets && launcherNoticeReadFailed(background), pending: background.isFetching, error: background.error, retry: background.refetch },
+      { label: lang === "zh" ? "助理头像" : "Assistant avatar", failed: readingAssistantAvatar && launcherNoticeReadFailed(assistantAvatar), pending: assistantAvatar.isFetching, error: assistantAvatar.error, retry: assistantAvatar.refetch },
+    ],
+    history: { missing: historyAttachments.missingGenerated, failed: historyAttachments.failed, pending: historyAttachments.pending, retry: historyAttachments.retry, refresh: detail.refetch },
+    deliveryUnreported: status.data?.patrol?.state === "unavailable" || ["unknown", "failed", "interrupted"].some(key => (status.data?.patrol?.deliveryStates[key] || 0) > 0),
+  }) : []);
   // Read-only context-usage ring from the native detail's usage projections.
   // Null before the first usage frame; diagnostics handoff and the auto-compaction
   // countdown are absent because this surface mounts neither dialog nor setting.
@@ -1184,6 +1202,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
         && (activity.execution === "idle" || (activity.execution === "settled" && activity.outcome === "completed"))
       ? preferences.idleMessage : sessionActivityStatusLabel(activity, lang)
       : copy.title);
+  const displayedStatusText = notificationsHosted && detail.data && !feedback && !queueStatusText && (statusHardDown || detail.isError)
+    ? `${sessionActivityStatusLabel(activity, lang)} · ${lang === "zh" ? "上次已知状态" : "Last known status"}` : statusText;
 
   // A status refresh failure no longer discards the mounted conversation.
   // While any session content exists (detail data), the page stays mounted
@@ -1192,9 +1212,9 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   // prior success proves the identity itself broke; collapsed keeps its status
   // line visible through the wait.
   if (status.isError && expanded && !detail.data) return waitingForBackend ? <VStateSurface fill tone="loading"
-    data-launcher-assistant-waiting="backend" title={copy.waitingBackend}>{status.error.message}</VStateSurface>
-    : <VStateSurface fill tone="error" title={copy.unavailable}
-    actions={<VButton onClick={() => void status.refetch()}>{copy.retry}</VButton>}>{status.error.message}</VStateSurface>;
+    data-launcher-assistant-waiting="backend" title={copy.waitingBackend}>{notificationsHosted ? null : status.error.message}</VStateSurface>
+    : <VStateSurface fill tone={notificationsHosted ? "unavailable" : "error"} title={notificationsHosted ? copy.conversationUnavailable : copy.unavailable}
+    actions={notificationsHosted ? undefined : <VButton onClick={() => void status.refetch()}>{copy.retry}</VButton>}>{notificationsHosted ? null : status.error.message}</VStateSurface>;
 
   const refreshAll = () => {
     void status.refetch(); void detail.refetch(); void dispatches.refetch(); void approvals.refetch();
@@ -1293,7 +1313,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     toolbarSlot={embedded ? <header className={navigationOwned ? petStyles.chatHeaderUnified : petStyles.chatHeaderStatic}>
       <div className={petStyles.chatIdentity}>
         <h1 className={petStyles.chatTitle}>{navigationOwned ? (lang === "zh" ? "对话" : "Chat") : (lang === "zh" ? "个人助理" : "Personal assistant")}</h1>
-        <span className={petStyles.chatStatus} role={feedback ? "alert" : "status"}>{statusText}</span>
+        <span className={petStyles.chatStatus} role={feedback ? "alert" : "status"}>{displayedStatusText}</span>
       </div>
       {!navigationOwned ? <VButton density="compact" variant="ghost" aria-pressed={computerOpen}
         onClick={() => setComputerOpen(value => !value)}>{lang === "zh" ? "电脑操作" : "Computer"}</VButton> : null}
@@ -1302,7 +1322,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     </header> : <header className={petStyles.chatHeader}>
       <div className={petStyles.chatIdentity}>
         <h1 className={petStyles.chatTitle} hidden={!preferences.showTitles}>{displayName}</h1>
-        <span className={petStyles.chatStatus} hidden={!preferences.showStatus && !feedback} role={feedback ? "alert" : "status"}>{statusText}</span>
+        <span className={petStyles.chatStatus} hidden={!preferences.showStatus && !feedback} role={feedback ? "alert" : "status"}>{displayedStatusText}</span>
       </div>
       <VButton density="compact" variant="ghost" aria-pressed={computerOpen}
         onClick={() => setComputerOpen(value => !value)}>{lang === "zh" ? "电脑操作" : "Computer"}</VButton>
@@ -1314,9 +1334,9 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     {themeSyncState !== "applied" ? <VStateSurface tone="error" title={themeSyncState === "unknown" ? (lang === "zh" ? "主题变更结果未确认" : "Theme change is unconfirmed") : themeSyncState === "conflict" ? (lang === "zh" ? "助理主题与全局主题不同" : "Assistant and global themes differ") : (lang === "zh" ? "主题尚未同步" : "Theme is not synchronized")}
       actions={<><VButton isDisabled={themePending} onClick={() => { if (themeGate.current) return; themeGate.current = true; setThemePending(true); void requestWorkbenchTheme(readStoredWorkbenchTheme()).then(result => { if (result !== "superseded") setThemeSyncState(result); }).finally(() => { themeGate.current = false; setThemePending(false); }); }}>{lang === "zh" ? "使用助理主题" : "Use assistant theme"}</VButton>
         <VButton isDisabled={themePending} onClick={() => { if (themeGate.current) return; themeGate.current = true; setThemePending(true); void useAuthorityTheme().then(result => { if (result !== "superseded") setThemeSyncState(result); }).finally(() => { themeGate.current = false; setThemePending(false); }); }}>{lang === "zh" ? "使用全局主题" : "Use global theme"}</VButton></>} /> : null}
-    {status.isError && statusDegradeTone === "error" ? <VStateSurface density="compact" tone="error" title={copy.statusStale}
+    {!notificationsHosted && status.isError && statusDegradeTone === "error" ? <VStateSurface density="compact" tone="error" title={copy.statusStale}
       actions={<VButton onClick={() => void status.refetch()}>{copy.retry}</VButton>}>{status.error.message}</VStateSurface>
-      : statusDegradeTone === "soft" ? <VStateSurface density="compact" tone="unavailable" title={copy.statusDelayed} /> : null}
+      : !notificationsHosted && statusDegradeTone === "soft" ? <VStateSurface density="compact" tone="unavailable" title={copy.statusDelayed} /> : null}
     {showWelcome ? <LauncherAssistantWelcome lang={lang} onPrompt={changeDraft}/> : null}
     {detail.data ? <LazyConversationView
       runtimeApi={launcherConversationApi}
@@ -1407,22 +1427,22 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       {computerAccess.notice ? <p className={petStyles.computerNotice} role="status">{computerAccess.notice}</p> : null}
       {approvalPrompt}</>}
       fallback={<VStateSurface fill tone="loading" title={copy.loading} />}
-    /> : <VStateSurface fill tone={detail.isError ? "error" : "loading"} title={detail.isError ? copy.unavailable : copy.loading}
-      actions={detail.isError ? <VButton onClick={() => void detail.refetch()}>{copy.retry}</VButton> : undefined}>{detail.error?.message}</VStateSurface>}
+    /> : <VStateSurface fill tone={detail.isError ? notificationsHosted ? "unavailable" : "error" : "loading"} title={detail.isError ? notificationsHosted ? copy.conversationUnavailable : copy.unavailable : copy.loading}
+      actions={detail.isError && !notificationsHosted ? <VButton onClick={() => void detail.refetch()}>{copy.retry}</VButton> : undefined}>{notificationsHosted ? null : detail.error?.message}</VStateSurface>}
     {!detail.data ? approvalPrompt : null}
-    {historyAttachments.missingGenerated ? <VStateSurface tone="error" title={lang === "zh" ? "历史图片缺少附件标识，暂不可查看" : "Historical image has no artifact ID"}
+    {!notificationsHosted && historyAttachments.missingGenerated ? <VStateSurface tone="error" title={lang === "zh" ? "历史图片缺少附件标识，暂不可查看" : "Historical image has no artifact ID"}
       actions={<VButton onClick={() => void detail.refetch()}>{copy.retry}</VButton>} /> : null}
-    {historyAttachments.failed ? <VStateSurface tone="error" title={lang === "zh" ? "历史附件暂不可用（单个文件上限 8 MiB）" : "Historical attachment unavailable (8 MiB per file limit)"}
+    {!notificationsHosted && historyAttachments.failed ? <VStateSurface tone="error" title={lang === "zh" ? "历史附件暂不可用（单个文件上限 8 MiB）" : "Historical attachment unavailable (8 MiB per file limit)"}
       actions={<VButton onClick={historyAttachments.retry}>{copy.retry}</VButton>} /> : null}
-    {(readingAssets && (avatar.isError || background.isError) || readingAssistantAvatar && assistantAvatar.isError) ? <VStateSurface tone="error"
+    {!notificationsHosted && (readingAssets && (avatar.isError || background.isError) || readingAssistantAvatar && assistantAvatar.isError) ? <VStateSurface tone="error"
       title={lang === "zh" ? "部分外观图片暂不可用，聊天仍可使用" : "Some appearance images are unavailable; chat is ready"}
       actions={<VButton onClick={() => { if (readingAssets && avatar.isError) void avatar.refetch(); if (readingAssets && background.isError) void background.refetch(); if (readingAssistantAvatar && assistantAvatar.isError) void assistantAvatar.refetch(); }}>{copy.retry}</VButton>} /> : null}
-    {status.data?.patrol?.state === "unavailable" || ["unknown", "failed", "interrupted"].some(key => (status.data?.patrol?.deliveryStates[key] || 0) > 0)
+    {!notificationsHosted && (status.data?.patrol?.state === "unavailable" || ["unknown", "failed", "interrupted"].some(key => (status.data?.patrol?.deliveryStates[key] || 0) > 0))
       ? <VStateSurface tone="error" title={lang === "zh" ? "部分任务结果暂未汇报，可在对话中让助理查询" : "Some task results have not been reported. Ask the assistant to check in chat."} /> : null}
     {dispatchApproval && activePreviewError ? <VStateSurface tone="error" title={activePreviewError}
       actions={<VButton onClick={() => { setPreviewAttempt(value => value + 1); void dispatches.refetch(); }}>{copy.retry}</VButton>} /> : null}
-    {approvalError || approvals.isError ? <VStateSurface tone="error" title={approvalError || (lang === "zh" ? "待授权查询暂不可用" : "Pending approvals unavailable")}
-      actions={<VButton onClick={() => { setApprovalError(""); setDecidedDispatchKey(""); setPreviewAttempt(value => value + 1); void approvals.refetch(); void dispatches.refetch(); }}>{copy.retry}</VButton>}>{approvals.error?.message}</VStateSurface> : null}
+    {approvalError || !notificationsHosted && approvals.isError ? <VStateSurface tone="error" title={approvalError || (lang === "zh" ? "待授权查询暂不可用" : "Pending approvals unavailable")}
+      actions={<VButton onClick={() => { setApprovalError(""); setDecidedDispatchKey(""); setPreviewAttempt(value => value + 1); void approvals.refetch(); void dispatches.refetch(); }}>{copy.retry}</VButton>}>{notificationsHosted ? null : approvals.error?.message}</VStateSurface> : null}
     {detail.data?.queuedTurns?.length || queuedAcceptance ? <section data-launcher-assistant-queue
       className={petStyles.receiptPanel}
       aria-label={lang === "zh" ? "原生消息队列" : "Native message queue"}>
@@ -1437,9 +1457,9 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     </section> : null}
     {sendUnconfirmed ? <VStateSurface tone="error" title={copy.unknownSend}
       actions={<VButton onClick={() => void submit()} isDisabled={sendPending || controlPending || stopping}>{copy.retry}</VButton>}>{sendUnknownDetail}</VStateSurface> : null}
-    {detail.isError && detail.data && statusDegradeTone !== "error" ? <VStateSurface tone="error" title={copy.unavailable}
+    {!notificationsHosted && detail.isError && detail.data && statusDegradeTone !== "error" ? <VStateSurface tone="error" title={copy.unavailable}
       actions={<VButton onClick={() => void detail.refetch()}>{copy.retry}</VButton>}>{detail.error.message}</VStateSurface> : null}
-    {dispatches.isError ? <VStateSurface tone="error" title={copy.receipts}
+    {!notificationsHosted && dispatches.isError ? <VStateSurface tone="error" title={copy.receipts}
       actions={<VButton onClick={() => void dispatches.refetch()}>{copy.retry}</VButton>}>{dispatches.error.message}</VStateSurface> : null}
   </VDenseOpsPage>;
 }

@@ -15,6 +15,7 @@ import {
   sessionRecoveryResumedLabel,
 } from "./conversationSpecialMessagePresentation";
 import styles from "./ConversationView.styles";
+import recoveryStyles from "./sessionRecoveryNotice.styles";
 
 /** Presentation tone of a context-compression checkpoint divider. */
 export type ConversationCompressionDividerTone =
@@ -123,22 +124,25 @@ export function createConversationSpecialRows({
       );
     }
     if (isSessionRecoveryResumedMessage(message)) {
-      const detail = sessionRecoveryResumedDetail(message, lang);
+      // A generic "continue" turn label repeats the recovery sentence; retain
+      // meaningful task names and retry counts, with the journal unchanged.
+      const detail = sessionRecoveryResumedDetail(message, lang).replace(/^(?:继续|continue)(?: · |$)/i, "");
       return (
         <article
           key={rowKey}
-          className={styles.cliAgentLifecycleTurn}
+          className={recoveryStyles.row}
+          data-session-recovery-notice
           data-conversation-row-key={rowKey}
         >
-          <span className={styles.cliAgentLifecycleIcon} aria-hidden="true">
+          <span className={recoveryStyles.icon} aria-hidden="true">
             <RefreshCw size={14} />
           </span>
-          <span className={styles.cliAgentLifecycleText}>
+          <span className={recoveryStyles.label}>
             {sessionRecoveryResumedLabel(message, lang)}
           </span>
-          {detail ? <code className={styles.cliAgentLifecycleMeta}>{detail}</code> : null}
+          {detail ? <span className={recoveryStyles.detail}>· {detail}</span> : null}
           {message.timestamp ? (
-            <span className={styles.cliAgentLifecycleTime}>{formatTimestamp(message.timestamp)}</span>
+            <time className={recoveryStyles.time} dateTime={message.timestamp}>{formatTimestamp(message.timestamp)}</time>
           ) : null}
         </article>
       );

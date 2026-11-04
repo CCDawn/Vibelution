@@ -65,3 +65,21 @@ it("reports an unavailable generated image and retries its fixed ID", async () =
   expect(result.messages[0].metadata?.imageUrl).toBe("data:image/png;base64,AQI=");
   expect(read).toHaveBeenCalledTimes(2);
 });
+
+it("retains a failed history notice during retry and prevents repeated reads while pending", async () => {
+  let resolve!: (url: string) => void;
+  read.mockRejectedValueOnce(new Error("unavailable"))
+    .mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+  await setup([row(0)]);
+  await rerender(["m0"]);
+  expect(result.failed).toBe(true);
+  await act(async () => result.retry());
+  expect(result.failed).toBe(true);
+  expect(result.pending).toBe(true);
+  await act(async () => result.retry());
+  expect(read).toHaveBeenCalledTimes(2);
+  await act(async () => { resolve("data:image/png;base64,AQI="); await new Promise(done => setTimeout(done, 0)); });
+  expect(result.failed).toBe(false);
+  expect(result.pending).toBe(false);
+  expect(read).toHaveBeenCalledTimes(2);
+});
