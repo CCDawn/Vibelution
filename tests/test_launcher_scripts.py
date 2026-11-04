@@ -2061,6 +2061,40 @@ def test_desktop_entry_source_signature_tracks_launcher_style_maps(monkeypatch, 
     assert before != after
 
 
+def test_desktop_entry_source_signature_covers_startup_and_lifecycle_modules(monkeypatch, tmp_path):
+    # development-standard.md 8.0: the launcher control-surface freshness
+    # signature must cover every module that can run startup, polling,
+    # developer-mode, shutdown, or lifecycle logic, so a stale backend cannot
+    # keep old popup-producing code. Hardcode the required paths so future
+    # startup/lifecycle modules cannot silently drop out of the list again.
+    bridge = _load_desktop_entry_py()
+    monkeypatch.setattr(bridge, "PROJECT_ROOT", tmp_path)
+
+    required_startup_lifecycle_paths = (
+        "core/infrastructure/git_process.py",
+        "core/infrastructure/no_console_git.py",
+        "core/launcher/branch_instance_lifecycle.py",
+        "core/launcher/desktop_shell.py",
+        "core/launcher/frontend_build.py",
+        "scripts/vibelution_launcher.py",
+        "scripts/windowless_subprocess.py",
+    )
+    for required_path in required_startup_lifecycle_paths:
+        assert required_path in bridge.SOURCE_SIGNATURE_PATHS
+
+    for relative_path in bridge.SOURCE_SIGNATURE_PATHS:
+        source_path = tmp_path / relative_path
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.write_text(f"initial {relative_path}\n", encoding="utf-8")
+
+    before = bridge._source_signature()
+    desktop_shell_source = tmp_path / "core" / "launcher" / "desktop_shell.py"
+    desktop_shell_source.write_text("changed desktop shell source\n", encoding="utf-8")
+    after = bridge._source_signature()
+
+    assert before != after
+
+
 def test_desktop_entry_python_bridge_starts_launcher_natively(monkeypatch, tmp_path):
     bridge = _load_desktop_entry_py()
     calls: list[tuple[str, object]] = []
