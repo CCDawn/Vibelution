@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import inspect
+import json
 import subprocess
 from pathlib import Path
 
@@ -485,6 +486,75 @@ def test_worktree_is_dirty_fail_closed_on_timeout(tmp_path, monkeypatch):
     monkeypatch.setattr(workspace.git_process, "run_git", boom)
     assert workspace._worktree_is_dirty(root) is True
     assert called["n"] == 1
+
+
+def test_runtime_only_listing_skips_dirty_scan_but_keeps_checkout_runtime(tmp_path, monkeypatch):
+    project = tmp_path / "OtherApp"
+    task = project / ".worktrees" / "task"
+    legacy_pool = tmp_path / "Vibelution-worktrees"
+    legacy = legacy_pool / "legacy"
+    foreign = tmp_path / "external" / "OtherApp"
+    paths = [project, task, legacy, foreign]
+    for path in paths:
+        path.mkdir(parents=True, exist_ok=True)
+        state = path / ".runtime" / "launcher" / "state.json"
+        state.parent.mkdir(parents=True)
+        state.write_text(
+            json.dumps({"workbench": {
+                "observedState": "open", "backendPort": 8007,
+                "backendPid": os.getpid(), "browserWindowPid": os.getpid(),
+            }}),
+            encoding="utf-8",
+        )
+    layout = workspace.BranchWorkspaceLayout(
+        checkout=project, worktree_root=project, integration_root=project,
+        git_common_dir=project / ".git", branch_pool=project / ".worktrees",
+        retired_pool=project / ".worktrees" / "_retired",
+        legacy_siblings=(legacy_pool,), role="main", slug="",
+    )
+    branches = ["main", "codex/task", "codex/legacy", "codex/external"]
+    monkeypatch.setattr(workspace, "resolve_branch_workspace", lambda _checkout: layout)
+    monkeypatch.setattr(workspace, "_registered_worktrees", lambda _root: [
+        {"worktree": str(path), "branch": f"refs/heads/{branch}", "HEAD": "a" * 40}
+        for path, branch in zip(paths, branches)
+    ])
+    monkeypatch.setattr(workspace, "_local_branch_refs", lambda _root: [])
+    monkeypatch.setattr(workspace, "_unregistered_pool_dirs", lambda _layout: [])
+    monkeypatch.setattr(workspace, "resolve_project_runtime_home", lambda path: path / ".runtime")
+
+    def no_dirty_scan(_paths):
+        raise AssertionError("runtime-only listing must not scan checkout dirtiness")
+
+    monkeypatch.setattr(workspace, "_worktree_dirty_map", no_dirty_scan)
+    observed: list[Path] = []
+    real_observation = workspace._runtime_observation
+
+    def observe(path):
+        observed.append(path)
+        return real_observation(path)
+
+    monkeypatch.setattr(workspace, "_runtime_observation", observe)
+    payload = list_branch_instances(project, include_dirty=False)
+
+    assert payload["currentId"] == "main"
+    assert payload["integrationRoot"] == str(project)
+    assert set(observed) == set(paths)
+    by_branch = {item["branch"]: item for item in payload["items"]}
+    assert by_branch["main"]["id"] == "main"
+    assert by_branch["codex/task"]["id"] == "worktree:task"
+    assert by_branch["codex/legacy"]["id"] == "worktree:legacy"
+    assert by_branch["codex/legacy"]["legacy"] is True
+    assert len({item["id"] for item in by_branch.values()}) == len(paths)
+    for path, branch in zip(paths, branches):
+        item = by_branch[branch]
+        assert item["path"] == str(path)
+        assert item["dirtyUnknown"] is True
+        assert item["promotable"] is False
+        assert item["alive"] is True
+        assert item["observedState"] == "open"
+        assert item["port"] == 8007
+        assert item["pids"]["backend"] == os.getpid()
+        assert item["pids"]["window"] == os.getpid()
 
 
 def test_dirty_scan_skips_foreign_worktrees_and_reports_dirty_unknown(tmp_path):

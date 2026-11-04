@@ -121,9 +121,11 @@ def launcher_freshness() -> dict:
 
 
 @router.get("/api/launcher/branch-instances")
-def launcher_branch_instances(cleanupMetadata: bool = False) -> dict:
+def launcher_branch_instances(cleanupMetadata: bool = False, runtimeOnly: bool = False) -> dict:
     if cleanupMetadata:
         return launcher_service.list_launcher_branch_instances(include_cleanup_metadata=True)
+    if runtimeOnly:
+        return launcher_service.list_launcher_branch_instances(runtime_only=True)
     return launcher_service.list_launcher_branch_instances()
 
 

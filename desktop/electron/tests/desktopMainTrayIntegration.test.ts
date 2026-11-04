@@ -173,7 +173,8 @@ describe("Electron main tray integration", () => {
     expect(captureEnd).toBeGreaterThan(captureStart);
     expect(captureSource).toContain("Promise.allSettled");
     expect(captureSource).toContain("launcherStateStore.refresh");
-    expect(captureSource).toContain("fetchLauncherBranchInstances");
+    expect(captureSource).toContain("branch-instances?runtimeOnly=true");
+    expect(captureSource).toContain("isVerifiedClosedBranchInventory");
     expect(captureSource).toContain("readRegistry(instancesRegistryPath())");
     expect(captureSource).toContain("registryEntriesToShutdownInstanceSnapshots");
     expect(captureSource).toContain("withDesktopShellExitTimeout");

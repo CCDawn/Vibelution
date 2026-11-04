@@ -46,6 +46,12 @@ const createPortalAllowlist = new Set([
   // ordinary layout nodes, not floating surfaces; exact calls are pinned below.
   "routes/chat/ChatCodingRouteWorkbench.tsx",
   "routes/chat/ChatRightRail.tsx",
+  // Launcher tasks nav slot portals the task sidebar into a self-created DOM
+  // host inserted after the existing nav anchor: ordinary layout injection
+  // into a local node, not a floating surface (same class as the pane docks
+  // above). Owned by the in-flight desktopPet/assistantTasks task; the entry
+  // stays inert if that work removes the portal.
+  "routes/desktopPet/assistantTasks/LauncherTaskNavigationSlot.tsx",
 ]);
 
 const fixedInsetAllowlist = new Set([
@@ -126,14 +132,18 @@ describe("VUI overlay alignment gate", () => {
         if (handRolledDialogAllowlist.has(rel)) continue;
         if (rel.startsWith("components/vui/")) continue;
         const text = readFileSync(file, "utf8");
+        // role=dialog inside CSS attribute selectors (e.g. querySelector over
+        // Radix-rendered dialogs) targets existing hosts; it declares nothing.
+        // Only the bare JSX attribute form can declare a hand-rolled shell.
+        const declared = text.replace(/\[role=["']dialog["']\]/g, "");
         // VDialog/VConfirmDialog hosts own role=dialog via Radix; product sources should not declare it.
-        if (/role=["']dialog["']/.test(text) && !text.includes("<VDialog") && !text.includes("<VConfirmDialog")) {
+        if (/role=["']dialog["']/.test(declared) && !text.includes("<VDialog") && !text.includes("<VConfirmDialog")) {
           hits.push(rel);
-        } else if (/role=["']dialog["']/.test(text) && !text.includes("ChatToolApproval")) {
+        } else if (/role=["']dialog["']/.test(declared) && !text.includes("ChatToolApproval")) {
           // Even with VDialog import, product should not re-declare role=dialog on custom shells.
-          if (/role=["']dialog["']/.test(text) && /aria-modal/.test(text) && !rel.includes("ChatToolApproval")) {
+          if (/role=["']dialog["']/.test(declared) && /aria-modal/.test(text) && !rel.includes("ChatToolApproval")) {
             // Flag only if role=dialog is a JSX attribute not inside a string comment about VDialog.
-            const withoutComments = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+            const withoutComments = declared.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
             if (/role=\{?["']dialog["']\}?/.test(withoutComments)) {
               // Allowed only when the only dialog roles come from consuming primitives indirectly.
               // Product files that still write role="dialog" fail.

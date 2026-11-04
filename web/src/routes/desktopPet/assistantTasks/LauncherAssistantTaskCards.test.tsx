@@ -146,6 +146,20 @@ describe("task card facts and direct cleanup", () => {
     expect((await openTask(failed)).textContent).toContain("远程仓库拒绝访问");
   });
 
+  it("attaches the failure code label to the failure reason while an unknown code stays silent", async () => {
+    rows = [row({ title: "分类失败", receipt: { taskId: "native-1", status: "failed", error: { code: "TASK_NOT_FOUND", message: "native receipt missing" } } }),
+      row({ dispatchId: "dispatch-future", title: "未知码失败", receipt: { taskId: "native-1", status: "failed", error: { code: "FUTURE_CODE", message: "opaque failure" } } })];
+    await render();
+    const classified = await openTask(container.querySelector('article[aria-label="分类失败"]')!);
+    expect(classified.textContent).toContain("任务不存在");
+    expect(classified.textContent).toContain("native receipt missing");
+    await click("关闭", classified);
+    const opaque = await openTask(container.querySelector('article[aria-label="未知码失败"]')!);
+    expect(opaque.textContent).toContain("opaque failure");
+    expect(opaque.textContent).not.toContain("任务不存在");
+    await click("关闭", opaque);
+  });
+
   it("shows current loaded group counts and sorts real task times inside each group", async () => {
     rows = [row({ dispatchId: "old", title: "较早任务", updatedAt: "2026-11-01T00:00:00Z" }),
       row({ dispatchId: "new", title: "较新任务", updatedAt: "2026-11-02T00:00:00Z" }),

@@ -163,10 +163,17 @@ it("keeps candidate opt-in and relationship filtering reachable in display setti
   expect(candidateToggle.checked).toBe(false);
   await act(async () => candidateToggle.click()); await flush();
   expect(host.querySelector('[data-testid="canvas"]')?.getAttribute("data-edges")).toBe("supports,contradicts");
-  const filter = settings.querySelector<HTMLSelectElement>('[aria-label="关系筛选"]')!;
-  await act(async () => { filter.value = "反驳"; filter.dispatchEvent(new Event("change", { bubbles: true })); }); await flush();
+  const pickRelation = async (labelText: string) => {
+    const trigger = settings.querySelector<HTMLElement>('[role="combobox"][aria-label="关系筛选"]')!;
+    await act(async () => trigger.click());
+    const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(node => node.textContent === labelText)!;
+    await act(async () => option.click());
+    await flush();
+  };
+  await pickRelation("反驳");
   expect(host.querySelector('[data-testid="canvas"]')?.getAttribute("data-edges")).toBe("contradicts");
-  await act(async () => { filter.value = ""; filter.dispatchEvent(new Event("change", { bubbles: true })); candidateToggle.click(); }); await flush();
+  await pickRelation("全部关系");
+  await act(async () => candidateToggle.click()); await flush();
   await closeSettings();
   expect(host.querySelector('[data-testid="canvas"]')?.getAttribute("data-edges")).toBe("supports");
   const agentView = [...host.querySelectorAll("button")].find(button => button.textContent === "Agent 权限视图")!;

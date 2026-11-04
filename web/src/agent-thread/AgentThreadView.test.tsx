@@ -129,6 +129,35 @@ describe("AgentThreadView", () => {
     expect(html).toContain("历史会话");
     expect(html).toContain("分析 Agent");
   });
+  it("renders the structured tool failure message on the tool-call part", () => {
+    const html = renderThread({
+      id: "thread-tool-error",
+      source: { kind: "session", id: "session-4" },
+      status: "idle",
+      messages: [
+        {
+          id: "assistant-tool-error",
+          role: "assistant",
+          createdAt: "2026-07-02T08:15:00Z",
+          streaming: false,
+          source: { kind: "conversation-message", id: "assistant-tool-error" },
+          parts: [
+            {
+              id: "assistant-tool-error-part",
+              type: "tool-call",
+              name: "run_command",
+              status: "failed",
+              error: "命令超时",
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(html).toContain('data-agent-part-type="tool-call"');
+    expect(html).toContain("命令超时");
+  });
+
   it("renders message parts through stable process, content, and context sections", () => {
     const html = renderThread({
       id: "thread-sections",

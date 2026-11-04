@@ -724,6 +724,21 @@ def test_launcher_api_bridge_branch_instances_cleanup_metadata_is_opt_in(monkeyp
     assert seen[0]["kwargs"] == {}
     assert seen[1]["kwargs"] == {"include_cleanup_metadata": True}
 
+    for query, expected_kwargs in [
+        ("runtimeOnly=0&cleanupMetadata=0", {}),
+        ("runtimeOnly=true", {"runtime_only": True}),
+        ("runtimeOnly=1&cleanupMetadata=1", {"include_cleanup_metadata": True}),
+    ]:
+        runtime_payload = entry._run_launcher_api_bridge(
+            argparse.Namespace(
+                launcher_api_path=f"branch-instances?{query}",
+                launcher_api_method="GET", launcher_api_body="",
+            )
+        )
+        assert runtime_payload["ok"] is True
+        assert runtime_payload["payload"] == {"items": []}
+        assert seen[-1]["kwargs"] == expected_kwargs
+
     merge_payload = entry._run_launcher_api_bridge(
         argparse.Namespace(
             launcher_api_path="branch-instances/cleanup-metadata",

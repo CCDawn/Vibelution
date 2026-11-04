@@ -1,5 +1,5 @@
 import type { LauncherAssistantDispatch } from "../../../api/launcherAssistant";
-import { displayError, taskMetadata, type AssistantTaskMetadata } from "./assistantTaskMetadata";
+import { displayError, displayErrorCode, taskMetadata, type AssistantTaskMetadata } from "./assistantTaskMetadata";
 
 /** Read-only presentation of the existing bounded dispatch feed. This is not a
  * task store, an execution owner, or proof that the user's goal was achieved. */
@@ -14,6 +14,10 @@ export type AssistantDispatchTask = AssistantTaskMetadata & {
   nativeStatus: string | null;
   title: string;
   resultSummary: string;
+  /** Machine failure code for display only: `lastError.code` while the receipt
+   * read itself failed, else the bound receipt's `error.code`. Never an input
+   * to state, polling, or cleanup authority. */
+  errorCode: string;
   state: AssistantDispatchTaskState;
   shouldPoll: boolean;
   sourceAvailable: boolean;
@@ -75,6 +79,10 @@ function projectRow(row: LauncherAssistantDispatch, sourceAvailable: boolean): A
     title: boundedText(row.title, 100),
     resultSummary: bound ? boundedText(row.receipt?.resultSummary, 600) : "",
     error: bound ? displayError((row.receipt as { error?: unknown } | null)?.error) : "",
+    // A lastError means the receipt itself could not be observed, so its code
+    // outranks any stale receipt error code for display.
+    errorCode: identity(row.lastError?.code)
+      || (bound ? displayErrorCode((row.receipt as { error?: unknown } | null)?.error) : ""),
     shouldPoll: current && row.receipt?.shouldPoll === true && ["running", "stopping", "waiting_user"].includes(state),
     state, sourceAvailable: sourceAvailable && !row.lastError, receiptBound: bound, conflictingObservations: false,
     pendingApprovalCount: pending.size, businessAcceptance: "not_evaluated",

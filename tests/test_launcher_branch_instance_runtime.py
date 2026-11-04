@@ -464,6 +464,87 @@ def test_branch_list_does_not_call_full_launcher_status(monkeypatch):
     assert launcher_service.list_launcher_branch_instances() == {"items": []}
 
 
+@pytest.mark.parametrize("runtime_only", [False, True])
+def test_overlayed_listing_keeps_registered_runtime_with_optional_dirty_scan(
+    tmp_path, monkeypatch, runtime_only
+):
+    path = tmp_path / "task"
+    path.mkdir()
+    _prepare_bundled_frontend(path)
+    _write_workbench_state(path, backendHealthy=True, backendPortListening=True)
+    seen: list[dict[str, object]] = []
+
+    def list_instances(checkout, **kwargs):
+        assert checkout == lifecycle.PROJECT_ROOT
+        seen.append(kwargs)
+        return {"items": [_item(
+            path, alive=True, port=8007, dirtyUnknown=runtime_only,
+            pids={"backend": os.getpid(), "window": os.getpid(), "manager": 0},
+        )]}
+
+    monkeypatch.setattr(lifecycle, "list_branch_instances", list_instances)
+    monkeypatch.setattr(lifecycle, "_read_current_launcher_state", lambda: {})
+    monkeypatch.setattr(lifecycle, "_slot_fields_for_path", lambda _path: {})
+    monkeypatch.setattr(lifecycle.registry, "list_instances", lambda: [{
+        "instanceId": "worktree:feature", "projectRoot": str(path),
+        "port": 8007, "windowPid": os.getpid(), "windowTitle": "registered task",
+        "generation": 7, "status": "running",
+        "cleanupObservation": {"classification": "live"},
+    }])
+
+    payload = (
+        lifecycle.list_overlayed_branch_instances(include_dirty=False)
+        if runtime_only else lifecycle.list_overlayed_branch_instances()
+    )
+    item = payload["items"][0]
+    assert seen == [{"include_dirty": False} if runtime_only else {}]
+    assert item["id"] == "worktree:feature"
+    assert item["path"] == str(path)
+    assert item["dirtyUnknown"] is runtime_only
+    assert item["pids"]["backend"] == os.getpid()
+    assert item["runtime"]["backend"]["alive"] is True
+    assert item["runtime"]["backend"]["port"] == 8007
+    assert item["runtime"]["backend"]["pid"] == os.getpid()
+    assert item["runtime"]["window"]["open"] is True
+    assert item["runtime"]["window"]["pid"] == os.getpid()
+    assert item["runtime"]["window"]["title"] == "registered task"
+    assert item["runtime"]["generation"] == 7
+    assert item["runtime"]["registryClassification"] == "live"
+
+
+@pytest.mark.parametrize("include_cleanup_metadata", [False, True])
+def test_service_runtime_only_skips_dirty_unless_cleanup_metadata_is_requested(
+    monkeypatch, include_cleanup_metadata
+):
+    from core.launcher import branch_instance_cleanup
+
+    bundle = {"observedState": "closed"}
+    payload = {"items": []}
+    calls: list[dict[str, object]] = []
+    annotations: list[float] = []
+    monkeypatch.setattr(launcher_service, "_current_project_bundle_for_branch_list", lambda: bundle)
+
+    def list_instances(**kwargs):
+        calls.append(kwargs)
+        return payload
+
+    def annotate(data, *, git_timeout):
+        assert data is payload
+        annotations.append(git_timeout)
+        return data
+
+    monkeypatch.setattr(lifecycle, "list_overlayed_branch_instances", list_instances)
+    monkeypatch.setattr(branch_instance_cleanup, "annotate_cleanup_metadata", annotate)
+    assert launcher_service.list_launcher_branch_instances(
+        runtime_only=True, include_cleanup_metadata=include_cleanup_metadata
+    ) is payload
+    assert calls == [
+        {"current_bundle": bundle}
+        if include_cleanup_metadata else {"current_bundle": bundle, "include_dirty": False}
+    ]
+    assert annotations == ([2.0] if include_cleanup_metadata else [])
+
+
 def test_service_cleanup_metadata_annotation_is_opt_in(monkeypatch):
     monkeypatch.setattr(
         launcher_service,

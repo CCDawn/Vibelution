@@ -675,6 +675,14 @@ export type ToolCallTurnItem = SessionTurnItemBase & {
    * transcript surfaces the warning instead of a clean success.
    */
   semanticStatus?: string;
+  /**
+   * Structured failure facts projected by the turn journal for failed calls
+   * only (core/chat/turn_journal.py); absent on legacy items and successes.
+   */
+  error?: {
+    code?: string;
+    message?: string;
+  };
 };
 
 export type RetryTurnItem = SessionTurnItemBase & {

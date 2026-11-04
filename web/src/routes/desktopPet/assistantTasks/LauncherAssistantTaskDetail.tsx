@@ -3,7 +3,7 @@ import {VButton,VChip,VDialog} from "../../../components/vui";
 import type {AssistantTask} from "./assistantTeamRunTasks";
 import type {AssistantDispatchTask} from "./assistantDispatchTasks";
 import {taskCleanupTargets} from "./assistantTaskCleanup";
-import {taskCardOwner,taskCardState,taskCardTitle} from "./assistantTaskPresentation";
+import {dispatchFailureCodeLabel,taskCardOwner,taskCardState,taskCardTitle} from "./assistantTaskPresentation";
 import {COPY} from "./assistantTaskCopy";
 import {taskDisplayTitle} from "./assistantTaskMetadata";
 import styles from "./LauncherAssistantTaskDetail.styles";
@@ -11,6 +11,7 @@ type Props={task:AssistantTask;lang:"zh"|"en";actionsEnabled:boolean;cleanupBusy
 export function LauncherAssistantTaskDetail({task,lang,actionsEnabled,cleanupBusy,onClose,onReview,onApproval,onDelete,onCloseAutoFocus}:Props){
  const [references,setReferences]=useState(false);const copy=COPY[lang];
  const pending=task.kind==="dispatch"&&task.cleanupPending===true;
+ const failureLabel=task.state==="failed"?dispatchFailureCodeLabel(task.errorCode,lang):"";
  const localOnly=task.state==="unknown";
  const summary=pending?copy.cleanupRecovery:(task.state==="failed"?task.error:task.resultSummary)||(task.state==="failed"?copy.noFailure:copy.noSummary);
  const title=taskCardTitle(task,lang);const providedTitle=taskDisplayTitle(task.title,"",lang);
@@ -32,7 +33,7 @@ export function LauncherAssistantTaskDetail({task,lang,actionsEnabled,cleanupBus
   {task.kind==="team_run"&&!task.currentAgentName?<p className={styles.context}>{lang==="zh"?"来源尚未提供当前负责的 Agent。":"The source has not reported a current responsible Agent."}</p>:null}
   {task.state==="unknown"&&!task.sourceAvailable?<p className={styles.context}>{copy.unknownCached}</p>:null}
   </div>
-  <section className={styles.section}><h2 className={styles.heading}>{task.state==="failed"?(lang==="zh"?"失败原因":"Failure reason"):task.state==="awaiting_verification"?(lang==="zh"?"执行结果":"Execution result"):copy.summary}</h2><p className={styles.summary}>{summary}</p></section>
+  <section className={styles.section}><h2 className={styles.heading}>{task.state==="failed"?(lang==="zh"?"失败原因":"Failure reason"):task.state==="awaiting_verification"?(lang==="zh"?"执行结果":"Execution result"):copy.summary}</h2>{failureLabel?<p className={styles.context}>{failureLabel}</p>:null}<p className={styles.summary}>{summary}</p></section>
   {task.state==="failed"&&task.resultSummary?<section className={styles.section}><h2 className={styles.heading}>{copy.summary}</h2><p className={styles.summary}>{task.resultSummary}</p></section>:null}
   {task.state==="awaiting_verification"?<p className={styles.context}>{copy.executionEnded}</p>:null}
   <VButton variant="ghost" density="compact" className="justify-self-start" aria-expanded={references} onClick={()=>setReferences(value=>!value)}>{references?(lang==="zh"?"收起引用信息":"Hide references"):(lang==="zh"?"引用信息":"References")}</VButton>

@@ -106,6 +106,11 @@ function assistantTurnItemsToAgentParts(items: readonly SessionTurnItem[]): Agen
         } satisfies AgentMentalPart];
       }
       if (item.type === "tool_call") {
+        // Failed tool calls carry structured journal facts ({code, message});
+        // the view already renders `part.error`, so only the message (code as
+        // fallback) needs to arrive here. Legacy items without `error` keep
+        // `undefined`, matching the previous output exactly.
+        const structuredError = compactText(item.error?.message) || compactText(item.error?.code);
         return [{
           id: item.id,
           type: "tool-call",
@@ -116,6 +121,7 @@ function assistantTurnItemsToAgentParts(items: readonly SessionTurnItem[]): Agen
           // target; result-derived summaries do not exist until it finishes.
           arguments: parseToolCallInput(item.input),
           resultPreview: compactText(item.output),
+          error: structuredError || undefined,
           sequence: sessionTurnItemOrderSequence(item),
           timestamp: item.updatedAt ?? item.createdAt,
           source: "feedback-event",
