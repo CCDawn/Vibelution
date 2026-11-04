@@ -1905,6 +1905,44 @@ describe("AssistantHost liveness watch and bounded respawn", () => {
     };
   }
 
+  /** Scriptable control channel for the consecutive-failure semantics: every
+   * /next poll parks until failAll() rejects it like a socket reset or
+   * answerOne() completes one worker's claim (claim -> empty result ->
+   * settle), which is the successful RPC that clears the failure count.
+   * Settle always acks accepted. */
+  function scriptedControlChannel(fetchImpl: ReturnType<typeof fixture>["fetchImpl"]) {
+    const base = fetchImpl.getMockImplementation()!;
+    let parked: Array<{ fail: (error: Error) => void; answer: () => void }> = [];
+    let polls = 0;
+    fetchImpl.mockImplementation(async (...args: Parameters<typeof globalThis.fetch>) => {
+      const [url, init] = args;
+      if (String(url).endsWith("/api/assistant/main-control/settle")) return Response.json({ schemaVersion: 1, accepted: true });
+      if (!String(url).endsWith("/api/assistant/main-control/next")) return base(...args);
+      polls += 1;
+      return await new Promise<Response>((resolve, reject) => {
+        const entry = {
+          fail: (error: Error) => { parked = parked.filter(other => other !== entry); reject(error); },
+          answer: () => {
+            parked = parked.filter(other => other !== entry);
+            resolve(Response.json({ schemaVersion: 1, request: { deliveryId: "b".repeat(32), action: "project_lifecycle",
+              projectId: "project", operation: "start", requestId: "probe" } }));
+          },
+        };
+        parked.push(entry);
+        init?.signal?.addEventListener("abort", () => entry.fail(new Error("aborted")), { once: true });
+      });
+    });
+    return {
+      polls: () => polls,
+      failAll: () => { for (const entry of [...parked]) entry.fail(new TypeError("fetch failed")); },
+      answerOne: () => { parked[0]?.answer(); },
+    };
+  }
+
+  function channelFailureLines(warn: { mock: { calls: unknown[][] } }): string[] {
+    return warn.mock.calls.map(([line]) => String(line)).filter(line => line.includes("phase=channel_failure"));
+  }
+
   /** A venv pythonw redirector root outlives its killed host child for a few ms. */
   function hostExitsAfter(active: Map<WorkbenchJobHandle, number>, ms: number): void {
     const job = [...active.keys()].at(-1)!;
@@ -2131,23 +2169,148 @@ describe("AssistantHost liveness watch and bounded respawn", () => {
     await host.stop();
   });
 
-  it("keeps a live host's control-channel failure terminal without forensics or respawn", async () => {
+  it("reconnects a live host after one control-channel failure without retiring it", async () => {
+    // Live-fire record (2026-11-03): one healthy host was terminated on the
+    // first control RPC hiccup, three times 5-13 minutes apart, dropping
+    // reminders and native sessions each time. A single failure now
+    // reconnects the transport instead of retiring the generation.
     vi.useFakeTimers();
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { host, native, fetchImpl, root, inputs } = fixture({ graceful: true, mainControl: async () => ({}) });
-    const channel = controlChannel(fetchImpl);
+    const channel = scriptedControlChannel(fetchImpl);
     await host.start();
     await vi.advanceTimersByTimeAsync(0);
-    channel.reset();
-    await vi.advanceTimersByTimeAsync(1_100);
+    expect(channel.polls()).toBeGreaterThan(0);
+    channel.failAll();
+    const polls = channel.polls();
+    await vi.advanceTimersByTimeAsync(150);
+    expect(host.snapshot()).toEqual({ state: "ready", errorCode: null });
+    expect(native.terminate).not.toHaveBeenCalled();
+    expect(channelFailureLines(warnSpy)).toHaveLength(1);
+    expect(channelFailureLines(warnSpy)[0]).toContain("failures=1 limit=3");
+    expect(deathLines(warnSpy)).toHaveLength(0);
+    expect(deathForensics(root, inputs, 0)).toBeNull();
+    // The transport reconnected and claims again on the same live host.
+    expect(channel.polls()).toBeGreaterThan(polls);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(native.spawn).toHaveBeenCalledTimes(1);
+    expect(native.terminate).not.toHaveBeenCalled();
+    expect(host.snapshot()).toEqual({ state: "ready", errorCode: null });
+    expect(deathForensics(root, inputs, 0)).toBeNull();
+    warnSpy.mockRestore();
+    await host.stop();
+  });
+
+  it("resets the consecutive failure count after one successful claim", async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { host, native, fetchImpl, root, inputs } = fixture({ graceful: true, mainControl: async () => ({}) });
+    const channel = scriptedControlChannel(fetchImpl);
+    await host.start();
+    await vi.advanceTimersByTimeAsync(0);
+    // Two consecutive failures reconnect twice; the host stays ready.
+    channel.failAll();
+    await vi.advanceTimersByTimeAsync(150);
+    channel.failAll();
+    await vi.advanceTimersByTimeAsync(450);
+    expect(host.snapshot()).toEqual({ state: "ready", errorCode: null });
+    expect(native.terminate).not.toHaveBeenCalled();
+    // One completed claim proves the channel works and clears the count, so
+    // two more failures still reconnect instead of reaching the limit.
+    channel.answerOne();
+    await vi.advanceTimersByTimeAsync(0);
+    channel.failAll();
+    await vi.advanceTimersByTimeAsync(150);
+    channel.failAll();
+    await vi.advanceTimersByTimeAsync(450);
+    expect(host.snapshot()).toEqual({ state: "ready", errorCode: null });
+    expect(native.terminate).not.toHaveBeenCalled();
+    expect(deathForensics(root, inputs, 0)).toBeNull();
+    expect(channelFailureLines(warnSpy).at(-1)).toContain("failures=2 limit=3");
+    warnSpy.mockRestore();
+    await host.stop();
+  });
+
+  it("retires a live host only on the third consecutive failure, with control-failure forensics", async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { host, native, fetchImpl, root, inputs } = fixture({ graceful: true, mainControl: async () => ({}) });
+    const channel = scriptedControlChannel(fetchImpl);
+    await host.start();
+    await vi.advanceTimersByTimeAsync(0);
+    const instanceId = inputs[0]!.arguments[inputs[0]!.arguments.indexOf("--instance-id") + 1]!;
+    channel.failAll();
+    await vi.advanceTimersByTimeAsync(150);
+    channel.failAll();
+    await vi.advanceTimersByTimeAsync(450);
+    expect(host.snapshot()).toEqual({ state: "ready", errorCode: null });
+    expect(native.terminate).not.toHaveBeenCalled();
+    channel.failAll();
+    await vi.advanceTimersByTimeAsync(1_500);
+    // The limit-th consecutive failure keeps the old terminal view and
+    // terminates, but now leaves the same on-disk forensics as an unexpected
+    // exit instead of dying unattributed.
     expect(host.snapshot()).toEqual({ state: "failed", errorCode: "ASSISTANT_MAIN_CONTROL_FAILED" });
     expect(native.terminate).toHaveBeenCalledTimes(1);
-    expect(deathForensics(root, inputs, 0)).toBeNull();
-    expect(deathLines(warnSpy)).toHaveLength(0);
+    expect(deathForensics(root, inputs, 0)).toMatchObject({ schemaVersion: 1, phase: "control_failure_retire",
+      detectedBy: "main_control", exitCode: null, instanceId, pid: 100, hostPid: 900, uptimeMs: expect.any(Number),
+      revision: expect.any(Number), recordedAt: expect.any(String), deathsInSession: 0, stderrTail: "",
+      consecutiveControlFailures: 3, lastControlError: "ASSISTANT_TRANSPORT_FAILED" });
+    expect(deathLines(warnSpy)).toHaveLength(1);
+    expect(deathLines(warnSpy)[0]).toContain("phase=control_failure_retire");
+    expect(deathLines(warnSpy)[0]).toContain("consecutiveFailures=3");
+    expect(deathLines(warnSpy)[0]).toContain(`instanceId=${instanceId}`);
     await vi.advanceTimersByTimeAsync(30_000);
     expect(native.spawn).toHaveBeenCalledTimes(1);
     expect(host.snapshot()).toEqual({ state: "failed", errorCode: "ASSISTANT_MAIN_CONTROL_FAILED" });
     warnSpy.mockRestore();
+  });
+
+  it("never counts reference-recovery reconnects toward the kill limit", async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const leases: Array<() => void> = [];
+    const { host, native, fetchImpl } = fixture({ graceful: true,
+      mainControl: async (_request, _signal, context) => { leases.push(context!.retainLease()); return {}; } });
+    const channel = controlChannel(fetchImpl, { deliveryId: "c".repeat(32), action: "project_lifecycle", projectId: "project",
+      operation: "start", requestId: "lease-holder" });
+    await host.start();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(leases).toHaveLength(1);
+    channel.reset();
+    // The broken channel reconnects through the lease-retaining recovery
+    // branch forever; it neither terminates the host nor feeds the plain
+    // control-failure limit.
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(channel.deadRetries()).toBeGreaterThan(1);
+    expect(host.snapshot()).toEqual({ state: "ready", errorCode: null });
+    expect(native.terminate).not.toHaveBeenCalled();
+    expect(native.spawn).toHaveBeenCalledTimes(1);
+    expect(channelFailureLines(warnSpy)).toHaveLength(0);
+    expect(deathLines(warnSpy)).toHaveLength(0);
+    warnSpy.mockRestore();
+    await host.stop();
+  });
+
+  it("gives the control channel a 30s claim budget before counting a failure", async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { host, native, fetchImpl } = fixture({ graceful: true, mainControl: async () => ({}) });
+    const channel = scriptedControlChannel(fetchImpl);
+    await host.start();
+    await vi.advanceTimersByTimeAsync(0);
+    // A claim that hangs past the old 15s budget is still pending at 15s...
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(host.snapshot()).toEqual({ state: "ready", errorCode: null });
+    expect(channelFailureLines(warnSpy)).toHaveLength(0);
+    // ...and only trips its own 30s budget into one counted reconnect.
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(channelFailureLines(warnSpy)).toHaveLength(1);
+    expect(channelFailureLines(warnSpy)[0]).toContain("lastError=\"ASSISTANT_REQUEST_TIMEOUT\"");
+    expect(host.snapshot()).toEqual({ state: "ready", errorCode: null });
+    expect(native.terminate).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+    await host.stop();
   });
 
   it("lets the first of the liveness poll and the control-pump settle window classify one exit", async () => {
