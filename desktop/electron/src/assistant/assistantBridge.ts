@@ -27,6 +27,15 @@ export type AssistantBridgeOwner = {
 const START_GRACE_READ_MS = 2_000;
 /** Renderer read views that keep polling while a generation is starting. */
 const READ_OPERATIONS = new Set(["status", "detail", "dispatches", "teamRuns", "config", "approvals", "curation", "assistantAvatar"]);
+/**
+ * Closed verb list a renderer may dispatch through this bridge; must cover
+ * every operation of AssistantHostRequest (assistantHost.ts) and is locked to
+ * that union by tests/assistantBridge.test.ts. Bridge-local verbs
+ * (openLauncher/hide/setExpanded) are handled above and are not part of it.
+ * Every member is dispatched after a full host.start() recovery except the
+ * READ_OPERATIONS subset, which gets a bounded grace instead.
+ */
+export const ASSISTANT_BRIDGE_OPERATIONS = ["status", "detail", "dispatches", "teamRuns", "setModel", "setManagementPermissionPreset", "previewTaskCleanup", "executeTaskCleanup", "config", "send", "uploadAttachment", "readAttachment", "stop", "continue", "switchHead", "regenerate", "guidance", "curation", "curate", "approvals", "resolveApproval", "previewDispatchApproval", "decideDispatchApproval", "declineDispatchApproval", "operatorAsset", "assistantAvatar", "computerState", "computerWindows", "computerGrant", "computerControl", "computerConfirm"];
 
 function delay(ms: number): Promise<void> {
   return new Promise(done => {
@@ -85,7 +94,7 @@ export async function invokeAssistant(event: Sender, payload: unknown, owner: As
   if (request.operation === "setModel" && (Object.keys(request).length !== 2
     || typeof request.modelId !== "string" || !/^[^\s\x00-\x1f\x7f]{1,200}(?![\s\S])/.test(request.modelId)))
     throw new Error("ASSISTANT_REQUEST_INVALID");
-  if (!["status", "detail", "dispatches", "teamRuns", "setModel", "setManagementPermissionPreset", "previewTaskCleanup", "executeTaskCleanup", "config", "send", "uploadAttachment", "readAttachment", "stop", "continue", "curation", "curate", "approvals", "resolveApproval", "previewDispatchApproval", "decideDispatchApproval", "declineDispatchApproval", "operatorAsset", "assistantAvatar", "computerState", "computerWindows", "computerGrant", "computerControl", "computerConfirm"].includes(String(request.operation))) {
+  if (!ASSISTANT_BRIDGE_OPERATIONS.includes(String(request.operation))) {
     throw new Error("ASSISTANT_REQUEST_INVALID");
   }
   try {

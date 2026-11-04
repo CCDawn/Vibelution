@@ -1,5 +1,21 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { invokeAssistant, LAUNCHER_ASSISTANT_URL } from "../src/assistant/assistantBridge.js";
+import { ASSISTANT_BRIDGE_OPERATIONS, invokeAssistant, LAUNCHER_ASSISTANT_URL } from "../src/assistant/assistantBridge.js";
+import type { AssistantHostRequest } from "../src/assistant/assistantHost.js";
+
+/**
+ * Every member of AssistantHostRequest["operation"] (src/assistant/
+ * assistantHost.ts). The const's type pins each entry to the host union, and
+ * hostRequestListIsExhaustive below fails to compile when the union gains a
+ * member missing from this list, so a new host verb cannot land silently.
+ */
+const HOST_REQUEST_OPERATIONS: readonly AssistantHostRequest["operation"][] = [
+  "previewTaskCleanup", "executeTaskCleanup", "teamRuns", "setModel", "setManagementPermissionPreset",
+  "detail", "status", "dispatches", "config", "approvals", "assistantAvatar",
+  "resolveApproval", "previewDispatchApproval", "declineDispatchApproval", "decideDispatchApproval",
+  "send", "uploadAttachment", "readAttachment", "stop", "continue", "switchHead", "regenerate", "guidance",
+  "curation", "curate", "operatorAsset",
+  "computerState", "computerWindows", "computerGrant", "computerControl", "computerConfirm",
+];
 
 function setup() {
   const mainFrame = { url: LAUNCHER_ASSISTANT_URL };
@@ -89,6 +105,28 @@ describe("Launcher assistant private bridge", () => {
     expect(owner.host.request).toHaveBeenCalledTimes(5);
     expect(owner.host.start).toHaveBeenCalledTimes(3);
     await expect(invokeAssistant(event, { operation: "computerExecute" }, owner)).rejects.toThrow("REQUEST_INVALID");
+  });
+  it("keeps the bridge verb whitelist in lockstep with the host operation union", () => {
+    // Compile-time guard: fails to build when HOST_REQUEST_OPERATIONS no
+    // longer covers AssistantHostRequest, so a new host verb cannot be added
+    // without extending this list and re-checking the bridge whitelist.
+    const hostRequestListIsExhaustive: Exclude<AssistantHostRequest["operation"], typeof HOST_REQUEST_OPERATIONS[number]> extends never ? true : never = true;
+    expect(hostRequestListIsExhaustive).toBe(true);
+    for (const operation of HOST_REQUEST_OPERATIONS) expect(ASSISTANT_BRIDGE_OPERATIONS).toContain(operation);
+  });
+  it("forwards the regenerate, switchHead and guidance writes to the host unchanged", async () => {
+    const { owner, event } = setup();
+    const payloads = [
+      { operation: "regenerate", messageId: "message-1", requestId: "request-1" },
+      { operation: "switchHead", nodeId: "node-1" },
+      { operation: "guidance", content: "focus the summary", mode: "safe" },
+    ] as const;
+    for (const payload of payloads) await expect(invokeAssistant(event, payload, owner)).resolves.toEqual({ accepted: true });
+    expect(owner.host.start).toHaveBeenCalledTimes(3);
+    expect(owner.host.request).toHaveBeenCalledTimes(3);
+    expect(owner.host.request).toHaveBeenNthCalledWith(1, payloads[0]);
+    expect(owner.host.request).toHaveBeenNthCalledWith(2, payloads[1]);
+    expect(owner.host.request).toHaveBeenNthCalledWith(3, payloads[2]);
   });
   it("rejects the retired panel operations before starting or reaching the host", async () => {
     const { owner, event } = setup();
