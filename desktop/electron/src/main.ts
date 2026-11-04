@@ -4381,6 +4381,7 @@ async function requestDesktopShellExit(
               closeDesktopSession: async (signal) => {
                 signal.throwIfAborted();
                 await closeDesktopSessionIfRegistered();
+                signal.throwIfAborted();
                 if (operatorRequested && !interruptActiveWork) {
                   await windowProvider?.approveWorkbenchCloseOnce({ deadlineAt: deadline.expiresAt });
                   signal.throwIfAborted();

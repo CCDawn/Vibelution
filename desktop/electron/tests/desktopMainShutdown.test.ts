@@ -184,6 +184,21 @@ describe("actual Electron main shutdown functions", () => {
     expect(h.quit).toHaveBeenCalledOnce();
   });
 
+  it("does not close a later workbench when desktop session closure resolves after exit timed out", async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    let release!: () => void;
+    h.closeSession.mockImplementation(() => new Promise<void>(resolve => { release = resolve; }));
+    const exiting = h.exit();
+    await vi.advanceTimersByTimeAsync(30_001);
+    await exiting;
+    release();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(h.closeWindow).not.toHaveBeenCalled();
+    expect(h.stopMain).not.toHaveBeenCalled();
+    expect(h.quit).not.toHaveBeenCalled();
+  });
+
   it("quits an idle tray without a dialog, duplicate stop, or fixed delay", async () => {
     vi.useFakeTimers();
     const h = harness();
