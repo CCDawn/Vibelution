@@ -1180,7 +1180,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       { label: lang === "zh" ? "状态刷新" : "Status refresh", failed: (!taskNoticeOwner && launcherNoticeReadFailed(status)) || (!launcherNoticeReadFailed(status) && statusDegradeTone !== "quiet"), pending: status.isFetching, error: status.error, retry: status.refetch },
       { label: lang === "zh" ? "会话刷新" : "Conversation refresh", failed: reading && launcherNoticeReadFailed(detail), pending: detail.isFetching, error: detail.error, retry: detail.refetch },
       { label: lang === "zh" ? "待授权查询" : "Pending approvals", failed: reading && launcherNoticeReadFailed(approvals), pending: approvals.isFetching, error: approvals.error, retry: approvals.refetch },
-      { label: lang === "zh" ? "任务状态" : "Task status", failed: !taskNoticeOwner && reading && launcherNoticeReadFailed(dispatches), pending: dispatches.isFetching, error: dispatches.error, retry: dispatches.refetch },
+      { label: lang === "zh" ? "任务状态" : "Task status", failed: reading && launcherNoticeReadFailed(dispatches), pending: dispatches.isFetching, error: dispatches.error, retry: dispatches.refetch },
     ],
     appearance: [
       { label: lang === "zh" ? "用户头像" : "User avatar", failed: readingAssets && launcherNoticeReadFailed(avatar), pending: avatar.isFetching, error: avatar.error, retry: avatar.refetch },

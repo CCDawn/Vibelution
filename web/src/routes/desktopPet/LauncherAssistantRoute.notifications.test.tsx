@@ -129,7 +129,7 @@ afterEach(async () => {
 });
 
 describe("Launcher assistant hosted notifications", () => {
-  it("uses the task owner once for shared status and task-source failures", async () => {
+  it("deduplicates shared status while retaining independent task-query failures", async () => {
     await mount({withTaskOwner:true});
     failing.add("status");
     await act(async()=>{await client.refetchQueries({queryKey:["launcher-assistant","status"]});});
@@ -143,11 +143,21 @@ describe("Launcher assistant hosted notifications", () => {
     await click(panelButton("刷新"));
     expect(trigger().getAttribute("aria-label")).toContain("0 项提醒");
     failing.add("dispatches");
-    await act(async()=>{await client.refetchQueries({queryKey:["launcher-assistant"]});});
+    await act(async()=>{await client.refetchQueries({queryKey:["launcher-assistant","dispatches"]});});
     await settle(); await settle();
     expect(trigger().getAttribute("aria-label")).toContain("1 项提醒");
     expect(panel().querySelectorAll("li")).toHaveLength(1);
+    expect(panel().textContent).toContain("部分状态未更新");
+    expect(panel().textContent).not.toContain("任务状态未更新");
+    failing.delete("dispatches");
+    await click(panelButton("重新连接"));
+    expect(trigger().getAttribute("aria-label")).toContain("0 项提醒");
+    failing.add("dispatches");
+    await act(async()=>{await client.refetchQueries({queryKey:["launcher-assistant","task-cards"]});});
+    await settle(); await settle();
+    expect(trigger().getAttribute("aria-label")).toContain("1 项提醒");
     expect(panel().textContent).toContain("任务状态未更新");
+    expect(panel().textContent).not.toContain("部分状态未更新");
   });
 
   it("groups failed reads and appearance while retaining the mounted conversation and draft", async () => {
