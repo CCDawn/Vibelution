@@ -83,7 +83,7 @@ const COPY = {
     answerBelow: "去回答", answerHint: "请在下方输入回答，再点击发送。",
     editAsNew: "编辑为新消息",
     safeGuidance: "引导", safeGuidancePending: "正在引导",
-    interruptGuidance: "打断引导", interruptGuidancePending: "打断中",
+    interruptGuidance: "打断并引导", interruptGuidancePending: "正在打断引导",
   },
   en: {
     title: "Personal assistant", expand: "Open assistant chat", chat: "Chat", hide: "Hide assistant",
@@ -102,7 +102,7 @@ const COPY = {
     answerBelow: "Answer below", answerHint: "Type your answer below, then send it.",
     editAsNew: "Edit as new message",
     safeGuidance: "Steer", safeGuidancePending: "Steering",
-    interruptGuidance: "Interrupt guide", interruptGuidancePending: "Interrupting",
+    interruptGuidance: "Interrupt & steer", interruptGuidancePending: "Interrupting steer",
   },
 } as const;
 

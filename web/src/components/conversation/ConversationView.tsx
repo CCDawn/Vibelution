@@ -330,10 +330,6 @@ export const ConversationView = React.memo(function ConversationView({
   onFollowupQueueSendNow,
   followupQueueSteerLabel,
 }: ConversationViewProps) {
-  void interruptGuidanceLabel;
-  void interruptGuidancePendingLabel;
-  void onInterruptGuidance;
-  void onSafeGuidance;
   const { lang, t, statusLabel } = useAppI18n({ domains: ["chat"] });
   // Model labels for the turn-envelope switch dividers. Uses the lightweight
   // configuration bootstrap summary (modelLabels id→label map) instead of the full
@@ -1002,6 +998,8 @@ export const ConversationView = React.memo(function ConversationView({
     stopPendingLabel,
     safeGuidanceLabel,
     safeGuidancePendingLabel,
+    interruptGuidanceLabel,
+    interruptGuidancePendingLabel,
     editingMessageId,
     composerModeNotice,
     composerModeTargetPreview,
@@ -1016,6 +1014,7 @@ export const ConversationView = React.memo(function ConversationView({
     onStop,
     onContinueTurn,
     onSafeGuidance,
+    onInterruptGuidance,
     onFollowupQueueUpdate,
     onFollowupQueueRemove,
     onFollowupQueueMove,

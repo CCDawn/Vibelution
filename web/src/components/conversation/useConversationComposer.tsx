@@ -150,6 +150,8 @@ export type UseConversationComposerInput = {
   stopPendingLabel?: string;
   safeGuidanceLabel?: string;
   safeGuidancePendingLabel?: string;
+  interruptGuidanceLabel?: string;
+  interruptGuidancePendingLabel?: string;
   editingMessageId?: string;
   composerModeNotice?: string;
   composerModeTargetPreview?: string;
@@ -164,6 +166,7 @@ export type UseConversationComposerInput = {
   onStop?: () => void;
   onContinueTurn?: () => void;
   onSafeGuidance?: () => void;
+  onInterruptGuidance?: () => void;
   onFollowupQueueUpdate?: (id: string, text: string) => void;
   onFollowupQueueRemove?: (id: string) => void;
   onFollowupQueueMove?: (fromIndex: number, toIndex: number) => void;
@@ -239,6 +242,8 @@ export function useConversationComposer({
   stopPendingLabel,
   safeGuidanceLabel,
   safeGuidancePendingLabel,
+  interruptGuidanceLabel,
+  interruptGuidancePendingLabel,
   editingMessageId,
   composerModeNotice,
   composerModeTargetPreview,
@@ -253,6 +258,7 @@ export function useConversationComposer({
   onStop,
   onContinueTurn,
   onSafeGuidance,
+  onInterruptGuidance,
   onFollowupQueueUpdate,
   onFollowupQueueRemove,
   onFollowupQueueMove,
@@ -353,6 +359,7 @@ export function useConversationComposer({
   });
   const {
     guidanceActionDisabled,
+    guidanceDraftReady,
     showQueuePrimary,
     queuePrimaryIsImmediate,
   } = resolveComposerGuidanceUi({
@@ -373,6 +380,11 @@ export function useConversationComposer({
   const resolvedImmediateSteerLabel = t("immediateSteer");
   const resolvedSafeGuidanceLabel = safeGuidanceLabel ?? t("safeGuidance");
   const resolvedSafeGuidancePendingLabel = safeGuidancePendingLabel ?? t("safeGuidancePending");
+  const resolvedInterruptGuidanceLabel = interruptGuidanceLabel ?? t("interruptGuidance");
+  const resolvedInterruptGuidancePendingLabel = interruptGuidancePendingLabel ?? t("interruptGuidancePending");
+  // The interrupt channel both delivers the draft and requests a stop for the
+  // running turn; the tooltip must say so before the first click.
+  const resolvedInterruptGuidanceHint = t("interruptGuidanceHint");
   const resolvedBusyPrimaryLabel = queuePrimaryIsImmediate
     ? resolvedImmediateSteerLabel
     : resolvedQueueFollowupLabel;
@@ -881,6 +893,22 @@ export function useConversationComposer({
               : resolvedActionMode === "continue"
                 ? <Play size={16} aria-hidden="true" />
                 : <ArrowUp size={16} aria-hidden="true" />)}
+        </VButton>
+      ) : null}
+      {runningGuidanceActionsEnabled && guidanceDraftReady && onInterruptGuidance ? (
+        <VButton
+          className={styles.composerInterruptGuidanceButton}
+          type="button"
+          isDisabled={composerDisabled || composerSafeGuidancePending || composerInterruptGuidancePending}
+          onClick={onInterruptGuidance}
+          title={composerInterruptGuidancePending ? resolvedInterruptGuidancePendingLabel : resolvedInterruptGuidanceHint}
+          aria-label={composerInterruptGuidancePending ? resolvedInterruptGuidancePendingLabel : resolvedInterruptGuidanceLabel}
+          data-testid="composer-interrupt-guidance"
+        >
+          {composerInterruptGuidancePending ? (
+            <LoaderCircle className={styles.statusSpinner} size={14} aria-hidden="true" />
+          ) : null}
+          <span>{composerInterruptGuidancePending ? resolvedInterruptGuidancePendingLabel : resolvedInterruptGuidanceLabel}</span>
         </VButton>
       ) : null}
       {runningGuidanceActionsEnabled ? (
