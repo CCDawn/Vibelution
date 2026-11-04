@@ -30,23 +30,29 @@ async function renderControl(options: { selectionDisabled?: boolean; pending?: b
 }
 
 describe("Launcher model toolbar control", () => {
-  it("opens the shared compact popover recipe and preserves native model selection", async () => {
+  it("opens the shared compact popover recipe and preserves model selection", async () => {
     const { trigger, onModelChange } = await renderControl();
     expect(trigger.textContent).toBe("DeepSeek V4.1 Flash · 官方");
     expect(container.querySelector("select")).toBeNull();
     await act(async () => trigger.click());
-    const select = document.querySelector<HTMLSelectElement>('select[aria-label="切换助理模型"]')!;
-    expect(select).toBeTruthy();
-    expect(select.querySelector<HTMLOptionElement>('option[value="unavailable"]')?.disabled).toBe(true);
-    await act(async () => { select.value = "next"; select.dispatchEvent(new Event("change", { bubbles: true })); });
+    const selectTrigger = document.querySelector<HTMLElement>('[role="combobox"][aria-label="切换助理模型"]')!;
+    expect(selectTrigger).toBeTruthy();
+    await act(async () => selectTrigger.click());
+    const disabledOption = [...document.querySelectorAll<HTMLElement>('[role="option"]')]
+      .find(node => node.textContent === "缺少密钥")!;
+    expect(disabledOption.getAttribute("aria-disabled")).toBe("true");
+    const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')]
+      .find(node => node.textContent === "另一个模型")!;
+    await act(async () => option.click());
     expect(onModelChange).toHaveBeenCalledExactlyOnceWith("next");
-    expect(document.querySelector('select[aria-label="切换助理模型"]')).toBeNull();
+    expect(document.querySelector('[role="combobox"][aria-label="切换助理模型"]')).toBeNull();
   });
 
   it("keeps settings accessible while model switching is locked by active work", async () => {
     const { trigger, onModelChange, onOpenSettings } = await renderControl({ selectionDisabled: true });
     await act(async () => trigger.click());
-    expect(document.querySelector<HTMLSelectElement>("select")?.disabled).toBe(true);
+    const selectTrigger = document.querySelector<HTMLButtonElement>('[role="combobox"][aria-label="切换助理模型"]')!;
+    expect(selectTrigger.disabled).toBe(true);
     const settings = [...document.querySelectorAll<HTMLButtonElement>("button")].find(row => row.textContent === "模型设置")!;
     await act(async () => settings.click());
     expect(onOpenSettings).toHaveBeenCalledOnce();
@@ -56,8 +62,12 @@ describe("Launcher model toolbar control", () => {
   it("retains a current model absent from the choice catalogue and locks pending configuration", async () => {
     const { trigger } = await renderControl({ unknownCurrent: true });
     await act(async () => trigger.click());
-    expect(document.querySelector<HTMLSelectElement>("select")?.value).toBe("previous");
-    expect(document.querySelector('option[value="previous"]')?.textContent).toBe("当前对话模型");
+    const selectTrigger = document.querySelector<HTMLElement>('[role="combobox"][aria-label="切换助理模型"]')!;
+    expect(selectTrigger.textContent).toContain("当前对话模型");
+    await act(async () => selectTrigger.click());
+    const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')]
+      .find(node => node.textContent === "当前对话模型")!;
+    expect(option).toBeTruthy();
     await act(async () => root?.unmount()); root = undefined; container.remove();
     const pending = await renderControl({ pending: true });
     expect(pending.trigger.disabled).toBe(true);
