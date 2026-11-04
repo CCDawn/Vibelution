@@ -1,16 +1,27 @@
 """Optional, body-free display labels over existing dispatch identities."""
 from __future__ import annotations
 
+from contextlib import nullcontext
 from copy import deepcopy
 from pathlib import Path
 import unicodedata
 
 import anyio
 
+from core.external_agent.backend_client import BackendClientError
+
+from .dispatch import DispatchError
+
 _CONCURRENCY = 4
 _LOOKUP_BUDGET = 0.2
 _PAGE_BUDGET = 0.8
 _MAX_LOOKUPS = 128
+# Keep at most one page's worth of public labels, not task or execution state.
+_MAX_CACHED_LABELS = _MAX_LOOKUPS
+_LABEL_AUTHORITY_ERRORS = frozenset({
+    "SCOPE_DENIED", "SUBJECT_DENIED", "SUBJECT_REVOKED", "TARGET_BINDING_CHANGED",
+    "UNKNOWN_MANAGEMENT_SUBJECT", "MANAGEMENT_IDENTITY_ROTATED", "RUNTIME_IDENTITY_MISMATCH",
+})
 
 
 def display_name(value):
@@ -29,28 +40,39 @@ def project_display_name(binding):
     return display_name(binding[1].name)
 
 
+def _discard_project_labels(labels, project, binding):
+    for key in tuple(labels):
+        if key[0] == project and (binding is None or key[1] != binding):
+            labels.pop(key, None)
+
+
 async def enrich_dispatch_cards(dispatch, rows):
     """Copy rows and add best-effort labels without reading task/session bodies.
 
     A failed directory, denied scope or timeout leaves the native card usable.
-    Names are scoped to this request and rechecked against the same binding;
-    neither a durable cache nor a second task ledger is created.
+    The service retains bounded public labels only for a currently authorized,
+    exact project binding. Every request still attempts fresh directory reads;
+    cached labels cannot authorize work or become a second task ledger.
     """
     cards = deepcopy(rows)
     binding_reader = getattr(dispatch, "_project_read_binding", None)
     agent_reader = getattr(getattr(dispatch, "management", None), "agent", None)
     if not callable(binding_reader):
         return cards
+    labels = getattr(dispatch, "_task_card_agent_labels", {})
+    state = getattr(dispatch, "_dispatch_state", nullcontext())
     bindings, targets = {}, {}
     for index, row in enumerate(cards):
         project, agent = row.get("projectId"), row.get("agentId")
         if not isinstance(project, str) or not project:
             continue
         if project not in bindings:
-            try:
-                bindings[project] = binding_reader(project)
-            except Exception:
-                bindings[project] = None
+            with state:
+                try:
+                    bindings[project] = binding_reader(project)
+                except Exception:
+                    bindings[project] = None
+                _discard_project_labels(labels, project, bindings[project])
         if bindings[project] is None:
             continue
         name = project_display_name(bindings[project])
@@ -58,12 +80,34 @@ async def enrich_dispatch_cards(dispatch, rows):
             row["projectName"] = name
         if isinstance(agent, str) and agent:
             targets.setdefault((project, agent), []).append(index)
+            with state:
+                cached = labels.get((project, bindings[project], agent))
+                if cached:
+                    row["agentName"] = cached
 
     semaphore = anyio.Semaphore(_CONCURRENCY)
+    denied_projects = set()
+
+    def discard_agent_labels(project, agent=None):
+        with state:
+            if agent is None:
+                denied_projects.add(project)
+                _discard_project_labels(labels, project, None)
+            else:
+                labels.pop((project, bindings[project], agent), None)
+            for (target_project, target_agent), indices in targets.items():
+                if target_project == project and (agent is None or target_agent == agent):
+                    for index in indices:
+                        if "agentName" in rows[index]:
+                            cards[index]["agentName"] = deepcopy(rows[index]["agentName"])
+                        else:
+                            cards[index].pop("agentName", None)
 
     async def lookup(project, agent, indices):
         async with semaphore:
             try:
+                if project in denied_projects:
+                    return
                 # Metadata must not queue behind task control or make _call
                 # wait for a shielded native heartbeat borrower to drain.
                 slots = getattr(dispatch, "_active_project_clients", {})
@@ -75,14 +119,27 @@ async def enrich_dispatch_cards(dispatch, rows):
                 with anyio.move_on_after(_LOOKUP_BUDGET):
                     result = await agent_reader(project, agent_id=agent)
                     identity = result.get("agent") if isinstance(result, dict) else None
-                    if (not isinstance(result, dict) or result.get("projectId") != project
-                            or not isinstance(identity, dict) or identity.get("agentId") != agent
-                            or binding_reader(project) != bindings[project]):
-                        return
-                    name = display_name(identity.get("displayName"))
-                    if name:
-                        for index in indices:
-                            cards[index]["agentName"] = name
+                    with state:
+                        if (not isinstance(result, dict) or result.get("projectId") != project
+                                or not isinstance(identity, dict) or identity.get("agentId") != agent):
+                            discard_agent_labels(project, agent)
+                            return
+                        if binding_reader(project) != bindings[project]:
+                            return
+                        name = display_name(identity.get("displayName"))
+                        if name:
+                            key = (project, bindings[project], agent)
+                            labels.pop(key, None)
+                            labels[key] = name
+                            while len(labels) > _MAX_CACHED_LABELS:
+                                labels.pop(next(iter(labels)), None)
+                            for index in indices:
+                                cards[index]["agentName"] = name
+            except (BackendClientError, DispatchError, PermissionError) as exc:
+                # Registry identity alone does not prove the native agents:read
+                # grant still exists. Explicit denials invalidate this page too.
+                if isinstance(exc, PermissionError) or exc.code in _LABEL_AUTHORITY_ERRORS:
+                    discard_agent_labels(project)
             except Exception:
                 pass
 
@@ -103,10 +160,12 @@ async def enrich_dispatch_cards(dispatch, rows):
     # Registry changes invalidate only optional labels, never original rows.
     for index, row in enumerate(cards):
         project = row.get("projectId")
-        try:
-            current = binding_reader(project)
-        except Exception:
-            current = None
+        with state:
+            try:
+                current = binding_reader(project)
+            except Exception:
+                current = None
+            _discard_project_labels(labels, project, current)
         if project in bindings and (current is None or current != bindings[project]):
             for key in ("agentName", "projectName"):
                 if key in rows[index]:

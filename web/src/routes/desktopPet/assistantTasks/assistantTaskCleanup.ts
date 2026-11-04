@@ -32,10 +32,13 @@ export function taskCleanupTargets(task: AssistantTask): LauncherTaskCleanupTarg
 export type AssistantCleanupDialogState = {
   identity: string; scope: LauncherTaskCleanupScope; titles: Record<string, string>; bulk: boolean;
   pending: "loading" | "execute" | null; result?: LauncherTaskCleanupResult; error?: string;
+  sourceErrors?: AssistantCleanupSourceError[];
 };
 
-type CleanupInput = Pick<AssistantCleanupDialogState, "scope" | "titles">;
-type TaskSource = AssistantTask[] | ((signal: AbortSignal) => Promise<AssistantTask[]>);
+export type AssistantCleanupSourceError = { source: "dispatch" | "team_run"; message: string };
+export type AssistantCleanupCollection = { tasks: AssistantTask[]; sourceErrors?: AssistantCleanupSourceError[] };
+type CleanupInput = Pick<AssistantCleanupDialogState, "scope" | "titles" | "sourceErrors">;
+type TaskSource = AssistantTask[] | ((signal: AbortSignal) => Promise<AssistantTask[] | AssistantCleanupCollection>);
 
 /** The host owns eligibility, fingerprints and deletion. One lock covers preparation and execution. */
 export function useAssistantTaskCleanup(options: {
@@ -84,7 +87,10 @@ export function useAssistantTaskCleanup(options: {
       if (generation.current !== token || !valid(candidate.identity)) return;
       const remaining = new Set(result.items.filter(item => item.status !== "deleted").map(item => item.key));
       const retryScope = { ...candidate.scope, targets: candidate.scope.targets.filter(target => remaining.has(taskCleanupKey(target))) };
-      retryInput.current = async () => ({ scope: retryScope, titles: candidate.titles });
+      // An unavailable source supplied no deletion candidates. Recollect all
+      // sources on retry so its complete authoritative list can be verified.
+      // Otherwise retry only the host's unfinished references.
+      if (!candidate.sourceErrors?.length) retryInput.current = async () => ({ scope: retryScope, titles: candidate.titles });
       setState({ ...candidate, pending: null, result });
     } catch (error) {
       if (generation.current === token && valid(candidate.identity))
@@ -98,7 +104,8 @@ export function useAssistantTaskCleanup(options: {
   const open = (source: TaskSource, bulk = false) => {
     const context = current.current;
     return run(async signal => {
-      const tasks = typeof source === "function" ? await source(signal) : source;
+      const collected = typeof source === "function" ? await source(signal) : source;
+      const { tasks, sourceErrors } = Array.isArray(collected) ? { tasks: collected, sourceErrors: [] } : collected;
       const eligible = tasks.filter(task => taskCleanupTargets(task).length > 0);
       const targets = new Map<string, LauncherTaskCleanupTarget>();
       const titles: Record<string, string> = {};
@@ -107,7 +114,8 @@ export function useAssistantTaskCleanup(options: {
         targets.set(key, !bulk && task.state === "unknown" ? { ...target, localOnly: true } : target);
         titles[key] = taskDisplayTitle(task.title, task.kind === "dispatch" ? task.dispatchId : task.requestId, context.lang);
       }
-      return { scope: { agentId: context.agentId, directSessionId: context.sessionId, targets: [...targets.values()] }, titles };
+      return { scope: { agentId: context.agentId, directSessionId: context.sessionId, targets: [...targets.values()] }, titles,
+        sourceErrors: sourceErrors?.map(error => ({ ...error, message: displayText(error.message) })) };
     }, bulk);
   };
   return { state: visibleState, busy: Boolean(visibleState?.pending), close, open,
