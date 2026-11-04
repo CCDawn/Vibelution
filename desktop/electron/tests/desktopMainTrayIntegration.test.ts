@@ -57,7 +57,7 @@ describe("Electron main tray integration", () => {
     expect(mainSource).not.toContain("rebuildAndStart:");
     expect(mainSource).not.toContain("showStatus:");
     expect(mainSource).not.toContain("runTrayLauncherStatus");
-    expect(mainSource).toContain('orchestrateLauncherLifecycle("force-stop"');
+    expect(mainSource).toContain('orchestrateLauncherLifecycle("shutdown"');
     expect(mainSource).toContain("refreshPackagedDesktopShellIfStale");
     expect(mainSource).toContain("startPeriodicShellFreshnessWatch");
   });
@@ -80,10 +80,10 @@ describe("Electron main tray integration", () => {
     expect(quitSource).toContain("resolveQuitActiveWorkStatus");
     expect(quitSource).toContain("forceControlTokenRefresh");
     expect(quitSource).toContain("QUIT_ACTIVE_WORK_STATUS_TIMEOUT_MS");
-    expect(quitSource).toContain("退出壳并停止全部任务");
+    expect(quitSource).toContain("confirmStopActiveWork:");
     expect(quitSource).toContain("createDesktopShellExitDeadline(DESKTOP_QUIT_TOTAL_BUDGET_MS)");
-    expect(quitSource).toContain("deadline.remainingMs()");
-    expect(quitSource).toContain("AbortSignal.any([signal, deadline.signal])");
+    expect(quitSource).toContain("probeDeadline.remainingMs()");
+    expect(quitSource).toContain("AbortSignal.any([signal, probeDeadline.signal])");
   });
 
   it("destroys the tray only after shutdown is approved", () => {
@@ -118,20 +118,29 @@ describe("Electron main tray integration", () => {
     expect(mainSource).not.toContain('status.state === "active" ? 1 : 0');
   });
 
-  it("routes tray stop-all through forced shell exit instead of aborting on control fetch failed", () => {
+  it("routes the normal tray exit through one graceful shutdown after optional confirmation", () => {
     const stopAllStart = mainSource.indexOf("async function runTrayStopAll");
     const stopAllEnd = mainSource.indexOf("\nasync function ", stopAllStart + 1);
     const stopAllSource = mainSource.slice(stopAllStart, stopAllEnd);
-    expect(stopAllSource).toContain("requestForcedDesktopShellExit");
-    expect(stopAllSource).not.toContain("postLauncherControl");
-    expect(stopAllSource).not.toContain("停止全部失败");
-
-    const forcedStart = mainSource.indexOf("async function requestForcedDesktopShellExit");
-    const forcedEnd = mainSource.indexOf("\nasync function ", forcedStart + 1);
-    const forcedSource = mainSource.slice(forcedStart, forcedEnd);
-    expect(forcedSource).toContain("shouldNotifyForceStopControlFailure");
-    expect(forcedSource).toContain("executeApprovedDesktopShellShutdown");
-    expect(forcedSource).toContain('orchestrateLauncherLifecycle("force-stop"');
+    expect(stopAllSource).toContain('requestDesktopShellExit("desktop_shell_quit", true)');
+    expect(stopAllSource).toContain("trayQuitAllInFlight = true");
+    expect(stopAllSource).toContain("finally");
+    expect(stopAllSource).toContain("trayQuitAllInFlight = false");
+    expect(stopAllSource).toContain("trayRestartAllInFlight || trayRestartLauncherInFlight");
+    const quitStart = mainSource.indexOf("async function requestDesktopShellExit(");
+    const quitSource = mainSource.slice(quitStart, mainSource.indexOf("function notifyDesktopTray(", quitStart));
+    expect(quitSource).not.toContain('orchestrateLauncherLifecycle("force-stop"');
+    expect(quitSource).not.toContain("delayWithAbortSignal(1_500");
+    expect(quitSource.match(/stopMainRuntimeForApprovedShutdown\(/g)).toHaveLength(1);
+    expect(quitSource).toContain('decision.reason === "operator_confirmed"');
+    const execution = quitSource.slice(quitSource.indexOf("runApproved:"));
+    expect(execution).toContain("createDesktopShellExitDeadline(DESKTOP_QUIT_TOTAL_BUDGET_MS)");
+    const confirmStart = mainSource.indexOf("async function confirmDesktopShellExit(");
+    const confirmation = mainSource.slice(confirmStart, quitStart);
+    expect(confirmation).toContain('type: "question"');
+    expect(confirmation).toContain('buttons: ["取消", "保存并退出"]');
+    expect(confirmation).not.toContain("requestId");
+    expect(confirmation).not.toContain("强制");
   });
 
   it("stops the tray force flows when the operator cancels authorization", () => {
@@ -146,11 +155,7 @@ describe("Electron main tray integration", () => {
     expect(mainSource.slice(restartAllStart, restartAllEnd)).toContain(
       "已取消全部重启，当前窗口、运行时和任务均保留。"
     );
-    const forcedStart = mainSource.indexOf("async function requestForcedDesktopShellExit");
-    const forcedEnd = mainSource.indexOf("\nasync function ", forcedStart + 1);
-    expect(mainSource.slice(forcedStart, forcedEnd)).toContain(
-      "已取消退出，当前窗口、运行时和任务均保留。"
-    );
+
   });
 
   it("stops every live isolated row before approved shell exit", () => {
@@ -179,29 +184,13 @@ describe("Electron main tray integration", () => {
     expect(quitApprovedStart).toBeGreaterThan(-1);
     expect(quitFailureStart).toBeGreaterThan(quitApprovedStart);
     expect(quitTimeoutStart).toBeGreaterThan(-1);
-    expect(quitExitSource).toContain("stopIsolatedInstancesForApprovedShutdown(false, deadline)");
+    expect(quitExitSource).toContain("stopIsolatedInstancesForApprovedShutdown(interruptActiveWork, deadline)");
     expect(quitExitSource).toContain("await executeApprovedDesktopShellShutdown");
-    expect(quitExitSource.indexOf("stopIsolatedInstancesForApprovedShutdown(false, deadline)")).toBeLessThan(
+    expect(quitExitSource.indexOf("stopIsolatedInstancesForApprovedShutdown(interruptActiveWork, deadline)")).toBeLessThan(
       quitExitSource.indexOf("await executeApprovedDesktopShellShutdown")
     );
-    expect(quitApprovedSource).not.toContain("createDesktopShellExitDeadline(");
+    expect(quitApprovedSource).toContain("createDesktopShellExitDeadline(");
     expect(quitApprovedSource).toContain("deadline,");
-    const forcedStart = mainSource.indexOf("async function requestForcedDesktopShellExit");
-    const forcedEnd = mainSource.indexOf("\nasync function ", forcedStart + 1);
-    const forcedSource = mainSource.slice(forcedStart, forcedEnd);
-    const forcedTimeoutStart = forcedSource.indexOf("await withDesktopShellExitTimeout(");
-    const forcedExitSource = forcedSource.slice(forcedTimeoutStart);
-    expect(forcedStart).toBeGreaterThan(-1);
-    expect(forcedEnd).toBeGreaterThan(forcedStart);
-    expect(forcedTimeoutStart).toBeGreaterThan(-1);
-    expect(forcedExitSource).toContain("await bestEffortStopIsolatedInstancesForShutdown");
-    expect(forcedExitSource).toContain("await executeApprovedDesktopShellShutdown");
-    expect(forcedExitSource.indexOf("await bestEffortStopIsolatedInstancesForShutdown")).toBeLessThan(
-      forcedExitSource.indexOf("await executeApprovedDesktopShellShutdown")
-    );
-    expect(forcedSource).toContain("createDesktopShellExitDeadline()");
-    expect(forcedSource).toContain("deadline,");
-    expect(forcedSource).toContain("forceExitOnStopFailure: true");
     const failureStart = quitSource.indexOf("onApprovedFailure:", quitApprovedStart);
     const failureSource = quitSource.slice(failureStart);
     expect(failureSource).not.toContain("app.quit()");
