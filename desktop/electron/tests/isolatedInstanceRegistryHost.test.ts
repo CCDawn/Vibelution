@@ -1313,7 +1313,7 @@ describe("isolatedInstanceRegistryHost", () => {
   it.each([
     { reason: "identity cannot be captured", identity: null },
     { reason: "live python-family executable", identity: { pid: 9191, createTime: 202, executable: "C:/Python/python.exe" } }
-  ])("refuses conservatively when a live daemon record has no verifiable identity: $reason", async ({ identity }) => {
+  ])("retains records and completes retirement when a live daemon cannot be verified: $reason", async ({ identity }) => {
     const dependencies = daemonRetireDependencies({ captureDaemonIdentity: vi.fn(async () => identity) });
     const result = await retireClaimedIsolatedRuntime({
       instanceId: "worktree:task",
@@ -1325,21 +1325,23 @@ describe("isolatedInstanceRegistryHost", () => {
       dependencies
     });
 
-    expect(result).toMatchObject({
-      ok: false,
-      code: "backend_retire_incomplete",
-      message: expect.stringContaining("Runtime Manager daemon pid 9191")
+    // Retirement-time reconciliation mirrors the main-line stop path: a live
+    // pid that is not provably foreign keeps its records, no process is
+    // signalled, and the retirement still completes so the start flow stays
+    // the sole authority over live unverified daemons.
+    expect(result).toEqual({ ok: true });
+    expect(dependencies.captureDaemonIdentity).toHaveBeenCalledWith({
+      pythonPath: "python", workspaceRoot: "C:/wt/task", pid: 9191
     });
-    expect(dependencies.reclaimBackend).not.toHaveBeenCalled();
     expect(dependencies.clearDaemonRecords).not.toHaveBeenCalled();
-    expect(dependencies.clearRuntimeState).not.toHaveBeenCalled();
-    expect(dependencies.completeStop).not.toHaveBeenCalled();
-    expect(dependencies.upsert).toHaveBeenCalledWith(
-      "C:/tmp/instances.json",
-      "worktree:task",
-      expect.objectContaining({ status: "failed", phase: "failed", desiredState: "open" }),
-      5
-    );
+    expect(dependencies.reclaimBackend).toHaveBeenCalledOnce();
+    expect(dependencies.reclaimBackend.mock.calls[0]?.[0]).toMatchObject({
+      registeredPids: [],
+      extraPids: []
+    });
+    expect(dependencies.clearRuntimeState).toHaveBeenCalledOnce();
+    expect(dependencies.completeStop).toHaveBeenCalledOnce();
+    expect(dependencies.upsert).not.toHaveBeenCalled();
   });
 
   it("clears daemon records and proceeds when the recorded daemon pid has exited", async () => {
@@ -1381,8 +1383,16 @@ describe("isolatedInstanceRegistryHost", () => {
       code: "backend_retire_incomplete",
       message: expect.stringContaining("could not be cleared")
     });
-    expect(dependencies.reclaimBackend).not.toHaveBeenCalled();
+    expect(dependencies.clearDaemonRecords).toHaveBeenCalledWith("C:/wt/task");
+    expect(dependencies.reclaimBackend).toHaveBeenCalledOnce();
+    expect(dependencies.clearRuntimeState).not.toHaveBeenCalled();
     expect(dependencies.completeStop).not.toHaveBeenCalled();
+    expect(dependencies.upsert).toHaveBeenCalledWith(
+      "C:/tmp/instances.json",
+      "worktree:task",
+      expect.objectContaining({ status: "failed", phase: "failed", desiredState: "open" }),
+      5
+    );
   });
 
   it("fails closed when a reused foreign pid's stale records cannot be cleared", async () => {
@@ -1405,7 +1415,8 @@ describe("isolatedInstanceRegistryHost", () => {
       code: "backend_retire_incomplete",
       message: expect.stringContaining("reused by conhost.exe")
     });
-    expect(dependencies.reclaimBackend).not.toHaveBeenCalled();
+    expect(dependencies.reclaimBackend).toHaveBeenCalledOnce();
+    expect(dependencies.clearRuntimeState).not.toHaveBeenCalled();
     expect(dependencies.completeStop).not.toHaveBeenCalled();
   });
 
