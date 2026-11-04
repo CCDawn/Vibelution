@@ -1,8 +1,9 @@
 import { LoaderCircle, RefreshCw } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { LauncherStartupSettings } from "../api/launcher";
 import { VButton, VNativeInput, VTooltip } from "../components/vui";
+import startupStyles from "./LauncherStartupSettingsPanel.styles";
 import styles from "./LauncherPortSettingsPanel.styles";
 
 type LauncherPortSettingsCopy = {
@@ -21,6 +22,8 @@ type LauncherPortSettingsCopy = {
 
 type LauncherPortSettingsPanelProps = {
   copy: LauncherPortSettingsCopy;
+  /** Language for the conflict notice; defaults to Chinese until callers pass the UI language. */
+  uiLang?: "zh" | "en";
   setting: LauncherStartupSettings | undefined;
   controlPortOverride: number;
   backendPortOverride: number;
@@ -28,6 +31,30 @@ type LauncherPortSettingsPanelProps = {
   pending: boolean;
   onSave: (setting: LauncherStartupSettings) => void;
 };
+
+type PortTexts = { control: string; backend: string; frontend: string };
+
+function portTexts(setting: LauncherStartupSettings | undefined): PortTexts {
+  return {
+    control: String(setting?.launcher.controlPort ?? ""),
+    backend: String(setting?.workbench.backendPort ?? ""),
+    frontend: String(setting?.workbench.frontendPort ?? ""),
+  };
+}
+
+function portConflictText(uiLang: "zh" | "en") {
+  return uiLang === "zh"
+    ? {
+        conflict: "端口设置已被其他页面或进程修改。草稿已保留，加载最新设置后可重新编辑。",
+        loadLatest: "加载最新设置",
+        waitingForLatest: "正在读取最新设置…",
+      }
+    : {
+        conflict: "Port settings changed in another page or process. Your draft is preserved; load the latest settings before editing again.",
+        loadLatest: "Load latest settings",
+        waitingForLatest: "Waiting for the latest settings…",
+      };
+}
 
 function parsePortDraft(value: string) {
   if (!/^\d+$/.test(value.trim())) {
@@ -43,6 +70,7 @@ function differingOverride(configured: number, override: number) {
 
 export function LauncherPortSettingsPanel({
   copy,
+  uiLang = "zh",
   setting,
   controlPortOverride,
   backendPortOverride,
@@ -58,27 +86,69 @@ export function LauncherPortSettingsPanel({
         setting.workbench.frontendPort,
       ].join("|")
     : "";
-  const [controlPortText, setControlPortText] = useState("");
-  const [backendPortText, setBackendPortText] = useState("");
-  const [frontendPortText, setFrontendPortText] = useState("");
+  const [controlPortText, setControlPortText] = useState(() => String(setting?.launcher.controlPort ?? ""));
+  const [backendPortText, setBackendPortText] = useState(() => String(setting?.workbench.backendPort ?? ""));
+  const [frontendPortText, setFrontendPortText] = useState(() => String(setting?.workbench.frontendPort ?? ""));
   const [validationError, setValidationError] = useState("");
+  const [baseline, setBaseline] = useState(() => ({ ...portTexts(setting), configHash: setting?.configHash ?? "" }));
+  const [conflictSetting, setConflictSetting] = useState<LauncherStartupSettings>();
+  const text = portConflictText(uiLang);
+  const dirty = controlPortText !== baseline.control
+    || backendPortText !== baseline.backend
+    || frontendPortText !== baseline.frontend;
+  const previousSignature = useRef(signature);
+  const baselineRef = useRef(baseline);
+  const dirtyRef = useRef(dirty);
+  const pendingRef = useRef(pending);
+  baselineRef.current = baseline;
+  dirtyRef.current = dirty;
+  pendingRef.current = pending;
 
   useEffect(() => {
-    setControlPortText(String(setting?.launcher.controlPort ?? ""));
-    setBackendPortText(String(setting?.workbench.backendPort ?? ""));
-    setFrontendPortText(String(setting?.workbench.frontendPort ?? ""));
-    setValidationError("");
-  }, [signature]);
+    if (signature === previousSignature.current) {
+      return;
+    }
+    previousSignature.current = signature;
+
+    if (!dirtyRef.current && !pendingRef.current) {
+      const next = portTexts(setting);
+      setControlPortText(next.control);
+      setBackendPortText(next.backend);
+      setFrontendPortText(next.frontend);
+      setBaseline({ ...next, configHash: setting?.configHash ?? "" });
+      setValidationError("");
+      setConflictSetting(undefined);
+      return;
+    }
+
+    if (setting?.configHash && setting.configHash !== baselineRef.current.configHash) {
+      setConflictSetting(setting);
+    }
+  }, [setting, signature]);
 
   const current = setting;
   if (!current) {
     return null;
   }
 
-  const controlsDisabled = pending || !current.configHash;
+  const controlsDisabled = pending || !current.configHash || Boolean(conflictSetting);
   const controlOverride = differingOverride(current.launcher.controlPort, controlPortOverride);
   const backendOverride = differingOverride(current.workbench.backendPort, backendPortOverride);
   const frontendOverride = differingOverride(current.workbench.frontendPort, frontendPortOverride);
+
+  function adoptLatestPorts() {
+    const latest = conflictSetting;
+    if (!latest?.configHash) {
+      return;
+    }
+    const next = portTexts(latest);
+    setControlPortText(next.control);
+    setBackendPortText(next.backend);
+    setFrontendPortText(next.frontend);
+    setBaseline({ ...next, configHash: latest.configHash });
+    setConflictSetting(undefined);
+    setValidationError("");
+  }
 
   function savePorts() {
     const currentSetting = setting;
@@ -92,7 +162,16 @@ export function LauncherPortSettingsPanel({
       setValidationError(copy.invalidPort);
       return;
     }
+    const next: PortTexts = {
+      control: String(controlPort),
+      backend: String(backendPort),
+      frontend: String(frontendPort),
+    };
     setValidationError("");
+    setControlPortText(next.control);
+    setBackendPortText(next.backend);
+    setFrontendPortText(next.frontend);
+    setBaseline({ ...next, configHash: currentSetting.configHash });
     onSave({
       ...currentSetting,
       launcher: { ...currentSetting.launcher, controlPort },
@@ -107,6 +186,14 @@ export function LauncherPortSettingsPanel({
         <small className={styles.hint}>{copy.portSettingsHint}</small>
       </summary>
       <div className={styles.body}>
+        {conflictSetting ? (
+          <div className={startupStyles.settingsConflict} role="alert">
+            <p>{text.conflict}</p>
+            <VButton type="button" variant="secondary" onPress={adoptLatestPorts}>
+              {text.loadLatest}
+            </VButton>
+          </div>
+        ) : null}
         <div className={styles.fields}>
           <label className={styles.field}>
             <VTooltip content={copy.launcherControlPortHint} width="wide">
