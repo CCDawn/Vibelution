@@ -633,20 +633,24 @@ describe("Launcher assistant task cards", () => {
     onlyReads();
   });
 
-  it("distinguishes a first read failure from an available empty feed and does not auto retry", async () => {
+  it("distinguishes a first read failure from an available empty feed and probes the error with bounded backoff", async () => {
     dispatchReply = async () => { throw new Error("offline"); };
     await render();
     expect(container.textContent).toContain("任务状态暂不可用");
     expect(container.textContent).not.toContain("暂无此类任务");
-    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
-    expect(dispatchReads()).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); }); await settle();
+    expect(dispatchReads()).toBe(4); // probes due at +3s, +9s, +21s after the first failure
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); }); await settle();
+    expect(dispatchReads()).toBe(6); // probes at +33s and +45s exhaust the five-attempt budget
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); }); await settle();
+    expect(dispatchReads()).toBe(6); // no retry storm past the cap
     rows = []; dispatchReply = async () => rows;
     await click("刷新");
     expect(container.textContent).toContain("暂无此类任务");
-    expect(dispatchReads()).toBe(2);
+    expect(dispatchReads()).toBe(7);
   });
 
-  it("retains old cards as unknown after a poll fails and stops polling the error", async () => {
+  it("retains old cards as unknown after a poll fails and probes the error with bounded backoff", async () => {
     await render();
     expect(container.textContent).toContain("执行中");
     dispatchReply = async () => { throw new Error("disconnected"); };
@@ -660,8 +664,28 @@ describe("Launcher assistant task cards", () => {
     await click("关闭", dialog);
     expect(container.textContent).not.toContain("暂无此类任务");
     const reads = dispatchReads();
-    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
-    expect(dispatchReads()).toBe(reads);
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); }); await settle();
+    expect(dispatchReads()).toBe(reads + 3); // probes due at +3s, +9s, +21s after the failed poll
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); }); await settle();
+    expect(dispatchReads()).toBe(reads + 5); // probes at +33s and +45s finish the five-attempt budget
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); }); await settle();
+    expect(dispatchReads()).toBe(reads + 5); // capped: waiting for manual refresh instead of a retry storm
+  });
+
+  it("pauses bounded error probing while the view is hidden and recovers through the re-enable read", async () => {
+    dispatchReply = async () => { throw new Error("offline"); };
+    await render();
+    expect(dispatchReads()).toBe(1);
+    visibility = "hidden";
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); }); await settle();
+    expect(dispatchReads()).toBe(1); // hidden: no probe fires, however long the page is away
+    visibility = "visible";
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    await settle();
+    expect(dispatchReads()).toBe(2); // visible again: the stale error read reruns once on re-enable
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); }); await settle();
+    expect(dispatchReads()).toBe(2); // the probe budget was spent by elapsed time: no retry storm
   });
 
   it("does not turn unrelated shared status refreshes into automatic retries of a failed feed", async () => {
@@ -674,6 +698,9 @@ describe("Launcher assistant task cards", () => {
     }
     expect(dispatchReads()).toBe(1);
     expect(container.textContent).toContain("任务状态暂不可用");
+    // Recovery still follows only the probe cadence, never the status refreshes.
+    await act(async () => { await vi.advanceTimersByTimeAsync(9_000); }); await settle();
+    expect(dispatchReads()).toBe(3); // probes due at +3s and +9s after the first failure
   });
 
   it.each([
@@ -807,18 +834,18 @@ describe("Launcher assistant task cards", () => {
     onlyReads();
   });
 
-  it("keeps dispatch cards current when the independent team source fails and does not retry that source", async () => {
+  it("keeps dispatch cards current when the independent team source fails and probes it only on the bounded error cadence", async () => {
     status.teamRunsVersion = 1;
     teamReply = async () => { throw new Error("team offline"); };
     await render();
     expect(container.textContent).toContain("任务状态暂不可用");
     expect(container.querySelector('article[data-task-kind="dispatch"]')?.getAttribute("data-task-state")).toBe("running");
     await act(async () => { await vi.advanceTimersByTimeAsync(3_000); }); await settle();
-    expect(teamReads()).toBe(1);
+    expect(teamReads()).toBe(2); // the dispatch cadence plus the first bounded probe of the failed team source
     expect(dispatchReads()).toBe(2);
     teamReply = async () => teamPage([teamRun()]);
     await click("刷新");
-    expect(teamReads()).toBe(2);
+    expect(teamReads()).toBe(3);
     await click("已结束 1");
     expect(container.querySelector('article[data-task-kind="team_run"]')?.getAttribute("data-task-state")).toBe("awaiting_verification");
   });
@@ -837,8 +864,11 @@ describe("Launcher assistant task cards", () => {
       nativeStatus: null, revision: null, observedAt: null, receiptBound: false, lastKnown: expect.objectContaining({ runId: "run-1" }) }));
     await click("进行中 1");
     expect(container.querySelector('article[data-task-kind="dispatch"]')?.getAttribute("data-task-state")).toBe("running");
-    await act(async () => { await vi.advanceTimersByTimeAsync(9_000); }); await settle();
-    expect(teamReads()).toBe(2);
+    const reads = teamReads();
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); }); await settle();
+    expect(teamReads()).toBe(reads + 5); // five bounded probes after the failed active poll
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); }); await settle();
+    expect(teamReads()).toBe(reads + 5); // capped: no retry storm past the budget
   });
 
   it("keeps partial unknown observations manual and suspends known active team reads when hidden", async () => {

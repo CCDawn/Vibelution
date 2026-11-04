@@ -3,6 +3,7 @@ import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from "@
 import { getLauncherAssistantDispatches, getLauncherAssistantStatus, getLauncherAssistantTeamRuns } from "../../../api/launcherAssistant";
 import { projectAssistantDispatchTasks, type AssistantDispatchTask } from "./assistantDispatchTasks";
 import { projectAssistantTeamRunTasks, retainAssistantTeamRunDisplay, type AssistantTask, type AssistantTeamRunObservationPage } from "./assistantTeamRunTasks";
+import { assistantTaskErrorProbeInterval } from "./assistantTaskProbes";
 import { taskCleanupTargets, taskGroup, taskTime, useAssistantTaskCleanup } from "./assistantTaskCleanup";
 import { LauncherTaskCleanupDialog } from "./LauncherTaskCleanupDialog";
 import { LauncherAssistantTaskDetail } from "./LauncherAssistantTaskDetail";
@@ -29,6 +30,13 @@ export function LauncherAssistantTaskCards({onReview,onApproval,onOpenConversati
   const [shown, setShown] = useState(PAGE_SIZE);
   const [confirmedIdentity, setConfirmedIdentity] = useState("");
   const activeView = useRef({ mounted: false, identity: "", canAct: false });
+  // First-failure anchors of the two feed reads. query.state only exposes the
+  // LAST error time, while the bounded probe cadence must grow across
+  // consecutive failures and reset on any success or identity change. A retry
+  // fetch must NOT reset the anchor: react-query optimistically reports a
+  // no-data error query as non-error while its retry is in flight.
+  const dispatchProbeStartedAt = useRef<number | null>(null);
+  const teamProbeStartedAt = useRef<number | null>(null);
   useEffect(() => {
     activeView.current.mounted = true;
     const update = () => {
@@ -81,8 +89,15 @@ export function LauncherAssistantTaskCards({onReview,onApproval,onOpenConversati
     },
     enabled: reading, retry: false, staleTime: 0,
     refetchOnWindowFocus: false, refetchOnReconnect: false, refetchIntervalInBackground: false,
-    refetchInterval: query => reading && query.state.status === "success"
-      && projectAssistantDispatchTasks(query.state.data ?? []).tasks.some(task => task.shouldPoll) ? 3_000 : false,
+    // An error keeps a bounded liveness probe (3s→6s→12s, five attempts) so a
+    // recovered source is rejoined without manual refresh; the gate on
+    // `reading` stops it the moment the page hides or the identity is lost.
+    refetchInterval: query => {
+      if (!reading) return false;
+      if (query.state.status === "error") return assistantTaskErrorProbeInterval(dispatchProbeStartedAt.current, Date.now());
+      return query.state.status === "success"
+        && projectAssistantDispatchTasks(query.state.data ?? []).tasks.some(task => task.shouldPoll) ? 3_000 : false;
+    },
   });
   const teamQueryKey = ["launcher-assistant", "team-task-cards", agentId, sessionId];
   const teamRuns = useInfiniteQuery({
@@ -99,10 +114,23 @@ export function LauncherAssistantTaskCards({onReview,onApproval,onOpenConversati
     getNextPageParam: page => page.nextCursor ?? undefined,
     enabled: teamEnabled, retry: false, staleTime: 0,
     refetchOnWindowFocus: false, refetchOnReconnect: false, refetchIntervalInBackground: false,
-    refetchInterval: query => teamEnabled && query.state.status === "success"
-      && projectAssistantTeamRunTasks(query.state.data?.pages.flatMap(page => page.teamRuns) ?? [])
-        .tasks.some(task => task.shouldPoll) ? 3_000 : false,
+    // Same bounded error probe as the dispatch feed, gated on `teamEnabled`.
+    refetchInterval: query => {
+      if (!teamEnabled) return false;
+      if (query.state.status === "error") return assistantTaskErrorProbeInterval(teamProbeStartedAt.current, Date.now());
+      return query.state.status === "success"
+        && projectAssistantTeamRunTasks(query.state.data?.pages.flatMap(page => page.teamRuns) ?? [])
+          .tasks.some(task => task.shouldPoll) ? 3_000 : false;
+    },
   });
+  useEffect(() => {
+    if (dispatches.isSuccess) dispatchProbeStartedAt.current = null;
+    else if (dispatches.isError) dispatchProbeStartedAt.current = dispatchProbeStartedAt.current ?? Date.now();
+  }, [dispatches.isSuccess, dispatches.isError, identity]);
+  useEffect(() => {
+    if (teamRuns.isSuccess) teamProbeStartedAt.current = null;
+    else if (teamRuns.isError) teamProbeStartedAt.current = teamProbeStartedAt.current ?? Date.now();
+  }, [teamRuns.isSuccess, teamRuns.isError, identity]);
   useEffect(() => setShown(PAGE_SIZE), [identity]);
   const unavailable = status.isError || dispatches.isError;
   const loading = !unavailable && (!identityConfirmed || status.isPending || dispatches.isPending
