@@ -16,11 +16,14 @@ export function useLauncherAssistantBudget(sessionId: string, agentId: string, l
   const flight = useRef(false);
   const [pendingOwner, setPendingOwner] = useState("");
   const [failure, setFailure] = useState<{ owner: string; message: string } | null>(null);
-  const query = useQuery({ queryKey: key, queryFn: async () => {
-    const incoming = await getLauncherAssistantBudget();
-    const current = client.getQueryData<SessionBudgetParameters>(key);
-    return current && current.revision >= incoming.revision ? current : incoming;
-  },
+  const query = useQuery({ queryKey: key, queryFn: getLauncherAssistantBudget,
+    // Merge at the actual cache write, including reconnect reads that can
+    // settle between the save receipt and React Query's commit microtask.
+    structuralSharing: (oldData, newData) => {
+      const current = oldData as SessionBudgetParameters | undefined;
+      const incoming = newData as SessionBudgetParameters;
+      return current && current.revision >= incoming.revision ? current : incoming;
+    },
     enabled: Boolean(sessionId && agentId), retry: false, staleTime: 0 });
 
   async function save(parameters: ChatComposerBudgetParametersPatch) {

@@ -29,6 +29,26 @@ afterEach(async () => {
 });
 
 describe("Launcher assistant budget state", () => {
+  it.each([0, 1, 2, 3, 4])("keeps the saved quota when an older read settles %i microtasks before confirmation", async gap => {
+    await render();
+    let confirm!: (value: unknown) => void;
+    let oldRead!: (value: unknown) => void;
+    const write = new Promise(done => { confirm = done; });
+    const read = new Promise(done => { oldRead = done; });
+    invoke.mockImplementation(async request => request.operation === "setBudgetParameters" ? write : read);
+    await act(async () => control!.onSave({ revision: 3, maxCallsPerTurn: 0 }));
+    let refresh!: Promise<void>;
+    await act(async () => { refresh = client.invalidateQueries({ queryKey: ["launcher-assistant", "budget"] }); });
+    await act(async () => {
+      oldRead({ revision: 3, maxCallsPerTurn: 16 });
+      for (let step = 0; step < gap; step += 1) await Promise.resolve();
+      confirm({ revision: 4, maxCallsPerTurn: 0 });
+      await refresh;
+    });
+    await settle();
+    expect(control?.revision).toBe(4);
+    expect(control?.maxCallsPerTurn).toBe(0);
+  });
   it("does not let a read started during a save roll back the confirmed quota", async () => {
     await render();
     let confirm!: (value: unknown) => void;
