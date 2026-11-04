@@ -16,7 +16,7 @@ export function startAssistantReminderPump(options: {
   host: ReminderHost;
   available(): boolean;
   notify(notice: ReminderNotice, recoveredFallback: boolean, onClick: () => void, onFailure: () => void, onFallback: (decision: Promise<boolean>) => void,
-    onLateFallback: (show: () => Promise<boolean>) => void): Promise<AssistantReminderChannel>;
+    onLateFallback: (show: () => Promise<boolean>) => void, signal: AbortSignal): Promise<AssistantReminderChannel>;
   openAssistant(): void;
   onError(reason: "notification" | "transport"): void;
   intervalMs?: number;
@@ -24,6 +24,7 @@ export function startAssistantReminderPump(options: {
   let stopped = false;
   let retired = false;
   let permanentStop = false;
+  const notificationStop = new AbortController();
   let epoch = 0;
   let migrationDrain: Promise<void> | undefined;
   let migrationDrained = false;
@@ -62,7 +63,7 @@ export function startAssistantReminderPump(options: {
       let event: AssistantReminder | null;
       try { event = await claiming; }
       finally { claiming = undefined; }
-      if (!current()) return;
+      if (permanentStop || !current()) return;
       failureReported = false;
       if (!event) { schedule(delay); return; }
       let clicked = false;
@@ -131,7 +132,7 @@ export function startAssistantReminderPump(options: {
         if (migrationDrained) {
           if (!deferredLate) { deferredLate = true; deferredCallbacks.push(() => { deferredLate = false; lateNow(show); }); }
         } else lateNow(show);
-      });
+      }, notificationStop.signal);
       if (!current()) return;
       acknowledgement = options.host.settleReminder(event, channel, false);
       recordClick();
@@ -154,6 +155,7 @@ export function startAssistantReminderPump(options: {
   const stop = async () => {
     permanentStop = true;
     stopped = true;
+    notificationStop.abort();
     if (timer) clearTimeout(timer);
     if (active) await active;
     if (pendingDialogs.size) {
