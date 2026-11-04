@@ -165,16 +165,32 @@ class TaskCleanup:
         key = adapter._key(target.projectId, target.originAction, target.requestId)
         return adapter._root / "cleanup_tombstones" / (key + ".json")
 
-    def _marker_scope(self, target, payload):
-        binding = self.dispatch._project_read_binding(target.projectId)
+    def _marker_scope(self, target, payload, project_binding=None):
+        if project_binding is None:
+            binding = self.dispatch._project_read_binding(target.projectId)
+            project_binding = self.dispatch._binding(binding[1])
         scope = {"schemaVersion": 1, "kind": target.kind, "projectId": target.projectId,
-                 "projectBinding": self.dispatch._binding(binding[1]),
+                 "projectBinding": project_binding,
                  "agentId": payload.agentId, "directSessionId": payload.directSessionId, "localOnly": target.localOnly}
         if target.kind == "dispatch":
             scope["dispatchId"] = target.dispatchId
         else:
             scope.update(originAction=target.originAction, requestId=target.requestId)
         return scope
+
+    def _row(self, dispatch_id):
+        """Read a dispatch record, tolerating a since-unregistered source project.
+
+        Registered reads still verify the registry binding; this fallback only
+        unlocks the reference-only exits where the proof itself reports the
+        unregistered project. A changed-but-registered binding keeps raising.
+        """
+        try:
+            return self.dispatch._read(dispatch_id)
+        except DispatchError as error:
+            if error.code != "PROJECT_NOT_AUTHORIZED":
+                raise
+        return self.dispatch._read(dispatch_id, require_authorized=False)
 
     def _completed_plan(self, target, payload, path):
         binding = self.dispatch._project_read_binding(target.projectId)
@@ -223,11 +239,30 @@ class TaskCleanup:
         if record.get("clientRequestId") != request_id:
             raise ValueError("cleanup_request_identity_unconfirmed")
 
+        absence = None
+
         async def query(client):
+            nonlocal absence
             # A lost start response can still hide an admitted task whose lease
-            # patrol recovers through this exact request. Never infer absence
-            # from a missing local ID, credential denial or target 404.
-            found = await _bounded_native_request(client.get_task_for_request(client_request_id=request_id))
+            # patrol recovers through this exact request. Absence is accepted
+            # only from this lookup, after the source handshake and the durable
+            # capability check already succeeded; a credential denial or a 404
+            # on the recovered task itself stays unconfirmed below.
+            try:
+                found = await _bounded_native_request(client.get_task_for_request(client_request_id=request_id))
+            except BackendClientError as error:
+                if error.code == "TASK_NOT_FOUND":
+                    # Control token and capability header were both accepted;
+                    # the source explicitly answered that no task is bound to
+                    # this exact request for this adapter's own credential.
+                    absence = "task_absent"
+                elif error.code == "UNKNOWN_REQUEST":
+                    # The credential ledger holds no capability for this
+                    # request, so no lease patrol or reconcile path can ever
+                    # recover a hidden task through this ledger generation.
+                    # The source reachability handshake still ran first.
+                    absence = "credential_unavailable"
+                raise
             recovered_id = found.get("taskId") if isinstance(found, dict) else None
             if (not isinstance(recovered_id, str)
                     or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}", recovered_id)):
@@ -248,6 +283,13 @@ class TaskCleanup:
             with anyio.fail_after(_REQUEST_PROOF_BUDGET):
                 proof = await self.dispatch._call(target.projectId, query)
         except (BackendClientError, DispatchError) as error:
+            if error.code == "PROJECT_NOT_AUTHORIZED":
+                # The registry lookup fails before any network I/O: the source
+                # project is no longer admitted by this host, so the local
+                # association cannot reference observable work there.
+                return "request_absent", request_id, "project_unregistered"
+            if absence is not None:
+                return "request_absent", request_id, absence
             if error.code in {"UNKNOWN_REQUEST", "TASK_NOT_FOUND"}:
                 raise ValueError("cleanup_request_unconfirmed") from None
             raise
@@ -257,9 +299,16 @@ class TaskCleanup:
         return "request", request_id, proof["taskId"], proof["status"]
 
     async def _local_only_plan(self, target, path):
-        binding = self.dispatch._project_read_binding(target.projectId)
+        try:
+            binding = self.dispatch._project_read_binding(target.projectId)
+        except DispatchError as error:
+            # An unregistered source project cannot host observable work; the
+            # dispatch reference exits below carry their own proof instead.
+            if error.code != "PROJECT_NOT_AUTHORIZED" or target.kind != "dispatch":
+                raise
+            binding = None
         if target.kind == "dispatch":
-            record = self.dispatch._read(target.dispatchId)
+            record = self._row(target.dispatchId)
             if (record.get("projectId") != target.projectId
                     or not re.fullmatch(r"[a-f0-9]{64}", str(record.get("requestDigest", "")))):
                 raise ValueError("cleanup_reference_changed")
@@ -280,20 +329,26 @@ class TaskCleanup:
         if any(status in active for status in statuses if isinstance(status, str)):
             raise ValueError("cleanup_task_active")
         source_status = statuses
+        summary = {"status": "ready", "estimatedBytes": 0,
+                   "resources": [{"kind": "launcher_task_record", "count": 1, "bytes": 0}],
+                   "retained": [{"kind": "source_resources", "reason": "仅移除助理中的任务关联，源任务和共用资源均已保留。"}]}
         if target.kind == "dispatch":
-            source_status = statuses, await self._dispatch_terminal_proof(target, record)
+            proof = await self._dispatch_terminal_proof(target, record)
+            source_status = statuses, proof
+            if proof[0] == "request_absent":
+                summary["sourceConfirmed"] = proof[2]
         if target.kind == "team_run" and any(getattr(target, key) is not None
                 and getattr(target, key) != run.get(key) for key in ("teamId", "flowId", "runId")):
             raise ValueError("cleanup_run_changed")
-        if self.dispatch._project_read_binding(target.projectId) != binding:
+        if binding is not None and self.dispatch._project_read_binding(target.projectId) != binding:
             raise ValueError("cleanup_reference_changed")
         size = _size(path)
         plan = {"path": path, "bytes": size, "referenceOnly": True, "sourceStatus": source_status,
                 "binding": _dispatch_binding(record) if target.kind == "dispatch" else binding,
                 "record": record, "runBinding": tuple(run.get(key) for key in ("teamId", "flowId", "runId"))}
-        return plan, {"status": "ready", "estimatedBytes": size,
-                      "resources": [{"kind": "launcher_task_record", "count": 1, "bytes": size}],
-                      "retained": [{"kind": "source_resources", "reason": "仅移除助理中的任务关联，源任务和共用资源均已保留。"}]}
+        summary["estimatedBytes"] = size
+        summary["resources"] = [{"kind": "launcher_task_record", "count": 1, "bytes": size}]
+        return plan, summary
 
     async def _team_plan(self, target):
         from .team_patrol import TeamPatrolObserver, _ID
@@ -336,10 +391,12 @@ class TaskCleanup:
         proof = await self._dispatch_terminal_proof(target, row)
         size = _size(path)
         retained = [{"kind": "source_resources", "reason": "本次仅清理助理的任务关联，共用项目和其他源资源均已保留。"}]
+        summary = {"status": "ready", "estimatedBytes": size,
+                   "resources": [{"kind": "launcher_task_record", "count": 1, "bytes": size}], "retained": retained}
+        if proof[0] == "request_absent":
+            summary["sourceConfirmed"] = proof[2]
         return {"path": path, "binding": _dispatch_binding(row), "referenceOnly": True,
-                "sourceStatus": (status, proof), "bytes": size}, {
-                    "status": "ready", "estimatedBytes": size,
-                    "resources": [{"kind": "launcher_task_record", "count": 1, "bytes": size}], "retained": retained}
+                "sourceStatus": (status, proof), "bytes": size}, summary
 
     async def _plan(self, target, payload):
         if target.kind == "dispatch":
@@ -357,12 +414,15 @@ class TaskCleanup:
             return plan, {"status": "ready", "estimatedBytes": plan["bytes"],
                           "resources": [{"kind": "launcher_task_record", "count": 1, "bytes": plan["bytes"]}],
                           "retained": [{"kind": "shared_team_resources", "reason": "团队、成员、运行历史和成果供其他功能共用，本次仅删除助理的任务关联记录。"}]}
-        row = self.dispatch._read(target.dispatchId)
+        row = self._row(target.dispatchId)
         if row.get("projectId") != target.projectId:
             raise ValueError("cleanup_reference_changed")
         path = self.dispatch._path(target.dispatchId)
         if not row.get("nativeTaskId"):
             return await self._reference_plan(target, row, path)
+        # TODO(cleanup): a bound nativeTaskId under a since-unregistered source
+        # still dead-ends on PROJECT_NOT_AUTHORIZED here; freeing it needs a
+        # product decision about silently abandoning source resources.
         native = await self.dispatch._call(target.projectId,
             lambda client: client.preview_task_cleanup(task_id=row["nativeTaskId"]))
         if (not isinstance(native, dict) or native.get("taskId") != row["nativeTaskId"]
@@ -433,7 +493,7 @@ class TaskCleanup:
                         item.update(status="deleted", alreadyDeleted=True, retained=summary["retained"])
                 elif target.kind == "dispatch":
                     async with self.dispatch._dispatch_lock(target.dispatchId):
-                        row = self.dispatch._read(target.dispatchId)
+                        row = self._row(target.dispatchId)
                         if _dispatch_binding(row) != plan["binding"]:
                             raise ValueError("cleanup_reference_changed")
                         marker = self._marker_path(target)
@@ -444,9 +504,11 @@ class TaskCleanup:
                             if (current is None or not current.get("referenceOnly") or any(current[key] != plan[key]
                                     for key in ("binding", "sourceStatus"))):
                                 raise ValueError("cleanup_reference_changed")
-                            if _dispatch_binding(self.dispatch._read(target.dispatchId)) != plan["binding"]:
+                            if _dispatch_binding(self._row(target.dispatchId)) != plan["binding"]:
                                 raise ValueError("cleanup_reference_changed")
                             item.update(status="deleted", retained=summary["retained"])
+                            if summary.get("sourceConfirmed"):
+                                item["sourceConfirmed"] = summary["sourceConfirmed"]
                         if not plan.get("referenceOnly"):
                             # Persist recovery before an irreversible native request.
                             # Local-only removal must not become a native-cleanup retry.
@@ -468,9 +530,14 @@ class TaskCleanup:
                             # This compact marker prevents a deleted dispatch ID
                             # from becoming a second execution after credential loss.
                             self._identity(payload)
-                            if _dispatch_binding(self.dispatch._read(target.dispatchId)) != plan["binding"]:
+                            if _dispatch_binding(self._row(target.dispatchId)) != plan["binding"]:
                                 raise ValueError("cleanup_reference_changed")
-                            marker_data = {**self._marker_scope(target, payload), "requestDigest": row["requestDigest"]}
+                            # A reference-only plan is verified against the
+                            # record's own binding digest, which equals the
+                            # registry digest while the project stays admitted.
+                            marker_data = {**self._marker_scope(target, payload,
+                                plan["binding"][2] if plan.get("referenceOnly") else None),
+                                "requestDigest": row["requestDigest"]}
                             atomic_write_json(marker, marker_data, strict_replace=True)
                             _size(plan["path"])
                             plan["path"].unlink()

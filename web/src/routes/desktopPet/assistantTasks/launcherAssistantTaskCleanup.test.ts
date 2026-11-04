@@ -33,6 +33,21 @@ beforeEach(async () => {
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("Launcher task cleanup batched transport", () => {
+  it("keeps a confirmed-absence evidence note and falls back for unknown codes", async () => {
+    expect(api.launcherTaskCleanupSourceNote("task_absent", "zh")).toBe("源项目确认无此任务，已移除本地关联。");
+    expect(api.launcherTaskCleanupSourceNote("credential_unavailable", "zh"))
+      .toContain("无法再被观察或恢复");
+    expect(api.launcherTaskCleanupSourceNote("project_unregistered", "en"))
+      .toBe("The source project is no longer authorized; the local association was removed.");
+    expect(api.launcherTaskCleanupSourceNote("future_code", "zh")).toContain("已移除本地关联");
+    expect(api.launcherTaskCleanupSourceNote(undefined, "zh")).toBeNull();
+    const input = scope(1), plan = await api.previewLauncherTaskCleanup(input);
+    invoke.mockImplementation(async (request: { operation: string; targets: LauncherTaskCleanupTarget[] }) =>
+      request.operation === "previewTaskCleanup" ? preview(request.targets, "native-preview")
+        : { ...deleted(request.targets), items: deleted(request.targets).items.map(item => ({ ...item, sourceConfirmed: "task_absent" })) });
+    const result = await api.executeLauncherTaskCleanup(input, plan.fingerprint);
+    expect(result.items[0].sourceConfirmed).toBe("task_absent");
+  });
   it("deducts storage growth in one batch from release in another batch", async () => {
     const input = scope(33), plan = await api.previewLauncherTaskCleanup(input);
     let batch = 0;

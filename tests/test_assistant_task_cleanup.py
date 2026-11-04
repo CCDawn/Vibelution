@@ -761,12 +761,17 @@ def unbound_scene(scene):
 @pytest.mark.parametrize("local_only", [False, True])
 @pytest.mark.parametrize("stage", ["diagnostics", "request", "task"])
 @pytest.mark.parametrize("code", ["UNKNOWN_REQUEST", "TASK_NOT_FOUND", "BACKEND_TIMEOUT", "BACKEND_UNAVAILABLE"])
-async def test_unbound_cleanup_never_treats_request_or_credential_failure_as_non_admission(unbound_scene, local_only, stage, code):
+async def test_unbound_cleanup_absence_exit_needs_the_request_lookup_itself(unbound_scene, local_only, stage, code):
     scene = unbound_scene
 
     async def unavailable(*args, **kwargs):
         raise BackendClientError("private credential and path", code=code)
 
+    # Only a denial answered by the request lookup itself is an absence exit:
+    # it follows the verified source handshake and capability check. The same
+    # code raised anywhere else (unreachable source, recovered-task fetch)
+    # still keeps the reference.
+    confirmed = stage == "request" and code in {"UNKNOWN_REQUEST", "TASK_NOT_FOUND"}
     if stage == "diagnostics":
         scene.service.dispatch._call = unavailable
     elif stage == "request":
@@ -776,11 +781,98 @@ async def test_unbound_cleanup_never_treats_request_or_credential_failure_as_non
     payload = scene.payload.model_dump()
     payload["targets"][0]["localOnly"] = local_only
     preview = await scene.service.preview(CleanupPreview(**payload))
+    if confirmed:
+        assert preview["items"][0]["status"] == "ready"
+        assert preview["items"][0]["sourceConfirmed"] == ("task_absent" if code == "TASK_NOT_FOUND"
+                                                          else "credential_unavailable")
+        return
     assert preview["items"][0]["status"] == "blocked" and scene.path.exists()
     assert "private" not in json.dumps(preview) and scene.client.calls == 0
     assert not scene.service._marker_path(scene.payload.targets[0]).exists()
     if code in {"UNKNOWN_REQUEST", "TASK_NOT_FOUND"}:
         assert "受理或结束" in preview["items"][0]["reason"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("local_only", [False, True])
+@pytest.mark.parametrize("code,evidence", [("TASK_NOT_FOUND", "task_absent"),
+                                           ("UNKNOWN_REQUEST", "credential_unavailable")])
+async def test_source_confirmed_absence_frees_reference_cleanup(unbound_scene, local_only, code, evidence):
+    scene = unbound_scene
+
+    async def absent(**kwargs):
+        raise BackendClientError("private request state", code=code)
+
+    scene.client.get_task_for_request = absent
+    payload = scene.payload.model_dump()
+    payload["targets"][0]["localOnly"] = local_only
+    payload = CleanupPreview(**payload)
+    preview = await scene.service.preview(payload)
+    assert preview["items"][0]["status"] == "ready"
+    assert preview["items"][0]["sourceConfirmed"] == evidence
+    result = await scene.service.execute(CleanupExecute(**payload.model_dump(), fingerprint=preview["fingerprint"]))
+    assert result["items"][0]["status"] == "deleted" and not scene.path.exists()
+    assert result["items"][0]["sourceConfirmed"] == evidence
+    marker = json.loads((scene.root / "deleted" / "dispatch-1.json").read_text())
+    assert marker["requestDigest"] == "a" * 64 and marker["localOnly"] is local_only
+    assert scene.client.calls == 0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("local_only", [False, True])
+async def test_absence_reverting_to_a_found_task_blocks_before_removal(unbound_scene, local_only):
+    scene = unbound_scene
+
+    async def absent(**kwargs):
+        raise BackendClientError("gone", code="TASK_NOT_FOUND")
+
+    scene.client.get_task_for_request = absent
+    payload = scene.payload.model_dump()
+    payload["targets"][0]["localOnly"] = local_only
+    payload = CleanupPreview(**payload)
+    preview = await scene.service.preview(payload)
+    assert preview["items"][0]["status"] == "ready"
+    del scene.client.get_task_for_request
+    result = await scene.service.execute(CleanupExecute(**payload.model_dump(), fingerprint=preview["fingerprint"]))
+    assert result["items"][0]["status"] == "blocked" and scene.path.exists()
+    assert not (scene.root / "deleted" / "dispatch-1.json").exists() and scene.client.calls == 0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("local_only", [False, True])
+async def test_unregistered_source_project_frees_reference_cleanup(scene, local_only):
+    row = json.loads(scene.path.read_text())
+    row.update(nativeTaskId="", receipt=None, status="failed")
+    scene.path.write_text(json.dumps(row))
+    dispatch = scene.service.dispatch
+    original_read = dispatch._read
+    denied = DispatchError("Project is not in the host-authorized registry.", code="PROJECT_NOT_AUTHORIZED")
+
+    def unregistered(dispatch_id, *, require_authorized=True):
+        if require_authorized:
+            raise denied
+        return original_read(dispatch_id)
+
+    def unregistered_binding(_):
+        raise denied
+
+    async def unregistered_call(project, fn):
+        raise denied
+
+    dispatch._read = unregistered
+    dispatch._project_read_binding = unregistered_binding
+    dispatch._call = unregistered_call
+    payload = scene.payload.model_dump()
+    payload["targets"][0]["localOnly"] = local_only
+    payload = CleanupPreview(**payload)
+    preview = await scene.service.preview(payload)
+    assert preview["items"][0]["status"] == "ready"
+    assert preview["items"][0]["sourceConfirmed"] == "project_unregistered"
+    result = await scene.service.execute(CleanupExecute(**payload.model_dump(), fingerprint=preview["fingerprint"]))
+    assert result["items"][0]["status"] == "deleted" and not scene.path.exists()
+    assert result["items"][0]["sourceConfirmed"] == "project_unregistered"
+    marker = json.loads((scene.root / "deleted" / "dispatch-1.json").read_text())
+    assert marker["requestDigest"] == "a" * 64 and marker["projectBinding"] == "binding"
 
 
 @pytest.mark.anyio
