@@ -1253,4 +1253,208 @@ describe("isolatedInstanceRegistryHost", () => {
       portLeaseStatus: "reclaimable"
     });
   });
+
+  const daemonRetireEntry = {
+    projectRoot: "C:/wt/task",
+    host: "127.0.0.1",
+    port: 8003,
+    spawnPid: 4242,
+    spawnCreateTime: 101,
+    spawnExecutable: "C:/Python/pythonw.exe",
+    generation: 5,
+    status: "stopping"
+  };
+
+  function daemonRetireDependencies(overrides: Record<string, unknown> = {}) {
+    return {
+      readDaemonPid: () => 9191,
+      readDaemonIdentity: () => null,
+      connect: async () => false,
+      pidAlive: (pid: number) => pid === 9191,
+      captureDaemonIdentity: vi.fn(async () => null as { pid: number; createTime: number; executable: string } | null),
+      clearDaemonRecords: vi.fn(() => ({ removedPaths: ["daemon.pid", "daemon.lock", "daemon.identity.json"], failedPaths: [] })),
+      reclaimBackend: vi.fn(async () => ({ reclaimed: true, reason: "port already released", verifiedPid: undefined })),
+      clearRuntimeState: vi.fn(() => ({ cleared: true, removedCount: 2, failedCount: 0 })),
+      completeStop: vi.fn(async () => ({ applied: true, entry: { status: "closed" } })),
+      upsert: vi.fn(async () => ({ applied: true, entry: { status: "failed" } })),
+      ...overrides
+    };
+  }
+
+  it("clears daemon records without killing anything when the recorded pid was reused by a foreign process", async () => {
+    const dependencies = daemonRetireDependencies({
+      captureDaemonIdentity: vi.fn(async () => ({ pid: 9191, createTime: 202, executable: "C:/Windows/system32/node.exe" }))
+    });
+    const result = await retireClaimedIsolatedRuntime({
+      instanceId: "worktree:task",
+      workspaceRoot: "C:/wt/task",
+      pythonPath: "python",
+      registryPath: "C:/tmp/instances.json",
+      entry: daemonRetireEntry,
+      desiredStateOnFailure: "open",
+      dependencies
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(dependencies.captureDaemonIdentity).toHaveBeenCalledWith({
+      pythonPath: "python", workspaceRoot: "C:/wt/task", pid: 9191
+    });
+    expect(dependencies.clearDaemonRecords).toHaveBeenCalledWith("C:/wt/task");
+    // The foreign pid never reaches the kill path: only the registered spawn
+    // pid is reclaimable and the daemon record was proven stale reuse.
+    expect(dependencies.reclaimBackend.mock.calls[0]?.[0]).toMatchObject({
+      registeredPids: [],
+      extraPids: []
+    });
+    expect(dependencies.clearRuntimeState).toHaveBeenCalledOnce();
+    expect(dependencies.completeStop).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { reason: "identity cannot be captured", identity: null },
+    { reason: "live python-family executable", identity: { pid: 9191, createTime: 202, executable: "C:/Python/python.exe" } }
+  ])("refuses conservatively when a live daemon record has no verifiable identity: $reason", async ({ identity }) => {
+    const dependencies = daemonRetireDependencies({ captureDaemonIdentity: vi.fn(async () => identity) });
+    const result = await retireClaimedIsolatedRuntime({
+      instanceId: "worktree:task",
+      workspaceRoot: "C:/wt/task",
+      pythonPath: "python",
+      registryPath: "C:/tmp/instances.json",
+      entry: daemonRetireEntry,
+      desiredStateOnFailure: "open",
+      dependencies
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: "backend_retire_incomplete",
+      message: expect.stringContaining("Runtime Manager daemon pid 9191")
+    });
+    expect(dependencies.reclaimBackend).not.toHaveBeenCalled();
+    expect(dependencies.clearDaemonRecords).not.toHaveBeenCalled();
+    expect(dependencies.clearRuntimeState).not.toHaveBeenCalled();
+    expect(dependencies.completeStop).not.toHaveBeenCalled();
+    expect(dependencies.upsert).toHaveBeenCalledWith(
+      "C:/tmp/instances.json",
+      "worktree:task",
+      expect.objectContaining({ status: "failed", phase: "failed", desiredState: "open" }),
+      5
+    );
+  });
+
+  it("clears daemon records and proceeds when the recorded daemon pid has exited", async () => {
+    const dependencies = daemonRetireDependencies({ pidAlive: () => false });
+    const result = await retireClaimedIsolatedRuntime({
+      instanceId: "worktree:task",
+      workspaceRoot: "C:/wt/task",
+      pythonPath: "python",
+      registryPath: "C:/tmp/instances.json",
+      entry: daemonRetireEntry,
+      desiredStateOnFailure: "open",
+      dependencies
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(dependencies.clearDaemonRecords).toHaveBeenCalledWith("C:/wt/task");
+    expect(dependencies.captureDaemonIdentity).not.toHaveBeenCalled();
+    expect(dependencies.clearRuntimeState).toHaveBeenCalledOnce();
+    expect(dependencies.completeStop).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed when stale daemon records of an exited pid cannot be cleared", async () => {
+    const dependencies = daemonRetireDependencies({
+      pidAlive: () => false,
+      clearDaemonRecords: vi.fn(() => ({ removedPaths: [], failedPaths: ["C:/wt/task/daemon.pid"] }))
+    });
+    const result = await retireClaimedIsolatedRuntime({
+      instanceId: "worktree:task",
+      workspaceRoot: "C:/wt/task",
+      pythonPath: "python",
+      registryPath: "C:/tmp/instances.json",
+      entry: daemonRetireEntry,
+      desiredStateOnFailure: "open",
+      dependencies
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: "backend_retire_incomplete",
+      message: expect.stringContaining("could not be cleared")
+    });
+    expect(dependencies.reclaimBackend).not.toHaveBeenCalled();
+    expect(dependencies.completeStop).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a reused foreign pid's stale records cannot be cleared", async () => {
+    const dependencies = daemonRetireDependencies({
+      captureDaemonIdentity: vi.fn(async () => ({ pid: 9191, createTime: 202, executable: "C:/Windows/system32/conhost.exe" })),
+      clearDaemonRecords: vi.fn(() => ({ removedPaths: [], failedPaths: ["C:/wt/task/daemon.lock"] }))
+    });
+    const result = await retireClaimedIsolatedRuntime({
+      instanceId: "worktree:task",
+      workspaceRoot: "C:/wt/task",
+      pythonPath: "python",
+      registryPath: "C:/tmp/instances.json",
+      entry: daemonRetireEntry,
+      desiredStateOnFailure: "open",
+      dependencies
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: "backend_retire_incomplete",
+      message: expect.stringContaining("reused by conhost.exe")
+    });
+    expect(dependencies.reclaimBackend).not.toHaveBeenCalled();
+    expect(dependencies.completeStop).not.toHaveBeenCalled();
+  });
+
+  it("clears a verified daemon's stale records only after its retirement is confirmed", async () => {
+    const dependencies = daemonRetireDependencies({
+      readDaemonIdentity: () => ({ pid: 9191, createTime: 202, executable: "C:/Python/pythonw.exe" }),
+      pidAlive: () => false
+    });
+    const result = await retireClaimedIsolatedRuntime({
+      instanceId: "worktree:task",
+      workspaceRoot: "C:/wt/task",
+      pythonPath: "python",
+      registryPath: "C:/tmp/instances.json",
+      entry: daemonRetireEntry,
+      desiredStateOnFailure: "open",
+      dependencies
+    });
+
+    expect(result).toEqual({ ok: true });
+    // The verified daemon pid is reconciled as dead before the reclaim pass,
+    // so it never reaches reclaimBackend; its stale records are then cleared.
+    expect(dependencies.reclaimBackend.mock.calls[0]?.[0]).toMatchObject({
+      registeredPids: [],
+      extraPids: []
+    });
+    expect(dependencies.clearDaemonRecords).toHaveBeenCalledOnce();
+    expect(dependencies.clearRuntimeState).toHaveBeenCalledOnce();
+    expect(dependencies.completeStop).toHaveBeenCalledOnce();
+  });
+
+  it("keeps verified daemon records untouched when retirement stays incomplete", async () => {
+    const dependencies = daemonRetireDependencies({
+      readDaemonIdentity: () => ({ pid: 9191, createTime: 202, executable: "C:/Python/pythonw.exe" }),
+      pidAlive: () => false,
+      reclaimBackend: vi.fn(async () => ({ reclaimed: false, reason: "port occupant did not answer" }))
+    });
+    const result = await retireClaimedIsolatedRuntime({
+      instanceId: "worktree:task",
+      workspaceRoot: "C:/wt/task",
+      pythonPath: "python",
+      registryPath: "C:/tmp/instances.json",
+      entry: daemonRetireEntry,
+      desiredStateOnFailure: "open",
+      dependencies
+    });
+
+    expect(result).toMatchObject({ ok: false, code: "backend_retire_incomplete" });
+    expect(dependencies.clearDaemonRecords).not.toHaveBeenCalled();
+    expect(dependencies.clearRuntimeState).not.toHaveBeenCalled();
+    expect(dependencies.completeStop).not.toHaveBeenCalled();
+  });
 });
