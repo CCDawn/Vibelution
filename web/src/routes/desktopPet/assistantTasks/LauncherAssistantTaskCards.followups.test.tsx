@@ -199,11 +199,11 @@ describe("stable grouping and readable results", () => {
     expect(cleanupDialog().textContent).toContain("团队运行仅移除关联");
   });
 
-  it("separates unavailable team state from limited and unrecoverable history", async () => {
+  it("omits permanent history caveats while retaining unavailable team state", async () => {
     teamReply = async () => page([team()], { coverage: { kind: "local_associations", historyComplete: false, legacyUnrecoverable: 2, invalidRecords: 0 } });
     await render();
-    expect(container.textContent).toContain("可显示的历史有限");
-    expect(container.textContent).toContain("部分旧关联无法恢复");
+    expect(container.textContent).not.toContain("可显示的历史有限");
+    expect(container.textContent).not.toContain("部分旧关联无法恢复");
     expect(container.textContent).not.toContain("部分团队关联或状态暂无法核验");
     teamReply = async () => { throw new Error("offline"); }; await click("刷新");
     expect(container.textContent).toContain("团队运行状态暂不可用");
