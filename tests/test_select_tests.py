@@ -828,6 +828,35 @@ def test_selector_bounds_workers_by_test_files_and_keeps_single_file_serial():
     assert " -n " not in single_file_command
 
 
+def test_assistant_migration_keeps_full_coverage_and_isolates_documentation_timing():
+    result = select_tests.select_tests(
+        ["core/assistant_runtime/management.py"],
+        select_tests.load_matrix(),
+    )
+
+    assert "assistant-migration-handoff" in {
+        rule["id"] for rule in result["matchedRules"]
+    }
+    assert result["coverageGaps"] == []
+    commands = result["commands"]
+    documentation_batches = [
+        command for command in commands
+        if "tests/test_external_management_documentation.py" in command.split()
+    ]
+    assert len(documentation_batches) == 1
+    assert '-n 6 --dist loadfile -m "not serial"' in documentation_batches[0]
+
+    timing_nodeid = (
+        "tests/test_external_management_documentation.py::"
+        "test_real_router_registry_spec_is_read_only_without_lifespan_or_builtin_bootstrap"
+    )
+    timing_commands = [command for command in commands if timing_nodeid in command.split()]
+    assert timing_commands == [
+        f".\\.venv\\Scripts\\python.exe -m pytest {timing_nodeid} -q --maxfail=0"
+    ]
+    assert commands.index(timing_commands[0]) == commands.index(documentation_batches[0]) + 1
+
+
 def test_selector_bounds_auto_appended_workers_at_six(tmp_path: Path):
     (tmp_path / "tests").mkdir()
     names = [f"test_pack_{index:02d}.py" for index in range(1, 10)]

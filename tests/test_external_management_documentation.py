@@ -211,6 +211,8 @@ def test_public_entry_dto_cannot_reintroduce_legacy_execution_claims(env):
             DocumentationEntry.model_validate({**raw, **injected})
 
 
+# Measure cold-start latency without contention from unrelated xdist workers.
+@pytest.mark.serial
 def test_real_router_registry_spec_is_read_only_without_lifespan_or_builtin_bootstrap(monkeypatch, private_operator_environment):
     import os
     import sys

@@ -11,6 +11,7 @@ import anyio
 import pytest
 
 from core.assistant_runtime import task_card_metadata as metadata
+from core.assistant_runtime.dispatch import DispatchError
 from core.assistant_runtime.dispatch_approval import DispatchWrite, dispatch_write_approval_summary
 from core.assistant_runtime.local_project_client import LocalAssistantBackendClient
 from core.external_agent.backend_client import BackendClientError, ManagedAgentBackendClient
@@ -23,7 +24,7 @@ def enrich(dispatch, rows):
 
 def label_dispatch(tmp_path, reader):
     return SimpleNamespace(management=SimpleNamespace(agent=reader),
-        _project_read_binding=lambda project: (1, tmp_path / project))
+        _project_read_binding=lambda project: (1, tmp_path / project), _task_card_agent_labels={})
 
 
 def test_verified_public_labels_are_bounded_deduplicated_and_rows_copied(tmp_path):
@@ -83,6 +84,225 @@ def test_binding_change_discards_only_optional_labels(tmp_path):
 def test_missing_metadata_capability_keeps_legacy_host_mocks_usable():
     rows = [{"dispatchId": "old", "receipt": {"status": "running"}}]
     assert enrich(SimpleNamespace(), rows) == rows
+
+
+def test_verified_name_survives_slow_refresh_and_updates_from_each_new_read(tmp_path, monkeypatch):
+    monkeypatch.setattr(metadata, "_LOOKUP_BUDGET", 0.01)
+    calls = []
+    names = iter(["Original", None, "Renamed", None])
+
+    async def agent(project_id, *, agent_id):
+        calls.append((project_id, agent_id))
+        name = next(names)
+        if name is None:
+            await anyio.sleep(10)
+        return {"projectId": project_id, "agent": {"agentId": agent_id, "displayName": name}}
+
+    dispatch = label_dispatch(tmp_path, agent)
+    rows = [{"dispatchId": "stable-task", "projectId": "project-a", "agentId": "worker",
+             "title": "", "receipt": {"status": "running"}}]
+    before = deepcopy(rows)
+    assert [enrich(dispatch, rows)[0]["agentName"] for _ in range(4)] == [
+        "Original", "Original", "Renamed", "Renamed"]
+    assert calls == [("project-a", "worker")] * 4 and rows == before
+
+
+@pytest.mark.parametrize("change", ["generation", "root"])
+def test_cached_names_are_isolated_by_project_and_complete_binding(tmp_path, monkeypatch, change):
+    monkeypatch.setattr(metadata, "_LOOKUP_BUDGET", 0.01)
+    slow = False
+    bindings = {project: (1, tmp_path / project) for project in ("project-a", "project-b")}
+
+    async def agent(project_id, *, agent_id):
+        if slow:
+            await anyio.sleep(10)
+        return {"projectId": project_id, "agent": {"agentId": agent_id, "displayName": project_id}}
+
+    dispatch = label_dispatch(tmp_path, agent)
+    dispatch._project_read_binding = bindings.get
+    rows = [{"projectId": project, "agentId": "worker"} for project in bindings]
+    assert [row["agentName"] for row in enrich(dispatch, rows)] == list(bindings)
+    old = bindings["project-a"]
+    bindings["project-a"] = (2, old[1]) if change == "generation" else (old[0], tmp_path / "new-root")
+    slow = True
+    cards = enrich(dispatch, rows)
+    assert "agentName" not in cards[0] and cards[1]["agentName"] == "project-b"
+    # A previous binding cannot become a label source again after invalidation.
+    bindings["project-a"] = old
+    assert "agentName" not in enrich(dispatch, rows)[0]
+
+
+@pytest.mark.parametrize("denial", ["missing", "exception", "during-read"])
+def test_revoked_binding_discards_cached_labels_before_reauthorization(tmp_path, monkeypatch, denial):
+    monkeypatch.setattr(metadata, "_LOOKUP_BUDGET", 0.01)
+    allowed, revoke_during_read, slow = True, False, False
+
+    def binding(project):
+        if not allowed:
+            if denial == "exception":
+                raise PermissionError("project access revoked")
+            return None
+        return 1, tmp_path / project
+
+    async def agent(project_id, *, agent_id):
+        nonlocal allowed
+        if slow:
+            await anyio.sleep(10)
+        if revoke_during_read:
+            allowed = False
+        return {"projectId": project_id, "agent": {"agentId": agent_id, "displayName": "Verified"}}
+
+    dispatch = label_dispatch(tmp_path, agent)
+    dispatch._project_read_binding = binding
+    rows = [{"projectId": "project-a", "agentId": "worker"}]
+    assert enrich(dispatch, rows)[0]["agentName"] == "Verified"
+    if denial == "during-read":
+        revoke_during_read = True
+    else:
+        allowed = False
+    assert enrich(dispatch, rows) == rows and dispatch._task_card_agent_labels == {}
+    allowed, revoke_during_read, slow = True, False, True
+    assert "agentName" not in enrich(dispatch, rows)[0]
+
+
+@pytest.mark.parametrize("error_type,code", [
+    (error_type, code) for error_type in (BackendClientError, DispatchError)
+    for code in ("SCOPE_DENIED", "SUBJECT_DENIED", "SUBJECT_REVOKED", "TARGET_BINDING_CHANGED",
+                 "UNKNOWN_MANAGEMENT_SUBJECT", "MANAGEMENT_IDENTITY_ROTATED", "RUNTIME_IDENTITY_MISMATCH")
+] + [(PermissionError, None)])
+def test_source_authority_denial_clears_project_labels_with_unchanged_binding(
+        tmp_path, monkeypatch, error_type, code):
+    monkeypatch.setattr(metadata, "_LOOKUP_BUDGET", 0.01)
+    mode, calls = "success", []
+
+    async def agent(project_id, *, agent_id):
+        calls.append((project_id, agent_id))
+        if mode == "slow":
+            await anyio.sleep(10)
+        if mode == "denied" and project_id == "project-a" and agent_id == "second":
+            if error_type is PermissionError:
+                raise PermissionError("public Agent reads denied")
+            raise error_type("public Agent reads denied", code=code)
+        return {"projectId": project_id, "agent": {"agentId": agent_id, "displayName": "Verified"}}
+
+    dispatch = label_dispatch(tmp_path, agent)
+    rows = [{"projectId": "project-a", "agentId": name} for name in ("first", "second", "third")]
+    rows.append({"projectId": "project-b", "agentId": "second"})
+    assert all(row["agentName"] == "Verified" for row in enrich(dispatch, rows))
+    binding = dispatch._project_read_binding("project-a")
+    mode, calls = "denied", []
+    cards = enrich(dispatch, rows)
+    assert all("agentName" not in row for row in cards[:3])
+    assert cards[3]["agentName"] == "Verified"
+    assert dispatch._project_read_binding("project-a") == binding
+    assert not any(key[0] == "project-a" for key in dispatch._task_card_agent_labels)
+    assert ("project-a", "third") not in calls  # No later sibling can restore a denied page.
+    mode = "slow"
+    assert all("agentName" not in row for row in enrich(dispatch, rows)[:3])
+
+
+@pytest.mark.parametrize("mismatch", ["project", "agent", "missing"])
+def test_source_identity_mismatch_discards_only_target_agent_label(tmp_path, monkeypatch, mismatch):
+    monkeypatch.setattr(metadata, "_LOOKUP_BUDGET", 0.01)
+    mode = "success"
+
+    async def agent(project_id, *, agent_id):
+        if mode == "slow":
+            await anyio.sleep(10)
+        if mode == "mismatch" and agent_id == "target":
+            return {"projectId": "other" if mismatch == "project" else project_id, "agent": {
+                "agentId": "other" if mismatch == "agent" else None if mismatch == "missing" else agent_id,
+                "displayName": "Wrong"}}
+        return {"projectId": project_id, "agent": {"agentId": agent_id, "displayName": "Verified"}}
+
+    dispatch = label_dispatch(tmp_path, agent)
+    rows = [{"projectId": "project-a", "agentId": name} for name in ("target", "sibling", "target")]
+    assert all(row["agentName"] == "Verified" for row in enrich(dispatch, rows))
+    mode = "mismatch"
+    cards = enrich(dispatch, rows)
+    assert "agentName" not in cards[0] and "agentName" not in cards[2]
+    assert cards[1]["agentName"] == "Verified"
+    mode = "slow"
+    cards = enrich(dispatch, rows)
+    assert "agentName" not in cards[0] and "agentName" not in cards[2]
+    assert cards[1]["agentName"] == "Verified"
+
+
+@pytest.mark.parametrize("error", [
+    BackendClientError("temporary", code="BACKEND_UNAVAILABLE"),
+    DispatchError("temporary", code="BACKEND_TIMEOUT"),
+    RuntimeError("SCOPE_DENIED"),
+])
+def test_temporary_or_untyped_source_failures_keep_verified_label(tmp_path, error):
+    denied = False
+
+    async def agent(project_id, *, agent_id):
+        if denied:
+            raise error
+        return {"projectId": project_id, "agent": {"agentId": agent_id, "displayName": "Verified"}}
+
+    dispatch = label_dispatch(tmp_path, agent)
+    rows = [{"projectId": "project-a", "agentId": "worker"}]
+    first = enrich(dispatch, rows)
+    denied = True
+    assert enrich(dispatch, rows) == first
+
+
+@pytest.mark.parametrize("busy", ["borrowers", "closing", "guard"])
+def test_busy_task_control_keeps_previously_verified_name_without_another_read(tmp_path, busy):
+    calls = []
+
+    async def agent(project_id, *, agent_id):
+        calls.append(agent_id)
+        return {"projectId": project_id, "agent": {"agentId": agent_id, "displayName": "Verified"}}
+
+    dispatch = label_dispatch(tmp_path, agent)
+    rows = [{"projectId": "project-a", "agentId": "worker"}]
+    first = enrich(dispatch, rows)
+    dispatch._active_project_clients = {"project-a": SimpleNamespace(
+        borrowers=1 if busy == "borrowers" else 0, closing=busy == "closing")}
+    dispatch._project_locks = {"project-a": SimpleNamespace(locked=lambda: busy == "guard")}
+    assert enrich(dispatch, rows) == first and calls == ["worker"]
+
+
+def test_label_cache_is_bounded_and_never_shared_by_dispatch_owners(tmp_path):
+    calls = []
+
+    async def agent(project_id, *, agent_id):
+        calls.append(agent_id)
+        return {"projectId": project_id, "agent": {"agentId": agent_id, "displayName": agent_id}}
+
+    dispatch = label_dispatch(tmp_path, agent)
+    rows = [{"projectId": "project-a", "agentId": f"worker-{i}"} for i in range(129)]
+    enrich(dispatch, rows[:128])
+    enrich(dispatch, rows[128:])
+    assert len(dispatch._task_card_agent_labels) == 128 and len(calls) == 129
+    dispatch._project_locks = {"project-a": SimpleNamespace(locked=lambda: True)}
+    cards = enrich(dispatch, [rows[0], rows[-1]])
+    assert "agentName" not in cards[0] and cards[1]["agentName"] == "worker-128"
+    other = label_dispatch(tmp_path, agent)
+    other._project_locks = dispatch._project_locks
+    assert "agentName" not in enrich(other, rows[-1:])[0] and len(calls) == 129
+
+
+@pytest.mark.parametrize("change", ["suspend", "revoke", "generation"])
+def test_dispatch_owner_invalidates_labels_when_registry_authority_changes(tmp_path, change):
+    from tests.test_assistant_runtime_dispatch import ClientProbe, adapter
+
+    async def agent(project_id, *, agent_id):
+        return {"projectId": project_id, "agent": {"agentId": agent_id, "displayName": "Verified"}}
+
+    service = adapter(tmp_path, ClientProbe())
+    service.management = SimpleNamespace(agent=agent)
+    rows = [{"projectId": "project-a", "agentId": "worker"}]
+    assert enrich(service, rows)[0]["agentName"] == "Verified"
+    assert service._task_card_agent_labels
+    if change == "suspend":
+        service.suspend_projects()
+    else:
+        projects = {} if change == "revoke" else {"project-a": str(tmp_path / "project")}
+        service.replace_projects({"schemaVersion": 1, "revision": 0, "projects": projects})
+    assert service._task_card_agent_labels == {}
 
 
 def test_agent_labels_in_one_project_do_not_skip_each_other(tmp_path):

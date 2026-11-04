@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import stat
 from copy import deepcopy
 from pathlib import Path
 
@@ -218,6 +219,28 @@ class ManagementAdapter:
         from .management_discovery import list_requests
         return list_requests(self, project_id=project_id, action=action, offset=offset, limit=limit)
 
+    def _check_cleanup_fence(self, key):
+        marker = self._root / "cleanup_tombstones" / (key + ".json")
+        try:
+            for parent in reversed(marker.parents):
+                try:
+                    info = parent.lstat()
+                except FileNotFoundError:
+                    return
+                if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+                    raise OSError("Unsafe management cleanup path")
+            try:
+                marker.lstat()
+            except FileNotFoundError:
+                return
+        except OSError:
+            raise DispatchError("Management cleanup state cannot be checked; preserved without replay.",
+                                code="MANAGEMENT_STATE_INVALID") from None
+        # The scoped filename consumes the request even for legacy, unreadable
+        # or differently owned markers. Never mint a new subject for that ID.
+        raise DispatchError("This request was permanently cleaned; use a new request identity for new work.",
+                            code="MANAGEMENT_ALREADY_CLEANED")
+
     async def invoke(self, project_id: str, *, action: str, request_id: str, parameters: dict):
         from core.web.services.external_management.platform_actions import PLATFORM_ACTIONS
         never_replay = action in PLATFORM_ACTIONS or action in {"agent_purge", "agent_purge_batch"}
@@ -228,6 +251,7 @@ class ManagementAdapter:
             # A request may have waited while main suspended project admission.
             # Reuse the provider gate before reading/replaying or writing intent.
             self._key(project_id, action, request_id)
+            self._check_cleanup_fence(key)
             retrying = path.exists()
             if retrying:
                 record = self._read(path)
