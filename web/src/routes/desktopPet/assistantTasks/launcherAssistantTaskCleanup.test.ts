@@ -91,7 +91,8 @@ describe("Launcher task cleanup batched transport", () => {
   it("binds the preview to the exact assistant, session, references and ordering", async () => {
     const input = scope(2), plan = await api.previewLauncherTaskCleanup(input);
     for (const changed of [{ ...input, agentId: "assistant-2" }, { ...input, directSessionId: "session-2" },
-      { ...input, targets: [...input.targets].reverse() }, scope(1)]) {
+      { ...input, targets: [...input.targets].reverse() },
+      { ...input, targets: input.targets.map(target => ({ ...target, localOnly: true })) }, scope(1)]) {
       await expect(api.executeLauncherTaskCleanup(changed, plan.fingerprint)).rejects.toThrow("已失效");
     }
     expect(invoke).toHaveBeenCalledTimes(1);
@@ -129,5 +130,37 @@ describe("Launcher task cleanup batched transport", () => {
     invoke.mockImplementation(async request => { controller.abort(); return deleted(request.targets); });
     await expect(api.executeLauncherTaskCleanup(input, plan.fingerprint, { signal: controller.signal })).rejects.toThrow();
     expect(invoke.mock.calls.filter(([request]) => request.operation === "executeTaskCleanup")).toHaveLength(1);
+  });
+
+  it("cleans all targets in one action and executes each small batch immediately", async () => {
+    const result = await api.cleanupLauncherTasks(scope(37));
+    expect(result.items).toHaveLength(37);
+    expect(result.items.every(item => item.status === "deleted")).toBe(true);
+    expect(invoke.mock.calls.map(([request]) => request.operation)).toEqual(
+      Array.from({ length: 19 }, () => ["previewTaskCleanup", "executeTaskCleanup"]).flat());
+    expect(invoke.mock.calls.every(([request]) => request.targets.length <= 2)).toBe(true);
+  });
+
+  it("keeps a blocked source's actual reason and continues with other targets", async () => {
+    invoke.mockImplementation(async request => {
+      if (request.operation === "executeTaskCleanup") return deleted(request.targets);
+      const value = preview(request.targets);
+      value.items[0] = { ...value.items[0], status: "blocked", reason: "任务仍在运行" } as typeof value.items[0];
+      return value;
+    });
+    const result = await api.cleanupLauncherTasks(scope(6));
+    expect(result.items.filter(item => item.status === "deleted")).toHaveLength(3);
+    expect(result.items[0].failures[0].message).toBe("任务仍在运行");
+    expect(result.items[4].status).toBe("blocked");
+  });
+
+  it("stops subsequent direct batches when the page or identity aborts", async () => {
+    const controller = new AbortController();
+    invoke.mockImplementation(async request => {
+      if (request.operation === "executeTaskCleanup") { controller.abort(); return deleted(request.targets); }
+      return preview(request.targets);
+    });
+    await expect(api.cleanupLauncherTasks(scope(9), { signal: controller.signal })).rejects.toThrow();
+    expect(invoke).toHaveBeenCalledTimes(2);
   });
 });

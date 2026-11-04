@@ -158,14 +158,38 @@ export function LauncherAssistantTaskCards({onReview,onApproval,onOpenConversati
     if (activeView.current.mounted && activeView.current.canAct && activeView.current.identity === identity)
       setShown(value => value + PAGE_SIZE);
   };
-  const cleanup = useAssistantTaskCleanup({ agentId, sessionId, identity, canAct: reading, tasks, lang,
+  const cleanup = useAssistantTaskCleanup({ agentId, sessionId, identity, canAct: reading, lang,
     onChanged: () => Promise.allSettled([
       queryClient.invalidateQueries({ queryKey: ["launcher-assistant", "task-cards", agentId, sessionId], exact: true }),
       queryClient.invalidateQueries({ queryKey: teamQueryKey, exact: true }),
     ]),
   });
-  const cleanable = tasks.filter(task => (task.kind === "dispatch" ? task.nativeStatus === "succeeded" || task.cleanupPending === true : task.nativeStatus === "completed")
-    && taskCleanupTargets(task).length > 0);
+  const cleanable = tasks.filter(task => taskCleanupTargets(task).length > 0);
+  const cleanCompleted = () => {
+    if (!reading) return;
+    void cleanup.open(async signal => {
+      const dispatchRows = await readLauncherAssistantTaskSource(identity, signal, getLauncherAssistantDispatches, canReadSource);
+      signal.throwIfAborted();
+      const allTasks = projectAssistantDispatchTasks(dispatchRows).tasks.map(task => ({ ...task, kind: "dispatch" as const }));
+      if (!teamEnabled) return allTasks;
+      const pages: AssistantTeamRunObservationPage[] = [];
+      const cursors = new Set<string>();
+      let cursor: string | undefined;
+      do {
+        signal.throwIfAborted();
+        if (!canReadSource()) throw new Error(lang === "zh" ? "任务视图已变化，请重试。" : "The task view changed. Please retry.");
+        const page = await readLauncherAssistantTaskSource(identity, signal,
+          () => getLauncherAssistantTeamRuns({ agentId, directSessionId: sessionId }, cursor), canReadSource);
+        signal.throwIfAborted();
+        if (!canReadSource()) throw new Error(lang === "zh" ? "任务视图已变化，请重试。" : "The task view changed. Please retry.");
+        pages.push(page);
+        cursor = page.nextCursor ?? undefined;
+        if (cursor && cursors.has(cursor)) throw new Error(lang === "zh" ? "任务分页重复，请重试。" : "Task pagination repeated. Please retry.");
+        if (cursor) cursors.add(cursor);
+      } while (cursor);
+      return [...allTasks, ...projectAssistantTeamRunTasks(pages.flatMap(page => page.teamRuns)).tasks];
+    }, true);
+  };
 
  const selected=identityConfirmed && selection?.identity===identity ? tasks.find(task=>task.id===selection.id) : undefined;
  const openTask=(task:AssistantTask,trigger?:HTMLElement)=>{
@@ -181,20 +205,20 @@ export function LauncherAssistantTaskCards({onReview,onApproval,onOpenConversati
   if(!activeView.current.canAct || activeView.current.identity!==identity)return;
   setReviewRequest(null);closeTask();onApproval?.(task);onOpenConversation?.();
  };
- const remove=(task:AssistantTask)=>{if(reading){closeTask();void cleanup.open([task]);}};
+ const remove=(task:AssistantTask)=>{if(reading&&!cleanup.busy){closeTask();void cleanup.open([task]);}};
  const context={tasks,loading,unavailable,refreshing,teamUnavailable:teamSupported&&teamRuns.isError,
   partial:teamPartial,invalid:feed.invalidRecords,enabled:reading,shown,hasNextPage:teamEnabled&&Boolean(teamRuns.hasNextPage)&&!teamRuns.isError,
   loadingMore:teamRuns.isFetchingNextPage,selectedId:selected?.id??null,cleanableCount:cleanable.length,
-  refresh,more,openTask,cleanCompleted:()=>{if(reading)void cleanup.open(cleanable,true);},reviewRequest:identityConfirmed&&reviewRequest?.identity===identity?reviewRequest:null};
+  cleanupBusy:cleanup.busy,canCleanCompleted:cleanable.length>0||(teamEnabled&&Boolean(teamRuns.hasNextPage)),
+  refresh,more,openTask,remove,cleanCompleted,reviewRequest:identityConfirmed&&reviewRequest?.identity===identity?reviewRequest:null};
  return <LauncherTaskContext.Provider value={context}>
   {children??<LauncherAssistantTaskSidebar lang={lang}/>}
   {selected?<LauncherAssistantTaskDetail key={JSON.stringify([identity,selected.id])} task={selected} lang={lang}
-   actionsEnabled={reading} onClose={closeTask} onReview={review} onApproval={approve} onDelete={remove}
+   actionsEnabled={reading} cleanupBusy={cleanup.busy} onClose={closeTask} onReview={review} onApproval={approve} onDelete={remove}
    onCloseAutoFocus={event=>{event.preventDefault();requestAnimationFrame(()=>{if(document.querySelector('[role="dialog"][data-state="open"]'))return;
     const prior=returnFocus.current;
     const target=prior?.isConnected&&prior.getClientRects().length?prior:Array.from(document.querySelectorAll<HTMLElement>('button[aria-label="打开功能导航"],button[aria-label="Open navigation"]')).find(node=>node.getClientRects().length);
     target?.focus();});}}/>:null}
-  <LauncherTaskCleanupDialog state={cleanup.state} lang={lang} onClose={cleanup.close}
-   onConfirm={()=>{void cleanup.execute();}} onRetry={()=>{void cleanup.retry();}}/>
+  <LauncherTaskCleanupDialog state={cleanup.state} lang={lang} onClose={cleanup.close} onRetry={()=>{void cleanup.retry();}}/>
  </LauncherTaskContext.Provider>;
 }

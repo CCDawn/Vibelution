@@ -7,10 +7,11 @@ import {taskCardOwner,taskCardState,taskCardTitle} from "./assistantTaskPresenta
 import {COPY} from "./assistantTaskCopy";
 import {taskDisplayTitle} from "./assistantTaskMetadata";
 import styles from "./LauncherAssistantTaskDetail.styles";
-type Props={task:AssistantTask;lang:"zh"|"en";actionsEnabled:boolean;onClose:()=>void;onReview:(task:AssistantTask)=>void;onApproval:(task:AssistantDispatchTask)=>void;onDelete:(task:AssistantTask)=>void;onCloseAutoFocus:(event:Event)=>void};
-export function LauncherAssistantTaskDetail({task,lang,actionsEnabled,onClose,onReview,onApproval,onDelete,onCloseAutoFocus}:Props){
+type Props={task:AssistantTask;lang:"zh"|"en";actionsEnabled:boolean;cleanupBusy:boolean;onClose:()=>void;onReview:(task:AssistantTask)=>void;onApproval:(task:AssistantDispatchTask)=>void;onDelete:(task:AssistantTask)=>void;onCloseAutoFocus:(event:Event)=>void};
+export function LauncherAssistantTaskDetail({task,lang,actionsEnabled,cleanupBusy,onClose,onReview,onApproval,onDelete,onCloseAutoFocus}:Props){
  const [references,setReferences]=useState(false);const copy=COPY[lang];
  const pending=task.kind==="dispatch"&&task.cleanupPending===true;
+ const localOnly=task.state==="unknown";
  const summary=pending?copy.cleanupRecovery:(task.state==="failed"?task.error:task.resultSummary)||(task.state==="failed"?copy.noFailure:copy.noSummary);
  const title=taskCardTitle(task,lang);const providedTitle=taskDisplayTitle(task.title,"",lang);
  const titleMissing=providedTitle===(lang==="zh"?"委派任务":"Delegated task")||providedTitle!==title;
@@ -19,7 +20,7 @@ export function LauncherAssistantTaskDetail({task,lang,actionsEnabled,onClose,on
  const ref=(label:string,value:unknown)=><div key={label}><dt className={styles.referenceLabel}>{label}</dt><dd className={styles.referenceValue}>{value==null||value===""?copy.notBound:String(value)}</dd></div>;
  return <VDialog open title={title} size="lg" className={styles.modal}
   data-vui="launcher-task-detail" onOpenChange={open=>{if(!open)onClose();}} onCloseAutoFocus={onCloseAutoFocus}
-  footer={<><VButton variant="ghost" isDisabled={!actionsEnabled||!taskCleanupTargets(task).length} onClick={()=>onDelete(task)}>{pending?copy.retryCleanup:copy.remove}</VButton>
+  footer={<><VButton variant="ghost" tooltip={localOnly?copy.removeRecordHint:undefined} isDisabled={!actionsEnabled||cleanupBusy||!taskCleanupTargets(task).length} onClick={()=>onDelete(task)}>{localOnly?copy.removeRecord:pending?copy.retryCleanup:copy.remove}</VButton>
    <VButton variant="secondary" onClick={onClose}>{lang==="zh"?"关闭":"Close"}</VButton>
    {task.kind==="dispatch"&&task.state==="waiting_user"?<VButton variant="primary" isDisabled={!actionsEnabled} onClick={()=>onApproval(task)}>{copy.approval}</VButton>
     :<VButton variant="primary" isDisabled={!actionsEnabled} onClick={()=>onReview(task)}>{copy.review}</VButton>}</>}>

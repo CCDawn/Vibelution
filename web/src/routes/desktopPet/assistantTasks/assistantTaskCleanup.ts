@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { executeLauncherTaskCleanup, previewLauncherTaskCleanup, type LauncherTaskCleanupPreview,
-  type LauncherTaskCleanupResult, type LauncherTaskCleanupScope, type LauncherTaskCleanupTarget } from "../../../api/launcherAssistantTaskCleanup";
+import { cleanupLauncherTasks, type LauncherTaskCleanupResult, type LauncherTaskCleanupScope,
+  type LauncherTaskCleanupTarget } from "../../../api/launcherAssistantTaskCleanup";
 import type { AssistantTask } from "./assistantTeamRunTasks";
 import { displayText, taskDisplayTitle } from "./assistantTaskMetadata";
 
@@ -8,9 +8,10 @@ export const taskCleanupKey = (target: LauncherTaskCleanupTarget) => JSON.string
   target.kind === "dispatch" ? target.dispatchId : target.originAction, target.kind === "team_run" ? target.requestId : null]);
 
 export function taskGroup(task: AssistantTask): "attention" | "active" | "ended" {
-  if (task.kind === "dispatch" && task.cleanupPending) return "attention";
+  if (task.kind === "dispatch" && (task.cleanupPending === true || task.receiptBound && !task.conflictingObservations
+    && ["succeeded", "failed", "cancelled", "timed_out"].includes(task.nativeStatus ?? ""))) return "ended";
   return task.state === "running" || task.state === "stopping" ? "active"
-    : task.state === "awaiting_verification" || task.state === "stopped" ? "ended" : "attention";
+    : ["awaiting_verification", "failed", "stopped"].includes(task.state) ? "ended" : "attention";
 }
 
 export function taskTime(task: AssistantTask): number {
@@ -18,92 +19,97 @@ export function taskTime(task: AssistantTask): number {
   return Date.parse(task.updatedAt || task.createdAt || "") || 0;
 }
 
+/** Local references ask the host to verify eligibility. They never authorize deletion. */
 export function taskCleanupTargets(task: AssistantTask): LauncherTaskCleanupTarget[] {
-  if (task.kind === "dispatch" && task.cleanupPending === true && task.projectId && task.nativeTaskId && !task.conflictingObservations)
-    return [{ kind: "dispatch", projectId: task.projectId, dispatchId: task.dispatchId }];
-  if (!task.sourceAvailable || !task.receiptBound || task.conflictingObservations || !task.projectId
-    || task.state === "unknown") return [];
-  if (task.kind === "dispatch") return ["succeeded", "failed", "cancelled", "timed_out"].includes(task.nativeStatus || "")
-    ? [{ kind: "dispatch", projectId: task.projectId, dispatchId: task.dispatchId }] : [];
-  if (!["completed", "failed", "stopped"].includes(task.nativeStatus || "") || !task.teamId || !task.flowId || !task.runId) return [];
+  if (!task.projectId || task.conflictingObservations
+    || ["running", "stopping", "waiting_user", "waiting_input"].includes(task.state)) return [];
+  if (task.kind === "dispatch") return [{ kind: "dispatch", projectId: task.projectId, dispatchId: task.dispatchId }];
   return task.sourceRefs.map(reference => ({ kind: "team_run", projectId: task.projectId!, ...reference,
-    teamId: task.teamId!, flowId: task.flowId!, runId: task.runId! }));
+    ...(task.teamId ? { teamId: task.teamId } : {}), ...(task.flowId ? { flowId: task.flowId } : {}),
+    ...(task.runId ? { runId: task.runId } : {}) }));
 }
 
 export type AssistantCleanupDialogState = {
-  identity: string; ids: string[]; snapshot: string; scope: LauncherTaskCleanupScope; titles: Record<string, string>; bulk: boolean;
-  pending: "preview" | "execute" | null; preview?: LauncherTaskCleanupPreview; result?: LauncherTaskCleanupResult; error?: string;
+  identity: string; scope: LauncherTaskCleanupScope; titles: Record<string, string>; bulk: boolean;
+  pending: "loading" | "execute" | null; result?: LauncherTaskCleanupResult; error?: string;
 };
 
-const snapshot = (tasks: AssistantTask[]) => JSON.stringify(tasks.map(task => [task.id, task.nativeStatus, taskCleanupTargets(task)]));
+type CleanupInput = Pick<AssistantCleanupDialogState, "scope" | "titles">;
+type TaskSource = AssistantTask[] | ((signal: AbortSignal) => Promise<AssistantTask[]>);
 
-/** Only disclosure state lives here. The host remains the sole deletion authority. */
+/** The host owns eligibility, fingerprints and deletion. One lock covers preparation and execution. */
 export function useAssistantTaskCleanup(options: {
-  agentId: string; sessionId: string; identity: string; canAct: boolean; tasks: AssistantTask[]; lang: "zh" | "en"; onChanged: () => Promise<unknown>;
+  agentId: string; sessionId: string; identity: string; canAct: boolean; lang: "zh" | "en"; onChanged: () => Promise<unknown>;
 }) {
   const [state, setState] = useState<AssistantCleanupDialogState | null>(null);
   const generation = useRef(0);
   const operation = useRef<AbortController | null>(null);
   const executing = useRef<number | null>(null);
+  const retryInput = useRef<((signal: AbortSignal) => Promise<CleanupInput>) | null>(null);
   const current = useRef(options);
   current.current = options;
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => {
     mounted.current = false; generation.current += 1; operation.current?.abort();
   }; }, []);
-  const selected = (ids: string[]) => ids.map(id => current.current.tasks.find(task => task.id === id)).filter((task): task is AssistantTask => Boolean(task));
-  const valid = (candidate: AssistantCleanupDialogState) => mounted.current && current.current.canAct
-    && current.current.identity === candidate.identity && snapshot(selected(candidate.ids)) === candidate.snapshot;
-  const close = () => { generation.current += 1; operation.current?.abort(); setState(null); };
-  // Hide immediately on identity/visibility loss; late replies cannot reopen it.
+  const valid = (identity: string) => mounted.current && document.visibilityState !== "hidden"
+    && current.current.canAct && current.current.identity === identity;
+  const close = () => { generation.current += 1; operation.current?.abort(); executing.current = null; setState(null); };
   const visibleState = state && options.canAct && state.identity === options.identity ? state : null;
-  const stale = Boolean(state && !state.result && !state.pending && !valid(state));
   useEffect(() => {
-    if (state && (!options.canAct || state.identity !== options.identity || stale)) {
-      generation.current += 1; operation.current?.abort(); setState(null);
-    }
-  }, [options.canAct, options.identity, stale, state]);
+    if (state && (!options.canAct || state.identity !== options.identity)) close();
+  }, [options.canAct, options.identity, state]);
 
-  const open = async (tasks: AssistantTask[], bulk = false) => {
-    if (!current.current.canAct) return;
-    const eligible = tasks.filter(task => taskCleanupTargets(task).length > 0 && (!bulk
-      || task.kind === "dispatch" && (task.nativeStatus === "succeeded" || task.cleanupPending === true) || task.kind === "team_run" && task.nativeStatus === "completed"));
-    const targets = eligible.flatMap(taskCleanupTargets);
-    if (!targets.length) return;
+  const run = async (input: (signal: AbortSignal) => Promise<CleanupInput>, bulk: boolean) => {
+    const context = current.current;
+    if (!valid(context.identity) || executing.current !== null) return;
     const token = ++generation.current;
-    operation.current?.abort();
+    executing.current = token;
     const controller = new AbortController(); operation.current = controller;
-    const titles = Object.fromEntries(eligible.flatMap(task => taskCleanupTargets(task).map(target => [taskCleanupKey(target),
-      taskDisplayTitle(task.title, task.kind === "dispatch" ? task.dispatchId : task.requestId, current.current.lang)])));
-    const candidate: AssistantCleanupDialogState = { identity: current.current.identity, ids: eligible.map(task => task.id), titles,
-      snapshot: snapshot(eligible), scope: { agentId: current.current.agentId, directSessionId: current.current.sessionId, targets }, bulk, pending: "preview" };
+    retryInput.current = input;
+    let candidate: AssistantCleanupDialogState = { identity: context.identity, titles: {}, bulk, pending: "loading",
+      scope: { agentId: context.agentId, directSessionId: context.sessionId, targets: [] } };
     setState(candidate);
+    let attempted = false;
     try {
-      const preview = await previewLauncherTaskCleanup(candidate.scope, { signal: controller.signal });
-      if (generation.current === token && valid(candidate)) setState({ ...candidate, pending: null, preview });
-      else if (generation.current === token && mounted.current) close();
+      const resolved = await input(controller.signal);
+      controller.signal.throwIfAborted();
+      if (generation.current !== token || !valid(candidate.identity)) return;
+      candidate = { ...candidate, ...resolved, pending: "execute" };
+      setState(candidate);
+      attempted = candidate.scope.targets.length > 0;
+      const result: LauncherTaskCleanupResult = attempted
+        ? await cleanupLauncherTasks(candidate.scope, { signal: controller.signal })
+        : { schemaVersion: 1, releasedBytes: 0, items: [] };
+      if (generation.current !== token || !valid(candidate.identity)) return;
+      const remaining = new Set(result.items.filter(item => item.status !== "deleted").map(item => item.key));
+      const retryScope = { ...candidate.scope, targets: candidate.scope.targets.filter(target => remaining.has(taskCleanupKey(target))) };
+      retryInput.current = async () => ({ scope: retryScope, titles: candidate.titles });
+      setState({ ...candidate, pending: null, result });
     } catch (error) {
-      if (generation.current === token && valid(candidate)) setState({ ...candidate, pending: null, error: displayText(error instanceof Error ? error.message : String(error)) });
+      if (generation.current === token && valid(candidate.identity))
+        setState({ ...candidate, pending: null, error: displayText(error instanceof Error ? error.message : String(error)) });
+    } finally {
+      // Sent host requests may have completed even after visibility or identity loss.
+      if (executing.current === token) executing.current = null;
+      if (attempted && valid(candidate.identity)) await current.current.onChanged();
     }
   };
-  const execute = async () => {
-    if (!state?.preview || state.pending || executing.current === generation.current || !valid(state) || !state.preview.items.some(item => item.status === "ready")) return;
-    operation.current?.abort();
-    const controller = new AbortController(); operation.current = controller;
-    const candidate = state, token = ++generation.current;
-    executing.current = token;
-    setState({ ...candidate, pending: "execute", error: undefined });
-    try {
-      const result = await executeLauncherTaskCleanup(candidate.scope, candidate.preview!.fingerprint, { signal: controller.signal });
-      if (generation.current === token && mounted.current && current.current.identity === candidate.identity && current.current.canAct)
-        setState({ ...candidate, pending: null, preview: undefined, result });
-      // Refresh authoritative feeds even if the dialog closed during the operation.
-      if (mounted.current && current.current.identity === candidate.identity) await current.current.onChanged();
-    } catch (error) {
-      if (generation.current === token && valid(candidate)) setState({ ...candidate, pending: null, preview: undefined,
-        error: displayText(error instanceof Error ? error.message : String(error)) });
-      if (mounted.current && current.current.identity === candidate.identity) await current.current.onChanged();
-    } finally { if (executing.current === token) executing.current = null; }
+  const open = (source: TaskSource, bulk = false) => {
+    const context = current.current;
+    return run(async signal => {
+      const tasks = typeof source === "function" ? await source(signal) : source;
+      const eligible = tasks.filter(task => taskCleanupTargets(task).length > 0);
+      const targets = new Map<string, LauncherTaskCleanupTarget>();
+      const titles: Record<string, string> = {};
+      for (const task of eligible) for (const target of taskCleanupTargets(task)) {
+        const key = taskCleanupKey(target);
+        targets.set(key, !bulk && task.state === "unknown" ? { ...target, localOnly: true } : target);
+        titles[key] = taskDisplayTitle(task.title, task.kind === "dispatch" ? task.dispatchId : task.requestId, context.lang);
+      }
+      return { scope: { agentId: context.agentId, directSessionId: context.sessionId, targets: [...targets.values()] }, titles };
+    }, bulk);
   };
-  return { state: visibleState, close, open, execute, retry: () => state ? open(selected(state.ids), state.bulk) : Promise.resolve() };
+  return { state: visibleState, busy: Boolean(visibleState?.pending), close, open,
+    retry: () => state && retryInput.current ? run(retryInput.current, state.bulk) : Promise.resolve() };
 }

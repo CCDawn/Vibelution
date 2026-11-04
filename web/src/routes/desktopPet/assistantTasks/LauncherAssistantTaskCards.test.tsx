@@ -76,7 +76,7 @@ beforeEach(() => {
   container = document.createElement("div"); document.body.appendChild(container); root = createRoot(container);
 });
 
-describe("task card facts and cleanup confirmation", () => {
+describe("task card facts and direct cleanup", () => {
   function operationCalls(operation: string) { return invoke.mock.calls.filter(([request]) => request.operation === operation); }
   const terminal = () => { rows = [row({ receipt: { taskId: "native-1", status: "succeeded", resultSummary: "已生成周报，待人工核对" } })]; };
 
@@ -109,13 +109,14 @@ describe("task card facts and cleanup confirmation", () => {
     rows = [row({ dispatchId: "legacy-111111", agentName: "报告 Agent", title: "助理任务", receipt: { taskId: "native-1", status: "failed" } }),
       Object.assign(row({ dispatchId: "legacy-222222", title: undefined }), { prompt: "secret prompt body", code: "source code body" })];
     await render();
+    await click("已结束 1");
     expect(container.textContent).toContain("报告 Agent的委派任务");
     await click("进行中 1");
     expect(container.querySelector("article")?.getAttribute("aria-label")).toBe("委派任务");
     expect(container.textContent).not.toContain("secret prompt body");
     expect(container.textContent).not.toContain("source code body");
     expect(container.textContent).not.toContain("222222");
-    await click("待处理 1");
+    await click("已结束 1");
     expect(container.textContent).not.toContain("111111");
     expect(container.textContent).not.toContain("222222");
     expect(container.textContent).not.toContain("未命名任务");
@@ -130,13 +131,16 @@ describe("task card facts and cleanup confirmation", () => {
       row({ dispatchId: "dispatch-sync", title: "连接中断", lastError: { message: "offline" }, receipt: { taskId: "native-1", status: "failed" } }),
       row({ dispatchId: "dispatch-unbound", title: "尚未绑定", nativeTaskId: undefined, receipt: null })];
     await render();
+    await click("已结束 2");
     const sync = container.querySelector('article[aria-label="连接中断"]')!;
     expect(sync.getAttribute("data-task-state")).toBe("unknown");
     expect(sync.textContent).not.toContain("执行失败");
     const syncDialog = await openTask(sync);
-    expect(button("删除", syncDialog).disabled).toBe(true);
+    expect(button("移除记录", syncDialog).disabled).toBe(false);
     await click("关闭", syncDialog);
+    await click("待处理 1");
     expect(container.querySelector('article[aria-label="尚未绑定"]')?.getAttribute("data-task-state")).toBe("unknown");
+    await click("已结束 2");
     const failed = container.querySelector('article[aria-label="真实失败"]')!;
     expect(failed.textContent).toContain("执行失败");
     expect((await openTask(failed)).textContent).toContain("远程仓库拒绝访问");
@@ -213,247 +217,338 @@ describe("task card facts and cleanup confirmation", () => {
     expect(dispatchReads()).toBe(readsBeforeHide);
   });
 
-  it("previews actual bytes and retention before confirmation; cancel sends no deletion", async () => {
-    terminal(); await render();
-    await previewCleanup();
-    expect(operationCalls("previewTaskCleanup")).toHaveLength(1);
-    expect(operationCalls("executeTaskCleanup")).toHaveLength(0);
-    expect(document.body.textContent).toContain("预计释放：4,096 字节");
-    expect(document.body.textContent).toContain("项目为共享资源");
-    expect(invoke).toHaveBeenCalledWith({ operation: "previewTaskCleanup", agentId: "assistant-1", directSessionId: "session-1",
-      targets: [{ kind: "dispatch", projectId: "project-1", dispatchId: "dispatch-1" }] });
-    await click("取消", document.body);
-    expect(operationCalls("executeTaskCleanup")).toHaveLength(0);
-    expect(container.querySelector("article")).toBeTruthy();
-  });
-
-  it("only executes after explicit confirmation, carries the preview fingerprint and refreshes the native list", async () => {
+  it("cleans one card directly without opening details or requesting confirmation", async () => {
     terminal();
     executeReply = async () => { rows = []; return { schemaVersion: 1, releasedBytes: 3072,
       items: [{ key: dispatchCleanupKey, status: "deleted", releasedBytes: 3072, retained: [], failures: [] }] }; };
-    await render(); await previewCleanup();
-    expect(operationCalls("executeTaskCleanup")).toHaveLength(0);
-    await click("永久删除", document.body);
+    await render();
+    const card = container.querySelector("article")!;
+    expect(card.querySelectorAll("button")).toHaveLength(2);
+    expect(card.querySelector("button button")).toBeNull();
+    await click("清理“核对周报”", card);
+    expect(document.body.querySelector('[data-vui="launcher-task-detail"]')).toBeNull();
+    expect(operationCalls("previewTaskCleanup")).toHaveLength(1);
     expect(operationCalls("executeTaskCleanup")).toHaveLength(1);
     expect(invoke).toHaveBeenCalledWith({ operation: "executeTaskCleanup", agentId: "assistant-1", directSessionId: "session-1", fingerprint: "preview-1",
       targets: [{ kind: "dispatch", projectId: "project-1", dispatchId: "dispatch-1" }] });
-    expect(document.body.textContent).toContain("实际释放：3,072 字节");
+    expect(document.body.textContent).toContain("实际释放 3,072 字节");
+    expect(document.body.textContent).not.toContain("永久删除");
+    expect(document.body.textContent).not.toContain("预计释放");
     expect(container.querySelector("article")).toBeNull();
     expect(dispatchReads()).toBe(2);
   });
 
-  it("keeps partial records visible and requires a fresh preview and confirmation for retry", async () => {
-    terminal();
-    executeReply = async () => ({ schemaVersion: 1, releasedBytes: 1024, items: [{ key: dispatchCleanupKey, status: "partial", releasedBytes: 1024,
-      retained: [{ kind: "session", reason: "仍有共享引用" }], failures: [{ code: "FILE_BUSY", message: "文件正在使用" }] }] });
-    await render(); await previewCleanup(); await click("永久删除", document.body);
-    expect(container.querySelector("article")).toBeTruthy();
-    expect(document.body.textContent).toContain("实际释放：1,024 字节");
-    expect(document.body.textContent).toContain("文件正在使用");
-    expect(document.body.textContent).toContain("仍有共享引用");
-    await click("重新预览后重试", document.body);
-    expect(operationCalls("previewTaskCleanup")).toHaveLength(2);
+  it("also cleans directly from an already open detail dialog", async () => {
+    terminal(); await render();
+    await cleanupFromDetail();
+    expect(operationCalls("previewTaskCleanup")).toHaveLength(1);
     expect(operationCalls("executeTaskCleanup")).toHaveLength(1);
-    await click("取消", document.body);
-    expect(container.querySelector("article")).toBeTruthy();
+    expect(document.body.textContent).toContain("已清理");
   });
 
-  it("displays execution errors without silently hiding records or retrying deletion", async () => {
+  it("retains partial results and retries only the incomplete references in one click", async () => {
+    terminal();
+    rows.push(row({ dispatchId: "dispatch-2", title: "另一项", receipt: { taskId: "native-1", status: "failed" } }));
+    executeReply = async request => ({ schemaVersion: 1, releasedBytes: 1024,
+      items: (request.targets as LauncherTaskCleanupTarget[]).map(target => ({ key: cleanupKey(target),
+        status: cleanupKey(target) === dispatchCleanupKey ? "deleted" : "partial", releasedBytes: 512,
+        retained: [{ kind: "session", reason: "仍有共享引用" }], failures: cleanupKey(target) === dispatchCleanupKey
+          ? [] : [{ code: "FILE_BUSY", message: "文件正在使用" }] })) });
+    await render(); await click("清理已完成");
+    expect(container.querySelectorAll("article")).toHaveLength(2);
+    expect(document.body.textContent).toContain("文件正在使用");
+    expect(document.body.textContent).toContain("仍有共享引用");
+    await click("重试清理", document.body.querySelector('[data-vui="launcher-task-cleanup"]')!);
+    expect(operationCalls("executeTaskCleanup")).toHaveLength(2);
+    expect((operationCalls("previewTaskCleanup")[1][0] as unknown as { targets: unknown[] }).targets)
+      .toEqual([{ kind: "dispatch", projectId: "project-1", dispatchId: "dispatch-2" }]);
+  });
+
+  it("shows an unconfirmed execution failure and retries only on an explicit retry click", async () => {
     terminal(); executeReply = async () => { throw new Error("cleanup backend offline"); };
-    await render(); await previewCleanup(); await click("永久删除", document.body);
+    await render(); await click("清理“核对周报”");
     expect(document.body.textContent).toContain("清理未获确认");
     expect(document.body.textContent).toContain("cleanup backend offline");
     expect(container.querySelector("article")).toBeTruthy();
-    expect([...document.body.querySelectorAll("button")].some(element => element.textContent === "永久删除" && !element.disabled)).toBe(false);
     await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
     expect(operationCalls("executeTaskCleanup")).toHaveLength(1);
-    await click("重新预览后重试", document.body);
+    await click("重试清理");
+    expect(operationCalls("previewTaskCleanup")).toHaveLength(2);
+    expect(operationCalls("executeTaskCleanup")).toHaveLength(2);
+  });
+
+  it("preserves the host's blocking reason and offers a direct retry", async () => {
+    terminal(); previewReply = async () => ({ schemaVersion: 1, fingerprint: "blocked", estimatedBytes: 0,
+      items: [{ key: dispatchCleanupKey, title: "核对周报", status: "blocked", estimatedBytes: 0, resources: [], retained: [], reason: "工作目录含未合入代码" }] });
+    await render(); await click("清理“核对周报”");
+    expect(document.body.textContent).toContain("工作目录含未合入代码");
+    expect(document.body.textContent).toContain("暂不能清理");
+    expect(operationCalls("executeTaskCleanup")).toHaveLength(0);
+    previewReply = async () => { throw new Error("source unavailable"); };
+    await click("重试清理");
+    expect(document.body.textContent).toContain("source unavailable");
     expect(operationCalls("previewTaskCleanup")).toHaveLength(2);
   });
 
-  it("keeps confirmation disabled if the actual preview is blocked or fails", async () => {
-    terminal(); previewReply = async () => ({ schemaVersion: 1, fingerprint: "blocked", estimatedBytes: 0,
-      items: [{ key: dispatchCleanupKey, title: "核对周报", status: "blocked", estimatedBytes: 0, resources: [], retained: [], reason: "任务仍被引用" }] });
-    await render(); await previewCleanup();
-    expect(button("永久删除", document.body).disabled).toBe(true);
-    expect(document.body.textContent).toContain("任务仍被引用");
+  it("keeps active tasks disabled while sending unknown local references to the host for verification", async () => {
+    rows = [row(), row({ dispatchId: "unknown", title: "待同步任务", nativeTaskId: undefined, receipt: null })];
+    previewReply = async request => ({ schemaVersion: 1, fingerprint: "blocked", estimatedBytes: 0,
+      items: (request.targets as LauncherTaskCleanupTarget[]).map(target => ({ key: cleanupKey(target), title: "待同步任务",
+        status: "blocked", estimatedBytes: 0, resources: [], retained: [], reason: "任务尚未结束" })) });
+    await render();
+    expect(button("清理已完成").disabled).toBe(false);
+    const remove = button("移除记录“待同步任务”");
+    expect(remove.textContent).toBe("移除记录");
+    await act(async () => { remove.focus(); }); await settle();
+    expect(document.body.querySelector('[role="tooltip"]')?.textContent).toBe("核验后仅移除本地记录，保留源任务和文件");
+    await click("移除记录“待同步任务”");
+    expect(document.body.querySelector('[data-vui="launcher-task-detail"]')).toBeNull();
+    expect((operationCalls("previewTaskCleanup")[0][0] as unknown as { targets: unknown[] }).targets)
+      .toEqual([{ kind: "dispatch", projectId: "project-1", dispatchId: "unknown", localOnly: true }]);
+    expect(document.body.textContent).toContain("任务尚未结束");
     expect(operationCalls("executeTaskCleanup")).toHaveLength(0);
-    await click("取消", document.body);
-    previewReply = async () => { throw new Error("preview unavailable"); };
-    await previewCleanup();
-    expect(button("永久删除", document.body).disabled).toBe(true);
-    expect(document.body.textContent).toContain("preview unavailable");
+    await click("关闭"); await click("进行中 1");
+    expect(container.querySelector("article")!.querySelectorAll("button")).toHaveLength(1);
+    expect(button("清理", await openTask()).disabled).toBe(true);
   });
 
-  it("never enables deletion for active, unbound, unknown or stale-terminal receipts", async () => {
-    rows = [row(), row({ dispatchId: "unknown", receipt: { taskId: "native-1", status: "new_state" } }),
-      row({ dispatchId: "unbound", receipt: { taskId: "other", status: "succeeded" } }),
-      row({ dispatchId: "stale", lastError: { message: "offline" }, receipt: { taskId: "native-1", status: "succeeded" } })];
-    await render();
-    const unknownCards = [...container.querySelectorAll("article")];
-    expect(unknownCards).toHaveLength(3);
-    for (const card of unknownCards) {
-      const dialog = await openTask(card);
-      expect(button("删除", dialog).disabled).toBe(true);
-      await click("关闭", dialog);
-    }
-    await click("进行中 1");
-    const activeDialog = await openTask();
-    expect(button("删除", activeDialog).disabled).toBe(true);
-    await click("关闭", activeDialog);
-    expect(button("清理已完成").disabled).toBe(true);
-    onlyReads();
+  it.each(["zh", "en"] as const)("requests local-only removal of an unknown team association without native run IDs in %s", async lang => {
+    rows = []; status.teamRunsVersion = 1;
+    teamReply = async () => teamPage([teamRun({ teamId: null, flowId: null, runId: null, status: null, observedAt: null, readState: "unknown" })], { state: "partial" });
+    await render(lang); await click(lang === "zh" ? "移除记录“团队周报”" : "Remove record “团队周报”");
+    expect((operationCalls("previewTaskCleanup")[0][0] as unknown as { targets: unknown[] }).targets)
+      .toEqual([{ kind: "team_run", projectId: "project-1", requestId: "request-1", originAction: "team_run", localOnly: true }]);
+    expect((operationCalls("executeTaskCleanup")[0][0] as unknown as { targets: unknown[] }).targets)
+      .toEqual([{ kind: "team_run", projectId: "project-1", requestId: "request-1", originAction: "team_run", localOnly: true }]);
+    expect(operationCalls("executeTaskCleanup")).toHaveLength(1);
   });
 
-  it("keeps a host-marked incomplete cleanup retryable after a native TASK_NOT_FOUND refresh", async () => {
-    rows = [Object.assign(row({ receipt: { taskId: "native-1", status: "succeeded" } }), { cleanupPending: true })];
+  it("keeps local-only removal when retrying an unknown dispatch from its detail and translates retained source resources", async () => {
+    rows = [row({ lastError: { message: "offline" }, receipt: { taskId: "native-1", status: "failed" } })];
+    const retained = [{ kind: "source_resources", reason: "本次仅移除本地关联。" }];
+    executeReply = async request => ({ schemaVersion: 1, releasedBytes: 0,
+      items: (request.targets as LauncherTaskCleanupTarget[]).map(target => ({ key: cleanupKey(target), status: "blocked",
+        releasedBytes: 0, retained, failures: [{ code: "cleanup_source_unconfirmed", message: "尚未确认源任务的身份和状态" }] })) });
     await render();
-    expect(container.textContent).toContain("待清理");
+    const detail = await openTask();
+    await click("移除记录", detail);
+    const result = document.body.querySelector('[data-vui="launcher-task-cleanup"]')!;
+    expect(result.textContent).toContain("核验后仅移除本地记录，保留源任务和文件。");
+    expect(result.textContent).toContain("保留 源任务和文件 — 本次仅移除本地关联。");
+    expect(result.textContent).toContain("尚未确认源任务的身份和状态");
+    await click("重试清理", result);
+    for (const [request] of [...operationCalls("previewTaskCleanup"), ...operationCalls("executeTaskCleanup")])
+      expect((request as unknown as { targets: unknown[] }).targets)
+        .toEqual([{ kind: "dispatch", projectId: "project-1", dispatchId: "dispatch-1", localOnly: true }]);
+    expect(operationCalls("previewTaskCleanup")).toHaveLength(2);
+    expect(operationCalls("executeTaskCleanup")).toHaveLength(2);
+    expect(container.querySelector("article")).toBeTruthy();
+  });
+
+  it("keeps incomplete host cleanup in ended tasks even after TASK_NOT_FOUND", async () => {
     rows = [Object.assign(row({ receipt: null, lastError: { code: "TASK_NOT_FOUND", message: "deleted native receipt" } }), { cleanupPending: true })];
-    await click("刷新");
+    await render();
     const card = container.querySelector('article[data-task-state="unknown"]')!;
     expect(card.textContent).toContain("待清理");
-    expect(card.textContent).not.toContain("正在推进");
-    expect(card.closest('[data-task-group="attention"]')).toBeTruthy();
-    const dialog = await openTask(card);
-    expect(button("重试清理", dialog).disabled).toBe(false);
-    expect(button("清理已完成").disabled).toBe(false);
-    await click("重试清理", dialog);
-    expect(operationCalls("previewTaskCleanup")).toHaveLength(1);
-    expect(operationCalls("executeTaskCleanup")).toHaveLength(0);
-    expect(button("永久删除", document.body).disabled).toBe(false);
-    await click("取消", document.body);
+    expect(card.closest('[data-task-group="ended"]')).toBeTruthy();
     await click("清理已完成");
-    expect(operationCalls("previewTaskCleanup")).toHaveLength(2);
+    expect(operationCalls("previewTaskCleanup")).toHaveLength(1);
+    expect(operationCalls("executeTaskCleanup")).toHaveLength(1);
   });
 
-  it("does not treat a string cleanup flag or an unbound recovery reference as deletion authority", async () => {
-    rows = [Object.assign(row({ receipt: null, lastError: { code: "TASK_NOT_FOUND" } }), { cleanupPending: "true" }),
-      Object.assign(row({ dispatchId: "no-native", nativeTaskId: undefined, receipt: null }), { cleanupPending: true })];
+  it("groups bound historical terminal receipts as ended and verifies bulk targets without local-only removal", async () => {
+    rows = [row({ title: "待同步的已结束任务", lastError: { message: "offline" }, receipt: { taskId: "native-1", status: "failed" } }),
+      row({ dispatchId: "unbound", receipt: { taskId: "other", status: "succeeded" } })];
     await render();
-    const cards = [...container.querySelectorAll("article")];
-    expect(cards).toHaveLength(2);
-    for (const card of cards) {
-      const dialog = await openTask(card);
-      expect(button(card.textContent?.includes("待清理") ? "重试清理" : "删除", dialog).disabled).toBe(true);
-      await click("关闭", dialog);
-    }
+    expect(button("已结束 1")).toBeTruthy();
+    expect(button("待处理 1")).toBeTruthy();
+    expect(container.querySelector("article")?.getAttribute("data-task-state")).toBe("unknown");
+    await click("清理已完成");
+    const targets = (operationCalls("previewTaskCleanup")[0][0] as unknown as { targets: LauncherTaskCleanupTarget[] }).targets;
+    expect(targets).toEqual([{ kind: "dispatch", projectId: "project-1", dispatchId: "dispatch-1" },
+      { kind: "dispatch", projectId: "project-1", dispatchId: "unbound" }]);
+  });
+
+  it.each(["succeeded", "failed", "timed_out", "cancelled"])("keeps a bound %s receipt with a source error in ended tasks", async nativeStatus => {
+    rows = [row({ lastError: { message: "offline" }, receipt: { taskId: "native-1", status: nativeStatus } })];
+    await render();
+    expect(button("已结束 1").getAttribute("aria-selected")).toBe("true");
+    expect(button("待处理 0")).toBeTruthy();
+    const card = container.querySelector('article[data-task-state="unknown"]')!;
+    expect(card.closest('[data-task-group="ended"]')).toBeTruthy();
+    expect(button("移除记录“核对周报”", card).textContent).toBe("移除记录");
+    await click("移除记录“核对周报”", card);
+    expect((operationCalls("executeTaskCleanup")[0][0] as unknown as { targets: unknown[] }).targets)
+      .toEqual([{ kind: "dispatch", projectId: "project-1", dispatchId: "dispatch-1", localOnly: true }]);
+  });
+
+  it("includes successful, failed, timed-out and stopped endings and every team alias in bulk cleanup", async () => {
+    terminal(); status.teamRunsVersion = 1;
+    for (const nativeStatus of ["failed", "timed_out", "cancelled"]) rows.push(row({ dispatchId: nativeStatus, receipt: { taskId: "native-1", status: nativeStatus } }));
+    rows.push(row({ dispatchId: "active" }), row({ dispatchId: "unknown", receipt: null }));
+    const teamRows = [teamRun(), teamRun({ requestId: "request-2", originAction: "flow_start" }),
+      teamRun({ requestId: "failed-run", runId: "failed-run", status: "failed" }), teamRun({ requestId: "stopped-run", runId: "stopped-run", status: "stopped" }),
+      teamRun({ requestId: "running", runId: "running", status: "running" })];
+    teamReply = async () => teamPage(teamRows);
+    await render();
+    expect(button("已结束 7")).toBeTruthy();
+    await click("清理已完成");
+    const targets = operationCalls("previewTaskCleanup").flatMap(([request]) => (request as unknown as { targets: LauncherTaskCleanupTarget[] }).targets);
+    expect(targets).toHaveLength(9);
+    expect(targets.filter(target => target.kind === "dispatch").map(target => target.dispatchId).sort()).toEqual(["cancelled", "dispatch-1", "failed", "timed_out", "unknown"]);
+    expect(targets.filter(target => target.kind === "team_run").map(target => target.requestId).sort()).toEqual(["failed-run", "request-1", "request-2", "stopped-run"]);
+    expect(operationCalls("executeTaskCleanup")).toHaveLength(5);
+  });
+
+  it("collects all cursor pages beyond the visible ten cards and processes more than 32 references", async () => {
+    rows = []; status.teamRunsVersion = 1;
+    const runs = Array.from({ length: 41 }, (_, index) => teamRun({ requestId: `request-${index}`, runId: `run-${index}` }));
+    const cursors = [16, 32].map(offset => btoa(JSON.stringify({ snapshot: "a".repeat(64), offset })).replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_"));
+    teamReply = async cursor => {
+      const offset = cursor === cursors[1] ? 32 : cursor === cursors[0] ? 16 : 0;
+      return teamPage(runs.slice(offset, offset + 16), { offset, total: 41, nextCursor: offset === 0 ? cursors[0] : offset === 16 ? cursors[1] : null });
+    };
+    await render();
+    expect(container.querySelectorAll("article")).toHaveLength(10);
+    await click("清理已完成");
+    const targets = operationCalls("executeTaskCleanup").flatMap(([request]) => (request as unknown as { targets: LauncherTaskCleanupTarget[] }).targets);
+    expect(targets).toHaveLength(41);
+    expect(new Set(targets.map(cleanupKey)).size).toBe(41);
+    expect(invoke).toHaveBeenCalledWith({ operation: "teamRuns", cursor: cursors[0] });
+    expect(invoke).toHaveBeenCalledWith({ operation: "teamRuns", cursor: cursors[1] });
+    expect(document.body.textContent).toContain("任务清理结果");
+  });
+
+  it("reads fresh dispatch receipts before deciding which tasks to clean", async () => {
+    terminal(); rows.push(row({ dispatchId: "newly-ended", title: "刚结束的任务" }));
+    await render();
+    rows = rows.map(value => value.dispatchId === "newly-ended"
+      ? { ...value, receipt: { taskId: "native-1", status: "failed" } } : value);
+    await click("清理已完成");
+    const targets = operationCalls("previewTaskCleanup").flatMap(([request]) => (request as unknown as { targets: LauncherTaskCleanupTarget[] }).targets);
+    expect(targets).toHaveLength(2);
+    expect(targets).toContainEqual({ kind: "dispatch", projectId: "project-1", dispatchId: "newly-ended" });
+  });
+
+  it("sends identifiable unknown rows from a partial team snapshot for authoritative bulk verification", async () => {
+    rows = []; status.teamRunsVersion = 1;
+    teamReply = async () => teamPage([teamRun({ teamId: null, flowId: null, runId: null, status: null, observedAt: null, readState: "unknown" })], { state: "partial" });
+    previewReply = async request => ({ schemaVersion: 1, fingerprint: "blocked", estimatedBytes: 0,
+      items: (request.targets as LauncherTaskCleanupTarget[]).map(target => ({ key: cleanupKey(target), title: "团队周报",
+        status: "blocked", estimatedBytes: 0, resources: [], retained: [], reason: "团队运行仍在执行" })) });
+    await render();
+    expect(button("待处理 1")).toBeTruthy();
+    expect(button("已结束 0")).toBeTruthy();
+    expect(button("清理已完成").disabled).toBe(false);
+    await click("清理已完成");
+    expect((operationCalls("previewTaskCleanup")[0][0] as unknown as { targets: unknown[] }).targets)
+      .toEqual([{ kind: "team_run", projectId: "project-1", requestId: "request-1", originAction: "team_run" }]);
+    expect(document.body.textContent).toContain("团队运行仍在执行");
+    expect(operationCalls("executeTaskCleanup")).toHaveLength(0);
+  });
+
+  it.each(["queued", "running", "cancelling", "awaiting_approval"])("does not offer cleanup for a known %s dispatch", async nativeStatus => {
+    rows = [row({ receipt: { taskId: "native-1", status: nativeStatus } })];
+    await render();
+    expect(button("已结束 0")).toBeTruthy();
+    expect(container.querySelector("article")?.querySelectorAll("button")).toHaveLength(1);
     expect(button("清理已完成").disabled).toBe(true);
     onlyReads();
   });
 
-  it("limits bulk cleanup to loaded successful endings and includes every team alias", async () => {
-    terminal(); status.teamRunsVersion = 1;
-    rows.push(row({ dispatchId: "failed", receipt: { taskId: "native-1", status: "failed" } }), row({ dispatchId: "active" }));
-    const teamRows = [teamRun(), teamRun({ requestId: "request-2", originAction: "flow_start" }), teamRun({ requestId: "running", runId: "running", status: "running" })];
-    teamReply = async () => teamPage(teamRows);
-    await render(); await click("清理已完成");
-    const request = operationCalls("previewTaskCleanup")[0][0] as unknown as { targets: unknown[] };
-    expect(request.targets).toEqual([{ kind: "dispatch", projectId: "project-1", dispatchId: "dispatch-1" },
-      { kind: "team_run", projectId: "project-1", requestId: "request-1", originAction: "team_run", teamId: "team-1", flowId: "flow-1", runId: "run-1" },
-      { kind: "team_run", projectId: "project-1", requestId: "request-2", originAction: "flow_start", teamId: "team-1", flowId: "flow-1", runId: "run-1" }]);
-    expect(document.body.textContent).toContain("当前已加载且执行成功结束");
-    expect(document.body.textContent).toContain("不代表业务已验收");
-    expect(operationCalls("executeTaskCleanup")).toHaveLength(0);
-  });
-
-  it("sends all team source references for a single terminal card and displays optional progress facts without inventing missing counts", async () => {
-    status.teamRunsVersion = 1; rows = [];
-    teamReply = async () => teamPage([teamRun({ teamName: "校验团队", projectName: "资料项目", current: 0, stepCount: 4,
-      currentAgentName: "核验 Agent", resultSummary: "三份证据已核对" }), teamRun({ requestId: "request-2", originAction: "flow_start" })]);
+  it("enables bulk cleanup when ended tasks only exist on a later page", async () => {
+    rows = []; status.teamRunsVersion = 1;
+    const cursor = btoa(JSON.stringify({ snapshot: "b".repeat(64), offset: 1 })).replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
+    teamReply = async value => value ? teamPage([teamRun({ status: "failed" })], { offset: 1, total: 2 })
+      : teamPage([teamRun({ requestId: "active", runId: "active", status: "running" })], { total: 2, nextCursor: cursor });
     await render();
-    expect(container.textContent).toContain("核验 Agent · 已结束");
-    expect(container.textContent).not.toContain("资料项目");
-    const dialog = await openTask();
-    expect(dialog.textContent).toContain("项目：资料项目");
-    expect(dialog.textContent).toContain("三份证据已核对");
-    await click("引用信息", dialog);
-    expect(dialog.textContent).toContain("当前步骤：0");
-    expect(dialog.textContent).toContain("步骤数：4");
-    expect(dialog.textContent).toContain("尝试次数：尚未绑定");
-    expect(dialog.textContent).toContain("负责人：核验 Agent");
-    await click("删除", dialog);
-    const request = operationCalls("previewTaskCleanup")[0][0] as unknown as { targets: unknown[] };
-    expect(request.targets).toHaveLength(2);
+    expect(button("清理已完成").disabled).toBe(false);
+    await click("清理已完成");
+    expect(operationCalls("executeTaskCleanup")).toHaveLength(1);
   });
 
-  it.each(["identity", "hidden", "status_error"] as const)("invalidates a loaded cleanup preview after %s changes", async change => {
-    terminal(); await render(); await previewCleanup();
-    expect(button("永久删除", document.body).disabled).toBe(false);
+  it("fails visibly on a repeated cursor without deleting a partial list", async () => {
+    rows = []; status.teamRunsVersion = 1;
+    const cursor = btoa(JSON.stringify({ snapshot: "c".repeat(64), offset: 1 })).replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
+    teamReply = async value => teamPage([teamRun()], { offset: value ? 1 : 0, total: 3, nextCursor: cursor });
+    await render(); await click("清理已完成");
+    expect(document.body.textContent).toContain("团队运行暂不可用");
+    expect(operationCalls("previewTaskCleanup")).toHaveLength(0);
+    expect(button("重试清理").disabled).toBe(false);
+  });
+
+  it.each(["identity", "hidden", "unmounted"] as const)("stops cleanup collection if the view becomes %s", async change => {
+    rows = []; status.teamRunsVersion = 1;
+    const cursor = btoa(JSON.stringify({ snapshot: "d".repeat(64), offset: 1 })).replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
+    teamReply = async () => teamPage([teamRun()], { total: 2, nextCursor: cursor });
+    await render();
+    let resolvePage!: (value: LauncherAssistantTeamRunsPage) => void;
+    teamReply = () => new Promise(resolve => { resolvePage = resolve; });
+    await click("清理已完成");
     if (change === "identity") {
-      status = { assistant: { agentId: "assistant-2", directSessionId: "session-2", displayName: "新助理" } };
+      status = { teamRunsVersion: 1, assistant: { agentId: "assistant-2", directSessionId: "session-2", displayName: "新助理" } };
+      teamReply = async () => teamPage([]);
       await act(async () => { client.setQueryData(["launcher-assistant", "status"], status); }); await settle();
     } else if (change === "hidden") {
-      visibility = "hidden"; await act(async () => { document.dispatchEvent(new Event("visibilitychange")); }); await settle();
-    } else {
-      invoke.mockImplementation(async (request: { operation: string }) => { if (request.operation === "status") throw new Error("identity offline"); return {}; });
-      await act(async () => { await client.refetchQueries({ queryKey: ["launcher-assistant", "status"], exact: true }); }); await settle();
-    }
-    expect([...document.body.querySelectorAll("button")].some(element => element.textContent === "永久删除")).toBe(false);
-    expect(operationCalls("executeTaskCleanup")).toHaveLength(0);
+      visibility = "hidden"; await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    } else await act(async () => { root!.unmount(); root = null; });
+    const reads = teamReads();
+    await act(async () => { resolvePage(teamPage([teamRun()], { total: 2, nextCursor: cursor })); }); await settle();
+    expect(teamReads()).toBe(reads);
+    expect(operationCalls("previewTaskCleanup")).toHaveLength(0);
   });
 
-  it("discards a late cleanup preview from a previous assistant identity", async () => {
+  it.each(["identity", "hidden", "status_error"] as const)("stops before execution when %s changes during host verification", async change => {
     terminal();
     let resolvePreview!: (value: LauncherTaskCleanupPreview) => void;
+    const originalPreview = previewReply;
+    const response = await originalPreview({ targets: [{ kind: "dispatch", projectId: "project-1", dispatchId: "dispatch-1" }] });
     previewReply = () => new Promise(resolve => { resolvePreview = resolve; });
-    await render(); await previewCleanup();
-    expect(button("永久删除", document.body).disabled).toBe(true);
-    status = { assistant: { agentId: "assistant-2", directSessionId: "session-2", displayName: "新助理" } };
-    await act(async () => { client.setQueryData(["launcher-assistant", "status"], status); }); await settle();
-    await act(async () => { resolvePreview({ schemaVersion: 1, fingerprint: "old-preview", estimatedBytes: 1,
-      items: [{ key: "old", title: "旧身份清理结果", status: "ready", estimatedBytes: 1, resources: [], retained: [] }] }); }); await settle();
-    expect(document.body.textContent).not.toContain("旧身份清理结果");
-    expect(operationCalls("executeTaskCleanup")).toHaveLength(0);
-  });
-
-  it("does not request later preview batches after the assistant identity changes", async () => {
-    rows = Array.from({ length: 33 }, (_, index) => row({ dispatchId: `dispatch-${index}`,
-      receipt: { taskId: "native-1", status: "succeeded" } }));
-    let resolvePreview!: (value: LauncherTaskCleanupPreview) => void;
-    let firstTargets: LauncherTaskCleanupTarget[] = [];
-    previewReply = request => { firstTargets = request.targets as LauncherTaskCleanupTarget[]; return new Promise(resolve => { resolvePreview = resolve; }); };
-    await render(); await click("清理已完成");
-    status = { assistant: { agentId: "assistant-2", directSessionId: "session-2", displayName: "新助理" } };
-    await act(async () => { client.setQueryData(["launcher-assistant", "status"], status); }); await settle();
-    await act(async () => { resolvePreview({ schemaVersion: 1, fingerprint: "native-old", estimatedBytes: 32,
-      items: firstTargets.map(target => ({ key: cleanupKey(target), title: "旧任务", status: "ready", estimatedBytes: 1, resources: [], retained: [] })) }); });
+    await render(); await click("清理“核对周报”");
+    if (change === "identity") {
+      status = { assistant: { agentId: "assistant-2", directSessionId: "session-2", displayName: "新助理" } };
+      await act(async () => { client.setQueryData(["launcher-assistant", "status"], status); });
+    } else if (change === "hidden") {
+      visibility = "hidden"; await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    } else {
+      invoke.mockImplementation(async () => { throw new Error("identity offline"); });
+      await act(async () => { await client.refetchQueries({ queryKey: ["launcher-assistant", "status"], exact: true }); });
+    }
     await settle();
-    expect(operationCalls("previewTaskCleanup")).toHaveLength(1);
+    await act(async () => { resolvePreview(response); }); await settle();
     expect(operationCalls("executeTaskCleanup")).toHaveLength(0);
-    expect(document.body.textContent).not.toContain("旧任务");
+    expect(document.body.querySelector('[data-vui="launcher-task-cleanup"]')).toBeNull();
   });
 
-  it("stops later execute batches on identity change without projecting an old result into the next assistant", async () => {
-    rows = Array.from({ length: 33 }, (_, index) => row({ dispatchId: `dispatch-${index}`,
-      receipt: { taskId: "native-1", status: "succeeded" } }));
+  it("stops later execution batches after identity change", async () => {
+    rows = Array.from({ length: 33 }, (_, index) => row({ dispatchId: `dispatch-${index}`, receipt: { taskId: "native-1", status: "succeeded" } }));
     let resolveExecute!: (value: LauncherTaskCleanupResult) => void;
     let firstTargets: LauncherTaskCleanupTarget[] = [];
     executeReply = request => { firstTargets = request.targets as LauncherTaskCleanupTarget[]; return new Promise(resolve => { resolveExecute = resolve; }); };
     await render(); await click("清理已完成");
-    expect(operationCalls("previewTaskCleanup")).toHaveLength(2);
-    await click("永久删除", document.body);
     expect(operationCalls("executeTaskCleanup")).toHaveLength(1);
     status = { assistant: { agentId: "assistant-2", directSessionId: "session-2", displayName: "新助理" } };
     await act(async () => { client.setQueryData(["launcher-assistant", "status"], status); }); await settle();
-    await act(async () => { resolveExecute({ schemaVersion: 1, releasedBytes: 32, items: firstTargets.map(target => ({
+    await act(async () => { resolveExecute({ schemaVersion: 1, releasedBytes: 4, items: firstTargets.map(target => ({
       key: cleanupKey(target), status: "deleted", releasedBytes: 1, retained: [], failures: [],
     })) }); }); await settle();
     expect(operationCalls("executeTaskCleanup")).toHaveLength(1);
     expect(document.body.textContent).not.toContain("任务清理结果");
   });
 
-  it("prevents duplicate execution from two confirmation clicks in the same event batch", async () => {
+  it("shares one synchronous lock between single and bulk clicks", async () => {
     terminal();
     let resolveExecute!: (value: LauncherTaskCleanupResult) => void;
     executeReply = () => new Promise(resolve => { resolveExecute = resolve; });
-    await render(); await previewCleanup();
-    const confirm = button("永久删除", document.body);
-    await act(async () => { confirm.click(); confirm.click(); }); await settle();
+    await render();
+    const single = button("清理“核对周报”"), bulk = button("清理已完成");
+    await act(async () => { single.click(); bulk.click(); single.click(); }); await settle();
+    expect(operationCalls("previewTaskCleanup")).toHaveLength(1);
     expect(operationCalls("executeTaskCleanup")).toHaveLength(1);
-    await act(async () => { resolveExecute({ schemaVersion: 1, releasedBytes: 0, items: [{
-      key: dispatchCleanupKey, status: "blocked", releasedBytes: 0, retained: [], failures: [],
-    }] }); }); await settle();
+    expect(single.disabled).toBe(true);
+    expect(bulk.disabled).toBe(true);
+    await act(async () => { resolveExecute({ schemaVersion: 1, releasedBytes: 0,
+      items: [{ key: dispatchCleanupKey, status: "deleted", releasedBytes: 0, retained: [], failures: [] }] }); }); await settle();
   });
 });
 
@@ -496,9 +591,9 @@ async function openTask(card: Element = container.querySelector("article")!): Pr
   await act(async () => { trigger.click(); }); await settle();
   return taskDialog();
 }
-async function previewCleanup(card?: Element) {
+async function cleanupFromDetail(card?: Element) {
   const dialog = await openTask(card);
-  await click("删除", dialog);
+  await click("清理", dialog);
 }
 function dispatchReads() { return invoke.mock.calls.filter(([request]) => request.operation === "dispatches").length; }
 function teamReads() { return invoke.mock.calls.filter(([request]) => request.operation === "teamRuns").length; }

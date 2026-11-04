@@ -6,6 +6,8 @@ const styles={
  tabList:"!flex w-full !flex-nowrap !gap-0 !p-0.5",
  tab:"min-w-0 flex-1 !px-0.5 !text-[12px] whitespace-nowrap",
  list:"grid min-w-0 gap-0.5",
+ row:"flex min-w-0 items-center gap-0.5 [&>button:first-child]:min-w-0 [&>button:first-child]:flex-1",
+ remove:"min-h-7 shrink-0 px-1 !text-[12px]",
  empty:"px-2 py-3 text-center text-[12px] text-vui-fg-tertiary",
  notice:"grid min-w-0 gap-1 px-2 text-[12px] leading-relaxed text-vui-fg-secondary",
 };export default styles;

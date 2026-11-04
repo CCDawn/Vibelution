@@ -109,8 +109,8 @@ export type LauncherAssistantRequest =
 type LauncherAssistantBridge = { invoke: (payload: LauncherAssistantRequest) => Promise<unknown> };
 
 export type LauncherTaskCleanupTarget =
-  | { kind: "dispatch"; projectId: string; dispatchId: string }
-  | { kind: "team_run"; projectId: string; requestId: string; originAction: "team_run" | "flow_start"; teamId: string; flowId: string; runId: string };
+  | { kind: "dispatch"; projectId: string; dispatchId: string; localOnly?: boolean }
+  | { kind: "team_run"; projectId: string; requestId: string; originAction: "team_run" | "flow_start"; teamId?: string; flowId?: string; runId?: string; localOnly?: boolean };
 
 export function launcherAssistantInvoke(payload: LauncherAssistantRequest): Promise<unknown> {
   return launcherAssistantBridge().invoke(payload);

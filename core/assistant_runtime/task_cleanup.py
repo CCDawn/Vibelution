@@ -6,6 +6,7 @@ native identities. A partial deletion retains its local reference for retry.
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import time
 from collections import OrderedDict
@@ -16,7 +17,12 @@ import anyio
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.external_agent.backend_client import BackendClientError
+from core.external_agent.contracts import TASK_ACTIVE_STATUSES, TASK_TERMINAL_STATUSES
 from core.infrastructure.atomic_io import atomic_write_json
+from .dispatch import DispatchError, _bounded_native_request, _checked_task_receipt
+
+_REQUEST_PROOF_BUDGET = 25.0
 
 
 class _Closed(BaseModel):
@@ -30,6 +36,7 @@ class DispatchTarget(_Closed):
     kind: Literal["dispatch"]
     projectId: _Id
     dispatchId: str = Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+    localOnly: bool = False
 
 
 class TeamTarget(_Closed):
@@ -37,9 +44,10 @@ class TeamTarget(_Closed):
     projectId: _Id
     requestId: str = Field(min_length=1, max_length=96, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
     originAction: Literal["team_run", "flow_start"]
-    teamId: _Id
-    flowId: _Id
-    runId: _Id
+    teamId: _Id | None = None
+    flowId: _Id | None = None
+    runId: _Id | None = None
+    localOnly: bool = False
 
 
 Target = Annotated[Union[DispatchTarget, TeamTarget], Field(discriminator="kind")]
@@ -68,8 +76,47 @@ def _size(path: Path) -> int:
     return stat.st_size
 
 
+def _absent(path):
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return True
+    return False
+
+
 def _dispatch_binding(row):
     return tuple(row.get(key) for key in ("dispatchId", "projectId", "projectBinding", "agentId", "nativeTaskId", "requestDigest"))
+
+
+def _failure_reason(error):
+    code = getattr(error, "code", "") or str(error)
+    reasons = {
+        "cleanup_task_active": "任务仍在运行或停止尚未确认，请结束任务后重试。",
+        "TASK_NOT_TERMINAL": "任务仍在运行或停止尚未确认，请结束任务后重试。",
+        "cleanup_source_unconfirmed": "尚未确认源任务的身份和状态，已保留任务关联。",
+        "TASK_CLEANUP_UNAVAILABLE": "此任务不属于当前 Launcher 的本地任务，无法清理源资源。",
+        "LAUNCHER_AUTHORITY_REQUIRED": "当前 Launcher 的任务清理权限不可用，请恢复连接后重试。",
+        "REQUEST_UNAVAILABLE": "源团队请求记录已缺失，无法确认任务已结束，已保留助理任务关联。",
+        "OPERATION_UNAVAILABLE": "源运行记录已缺失，无法确认任务已结束，已保留助理任务关联。",
+        "OPERATION_SOURCE_UNAVAILABLE": "源运行状态当前不可读取，已保留助理任务关联，请恢复连接后重试。",
+        "TASK_NOT_FOUND": "源任务、访问凭据或权限不可用，无法确认清理范围，已保留任务关联。",
+        "BACKEND_TIMEOUT": "源项目未及时响应，清理结果尚未确认，请稍后重试。",
+        "BACKEND_UNAVAILABLE": "源项目当前无法连接，已保留任务关联，请恢复连接后重试。",
+        "cleanup_reference_changed": "任务关联或项目绑定已变化，请刷新后重试。",
+        "cleanup_run_changed": "团队任务身份与所选关联不一致，请刷新后重试。",
+        "cleanup_path_invalid": "任务记录路径不安全，已保留记录。",
+        "cleanup_request_unconfirmed": "无法确认原请求是否已受理或结束，已保留任务关联。",
+        "cleanup_request_identity_unconfirmed": "原请求标识缺失或与任务不一致，无法核实受理状态，已保留任务关联。",
+        "UNKNOWN_REQUEST": "原请求访问凭据不可用，无法核实受理状态，已保留任务关联。",
+        "BACKEND_PROTOCOL_ERROR": "源项目返回的任务身份或状态无法核对，已保留任务关联。",
+        "cleanup_bound_terminal_unconfirmed": "源任务仍有关联，尚未确认已结束。请确认结束状态后再移除记录。",
+        "cleanup_completion_unconfirmed": "任务关联已不在，但缺少与当前身份匹配的清理凭据，无法确认此前清理结果。",
+    }
+    if isinstance(error, TimeoutError):
+        return reasons["BACKEND_TIMEOUT"]
+    if isinstance(error, PermissionError):
+        return "任务记录或清理凭据暂时无法访问，清理未完成，请稍后重试。"
+    return reasons.get(code, "当前无法确认任务身份、终态或删除范围，请刷新后重试。")
 
 
 def _retained(rows):
@@ -111,9 +158,147 @@ class TaskCleanup:
         if not isinstance(identity, dict) or (identity.get("agentId"), identity.get("directSessionId")) != (payload.agentId, payload.directSessionId):
             raise HTTPException(409, detail={"code": "TASK_CLEANUP_IDENTITY_CHANGED"})
 
-    async def _team_plan(self, target):
-        from .team_patrol import TeamPatrolObserver
+    def _marker_path(self, target):
+        if target.kind == "dispatch":
+            return self.dispatch._root / "deleted" / (target.dispatchId + ".json")
         adapter = self.dispatch.management
+        key = adapter._key(target.projectId, target.originAction, target.requestId)
+        return adapter._root / "cleanup_tombstones" / (key + ".json")
+
+    def _marker_scope(self, target, payload):
+        binding = self.dispatch._project_read_binding(target.projectId)
+        scope = {"schemaVersion": 1, "kind": target.kind, "projectId": target.projectId,
+                 "projectBinding": self.dispatch._binding(binding[1]),
+                 "agentId": payload.agentId, "directSessionId": payload.directSessionId, "localOnly": target.localOnly}
+        if target.kind == "dispatch":
+            scope["dispatchId"] = target.dispatchId
+        else:
+            scope.update(originAction=target.originAction, requestId=target.requestId)
+        return scope
+
+    def _completed_plan(self, target, payload, path):
+        binding = self.dispatch._project_read_binding(target.projectId)
+        marker = self._marker_path(target)
+        try:
+            if _size(marker) > 4096:
+                raise ValueError("cleanup_completion_unconfirmed")
+            data = json.loads(marker.read_text(encoding="utf-8"))
+            scope = self._marker_scope(target, payload)
+            if (not isinstance(data, dict) or type(data.get("schemaVersion")) is not int or type(data.get("localOnly")) is not bool
+                    or any(data.get(key) != value for key, value in scope.items())):
+                raise ValueError("cleanup_completion_unconfirmed")
+            if target.kind == "dispatch":
+                if not re.fullmatch(r"[a-f0-9]{64}", str(data.get("requestDigest", ""))):
+                    raise ValueError("cleanup_completion_unconfirmed")
+            else:
+                from .team_patrol import _ID
+                for key in ("teamId", "flowId", "runId"):
+                    value = data.get(key)
+                    if target.localOnly and value is None and getattr(target, key) is None:
+                        continue
+                    if (not isinstance(value, str) or not _ID.fullmatch(value)
+                            or getattr(target, key) is not None and value != getattr(target, key)):
+                        raise ValueError("cleanup_completion_unconfirmed")
+        except (OSError, ValueError, TypeError):
+            raise ValueError("cleanup_completion_unconfirmed") from None
+        if not _absent(path) or self.dispatch._project_read_binding(target.projectId) != binding:
+            raise ValueError("cleanup_reference_changed")
+        retained = [{"kind": "deduplication_marker", "reason": "仅保留任务与身份标识的清理凭据，不保存任务内容。"}]
+        return {"path": path, "marker": marker, "markerData": data, "binding": binding, "alreadyDeleted": True}, {
+            "status": "ready", "estimatedBytes": 0, "resources": [], "retained": retained}
+
+    async def _dispatch_terminal_proof(self, target, record):
+        receipt = record.get("receipt") or {}
+        if not isinstance(receipt, dict):
+            raise ValueError("cleanup_source_unconfirmed")
+        if any(status in TASK_ACTIVE_STATUSES for status in (record.get("status"), receipt.get("status"))):
+            raise ValueError("cleanup_task_active")
+        task_id = record.get("nativeTaskId")
+        if task_id:
+            if (not isinstance(task_id, str) or receipt.get("taskId") != task_id
+                    or receipt.get("status") not in TASK_TERMINAL_STATUSES):
+                raise ValueError("cleanup_bound_terminal_unconfirmed")
+            return "task", task_id, receipt["status"]
+        request_id = "launcher-assistant:" + target.dispatchId
+        if record.get("clientRequestId") != request_id:
+            raise ValueError("cleanup_request_identity_unconfirmed")
+
+        async def query(client):
+            # A lost start response can still hide an admitted task whose lease
+            # patrol recovers through this exact request. Never infer absence
+            # from a missing local ID, credential denial or target 404.
+            found = await _bounded_native_request(client.get_task_for_request(client_request_id=request_id))
+            recovered_id = found.get("taskId") if isinstance(found, dict) else None
+            if (not isinstance(recovered_id, str)
+                    or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}", recovered_id)):
+                raise ValueError("cleanup_source_unconfirmed")
+            current = await _checked_task_receipt(client, recovered_id)
+            # The current public task DTO omits agentId. The authenticated
+            # original request binds its task; check optional identity if sent.
+            if any(payload.get("agentId") is not None and payload["agentId"] != record.get("agentId")
+                   for payload in (found, current)):
+                raise ValueError("cleanup_reference_changed")
+            if current.get("status") in TASK_ACTIVE_STATUSES:
+                raise ValueError("cleanup_task_active")
+            if current.get("status") not in TASK_TERMINAL_STATUSES:
+                raise ValueError("cleanup_request_unconfirmed")
+            return {"clientRequestId": request_id, "taskId": recovered_id, "status": current["status"]}
+
+        try:
+            with anyio.fail_after(_REQUEST_PROOF_BUDGET):
+                proof = await self.dispatch._call(target.projectId, query)
+        except (BackendClientError, DispatchError) as error:
+            if error.code in {"UNKNOWN_REQUEST", "TASK_NOT_FOUND"}:
+                raise ValueError("cleanup_request_unconfirmed") from None
+            raise
+        if (not isinstance(proof, dict) or proof.get("clientRequestId") != request_id
+                or not isinstance(proof.get("taskId"), str) or proof.get("status") not in TASK_TERMINAL_STATUSES):
+            raise ValueError("cleanup_source_unconfirmed")
+        return "request", request_id, proof["taskId"], proof["status"]
+
+    async def _local_only_plan(self, target, path):
+        binding = self.dispatch._project_read_binding(target.projectId)
+        if target.kind == "dispatch":
+            record = self.dispatch._read(target.dispatchId)
+            if (record.get("projectId") != target.projectId
+                    or not re.fullmatch(r"[a-f0-9]{64}", str(record.get("requestDigest", "")))):
+                raise ValueError("cleanup_reference_changed")
+        else:
+            record = self.dispatch.management._read(path)
+            if record.get("reference") != {"projectId": target.projectId,
+                    "action": target.originAction, "requestId": target.requestId}:
+                raise ValueError("cleanup_reference_changed")
+        receipt = record.get("receipt")
+        receipt = {} if receipt is None else receipt
+        if not isinstance(receipt, dict):
+            raise ValueError("cleanup_source_unconfirmed")
+        run = receipt.get("teamRun", record.get("teamRun", {}))
+        if not isinstance(run, dict):
+            raise ValueError("cleanup_source_unconfirmed")
+        statuses = record.get("status"), receipt.get("status"), run.get("status")
+        active = {*TASK_ACTIVE_STATUSES, "dispatching", "waiting", "stopping", "preparing"}
+        if any(status in active for status in statuses if isinstance(status, str)):
+            raise ValueError("cleanup_task_active")
+        source_status = statuses
+        if target.kind == "dispatch":
+            source_status = statuses, await self._dispatch_terminal_proof(target, record)
+        if target.kind == "team_run" and any(getattr(target, key) is not None
+                and getattr(target, key) != run.get(key) for key in ("teamId", "flowId", "runId")):
+            raise ValueError("cleanup_run_changed")
+        if self.dispatch._project_read_binding(target.projectId) != binding:
+            raise ValueError("cleanup_reference_changed")
+        size = _size(path)
+        plan = {"path": path, "bytes": size, "referenceOnly": True, "sourceStatus": source_status,
+                "binding": _dispatch_binding(record) if target.kind == "dispatch" else binding,
+                "record": record, "runBinding": tuple(run.get(key) for key in ("teamId", "flowId", "runId"))}
+        return plan, {"status": "ready", "estimatedBytes": size,
+                      "resources": [{"kind": "launcher_task_record", "count": 1, "bytes": size}],
+                      "retained": [{"kind": "source_resources", "reason": "仅移除助理中的任务关联，源任务和共用资源均已保留。"}]}
+
+    async def _team_plan(self, target):
+        from .team_patrol import TeamPatrolObserver, _ID
+        adapter = self.dispatch.management
+        binding = self.dispatch._project_read_binding(target.projectId)
         key = adapter._key(target.projectId, target.originAction, target.requestId)
         path = adapter._root / (key + ".json")
         record = adapter._read(path)
@@ -125,23 +310,59 @@ class TaskCleanup:
         if receipt.get("verified") is not True or receipt.get("status") != "completed":
             raise ValueError("cleanup_source_unconfirmed")
         run = await observer._flow_run(ref, receipt) if target.originAction == "flow_start" else receipt.get("teamRun")
-        if not isinstance(run, dict) or any(run.get(k) != getattr(target, k) for k in ("teamId", "flowId", "runId")):
+        if (not isinstance(run, dict) or any(not isinstance(run.get(key), str) or not _ID.fullmatch(run[key])
+                for key in ("teamId", "flowId", "runId"))):
+            raise ValueError("cleanup_source_unconfirmed")
+        if any(getattr(target, key) is not None and run[key] != getattr(target, key)
+               for key in ("teamId", "flowId", "runId")):
             raise ValueError("cleanup_run_changed")
         if run.get("status") not in {"completed", "failed", "stopped"}:
             raise ValueError("cleanup_task_active")
-        return {"path": path, "record": record, "binding": self.dispatch._project_read_binding(target.projectId),
+        if self.dispatch._project_read_binding(target.projectId) != binding:
+            raise ValueError("cleanup_reference_changed")
+        return {"path": path, "record": record, "binding": binding,
+                "runBinding": tuple(run[key] for key in ("teamId", "flowId", "runId")),
                 "revision": run.get("revision"), "status": run["status"], "bytes": _size(path)}
 
-    async def _plan(self, target):
+    async def _reference_plan(self, target, row, path):
+        receipt = row.get("receipt")
+        if receipt is None:
+            receipt = {}
+        if not isinstance(receipt, dict) or not re.fullmatch(r"[a-f0-9]{64}", str(row.get("requestDigest", ""))):
+            raise ValueError("cleanup_source_unconfirmed")
+        status = receipt.get("status") or row.get("status")
+        if receipt.get("taskId"):
+            raise ValueError("cleanup_reference_changed")
+        proof = await self._dispatch_terminal_proof(target, row)
+        size = _size(path)
+        retained = [{"kind": "source_resources", "reason": "本次仅清理助理的任务关联，共用项目和其他源资源均已保留。"}]
+        return {"path": path, "binding": _dispatch_binding(row), "referenceOnly": True,
+                "sourceStatus": (status, proof), "bytes": size}, {
+                    "status": "ready", "estimatedBytes": size,
+                    "resources": [{"kind": "launcher_task_record", "count": 1, "bytes": size}], "retained": retained}
+
+    async def _plan(self, target, payload):
+        if target.kind == "dispatch":
+            path = self.dispatch._path(target.dispatchId)
+        else:
+            adapter = self.dispatch.management
+            key = adapter._key(target.projectId, target.originAction, target.requestId)
+            path = adapter._root / (key + ".json")
+        if _absent(path):
+            return self._completed_plan(target, payload, path)
+        if target.localOnly:
+            return await self._local_only_plan(target, path)
         if target.kind == "team_run":
             plan = await self._team_plan(target)
             return plan, {"status": "ready", "estimatedBytes": plan["bytes"],
                           "resources": [{"kind": "launcher_task_record", "count": 1, "bytes": plan["bytes"]}],
                           "retained": [{"kind": "shared_team_resources", "reason": "团队、成员、运行历史和成果供其他功能共用，本次仅删除助理的任务关联记录。"}]}
         row = self.dispatch._read(target.dispatchId)
-        if row.get("projectId") != target.projectId or not row.get("nativeTaskId"):
+        if row.get("projectId") != target.projectId:
             raise ValueError("cleanup_reference_changed")
         path = self.dispatch._path(target.dispatchId)
+        if not row.get("nativeTaskId"):
+            return await self._reference_plan(target, row, path)
         native = await self.dispatch._call(target.projectId,
             lambda client: client.preview_task_cleanup(task_id=row["nativeTaskId"]))
         if (not isinstance(native, dict) or native.get("taskId") != row["nativeTaskId"]
@@ -163,11 +384,11 @@ class TaskCleanup:
         items, plans = [], []
         for target, key in zip(payload.targets, keys):
             try:
-                plan, item = await self._plan(target)
-            except Exception:
+                plan, item = await self._plan(target, payload)
+            except Exception as error:
                 plan = None
                 item = {"status": "blocked", "estimatedBytes": 0, "resources": [], "retained": [],
-                        "reason": "当前无法确认任务身份、终态或删除范围，请刷新后重试。"}
+                        "reason": _failure_reason(error)}
             items.append({"key": key, "title": target.dispatchId if target.kind == "dispatch" else target.requestId, **item})
             plans.append(plan)
         self._identity(payload)
@@ -195,35 +416,62 @@ class TaskCleanup:
             try:
                 if plan is None:
                     raise ValueError("cleanup_preview_blocked")
-                if target.kind == "dispatch":
+                if plan.get("alreadyDeleted"):
+                    if target.kind == "dispatch":
+                        lock = self.dispatch._dispatch_lock(target.dispatchId)
+                    else:
+                        adapter = self.dispatch.management
+                        key = adapter._key(target.projectId, target.originAction, target.requestId)
+                        lock = adapter._locks.setdefault(key, anyio.Lock())
+                    async with lock:
+                        if not _absent(plan["path"]):
+                            raise ValueError("cleanup_reference_changed")
+                        current, summary = self._completed_plan(target, payload, plan["path"])
+                        if any(current[key] != plan[key] for key in ("binding", "markerData")):
+                            raise ValueError("cleanup_reference_changed")
+                        self._identity(payload)
+                        item.update(status="deleted", alreadyDeleted=True, retained=summary["retained"])
+                elif target.kind == "dispatch":
                     async with self.dispatch._dispatch_lock(target.dispatchId):
                         row = self.dispatch._read(target.dispatchId)
                         if _dispatch_binding(row) != plan["binding"]:
                             raise ValueError("cleanup_reference_changed")
-                        native = plan["native"]
-                        marker = self.dispatch._root / "deleted" / (target.dispatchId + ".json")
+                        marker = self._marker_path(target)
                         local_paths = [plan["path"], marker]
                         local_before = sum(_size(path) for path in local_paths if path.exists())
-                        # Persist recovery before an irreversible native request.
-                        # A later TASK_NOT_FOUND during patrol must not make a
-                        # partially cleaned task unreachable from the operator UI.
-                        row["cleanupPending"] = True
-                        self.dispatch._save(row)
-                        result = await self.dispatch._call(target.projectId, lambda client: client.cleanup_task(
-                            task_id=row["nativeTaskId"], revision=native["revision"], fingerprint=native["fingerprint"]))
-                        if not isinstance(result, dict) or result.get("taskId") != row["nativeTaskId"]:
-                            raise ValueError("cleanup_receipt_invalid")
-                        native_delta = result.get("storageDeltaBytes", result.get("releasedBytes", 0))
-                        if type(native_delta) is not int:
-                            raise ValueError("cleanup_accounting_invalid")
-                        item.update(status=result.get("status", "partial"), releasedBytes=max(0, int(result.get("releasedBytes", 0))),
-                                    retained=_retained(result.get("retained", [])), failures=[{
-                                        "code": "TASK_RESOURCE_CLEANUP_FAILED", "message": "部分任务文件尚未删除，请重新预览后重试。"
-                                    } for failure in result.get("failures", []) if isinstance(failure, dict)])
+                        if plan.get("referenceOnly"):
+                            current, summary = await self._plan(target, payload)
+                            if (current is None or not current.get("referenceOnly") or any(current[key] != plan[key]
+                                    for key in ("binding", "sourceStatus"))):
+                                raise ValueError("cleanup_reference_changed")
+                            if _dispatch_binding(self.dispatch._read(target.dispatchId)) != plan["binding"]:
+                                raise ValueError("cleanup_reference_changed")
+                            item.update(status="deleted", retained=summary["retained"])
+                        if not plan.get("referenceOnly"):
+                            # Persist recovery before an irreversible native request.
+                            # Local-only removal must not become a native-cleanup retry.
+                            row["cleanupPending"] = True
+                            self.dispatch._save(row)
+                            native = plan["native"]
+                            result = await self.dispatch._call(target.projectId, lambda client: client.cleanup_task(
+                                task_id=row["nativeTaskId"], revision=native["revision"], fingerprint=native["fingerprint"]))
+                            if not isinstance(result, dict) or result.get("taskId") != row["nativeTaskId"]:
+                                raise ValueError("cleanup_receipt_invalid")
+                            native_delta = result.get("storageDeltaBytes", result.get("releasedBytes", 0))
+                            if type(native_delta) is not int:
+                                raise ValueError("cleanup_accounting_invalid")
+                            item.update(status=result.get("status", "partial"), releasedBytes=max(0, int(result.get("releasedBytes", 0))),
+                                        retained=_retained(result.get("retained", [])), failures=[{
+                                            "code": "TASK_RESOURCE_CLEANUP_FAILED", "message": "部分任务文件尚未删除，请重试清理。"
+                                        } for failure in result.get("failures", []) if isinstance(failure, dict)])
                         if item["status"] == "deleted":
                             # This compact marker prevents a deleted dispatch ID
                             # from becoming a second execution after credential loss.
-                            atomic_write_json(marker, {"schemaVersion": 1, "requestDigest": row["requestDigest"]}, strict_replace=True)
+                            self._identity(payload)
+                            if _dispatch_binding(self.dispatch._read(target.dispatchId)) != plan["binding"]:
+                                raise ValueError("cleanup_reference_changed")
+                            marker_data = {**self._marker_scope(target, payload), "requestDigest": row["requestDigest"]}
+                            atomic_write_json(marker, marker_data, strict_replace=True)
                             _size(plan["path"])
                             plan["path"].unlink()
                             item["retained"].append({"kind": "deduplication_marker", "reason": "仅保留防止重复执行的最小摘要，不保存任务内容。"})
@@ -231,15 +479,24 @@ class TaskCleanup:
                     adapter = self.dispatch.management
                     key = adapter._key(target.projectId, target.originAction, target.requestId)
                     async with adapter._locks.setdefault(key, anyio.Lock()):
-                        current = await self._team_plan(target)
-                        if any(current[key] != plan[key] for key in ("record", "binding", "revision", "status")):
+                        current, summary = await self._plan(target, payload)
+                        fields = ("record", "binding", "runBinding") if target.localOnly else (
+                            "record", "binding", "runBinding", "revision", "status")
+                        if current is None or any(current[key] != plan[key] for key in fields):
                             raise ValueError("cleanup_reference_changed")
+                        self._identity(payload)
+                        marker = self._marker_path(target)
+                        local_paths = [current["path"], marker]
+                        local_before = sum(_size(path) for path in local_paths if not _absent(path))
+                        marker_data = {**self._marker_scope(target, payload),
+                                       **dict(zip(("teamId", "flowId", "runId"), current["runBinding"]))}
+                        atomic_write_json(marker, marker_data, strict_replace=True)
                         current["path"].unlink()
-                        item.update(status="deleted", releasedBytes=current["bytes"],
-                                    retained=[{"kind": "shared_team_resources", "reason": "共用团队、成员、运行历史和成果已保留。"}])
-            except Exception:
+                        item.update(status="deleted", retained=[*summary["retained"],
+                            {"kind": "deduplication_marker", "reason": "仅保留任务与身份标识的清理凭据，不保存任务内容。"}])
+            except Exception as error:
                 item["status"] = "partial" if item["releasedBytes"] else "blocked"
-                item["failures"].append({"code": "TASK_CLEANUP_INCOMPLETE", "message": "清理未完成，任务引用已保留；请重新预览后重试。"})
+                item["failures"].append({"code": "TASK_CLEANUP_INCOMPLETE", "message": _failure_reason(error)})
             if local_before is not None:
                 try:
                     delta = native_delta + local_before - sum(_size(path) for path in local_paths if path.exists())

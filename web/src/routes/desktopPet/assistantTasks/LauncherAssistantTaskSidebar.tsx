@@ -6,7 +6,7 @@ import {VButton,VTabs,VSkeleton} from "../../../components/vui";
 import agentStyles from "../../AgentConversationDirectory.styles";
 import {useLauncherTasks} from "./LauncherTaskContext";
 import {taskCardOwner,taskCardState,taskCardTitle} from "./assistantTaskPresentation";
-import {taskGroup} from "./assistantTaskCleanup";
+import {taskCleanupTargets,taskGroup} from "./assistantTaskCleanup";
 import styles from "./LauncherAssistantTaskSidebar.styles";
 import type {AssistantTask} from "./assistantTeamRunTasks";
 import {COPY} from "./assistantTaskCopy";
@@ -16,10 +16,11 @@ function TaskRow({task,lang,onNavigate}:{task:AssistantTask;lang:"zh"|"en";onNav
  const model=useLauncherTasks()!;
  const title=taskCardTitle(task,lang),owner=taskCardOwner(task,lang),state=taskCardState(task,lang);
  const active=model.selectedId===task.id;
+ const localOnly=task.state==="unknown";
  const tone=task.state==="running"||task.state==="stopping"?"running":task.state==="waiting_user"||task.state==="waiting_input"?"approval":task.state==="failed"?"error":"none";
  const indicator=tone==="running"?agentStyles.agentActivityRunning:tone==="approval"?agentStyles.agentActivityApproval:tone==="error"?agentStyles.agentActivityError:"";
  const avatar=task.kind==="team_run"?<UsersRound size={16}/>:task.agentName&&task.agentName!==task.agentId?Array.from(task.agentName)[0]:<Bot size={16}/>;
- return <article aria-label={title} data-task-state={task.state} data-task-kind={task.kind} className="min-w-0">
+ return <article aria-label={title} data-task-state={task.state} data-task-kind={task.kind} className={styles.row}>
   <VButton variant="ghost" contentLayout="plain" className={[agentStyles.agentRow,active?agentStyles.agentRowActive:""].join(" ")}
    aria-label={[title,owner,state].join(" · ")} aria-haspopup="dialog" aria-expanded={active} data-selected={active?"true":undefined}
    tooltip={[title,owner,state].join(" · ")} onClick={event=>{onNavigate?.();model.openTask(task,event.currentTarget);}}>
@@ -34,6 +35,10 @@ function TaskRow({task,lang,onNavigate}:{task:AssistantTask;lang:"zh"|"en";onNav
     </span>:null}
    </span>
   </VButton>
+  {taskCleanupTargets(task).length>0?<VButton variant="ghost" density="compact" className={styles.remove}
+   aria-label={lang==="zh"?`${localOnly?"移除记录":"清理"}“${title}”`:`${localOnly?"Remove record":"Clean up"} “${title}”`}
+   tooltip={localOnly?COPY[lang].removeRecordHint:undefined} isDisabled={!model.enabled||model.cleanupBusy}
+   onClick={()=>{onNavigate?.();model.remove(task);}}>{localOnly?COPY[lang].removeRecord:task.kind==="dispatch"&&task.cleanupPending===true?COPY[lang].retryCleanup:COPY[lang].remove}</VButton>:null}
  </article>;
 }
 export function LauncherAssistantTaskSidebar({lang="zh",onNavigate}:{lang?:"zh"|"en";onNavigate?:()=>void}){
@@ -46,7 +51,7 @@ export function LauncherAssistantTaskSidebar({lang="zh",onNavigate}:{lang?:"zh"|
  const warning=model.unavailable||model.teamUnavailable?copy.unavailable:model.partial?copy.teamPartial:model.invalid?copy.invalid:"";
  return <section className={styles.root} aria-label={copy.label} data-assistant-task-cards>
   <header className={styles.toolbar}><span>{lang==="zh"?"任务":"Tasks"}</span><VButton variant="ghost" density="compact" isIconOnly aria-label={copy.refresh} tooltip={copy.refresh} icon={<RefreshCw size={13}/>} isPending={model.refreshing} onClick={()=>{void model.refresh();}}/>
-   <VButton variant="ghost" density="compact" className={styles.cleanup} title={copy.cleanupHint} isDisabled={!model.enabled||model.cleanableCount===0} onClick={model.cleanCompleted}>{copy.cleanup}</VButton>
+   <VButton variant="ghost" density="compact" className={styles.cleanup} title={copy.cleanupHint} isDisabled={!model.enabled||model.cleanupBusy||!model.canCleanCompleted} isPending={model.cleanupBusy} onClick={model.cleanCompleted}>{copy.cleanup}</VButton>
   </header>
   <VTabs value={group} onValueChange={value=>setChosen(value as Group)} aria-label={lang==="zh"?"任务分类":"Task categories"}
    className={styles.tabs} listClassName={styles.tabList} triggerClassName={styles.tab}

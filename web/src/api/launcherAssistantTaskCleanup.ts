@@ -20,12 +20,12 @@ const count = (value: unknown): value is number => Number.isSafeInteger(value) &
 const text = (value: unknown, max = 2000): value is string => typeof value === "string" && value.length <= max;
 const retained = (value: unknown): boolean => Array.isArray(value) && value.length <= 256
   && value.every(item => record(item) && text(item.kind, 100) && text(item.reason));
-const invalid = () => new Error("Launcher 任务清理结果不可用，请重新预览。");
+const invalid = () => new Error("Launcher 任务清理结果不可用，请重试。");
 const targetKey = (target: LauncherTaskCleanupTarget) => JSON.stringify([target.kind, target.projectId,
   target.kind === "dispatch" ? target.dispatchId : target.originAction, target.kind === "team_run" ? target.requestId : null]);
 const scopeKey = (scope: LauncherTaskCleanupScope) => JSON.stringify([scope.agentId, scope.directSessionId, scope.targets.map(target =>
-  target.kind === "dispatch" ? [target.kind, target.projectId, target.dispatchId]
-    : [target.kind, target.projectId, target.requestId, target.originAction, target.teamId, target.flowId, target.runId])]);
+  target.kind === "dispatch" ? [target.kind, target.projectId, target.dispatchId, target.localOnly === true]
+    : [target.kind, target.projectId, target.requestId, target.originAction, target.teamId, target.flowId, target.runId, target.localOnly === true])]);
 const matchingItems = (items: { key: string }[], targets: LauncherTaskCleanupTarget[]) => items.length === targets.length
   && new Set(items.map(item => item.key)).size === targets.length
   && targets.every(target => items.some(item => item.key === targetKey(target)));
@@ -94,7 +94,7 @@ export async function executeLauncherTaskCleanup(scope: LauncherTaskCleanupScope
   options: { signal?: AbortSignal } = {}): Promise<LauncherTaskCleanupResult> {
   options.signal?.throwIfAborted(); expirePlans();
   const plan = plans.get(fingerprint);
-  if (!plan || plan.identity !== scopeKey(scope)) throw new Error("清理预览已失效，请重新预览后确认。");
+  if (!plan || plan.identity !== scopeKey(scope)) throw new Error("清理范围已失效，请重试。");
   plans.delete(fingerprint);
   const { agentId, directSessionId } = scope;
   const items: LauncherTaskCleanupResult["items"] = [];
@@ -110,10 +110,54 @@ export async function executeLauncherTaskCleanup(scope: LauncherTaskCleanupScope
       items.push(...result.items); storageDeltaBytes = nextDelta; releasedBytes = Math.max(0, nextDelta);
     } catch (error) {
       options.signal?.throwIfAborted();
-      const message = `此批清理未获确认，部分记录可能已删除，请重新预览。${String(error instanceof Error ? error.message : error).slice(0, 600)}`;
+      const message = `此批清理未获确认，部分记录可能已删除，请重试。${String(error instanceof Error ? error.message : error).slice(0, 600)}`;
       items.push(...batch.targets.map(target => ({ key: targetKey(target), status: "blocked" as const, releasedBytes: 0,
         retained: [], failures: [{ code: "cleanup_batch_unconfirmed", message }] })));
     }
   }
   return { schemaVersion: 1, releasedBytes, storageDeltaBytes, items };
+}
+
+/** One operator action, with each host-owned plan executed before the next batch. */
+export async function cleanupLauncherTasks(scope: LauncherTaskCleanupScope,
+  options: { signal?: AbortSignal } = {}): Promise<LauncherTaskCleanupResult> {
+  options.signal?.throwIfAborted();
+  if (!scope.agentId || !scope.directSessionId || !scope.targets.length
+    || new Set(scope.targets.map(targetKey)).size !== scope.targets.length) throw invalid();
+  const targets = structuredClone(scope.targets);
+  const items: LauncherTaskCleanupResult["items"] = [];
+  let storageDeltaBytes = 0;
+  // Bound each native RPC even when several sources are slow. Plans remain
+  // short-lived and execution still rechecks native ownership and revision.
+  for (let offset = 0; offset < targets.length; offset += 2) {
+    options.signal?.throwIfAborted();
+    const batch = { agentId: scope.agentId, directSessionId: scope.directSessionId, targets: targets.slice(offset, offset + 2) };
+    try {
+      const preview = await previewLauncherTaskCleanup(batch, options);
+      options.signal?.throwIfAborted();
+      const blocked = new Map(preview.items.filter(item => item.status === "blocked").map(item => [item.key, item]));
+      const result = preview.items.some(item => item.status === "ready")
+        ? await executeLauncherTaskCleanup(batch, preview.fingerprint, options)
+        : { schemaVersion: 1 as const, releasedBytes: 0, storageDeltaBytes: 0, items: [] };
+      options.signal?.throwIfAborted();
+      const batchItems = batch.targets.map(target => {
+        const key = targetKey(target), unavailable = blocked.get(key);
+        if (unavailable) return { key, status: "blocked" as const, releasedBytes: 0, retained: unavailable.retained,
+          failures: [{ code: "cleanup_source_blocked", message: unavailable.reason || "任务来源或终态暂未确认，请稍后重试。" }] };
+        const item = result.items.find(row => row.key === key);
+        if (!item) throw invalid();
+        return item;
+      });
+      const nextDelta = storageDeltaBytes + (result.storageDeltaBytes ?? result.releasedBytes);
+      if (!Number.isSafeInteger(nextDelta)) throw invalid();
+      storageDeltaBytes = nextDelta;
+      items.push(...batchItems);
+    } catch (error) {
+      options.signal?.throwIfAborted();
+      const message = `此批清理未获确认，请重试。${String(error instanceof Error ? error.message : error).slice(0, 600)}`;
+      items.push(...batch.targets.map(target => ({ key: targetKey(target), status: "blocked" as const, releasedBytes: 0,
+        retained: [], failures: [{ code: "cleanup_batch_unconfirmed", message }] })));
+    }
+  }
+  return { schemaVersion: 1, releasedBytes: Math.max(0, storageDeltaBytes), storageDeltaBytes, items };
 }

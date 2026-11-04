@@ -30,7 +30,8 @@ beforeEach(() => {
     receipt: { taskId: "native-1", status: "succeeded", shouldPoll: false } }]).tasks[0], kind: "dispatch" as const };
   model = { tasks: [task], loading: false, unavailable: false, refreshing: false, teamUnavailable: false, partial: false,
     invalid: 0, enabled: true, shown: 10, hasNextPage: false, loadingMore: false, selectedId: null, cleanableCount: 1,
-    refresh: vi.fn(async () => {}), more: vi.fn(async () => {}), openTask: vi.fn(), cleanCompleted: vi.fn(), reviewRequest: null };
+    cleanupBusy: false, canCleanCompleted: true,
+    refresh: vi.fn(async () => {}), more: vi.fn(async () => {}), openTask: vi.fn(), remove: vi.fn(), cleanCompleted: vi.fn(), reviewRequest: null };
   returnToDesktop = vi.fn(async () => {});
   vi.stubGlobal("vibelutionLauncher", { returnToDesktop });
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
