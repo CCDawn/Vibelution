@@ -124,8 +124,15 @@ def overlay_instance_ports(
     return payload
 
 
-def list_overlayed_branch_instances(*, current_bundle: dict[str, Any] | None = None) -> dict[str, Any]:
-    return overlay_instance_ports(list_branch_instances(PROJECT_ROOT), current_bundle=current_bundle)
+def list_overlayed_branch_instances(
+    *, current_bundle: dict[str, Any] | None = None, include_dirty: bool = True
+) -> dict[str, Any]:
+    payload = (
+        list_branch_instances(PROJECT_ROOT)
+        if include_dirty
+        else list_branch_instances(PROJECT_ROOT, include_dirty=False)
+    )
+    return overlay_instance_ports(payload, current_bundle=current_bundle)
 
 
 def _attach_instance_runtime(

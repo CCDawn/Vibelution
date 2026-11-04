@@ -131,7 +131,7 @@ import {
 import { createLocalLauncherStatusSnapshot } from "./protocol/launcherStatusSnapshot.js";
 import { createReconcileDeadlineScheduler } from "./state/reconcileDeadlineScheduler.js";
 import { createLauncherStateFileHintGate, createLauncherStateHintBackoff, type LauncherStateFileHintGate } from "./state/launcherStateFileHintGate.js";
-import { LauncherStateStore, unwrapSource, type LauncherStateSnapshotV1, type LauncherWindowTruth } from "./state/launcherStateStore.js";
+import { LauncherStateStore, projectBranchInstanceStates, unwrapSource, type LauncherStateSnapshotV1, type LauncherWindowTruth } from "./state/launcherStateStore.js";
 import {
   LAUNCHER_APP_PROTOCOL,
   launcherAppOriginFor,
@@ -271,6 +271,7 @@ import { createDesktopTray } from "./tray/desktopTray.js";
 import {
   captureRunningInstanceIds,
   captureShutdownInstanceIds,
+  isVerifiedClosedBranchInventory,
   registryEntriesToShutdownInstanceSnapshots,
   clearTrayRestartAllPending,
   readTrayRestartAllPending,
@@ -4073,20 +4074,15 @@ async function captureShutdownIsolatedInstanceIds(deadline: DesktopShellExitDead
     return [];
   }
   const fallbackSnapshot = launcherStateStore.snapshot();
-  const [snapshotResult, listedResult, registryResult] = await Promise.allSettled([
-    withDesktopShellExitTimeout(
-      () => launcherStateStore.refresh("desktop_shell_exit"),
-      deadline,
-      "refresh isolated instances for desktop shell exit"
-    ),
+  const [listedResult, registryResult] = await Promise.allSettled([
     withDesktopShellExitTimeout(
       async (signal) => {
-        const context = await resolveTrayControlContextOrLoopback();
         signal.throwIfAborted();
-        return await fetchLauncherBranchInstances({
-          ...context,
-          requestTimeoutMs: Math.max(1, Math.min(8_000, deadline.remainingMs()))
-        });
+        return await orchestrateLauncherApi("branch-instances?runtimeOnly=true", {
+          schemaVersion: 1,
+          path: "branch-instances?runtimeOnly=true",
+          init: { method: "GET" }
+        }, signal);
       },
       deadline,
       "fetch isolated instances for desktop shell exit"
@@ -4097,17 +4093,35 @@ async function captureShutdownIsolatedInstanceIds(deadline: DesktopShellExitDead
       "read isolated instance registry for desktop shell exit"
     )
   ]);
-  const stateIds = snapshotResult.status === "fulfilled"
-    ? captureShutdownInstanceIds(snapshotResult.value.instances)
-    : captureShutdownInstanceIds(fallbackSnapshot.instances);
+  let stateIds = captureShutdownInstanceIds(fallbackSnapshot.instances);
   const listedIds = listedResult.status === "fulfilled"
-    ? captureRunningInstanceIds(listedResult.value).filter((instanceId) => instanceId !== "main")
+    ? captureRunningInstanceIds(classifyTrayBranchInstances(listedResult.value)).filter((instanceId) => instanceId !== "main")
     : [];
   const registryIds = registryResult.status === "fulfilled"
     ? captureShutdownInstanceIds(registryEntriesToShutdownInstanceSnapshots(registryResult.value.instances, knownPidIsAlive))
     : [];
-  if (snapshotResult.status === "rejected") {
-    console.warn(snapshotResult.reason instanceof Error ? snapshotResult.reason.message : String(snapshotResult.reason));
+  const payload = listedResult.status === "fulfilled" ? listedResult.value : null;
+  const windowTruth = currentLauncherWindowTruth();
+  const freshInstances = projectBranchInstanceStates(payload, windowTruth);
+  const closedInventory = isVerifiedClosedBranchInventory(payload)
+    && windowTruth.instances.every(item => item.instanceId === "main" || !item.open)
+    && freshInstances.every(item => item.id === "main" || !item.window.open);
+  if (closedInventory && registryResult.status === "fulfilled"
+    && stateIds.length === 0 && listedIds.length === 0 && registryIds.length === 0) {
+    return [];
+  }
+  // Refresh only when a stop may need current target roots or observations
+  // remain incomplete. Empty, verified inventories need no cleanup preview.
+  deadline.signal.throwIfAborted();
+  try {
+    const refreshed = await withDesktopShellExitTimeout(
+      () => launcherStateStore.refresh("desktop_shell_exit"),
+      deadline,
+      "refresh isolated instances for desktop shell exit"
+    );
+    stateIds = captureShutdownInstanceIds(refreshed.instances);
+  } catch (error: unknown) {
+    console.warn(error instanceof Error ? error.message : String(error));
   }
   if (listedResult.status === "rejected") {
     console.warn(listedResult.reason instanceof Error ? listedResult.reason.message : String(listedResult.reason));
@@ -4115,7 +4129,12 @@ async function captureShutdownIsolatedInstanceIds(deadline: DesktopShellExitDead
   if (registryResult.status === "rejected") {
     console.warn(registryResult.reason instanceof Error ? registryResult.reason.message : String(registryResult.reason));
   }
-  return Array.from(new Set([...stateIds, ...listedIds, ...registryIds]));
+  return Array.from(new Set([
+    ...stateIds,
+    ...captureShutdownInstanceIds(freshInstances.filter(item => !item.current)),
+    ...listedIds,
+    ...registryIds
+  ]));
 }
 
 async function recordDesktopExitEvent(
@@ -4364,6 +4383,7 @@ async function requestDesktopShellExit(
             pendingWorkbenchCloseAck = null;
             const workbenchJoinStartedAt = Date.now();
             const mainRuntimeAlreadyStopped = await joinWorkbenchCloseBackendStop(deadline);
+            signal.throwIfAborted();
             recordSupervisorEventFallbackLocally({
               eventCode: "electron.desktop_shell.exit_stage",
               message: "Desktop shell exit stage settled.",
@@ -4371,6 +4391,7 @@ async function requestDesktopShellExit(
             });
             const isolatedStopStartedAt = Date.now();
             await stopIsolatedInstancesForApprovedShutdown(interruptActiveWork, deadline);
+            signal.throwIfAborted();
             recordSupervisorEventFallbackLocally({
               eventCode: "electron.desktop_shell.exit_stage",
               message: "Desktop shell exit stage settled.",
@@ -6785,7 +6806,8 @@ function supersededBranchLifecycleResult(
 
 async function orchestrateLauncherApi(
   path: string,
-  payload: LauncherIpcInvokePayload
+  payload: LauncherIpcInvokePayload,
+  signal?: AbortSignal
 ): Promise<unknown> {
   if (launcherBootstrap === null) {
     throw new Error("Launcher backend is not available.");
@@ -6822,6 +6844,7 @@ async function orchestrateLauncherApi(
     failureLabel: "launcher api bridge",
     maxBytes: LAUNCHER_API_JSON_BRIDGE_MAX_BYTES,
     timeoutMs: launcherApiBridgeTimeoutMs(path, method),
+    signal,
     killPolicy: "child",
     mutation: method !== "GET"
   });
