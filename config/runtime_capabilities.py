@@ -41,6 +41,10 @@ RUNTIME_MODEL_CAPABILITY_FIELDS = (
     "capability_error",
 )
 OPERATOR_CAPABILITY_SOURCES = {"manual", "manual_config", "operator", "operator_config"}
+# Confidence marker for runtime probe records whose ok result was confirmed at
+# the content level (the reply actually referenced the image). Lenient-era
+# runtime records without this marker degrade to ``unknown`` on read.
+CONFIRMED_IMAGE_INPUT_CONFIDENCE = "content_confirmed"
 
 _CAPABILITY_ERROR_MESSAGES = {
     "auth_failed": "runtime capability probe authentication failed",
@@ -125,6 +129,8 @@ def _normalized_image_input_capability(details: dict[str, Any]) -> dict[str, Any
     }
     if supports is not None:
         normalized["supports_image_input"] = bool(supports)
+    if status == "supported" and details.get("capability_confirmed") is True:
+        normalized["capability_confidence"] = CONFIRMED_IMAGE_INPUT_CONFIDENCE
     error = str(details.get("capability_error") or "").strip()
     if error:
         normalized["capability_error"] = _capability_error_message(classify_capability_error(error))
@@ -143,6 +149,7 @@ def _catalog_capability(normalized: dict[str, Any]) -> dict[str, Any]:
         "field": "image_input",
         "value": normalized["capability_status"],
         "source": RUNTIME_CAPABILITY_SOURCE,
+        "confidence": str(normalized.get("capability_confidence") or ""),
         "checked_at": normalized["capability_checked_at"],
         "error": str(normalized.get("capability_error") or ""),
     }
@@ -175,6 +182,15 @@ def record_model_image_input_capability(
         },
     )
     existing = model.get("capabilities", {})
+    existing_record = existing.get("image_input") if isinstance(existing, dict) else None
+    if (
+        normalized["capability_status"] == "unknown"
+        and isinstance(existing_record, dict)
+        and str(existing_record.get("value") or "").strip() in {"supported", "unsupported"}
+    ):
+        # Accepted-only evidence never downgrades an explicit capability value:
+        # weak observations must not erase a prior supported/unsupported finding.
+        return _legacy_details(existing_record)
     observations = []
     if isinstance(existing, dict):
         for field, raw in existing.items():
@@ -198,9 +214,21 @@ def record_model_image_input_capability(
 
 def _legacy_details(record: dict[str, Any]) -> dict[str, Any]:
     value = str(record.get("value") or "unknown")
+    source = str(record.get("source") or "")
+    confidence = str(record.get("confidence") or "")
+    if (
+        value == "supported"
+        and source == RUNTIME_CAPABILITY_SOURCE
+        and confidence != CONFIRMED_IMAGE_INPUT_CONFIDENCE
+    ):
+        # Lenient-era runtime probes recorded ok-only success as supported, but
+        # an upstream that silently ignored the image succeeds too. Without
+        # content-level confirmation that record cannot assert support, so it
+        # degrades to unknown on read (no migration write needed).
+        value = "unknown"
     details: dict[str, Any] = {
         "capability_status": value,
-        "capability_source": str(record.get("source") or ""),
+        "capability_source": source,
         "capability_checked_at": str(record.get("checked_at") or ""),
     }
     if value in {"supported", "unsupported"}:
@@ -366,6 +394,7 @@ def strip_runtime_model_capability_fields(public_config: dict[str, Any]) -> dict
 
 
 __all__ = [
+    "CONFIRMED_IMAGE_INPUT_CONFIDENCE",
     "MODEL_CAPABILITY_CACHE_ENV",
     "MODEL_CAPABILITY_CACHE_FILENAME",
     "OPERATOR_CAPABILITY_SOURCES",

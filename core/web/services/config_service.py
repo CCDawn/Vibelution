@@ -707,6 +707,32 @@ def _model_image_input_support_map(public_config: dict[str, Any]) -> dict[str, b
     return supports_by_model
 
 
+def _image_input_probe_success_result(probe_reply: Any) -> dict[str, Any]:
+    """Build the result for a probe invoke that returned without an error.
+
+    A relay that silently drops the image still returns ok, so bare success is
+    accepted-only evidence. Only a reply that actually references the image
+    content may assert support.
+    """
+
+    from core.llm.image_input_feedback import extract_response_text, reply_confirms_image_content
+
+    reply_confirmed = reply_confirms_image_content(extract_response_text(probe_reply))
+    return {
+        "ok": True,
+        "message": "image input is supported" if reply_confirmed else (
+            "request succeeded but the reply did not reference the image; "
+            "image input remains unconfirmed"
+        ),
+        "capability": "image_input",
+        "capability_status": "supported" if reply_confirmed else "unknown",
+        "supports_image_input": True if reply_confirmed else None,
+        "capability_reason": (
+            "runtime_probe_reply_confirmed" if reply_confirmed else "runtime_probe_accepted"
+        ),
+    }
+
+
 def _image_input_capability_result_details(result: dict[str, Any]) -> dict[str, Any]:
     status = str(result.get("capability_status") or "").strip().lower()
     if status not in {"supported", "unsupported", "unknown"}:
@@ -719,6 +745,10 @@ def _image_input_capability_result_details(result: dict[str, Any]) -> dict[str, 
     supports = result.get("supports_image_input")
     if supports is not None:
         details["supports_image_input"] = bool(supports)
+    if status == "supported":
+        # Only reply-confirmed probe results reach supported status; carry the
+        # confirmation marker so the record survives read-time degradation.
+        details["capability_confirmed"] = True
     error = trim_lines(result.get("message") or result.get("error") or "", max_lines=2)
     if status != "supported" and error:
         details["capability_error"] = error
@@ -1366,10 +1396,12 @@ def _build_image_input_probe_profile(profile: Any) -> Any:
         if hasattr(public_config_module, "RetryPolicyConfig")
         else getattr(profile, "retry_policy", None)
     )
+    # The probe reply must carry enough words to reference the image; the
+    # confirmation detector needs the sentence intact, not a truncated "ok".
     try:
         return profile.model_copy(
             update={
-                "max_output_tokens": 8,
+                "max_output_tokens": 64,
                 "timeout": probe_timeout,
                 "connect_timeout": min(int(getattr(profile, "connect_timeout", probe_timeout) or probe_timeout), probe_timeout),
                 "streaming": False,
@@ -1378,7 +1410,7 @@ def _build_image_input_probe_profile(profile: Any) -> Any:
         )
     except Exception:
         probe_profile = copy.deepcopy(profile)
-        probe_profile.max_output_tokens = 8
+        probe_profile.max_output_tokens = 64
         probe_profile.timeout = probe_timeout
         probe_profile.connect_timeout = min(int(getattr(profile, "connect_timeout", probe_timeout) or probe_timeout), probe_timeout)
         probe_profile.streaming = False
@@ -1524,7 +1556,10 @@ def _run_draft_test_llm_image_input(
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "Reply with ok if you can inspect this image."},
+                    {
+                        "type": "text",
+                        "text": "In one short sentence, describe what you see in this image.",
+                    },
                     {"type": "image_url", "image_url": {"url": _IMAGE_INPUT_PROBE_DATA_URL}},
                 ],
             }
@@ -1533,7 +1568,7 @@ def _run_draft_test_llm_image_input(
             from core.llm import LLMClient
 
             client = LLMClient(config=probe_config, profile_id=route_id)
-            invoke_llm(
+            probe_reply = invoke_llm(
                 client,
                 messages,
                 tools=[],
@@ -1550,14 +1585,7 @@ def _run_draft_test_llm_image_input(
                 ),
                 metadata={"probeCapability": "image_input"},
             )
-            result = {
-                "ok": True,
-                "message": "image input is supported",
-                "capability": "image_input",
-                "capability_status": "supported",
-                "supports_image_input": True,
-                "capability_reason": "runtime_probe_succeeded",
-            }
+            result = _image_input_probe_success_result(probe_reply)
         except Exception as exc:
             error_text = public_config_module.redact_llm_probe_error(str(exc), api_key=api_key)
             supports_image_input, capability_status = _image_input_probe_status(error_text)

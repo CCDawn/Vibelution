@@ -519,6 +519,7 @@ def test_runtime_capability_adapter_writes_provider_scoped_catalog(tmp_path) -> 
         {
             "supports_image_input": True,
             "capability_status": "supported",
+            "capability_confirmed": True,
             "capability_checked_at": "2026-07-11T12:00:00Z",
         },
         cache_path=catalog_path,
@@ -527,6 +528,7 @@ def test_runtime_capability_adapter_writes_provider_scoped_catalog(tmp_path) -> 
     capability = state["providers"]["relay"]["models"]["gpt-a"]["capabilities"]["image_input"]
     assert capability["value"] == "supported"
     assert capability["source"] == "runtime_probe"
+    assert capability["confidence"] == "content_confirmed"
 
     public_config = {
         "llm": {
@@ -593,7 +595,12 @@ def test_one_shot_upgrader_imports_legacy_cache_via_canonical_alias_once(tmp_pat
     updated = apply_model_capability_overrides(public_config)
 
     model = updated["llm"]["model_library"]["relay/gpt-a"]
-    assert model["supports_image_input"] is True
+    # Legacy v1 entries were written by the lenient ok-only probe, so they
+    # import as runtime_probe records without confirmation and degrade to
+    # unknown on read instead of asserting support.
+    assert "supports_image_input" not in model
+    assert model["capability_status"] == "unknown"
+    assert model["capability_source"] == "runtime_probe"
     catalog = load_model_catalog_state(config_path.with_name("model-catalog-state.json"))
     assert catalog["metadata"]["legacyCapabilityImportCompleted"] is True
     assert first == second

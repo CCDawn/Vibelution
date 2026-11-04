@@ -1788,6 +1788,8 @@ async function residentAssistantActiveWork(): Promise<ActiveWorkStatus> {
 }
 
 async function acquireResidentAssistantShutdownGuard(): Promise<AssistantLifecycleLease> {
+  if (launcherAssistantExitReady && (!launcherAssistantHost || launcherAssistantHost.snapshot().state === "stopped"))
+    return { release: async () => undefined, commit: () => undefined };
   if (!launcherAssistantHost && !launcherAssistantStarting) return { release: async () => undefined, commit: () => undefined };
   if (!acquireResidentAssistantLifecycleLease) throw new Error("ASSISTANT_LIFECYCLE_UNAVAILABLE");
   return acquireResidentAssistantLifecycleLease();
@@ -4197,29 +4199,6 @@ async function stopIsolatedInstancesWithDeadline(
   }
 }
 
-async function bestEffortStopIsolatedInstancesForShutdown(
-  label: string,
-  sharedDeadline?: DesktopShellExitDeadline
-): Promise<void> {
-  const ownsDeadline = sharedDeadline === undefined;
-  const deadline = sharedDeadline ?? createDesktopShellExitDeadline();
-  try {
-    await withDesktopShellExitTimeout(
-      () => stopIsolatedInstancesForApprovedShutdown(false, deadline),
-      deadline,
-      label
-    );
-  } catch (error: unknown) {
-    const detail = error instanceof Error ? error.message : String(error);
-    await recordDesktopExitEvent(deadline, {
-      eventCode: "electron.isolated_instances.stop_all_failed",
-      message: "Isolated instance stop did not finish before the desktop shell exit step deadline.",
-      fields: { error: detail.slice(0, 500), label: label.slice(0, 160) }
-    });
-  } finally {
-    if (ownsDeadline) deadline.dispose();
-  }
-}
 
 function localQuitActiveWorkStatus(): ActiveWorkStatus {
   try {
@@ -4241,17 +4220,44 @@ function localQuitActiveWorkStatus(): ActiveWorkStatus {
   }
 }
 
+async function confirmDesktopShellExit(
+  decision: Extract<ShutdownDecision, { allowed: false }>,
+  activeWork: ActiveWorkStatus | null
+): Promise<boolean> {
+  const count = activeWork?.count ?? activeWork?.items?.length ?? 0;
+  const options = {
+    type: "question" as const,
+    title: "退出 Vibelution",
+    message: decision.reason === "active_work_running"
+      ? `${count > 0 ? `还有 ${count} 项任务正在进行` : "有任务正在进行"}，是否保存进度并退出？`
+      : "暂时无法读取完整任务状态，是否保存记录并退出？",
+    detail: "退出会停止正在运行的任务，已有记录会保留。",
+    buttons: ["取消", "保存并退出"],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true
+  };
+  const parent = assistantBrowserWindow();
+  const response = parent
+    ? await dialog.showMessageBox(parent, options)
+    : await dialog.showMessageBox(options);
+  return response.response === 1;
+}
+
 async function requestDesktopShellExit(
-  closeReason: DesktopCloseReason = "desktop_shell_quit"
+  closeReason: DesktopCloseReason = "desktop_shell_quit",
+  operatorRequested = false
 ): Promise<ShutdownDecision> {
   return desktopLifecycleCoordinator.request(closeReason, async () => {
     const ownershipMode = launcherBootstrap?.mode ?? "attached";
-    // Authorization, retry, stop and close all spend the same finite budget.
-    const deadline = createDesktopShellExitDeadline(DESKTOP_QUIT_TOTAL_BUDGET_MS);
-    try {
-      return await executeShutdownAuthorizationBoundary({
-        authorize: async () =>
-          await decideShutdown({
+    const quitStartedAt = Date.now();
+    let confirmationMs = 0;
+    let observedActiveWork: ActiveWorkStatus | null = null;
+    return await executeShutdownAuthorizationBoundary({
+      authorize: async () => {
+        const probeDeadline = createDesktopShellExitDeadline(DESKTOP_QUIT_TOTAL_BUDGET_MS);
+        try {
+          return await decideShutdown({
             ownershipMode,
             activeWorkStatus: async () => {
               const bootstrap = launcherBootstrap;
@@ -4261,15 +4267,15 @@ async function requestDesktopShellExit(
               const probeQuitActiveWork = async (forceControlTokenRefresh: boolean) => {
                 const context = await withDesktopShellExitTimeout(
                   (signal) => resolveDesktopActionLoopContext(bootstrap, { forceControlTokenRefresh, signal }),
-                  deadline,
+                  probeDeadline,
                   "resolve quit control context"
                 );
                 return await withDesktopShellExitTimeout(
                   (signal) => fetchLauncherActiveWorkStatus({
                     ...context,
-                    signal: AbortSignal.any([signal, deadline.signal])
+                    signal: AbortSignal.any([signal, probeDeadline.signal])
                   }),
-                  Math.max(1, Math.min(QUIT_ACTIVE_WORK_STATUS_TIMEOUT_MS, deadline.remainingMs())),
+                  Math.max(1, Math.min(QUIT_ACTIVE_WORK_STATUS_TIMEOUT_MS, probeDeadline.remainingMs())),
                   "resolve launcher active work status for quit"
                 );
               };
@@ -4277,35 +4283,57 @@ async function requestDesktopShellExit(
                 probe: () => probeQuitActiveWork(false),
                 recoverAndRetry: () => probeQuitActiveWork(true)
               });
-              return combineAssistantActiveWork(workspace, await residentAssistantActiveWork());
-          },
-          // The launcher probe rides on the workbench backend. When that backend
-          // is dead or wedged the probe times out and quit used to fail with
-          // "无法确认是否有进行中的任务" forever; the same file-based scan the
-          // main-line stop command trusts keeps quit possible instead.
-          localActiveWorkStatus: async () => combineAssistantActiveWork(localQuitActiveWorkStatus(), await residentAssistantActiveWork()),
-          onDegradedObservationAllow: (detail) => {
-            void recordDesktopExitEvent(deadline, {
-              eventCode: "electron.desktop_shell.exit_allowed_observation_degraded",
-              message: "Desktop shell exit was allowed with no active work while a probe stayed unobservable.",
-              fields: {
-                probeMessage: detail.probeMessage.slice(0, 300),
-                localMessage: detail.localMessage.slice(0, 300)
-              }
-            });
-          }
-        }),
-        onDenied: (decision) => {
-          notifyDesktopTray("Vibelution", decision.message || "有进行中的任务，暂时无法退出。可先用托盘“退出壳并停止全部任务”。", "warning");
-        },
-        runApproved: async (decision) => {
-          const assistantGuard = await acquireResidentAssistantShutdownGuard();
-          try {
-          pendingWorkbenchCloseAck = null;
+              observedActiveWork = combineAssistantActiveWork(workspace, await residentAssistantActiveWork());
+              return observedActiveWork;
+            },
+            localActiveWorkStatus: async () => {
+              observedActiveWork = combineAssistantActiveWork(localQuitActiveWorkStatus(), await residentAssistantActiveWork());
+              return observedActiveWork;
+            },
+            onDegradedObservationAllow: (detail) => {
+              void recordDesktopExitEvent(probeDeadline, {
+                eventCode: "electron.desktop_shell.exit_allowed_observation_degraded",
+                message: "Desktop shell exit was allowed with no active work while a probe stayed unobservable.",
+                fields: {
+                  probeMessage: detail.probeMessage.slice(0, 300),
+                  localMessage: detail.localMessage.slice(0, 300)
+                }
+              });
+            }
+          });
+        } finally {
+          probeDeadline.dispose();
+        }
+      },
+      confirmStopActiveWork: operatorRequested ? async (decision) => {
+        const startedAt = Date.now();
+        try { return await confirmDesktopShellExit(decision, observedActiveWork); }
+        finally { confirmationMs = Math.max(0, Date.now() - startedAt); }
+      } : undefined,
+      onDenied: (decision) => {
+        notifyDesktopTray("Vibelution", decision.message || "有任务正在进行，可从托盘选择退出并保存记录。", "info");
+      },
+      runApproved: async (decision) => {
+        // Human confirmation spends no part of the bounded execution budget.
+        const deadline = createDesktopShellExitDeadline(DESKTOP_QUIT_TOTAL_BUDGET_MS);
+        const interruptActiveWork = decision.reason === "operator_confirmed";
+        const assistantGuard: { lease: AssistantLifecycleLease | null } = { lease: null };
+        try {
           await withDesktopShellExitTimeout(async (signal) => {
             signal.throwIfAborted();
+            if (operatorRequested) {
+              await stopLauncherAssistant();
+            } else {
+              const pendingGuard = acquireResidentAssistantShutdownGuard();
+              void pendingGuard.then(lease => {
+                if (signal.aborted && !shutdownApproved) void lease.release().catch(() => undefined);
+              }, () => undefined);
+              assistantGuard.lease = await pendingGuard;
+            }
+            signal.throwIfAborted();
+            pendingWorkbenchCloseAck = null;
             const mainRuntimeAlreadyStopped = await joinWorkbenchCloseBackendStop(deadline);
-            await stopIsolatedInstancesForApprovedShutdown(false, deadline);
+            await stopIsolatedInstancesForApprovedShutdown(interruptActiveWork, deadline);
             const shutdownResult = await executeApprovedDesktopShellShutdown({
               decision,
               closeDesktopSession: async (signal) => {
@@ -4318,58 +4346,45 @@ async function requestDesktopShellExit(
                   fields: {
                     closeReason,
                     ownershipMode,
+                    quitElapsedMs: Math.max(0, Date.now() - quitStartedAt),
+                    confirmationMs,
                     ...(event.fields ?? {})
                   }
                 });
               },
               stopManagedRuntime: mainRuntimeAlreadyStopped
                 ? async () => undefined
-                : (signal) => stopMainRuntimeForApprovedShutdown(false, signal),
+                : (signal) => stopMainRuntimeForApprovedShutdown(interruptActiveWork, signal),
               stopPythonLauncher: stopOwnedPythonLauncherService,
               approveShutdown: () => {
-                assistantGuard.commit();
+                assistantGuard.lease?.commit();
                 shutdownApproved = true;
               },
               stopDesktopActionLoop,
               deadline,
-              quitApp: () => {
-                app.quit();
-              }
+              quitApp: () => { app.quit(); }
             });
             if (shutdownResult?.managedRuntimeError || shutdownResult?.stopError) {
-              notifyDesktopTray(
-                "Vibelution",
-                "运行时未能完整停止，已取消退出。请查看运行时状态后重试，或明确选择“退出壳并停止全部任务”。",
-                "warning"
-              );
+              notifyDesktopTray("Vibelution", "部分运行时尚未停止，退出未完成。请稍后重试。", "info");
             }
           }, deadline, "desktop shell exit");
-          } finally { if (!shutdownApproved) void assistantGuard.release().catch(() => undefined); }
-        },
-        onApprovedFailure: async (_decision, error) => {
-          const message = error instanceof Error ? error.message : String(error);
-          console.warn(message);
-          recordSupervisorEventFallbackLocally({
-            eventCode: "electron.desktop_shell.exit_blocked_stop_failed",
-            message: "Desktop shell exit was cancelled because managed processes did not stop within budget.",
-            fields: { closeReason, error: message.slice(0, 500), failOpen: false }
-          });
-          recordSupervisorEventFallbackLocally({
-            eventCode: "electron.isolated_instances.stop_all_failed",
-            message: "Isolated instance stop did not finish before the desktop shell exit budget.",
-            fields: { closeReason, error: message.slice(0, 500), failOpen: false, retrySuppressed: true }
-          });
-          pendingWorkbenchCloseAck = null;
-          notifyDesktopTray(
-            "Vibelution",
-            "运行时或隔离实例未能完整停止，已取消退出。可检查状态后重试，或明确选择“退出壳并停止全部任务”。",
-            "warning"
-          );
+        } finally {
+          deadline.dispose();
+          if (!shutdownApproved && assistantGuard.lease) void assistantGuard.lease.release().catch(() => undefined);
         }
-      });
-    } finally {
-      deadline.dispose();
-    }
+      },
+      onApprovedFailure: async (_decision, error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(message);
+        recordSupervisorEventFallbackLocally({
+          eventCode: "electron.desktop_shell.exit_blocked_stop_failed",
+          message: "Desktop shell exit was cancelled because managed processes did not stop within budget.",
+          fields: { closeReason, error: message.slice(0, 500), failOpen: false }
+        });
+        pendingWorkbenchCloseAck = null;
+        notifyDesktopTray("Vibelution", "退出尚未完成，可再次选择退出重试。", "info");
+      }
+    });
   });
 }
 
@@ -4944,109 +4959,7 @@ async function runTrayRestartAll(): Promise<void> {
   }
 }
 
-async function requestForcedDesktopShellExit(
-  closeReason: DesktopCloseReason = "desktop_shell_quit"
-): Promise<void> {
-  if (trayQuitAllInFlight || trayRestartAllInFlight || trayRestartLauncherInFlight) {
-    notifyDesktopTray("Vibelution", "已有托盘操作进行中，请稍候。", "warning");
-    return;
-  }
-  trayQuitAllInFlight = true;
-  try {
-    return await desktopLifecycleCoordinator.request(closeReason, async () => {
-      const ownershipMode = launcherBootstrap?.mode ?? "attached";
-      const interruptedActiveWork = ACTIVE_WORK_POLICY_FORCE_INTERRUPT
-        ? await resolveInterruptedActiveWork()
-        : { count: 0, items: [] };
-      const interruptedActiveWorkCount = interruptedActiveWork.count;
-      if (interruptedActiveWorkCount > 0) {
-        await recordTrayForceInterruptEvidence("electron.tray.quit_all.force_interrupt", "Tray quit-all proceeding while active work was present.", {
-          interruptedActiveWorkCount,
-          interruptedActiveWorkItems: JSON.stringify(interruptedActiveWork.items)
-        });
-      }
-      const deadline = createDesktopShellExitDeadline();
-      let mainRuntimeAlreadyStopped = false;
-      try {
-        mainRuntimeAlreadyStopped = await joinWorkbenchCloseBackendStop(deadline);
-        if (!mainRuntimeAlreadyStopped) {
-          await withDesktopShellExitTimeout(
-            (signal) => orchestrateLauncherLifecycle("force-stop", { schemaVersion: 1, path: "force-stop" }, "operator", signal),
-            deadline,
-            "force stop main runtime"
-          );
-          await withDesktopShellExitTimeout(
-            (signal) => delayWithAbortSignal(1_500, signal),
-            deadline,
-            "wait for forced runtime stop"
-          );
-        }
-      } catch (error: unknown) {
-        if (isForceLifecycleAuthorizationDenied(error)) {
-          notifyDesktopTray("Vibelution", "已取消退出，当前窗口、运行时和任务均保留。", "info");
-          deadline.dispose();
-          return;
-        }
-        if (shouldNotifyForceStopControlFailure(error)) {
-          const detail = error instanceof Error ? error.message : String(error);
-          notifyDesktopTray("Vibelution", `停止托管运行时失败：${detail.slice(0, 220)}`, "warning");
-        }
-      }
-      pendingWorkbenchCloseAck = null;
-      try {
-        await withDesktopShellExitTimeout(async (signal) => {
-          signal.throwIfAborted();
-          await bestEffortStopIsolatedInstancesForShutdown(
-            "stop isolated instances before forced desktop shell exit",
-            deadline
-          );
-          await executeApprovedDesktopShellShutdown({
-            decision: { allowed: true, reason: "no_active_work", stopPythonLauncher: true },
-            closeDesktopSession: async (signal) => {
-              signal.throwIfAborted();
-              await closeDesktopSessionIfRegistered();
-            },
-            recordEvent: (event) => {
-              recordSupervisorEventFallbackLocally({
-                ...event,
-                fields: {
-                  closeReason,
-                  ownershipMode,
-                  forced: true,
-                  interruptedActiveWorkCount,
-                  ...(event.fields ?? {})
-                }
-              });
-            },
-            stopManagedRuntime: mainRuntimeAlreadyStopped ? async () => undefined : stopManagedRuntime,
-            stopPythonLauncher: stopOwnedPythonLauncherService,
-            approveShutdown: () => {
-              shutdownApproved = true;
-            },
-            stopDesktopActionLoop,
-            deadline,
-            quitApp: () => {
-              app.quit();
-            },
-            forceExitOnStopFailure: true
-          });
-        }, deadline, "forced desktop shell exit");
-      } finally {
-        deadline.dispose();
-      }
-    });
-  } finally {
-    trayQuitAllInFlight = false;
-  }
-}
 
-async function runTrayQuitAll(): Promise<void> {
-  try {
-    await requestForcedDesktopShellExit("desktop_shell_quit");
-  } catch (error: unknown) {
-    console.warn(error instanceof Error ? error.message : String(error));
-  }
-}
 
 /**
  * Observe already-open workbench windows for backend liveness. The window-open
@@ -5212,10 +5125,18 @@ async function runTrayBranchInstance(operation: string, instanceId: string, labe
 }
 
 async function runTrayStopAll(): Promise<void> {
+  if (trayQuitAllInFlight) return;
+  if (trayRestartAllInFlight || trayRestartLauncherInFlight) {
+    notifyDesktopTray("Vibelution", "正在完成重启，请稍后退出。", "info");
+    return;
+  }
+  trayQuitAllInFlight = true;
   try {
-    await requestForcedDesktopShellExit("desktop_shell_quit");
+    await requestDesktopShellExit("desktop_shell_quit", true);
   } catch (error: unknown) {
     console.warn(error instanceof Error ? error.message : String(error));
+  } finally {
+    trayQuitAllInFlight = false;
   }
 }
 
@@ -5368,7 +5289,7 @@ ipcMain.on(IPC_CHANNELS.endDesktopPetWindowDrag, (event) => {
 
 ipcMain.handle(IPC_CHANNELS.requestDesktopShellExit, async (event) => {
   assertTrustedIpcSender(event, trustedIpcOrigins());
-  return await requestDesktopShellExit();
+  return await requestDesktopShellExit("desktop_shell_quit", true);
 });
 
 ipcMain.handle(IPC_CHANNELS.notifyConversationCompleted, async (event, payload: DesktopConversationCompletionNotification) => {
