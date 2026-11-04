@@ -298,9 +298,10 @@ describe("task card facts and direct cleanup", () => {
     await render();
     expect(button("清理已完成").disabled).toBe(false);
     const remove = button("移除记录“待同步任务”");
-    expect(remove.textContent).toBe("移除记录");
+    expect(remove.textContent).toBe("");
+    expect(remove.querySelector("svg")).not.toBeNull();
     await act(async () => { remove.focus(); }); await settle();
-    expect(document.body.querySelector('[role="tooltip"]')?.textContent).toBe("核验后仅移除本地记录，保留源任务和文件");
+    expect(document.body.querySelector('[role="tooltip"]')?.textContent).toBe("移除记录 · 核验后仅移除本地记录，保留源任务和文件");
     await click("移除记录“待同步任务”");
     expect(document.body.querySelector('[data-vui="launcher-task-detail"]')).toBeNull();
     expect((operationCalls("previewTaskCleanup")[0][0] as unknown as { targets: unknown[] }).targets)
@@ -376,7 +377,7 @@ describe("task card facts and direct cleanup", () => {
     expect(button("待处理 0")).toBeTruthy();
     const card = container.querySelector('article[data-task-state="unknown"]')!;
     expect(card.closest('[data-task-group="ended"]')).toBeTruthy();
-    expect(button("移除记录“核对周报”", card).textContent).toBe("移除记录");
+    expect(button("移除记录“核对周报”", card).querySelector("svg")).not.toBeNull();
     await click("移除记录“核对周报”", card);
     expect((operationCalls("executeTaskCleanup")[0][0] as unknown as { targets: unknown[] }).targets)
       .toEqual([{ kind: "dispatch", projectId: "project-1", dispatchId: "dispatch-1", localOnly: true }]);
@@ -545,8 +546,8 @@ describe("task card facts and direct cleanup", () => {
     await act(async () => { single.click(); bulk.click(); single.click(); }); await settle();
     expect(operationCalls("previewTaskCleanup")).toHaveLength(1);
     expect(operationCalls("executeTaskCleanup")).toHaveLength(1);
-    expect(single.disabled).toBe(true);
-    expect(bulk.disabled).toBe(true);
+    expect(button("清理“核对周报”").disabled).toBe(true);
+    expect(button("清理已完成").disabled).toBe(true);
     await act(async () => { resolveExecute({ schemaVersion: 1, releasedBytes: 0,
       items: [{ key: dispatchCleanupKey, status: "deleted", releasedBytes: 0, retained: [], failures: [] }] }); }); await settle();
   });
