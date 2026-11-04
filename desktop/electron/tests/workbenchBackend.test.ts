@@ -15,7 +15,9 @@ import {
 import {
   queueDeferredRestartIntent,
   classifyWorkbenchPortOccupant,
+  clearStaleRuntimeManagerDaemonRecords,
   clearWorkbenchLauncherRuntimeState,
+  executableLooksLikePythonDaemon,
   executeMainLineWorkbench,
   ensureFrontendRelease,
   defaultEnsureFrontend,
@@ -28,6 +30,8 @@ import {
   resolveBindableWorkbenchPort,
   reclaimStaleWorkbenchBackend,
   resolveNoConsolePython,
+  runtimeManagerDaemonLockPath,
+  runtimeManagerDaemonPidPath,
   runningCodeFingerprintReadPaths,
   sameProjectRoot,
   spawnWorkbenchBackend,
@@ -2141,6 +2145,7 @@ describe("runWorkbenchLifecycle", () => {
       readDaemonPid: () => 7788,
       readDaemonIdentity: () => null,
       pidAlive: (pid) => pid === 7788,
+      captureProcessIdentity: async () => null,
     })).rejects.toThrow("Runtime Manager daemon pid 7788 is live but has no verifiable identity");
     expect(spawnImpl).not.toHaveBeenCalled();
     expect(written.at(-1)).toMatchObject({
@@ -2816,6 +2821,193 @@ describe("runWorkbenchLifecycle", () => {
     ).rejects.toThrow("exited before it became healthy");
     expect(killPid).toHaveBeenCalledWith(5252);
     expect(childKill).not.toHaveBeenCalled();
+  });
+});
+
+describe("stale Runtime Manager daemon pid reuse records", () => {
+  function staleDaemonFixture() {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "vibelution-daemon-pid-reuse-"));
+    const pidPath = runtimeManagerDaemonPidPath(workspaceRoot);
+    const lockPath = runtimeManagerDaemonLockPath(workspaceRoot);
+    mkdirSync(dirname(pidPath), { recursive: true });
+    writeFileSync(pidPath, "7788\n", "utf8");
+    writeFileSync(lockPath, "7788\n", "utf8");
+    const written: Record<string, unknown>[] = [];
+    const base = {
+      workspaceRoot,
+      pythonPath: "C:/repo/.venv/Scripts/python.exe",
+      command: { commandId: "cmd_daemon_pid_reuse", type: "open", operation: "start", noBrowser: true },
+      readState: () => ({ backendPid: 0, backendPort: 8000 }),
+      writeState: (state: Record<string, unknown>) => {
+        written.push(state);
+      },
+      listActiveWork: () => [],
+      ensureFrontend: async () => undefined
+    };
+    return { workspaceRoot, pidPath, lockPath, written, base };
+  }
+
+  it("classifies only the python/pythonw family as a plausible daemon executable", () => {
+    for (const executable of [
+      "C:/repo/.venv/Scripts/python.exe",
+      "C:/Python312/pythonw.exe",
+      "/usr/bin/python3",
+      "C:/Python/python3.12.exe",
+      "pythonw3.12"
+    ]) {
+      expect(executableLooksLikePythonDaemon(executable)).toBe(true);
+    }
+    for (const executable of [
+      "C:/Windows/System32/conhost.exe",
+      "C:/Program Files/nodejs/node.exe",
+      "C:/Windows/System32/cmd.exe",
+      "py.exe",
+      "pythonista.exe",
+      ""
+    ]) {
+      expect(executableLooksLikePythonDaemon(executable)).toBe(false);
+    }
+  });
+
+  it("starts after clearing records when a live unverified daemon pid was reused by a foreign process", async () => {
+    const f = staleDaemonFixture();
+    try {
+      let spawned = false;
+      const spawnImpl = vi.fn(() => {
+        spawned = true;
+        return fakeBackendChild();
+      });
+      const result = await executeMainLineWorkbench({
+        ...f.base,
+        operation: "start",
+        spawnImpl,
+        connect: async () => spawned,
+        fetchHealth: async () => ({
+          status: 200,
+          json: async () => ({ status: "ok", routesReady: true, pid: 4242, workspaceRoot: f.workspaceRoot })
+        }),
+        pidAlive: (pid) => pid === 7788,
+        captureProcessIdentity: async ({ pid }) => ({
+          pid,
+          createTime: 1,
+          executable: "C:/Windows/System32/conhost.exe"
+        })
+      });
+      expect(result.accepted).toBe(true);
+      expect(spawned).toBe(true);
+      expect(existsSync(f.pidPath)).toBe(false);
+      expect(existsSync(f.lockPath)).toBe(false);
+      expect(f.written.at(-1)).toMatchObject({
+        observedState: "open",
+        lifecycleWarning: expect.stringContaining("reused by conhost.exe")
+      });
+    } finally {
+      rmSync(f.workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("still refuses to start when the live unverified daemon pid belongs to a python process", async () => {
+    const f = staleDaemonFixture();
+    try {
+      const spawnImpl = vi.fn(() => fakeBackendChild());
+      await expect(executeMainLineWorkbench({
+        ...f.base,
+        operation: "start",
+        spawnImpl,
+        connect: async () => false,
+        fetchHealth: async () => ({ status: 503 }),
+        pidAlive: (pid) => pid === 7788,
+        captureProcessIdentity: async ({ pid }) => ({
+          pid,
+          createTime: 1,
+          executable: "C:/repo/.venv/Scripts/pythonw.exe"
+        })
+      })).rejects.toThrow("Runtime Manager daemon pid 7788 is live but has no verifiable identity");
+      expect(spawnImpl).not.toHaveBeenCalled();
+      expect(existsSync(f.pidPath)).toBe(true);
+      expect(existsSync(f.lockPath)).toBe(true);
+      expect(f.written.at(-1)).toMatchObject({ observedState: "failed", lastReason: "electron_main_start_preflight_failed" });
+    } finally {
+      rmSync(f.workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("still refuses to start when the live unverified daemon pid identity cannot be captured", async () => {
+    const f = staleDaemonFixture();
+    try {
+      const spawnImpl = vi.fn(() => fakeBackendChild());
+      await expect(executeMainLineWorkbench({
+        ...f.base,
+        operation: "start",
+        spawnImpl,
+        connect: async () => false,
+        fetchHealth: async () => ({ status: 503 }),
+        pidAlive: (pid) => pid === 7788,
+        captureProcessIdentity: async () => null
+      })).rejects.toThrow("Runtime Manager daemon pid 7788 is live but has no verifiable identity");
+      expect(spawnImpl).not.toHaveBeenCalled();
+      expect(existsSync(f.pidPath)).toBe(true);
+    } finally {
+      rmSync(f.workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("clears stale daemon records when a force-stop completes with the recorded pid dead", async () => {
+    const f = staleDaemonFixture();
+    try {
+      const result = await executeMainLineWorkbench({
+        ...f.base,
+        operation: "force-stop",
+        command: { commandId: "cmd_force_stop_stale_daemon", type: "close", operation: "force-stop", noBrowser: true },
+        pidAlive: () => false,
+        killPid: () => undefined,
+        connect: async () => false,
+        captureProcessIdentity: async () => {
+          throw new Error("must not capture identity for a dead pid");
+        }
+      });
+      expect(result.accepted).toBe(true);
+      expect(existsSync(f.pidPath)).toBe(false);
+      expect(existsSync(f.lockPath)).toBe(false);
+    } finally {
+      rmSync(f.workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps daemon records when a force-stop skips a live python daemon without an identity", async () => {
+    const f = staleDaemonFixture();
+    try {
+      const result = await executeMainLineWorkbench({
+        ...f.base,
+        operation: "force-stop",
+        command: { commandId: "cmd_force_stop_live_daemon", type: "close", operation: "force-stop", noBrowser: true },
+        pidAlive: (pid) => pid === 7788,
+        killPid: () => undefined,
+        connect: async () => false,
+        captureProcessIdentity: async ({ pid }) => ({
+          pid,
+          createTime: 1,
+          executable: "C:/repo/.venv/Scripts/python.exe"
+        })
+      });
+      expect(result.accepted).toBe(true);
+      expect(result.message).toContain("Skipped unverified Runtime Manager daemon pid 7788");
+      expect(existsSync(f.pidPath)).toBe(true);
+      expect(existsSync(f.lockPath)).toBe(true);
+    } finally {
+      rmSync(f.workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("clears nothing when no daemon pid is recorded", () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "vibelution-daemon-pid-empty-"));
+    try {
+      const cleanup = clearStaleRuntimeManagerDaemonRecords(workspaceRoot);
+      expect(cleanup.removedPaths).toEqual([]);
+      expect(cleanup.failedPaths).toEqual([]);
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
   });
 });
 
