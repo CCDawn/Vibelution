@@ -12,6 +12,7 @@ import {
   regenerateLauncherAssistantMessage, guideLauncherAssistantTurn,
   getLauncherOperatorAsset, getLauncherAssistantAvatar, openLauncherFromAssistant, uploadLauncherAttachment,
   readLauncherAttachment, subscribeLauncherAssistantSessionEvent,
+  launcherAssistantBudgetQueryKey,
 } from "../../api/launcherAssistant";
 import { openLauncherModelConnection } from "../../api/launcher";
 import type { ConversationMessage, SessionDetail, SessionReferenceAttachment } from "../../api/types";
@@ -63,6 +64,7 @@ import { loadLauncherComposer, restoreLauncherComposerAttachments, saveLauncherC
 import { readLauncherAssistantTaskSource } from "./launcherAssistantTaskReads";
 import { readLauncherManagementStatus, useLauncherManagementPermission } from "./useLauncherManagementPermission";
 import { LauncherManagementPermissionControl } from "./LauncherManagementPermissionControl";
+import { useLauncherAssistantBudget } from "./useLauncherAssistantBudget";
 import { agentPurgeBatchPreviewIsValid, launcherAgentPurgeBatchActionPreview } from "./launcherAgentPurgeBatchPreview";
 
 const COPY = {
@@ -241,6 +243,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     setStatusFailures(current => status.isError ? current + 1 : 0);
   }, [status.isError, status.errorUpdatedAt, status.dataUpdatedAt]);
   const sessionId = status.data?.assistant.directSessionId || "";
+  const budget = useLauncherAssistantBudget(sessionId, status.data?.assistant.agentId || "", lang);
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
   const reading = expanded && visible && Boolean(sessionId);
@@ -451,6 +454,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     void client.invalidateQueries({ queryKey: queryKeys.configPublic(), exact: true });
     void client.invalidateQueries({ queryKey: [launcherConversationApi.cacheKey, "config"], exact: true });
     void client.invalidateQueries({ queryKey: ["launcher-assistant", "operator-asset"] });
+    void client.invalidateQueries({ queryKey: launcherAssistantBudgetQueryKey(status.data?.assistant.agentId || "", sessionId), exact: true });
   }, [client, observingOwnSession, sessionId, terminalOutcome, terminalTurnId]);
   const approvals = useQuery({
     queryKey: ["launcher-assistant", "approvals", sessionId, epoch],
@@ -1196,6 +1200,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     void status.refetch(); void detail.refetch(); void dispatches.refetch(); void approvals.refetch();
     void client.invalidateQueries({ queryKey: assetQueryPrefix });
     void client.invalidateQueries({ queryKey: assistantAvatarPrefix });
+    void client.invalidateQueries({ queryKey: launcherAssistantBudgetQueryKey(status.data?.assistant.agentId || "", sessionId), exact: true });
   };
 
   if (!expanded) return <main className={petStyles.root} data-vui-domain-recipe="launcher-assistant"
@@ -1370,6 +1375,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       composerSafeGuidancePending={guidancePendingMode === "safe"}
       composerInterruptGuidancePending={guidancePendingMode === "interrupt"}
       composerLeadingControl={<><ChatComposerPlusMenu lang={lang} showCapabilities={false} showReferences={false}
+        budget={budget}
         sessionReferences={[]} onAddAttachments={addAttachments}
         attachmentDisabled={status.data?.attachmentVersion !== 1 || sendPending || sendUnconfirmed || controlPending} />
         <LauncherManagementPermissionControl state={managementPermission} lang={lang} /></>}

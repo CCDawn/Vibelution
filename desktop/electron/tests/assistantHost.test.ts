@@ -68,6 +68,31 @@ function fixture(options: { stale?: boolean; noReadyFirst?: boolean; graceful?: 
 }
 
 describe("AssistantHost", () => {
+  it("keeps assistant budget reads and CAS writes fixed to the native owner", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    fetchImpl.mockResolvedValueOnce(Response.json({ revision: 3, maxCallsPerTurn: 16 }));
+    await expect(host.request({ operation: "budgetParameters" })).resolves.toEqual({ revision: 3, maxCallsPerTurn: 16 });
+    expect(fetchImpl.mock.calls.at(-1)![1]?.method).toBe("GET");
+    for (const maxCallsPerTurn of [0, null, 64]) {
+      fetchImpl.mockResolvedValueOnce(Response.json({ revision: 4, maxCallsPerTurn }));
+      await expect(host.request({ operation: "setBudgetParameters", revision: 3, maxCallsPerTurn })).resolves.toEqual({ revision: 4, maxCallsPerTurn });
+      expect(String(fetchImpl.mock.calls.at(-1)![0])).toBe("http://127.0.0.1:12345/api/assistant/budget-parameters");
+      expect(fetchImpl.mock.calls.at(-1)![1]?.method).toBe("PATCH");
+      expect(JSON.parse(String(fetchImpl.mock.calls.at(-1)![1]?.body))).toEqual({ revision: 3, maxCallsPerTurn });
+    }
+    const calls = fetchImpl.mock.calls.length;
+    for (const payload of [{ operation: "budgetParameters", sessionId: "foreign" },
+      { operation: "setBudgetParameters", revision: 3, maxCallsPerTurn: 0, sessionId: "foreign" },
+      { operation: "setBudgetParameters", revision: true, maxCallsPerTurn: 0 },
+      { operation: "setBudgetParameters", revision: 3, maxCallsPerTurn: 201 }])
+      await expect(host.request(payload as AssistantHostRequest)).rejects.toThrow("ASSISTANT_BUDGET_INVALID");
+    expect(fetchImpl.mock.calls.length).toBe(calls);
+    fetchImpl.mockResolvedValueOnce(Response.json({ detail: "private" }, { status: 409 }));
+    await expect(host.request({ operation: "setBudgetParameters", revision: 3, maxCallsPerTurn: 0 })).rejects.toThrow("ASSISTANT_BUDGET_CONFLICT");
+    expect(fetchImpl.mock.calls.length).toBe(calls + 1);
+    await host.stop();
+  });
   it("posts management presets once with closed CAS inputs and bounded verified receipts", async () => {
     const { host, fetchImpl } = fixture({ graceful: true });
     await host.start();

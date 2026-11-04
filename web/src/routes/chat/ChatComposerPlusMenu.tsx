@@ -439,8 +439,9 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
               }) : null}
             </>
           )) : null}
-          {props.showCapabilities !== false ? renderSection(capabilitiesSection, (
+          {props.showCapabilities !== false || budget ? renderSection(capabilitiesSection, (
             <>
+              {props.showCapabilities !== false ? <>
               {renderToggle({
                 id: "mental-model",
                 label: lang === "zh" ? "心智模型" : "Mental model",
@@ -468,6 +469,7 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
                 disabled: props.capabilityDisabled,
                 onChange: props.onPromptSuggestionEnabledChange,
               })}
+              </> : null}
               {budget ? (
                 <ChatComposerBudgetPopover
                   lang={lang}

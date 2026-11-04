@@ -1,4 +1,4 @@
-import type { AgentPermissionPreset, ConfigBootstrap, SessionDetail, SessionMessageCurationAction, SessionMessageCurationMutationResponse, SessionMessageCurationResponse, SessionReferenceAttachment, SessionToolApprovalRequest } from "./types";
+import type { AgentPermissionPreset, ConfigBootstrap, SessionBudgetParameters, SessionDetail, SessionMessageCurationAction, SessionMessageCurationMutationResponse, SessionMessageCurationResponse, SessionReferenceAttachment, SessionToolApprovalRequest } from "./types";
 import type { DesktopPetPreferences } from "../routes/desktopPet/desktopPetPreferences";
 import type { SessionContinuationExpectation } from "./chat";
 
@@ -81,6 +81,8 @@ export type LauncherAssistantRequest =
   | { operation: "previewTaskCleanup" | "executeTaskCleanup"; agentId: string; directSessionId: string; targets: LauncherTaskCleanupTarget[]; fingerprint?: string }
   | { operation: "teamRuns"; cursor?: string }
   | { operation: "setModel"; modelId: string }
+  | { operation: "budgetParameters" }
+  | { operation: "setBudgetParameters"; revision: number; maxCallsPerTurn: number | null }
   | { operation: "setManagementPermissionPreset"; preset: AgentPermissionPreset; expectedRevision: number }
   | { operation: "detail"; beforeMessageIndex?: number }
   | { operation: "status" | "dispatches" | "hide" | "approvals" | "openLauncher" | "assistantAvatar" }
@@ -114,6 +116,31 @@ export type LauncherTaskCleanupTarget =
 
 export function launcherAssistantInvoke(payload: LauncherAssistantRequest): Promise<unknown> {
   return launcherAssistantBridge().invoke(payload);
+}
+
+function validBudget(value: unknown): value is SessionBudgetParameters {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  return Object.keys(row).length === 2 && Number.isSafeInteger(row.revision) && (row.revision as number) >= 0
+    && (row.maxCallsPerTurn === null || Number.isSafeInteger(row.maxCallsPerTurn)
+      && (row.maxCallsPerTurn as number) >= 0 && (row.maxCallsPerTurn as number) <= 200);
+}
+
+export async function getLauncherAssistantBudget(): Promise<SessionBudgetParameters> {
+  const result = await launcherAssistantInvoke({ operation: "budgetParameters" });
+  if (!validBudget(result)) throw new Error("ASSISTANT_RESPONSE_INVALID");
+  return result;
+}
+
+export const launcherAssistantBudgetQueryKey = (agentId: string, sessionId: string) =>
+  ["launcher-assistant", "budget", agentId, sessionId] as const;
+
+export async function setLauncherAssistantBudget(parameters: SessionBudgetParameters): Promise<SessionBudgetParameters> {
+  if (!validBudget(parameters)) throw new Error("ASSISTANT_BUDGET_INVALID");
+  const result = await launcherAssistantInvoke({ operation: "setBudgetParameters", ...parameters });
+  if (!validBudget(result) || result.maxCallsPerTurn !== parameters.maxCallsPerTurn || result.revision <= parameters.revision)
+    throw new Error("ASSISTANT_RESPONSE_INVALID");
+  return result;
 }
 
 export function launcherAssistantBridge(source: unknown = globalThis): LauncherAssistantBridge {

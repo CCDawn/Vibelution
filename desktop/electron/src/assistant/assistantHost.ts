@@ -48,6 +48,8 @@ export type AssistantHostRequest =
   | { operation: "previewTaskCleanup" | "executeTaskCleanup"; agentId: string; directSessionId: string; targets: unknown[]; fingerprint?: string }
   | { operation: "teamRuns"; cursor?: string }
   | { operation: "setModel"; modelId: string }
+  | { operation: "budgetParameters" }
+  | { operation: "setBudgetParameters"; revision: number; maxCallsPerTurn: number | null }
   | { operation: "setManagementPermissionPreset"; preset: "request_approval" | "auto_review" | "full_access"; expectedRevision: number }
   | { operation: "detail"; beforeMessageIndex?: number }
   | { operation: "status" | "dispatches" | "config" | "approvals" | "assistantAvatar" }
@@ -75,7 +77,7 @@ export type AssistantHostRequest =
 /** Read-only requests still drain with migration, but cannot submit new work. */
 const LIFECYCLE_READ_OPERATIONS: ReadonlySet<AssistantHostRequest["operation"]> = new Set([
   "status", "detail", "dispatches", "teamRuns", "config", "approvals", "curation",
-  "operatorAsset", "assistantAvatar", "computerState", "readAttachment"
+  "operatorAsset", "assistantAvatar", "computerState", "readAttachment", "budgetParameters"
 ]);
 
 /** Private to Electron main; attemptToken must never cross the renderer bridge. */
@@ -930,7 +932,7 @@ export class AssistantHost {
         if (lifecycle.committed) throw new HostError("ASSISTANT_LIFECYCLE_CLOSING");
         lifecycle.arrival = true;
       }
-      const safeWhileWaiting = ["status", "detail", "dispatches", "teamRuns", "config", "approvals", "curation", "operatorAsset", "assistantAvatar", "setManagementPermissionPreset", "resolveApproval", "previewDispatchApproval", "decideDispatchApproval", "declineDispatchApproval", "stop", "computerState"]
+      const safeWhileWaiting = ["status", "detail", "dispatches", "teamRuns", "config", "approvals", "curation", "operatorAsset", "assistantAvatar", "setManagementPermissionPreset", "budgetParameters", "setBudgetParameters", "resolveApproval", "previewDispatchApproval", "decideDispatchApproval", "declineDispatchApproval", "stop", "computerState"]
         .includes(captured.operation);
       // Confirmation only settles an existing native waiter; it remains a
       // counted writer in the host barrier even after admission is sealed.
@@ -962,6 +964,27 @@ export class AssistantHost {
     }
     if (!object(payload)) throw new HostError("ASSISTANT_REQUEST_INVALID");
     switch (payload.operation) {
+      case "budgetParameters":
+      case "setBudgetParameters": {
+        const write = payload.operation === "setBudgetParameters";
+        if (Object.keys(payload).length !== (write ? 3 : 1)
+          || !ownKeys(payload, write ? ["operation", "revision", "maxCallsPerTurn"] : ["operation"])
+          || write && (!Number.isSafeInteger(payload.revision) || payload.revision < 0
+            || payload.maxCallsPerTurn !== null && (!Number.isSafeInteger(payload.maxCallsPerTurn)
+              || payload.maxCallsPerTurn < 0 || payload.maxCallsPerTurn > 200)))
+          throw new HostError("ASSISTANT_BUDGET_INVALID");
+        const result = await this.rpc(generation, "/api/assistant/budget-parameters", write ? "PATCH" : "GET",
+          write ? { revision: payload.revision, maxCallsPerTurn: payload.maxCallsPerTurn } : undefined,
+          write ? REQUEST_MS : READ_MS, false, 8192);
+        if (!object(result) || Object.keys(result).length !== 2 || !ownKeys(result, ["revision", "maxCallsPerTurn"])
+          || !Number.isSafeInteger(result.revision) || (result.revision as number) < 0
+          || result.maxCallsPerTurn !== null && (!Number.isSafeInteger(result.maxCallsPerTurn)
+            || (result.maxCallsPerTurn as number) < 0 || (result.maxCallsPerTurn as number) > 200)
+          || write && (result.maxCallsPerTurn !== payload.maxCallsPerTurn
+            || (result.revision as number) <= payload.revision))
+          throw new HostError("ASSISTANT_RESPONSE_INVALID");
+        return result;
+      }
       case "setManagementPermissionPreset": {
         if (Object.keys(payload).length !== 3 || !ownKeys(payload, ["operation", "preset", "expectedRevision"])
           || typeof payload.preset !== "string" || !["request_approval", "auto_review", "full_access"].includes(payload.preset)
@@ -1779,7 +1802,7 @@ export class AssistantHost {
     } catch { return false; }
   }
 
-  private async rpc(generation: Generation, path: string, method: "GET" | "POST" | "PUT", body?: object,
+  private async rpc(generation: Generation, path: string, method: "GET" | "POST" | "PUT" | "PATCH", body?: object,
     timeoutMs = REQUEST_MS, retiring = false, maxResponseBytes = MAX_RESPONSE_BYTES, callerSignal?: AbortSignal): Promise<unknown> {
     if (!generation.origin || generation.closed || (!retiring && generation.abort.signal.aborted)) throw new HostError("ASSISTANT_NOT_READY");
     const timeout = new AbortController();
@@ -1830,6 +1853,11 @@ export class AssistantHost {
         // stays a deliberate, consumed decision.
         if (failureCode === "ATTACHMENT_NOT_FOUND") throw new HostError(failureCode);
         if (failureCode !== null && /^ASSISTANT_[A-Z_]+$/.test(failureCode)) throw new HostError(failureCode);
+        if (path === "/api/assistant/budget-parameters") {
+          if (response.status === 409) throw new HostError("ASSISTANT_BUDGET_CONFLICT");
+          if (response.status === 422) throw new HostError("ASSISTANT_BUDGET_INVALID");
+          if (response.status === 503 || response.status === 404) throw new HostError("ASSISTANT_BUDGET_UNAVAILABLE");
+        }
         if (path === "/api/assistant/management-permission") {
           if (response.status === 409) throw new HostError("ASSISTANT_PERMISSION_CONFLICT");
           if (response.status === 422) throw new HostError("ASSISTANT_PERMISSION_INVALID");

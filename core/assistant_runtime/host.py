@@ -21,6 +21,8 @@ from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from .budget_parameters import AssistantBudgetParameters
+
 # The renderer polls /api/assistant at a multi-second cadence while chat detail
 # and submit hold native._LOCK for their own reads. Serving the lock-bound
 # identity reads from this snapshot bounds every status response without
@@ -532,6 +534,14 @@ class NativeFacade:
             self._identity_snapshot = None
         return result
 
+    def budget_parameters(self):
+        from . import native
+        return native.budget_parameters()
+
+    def set_budget_parameters(self, max_calls_per_turn, expected_revision):
+        from . import native
+        return native.set_budget_parameters(max_calls_per_turn, expected_revision)
+
     def avatar(self):
         from . import native
         return native.read_assistant_avatar()
@@ -844,6 +854,9 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_error(request: Request, error: RequestValidationError):
+        if request.url.path == "/api/assistant/budget-parameters":
+            return JSONResponse({"detail": {"code": "ASSISTANT_BUDGET_INVALID",
+                "message": "The assistant budget request is invalid"}}, status_code=422)
         if request.url.path == "/api/assistant/management-permission":
             return JSONResponse({"detail": {"code": "ASSISTANT_PERMISSION_INVALID",
                 "message": "The management permission request is invalid"}}, status_code=422)
@@ -864,6 +877,9 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
             "ASSISTANT_PERMISSION_INVALID": (422, "The management permission request is invalid"),
             "ASSISTANT_PERMISSION_CONFLICT": (409, "Management permission changed; refresh before retrying"),
             "ASSISTANT_PERMISSION_UNAVAILABLE": (503, "Management permission settings are unavailable"),
+            "ASSISTANT_BUDGET_INVALID": (422, "The assistant budget request is invalid"),
+            "ASSISTANT_BUDGET_CONFLICT": (409, "Assistant budget changed; refresh before retrying"),
+            "ASSISTANT_BUDGET_UNAVAILABLE": (503, "Assistant budget settings are unavailable"),
             "ASSISTANT_QUIESCING": (503, "Native assistant is quiescing; retry after the migration fence"),
             "ASSISTANT_QUIESCENCE_BUSY": (503, "Native assistant is quiescing; retry after the migration fence"),
             "ATTACHMENT_NOT_FOUND": (404, "Native assistant attachment not found"),
@@ -1404,6 +1420,26 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
             raise AssistantSessionError("ASSISTANT_PERMISSION_UNAVAILABLE")
         response.headers["Cache-Control"] = "no-store"
         return setter(payload.preset, payload.expectedRevision)
+
+    @app.get("/api/assistant/budget-parameters", response_model=AssistantBudgetParameters)
+    def budget_parameters(request: Request, response: Response):
+        if request.query_params:
+            raise AssistantSessionError("ASSISTANT_BUDGET_INVALID")
+        getter = getattr(native, "budget_parameters", None)
+        if not callable(getter):
+            raise AssistantSessionError("ASSISTANT_BUDGET_UNAVAILABLE")
+        response.headers["Cache-Control"] = "no-store"
+        return getter()
+
+    @app.patch("/api/assistant/budget-parameters", response_model=AssistantBudgetParameters)
+    def set_budget_parameters(payload: AssistantBudgetParameters, request: Request, response: Response):
+        if request.query_params:
+            raise AssistantSessionError("ASSISTANT_BUDGET_INVALID")
+        setter = getattr(native, "set_budget_parameters", None)
+        if not callable(setter):
+            raise AssistantSessionError("ASSISTANT_BUDGET_UNAVAILABLE")
+        response.headers["Cache-Control"] = "no-store"
+        return setter(payload.maxCallsPerTurn, payload.revision)
 
     from .team_task_cards import TeamTaskCardsError, TeamTaskCardsPage, read_team_task_cards
 

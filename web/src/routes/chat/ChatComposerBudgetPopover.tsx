@@ -291,5 +291,5 @@ export function ChatComposerBudgetPopover({
 }
 
 function budgetDraft(value: number | null | undefined): string {
-  return typeof value === "number" && Number.isSafeInteger(value) ? String(value) : "";
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? String(value) : "";
 }

@@ -72,15 +72,15 @@ def session_id_from_runtime(runtime: Mapping[str, Any] | None) -> str:
     return session_id
 
 
-def _session_override_max_calls(session_id: str, runtime: Mapping[str, Any] | None = None) -> int:
-    """会话级 maxCallsPerTurn 覆盖；未知/未配置/读取失败返回 0（不覆盖）。
+def _session_override_max_calls(session_id: str, runtime: Mapping[str, Any] | None = None) -> int | None:
+    """会话级额度覆盖；None 不覆盖，0 明确关闭每回合额度限制。
 
     runtime 可用且目标会话与 runtime 推导一致（或未显式指定会话）时，
     走授权层已 memo 的 ``_session_override_max_calls_per_turn``：同键
     （sessionId+agentId+configRevision+configHash）重复读取由有界 LRU
     供值，不再每轮打真实 session store/agent registry I/O（读缓存在
     每轮 chat-state 写后被 epoch 失效，直接查询在稳态回合近似每轮真读）。
-    memo 只缓存权威解析结果（含无覆盖的 0），异常路径不缓存，语义与
+    memo 只缓存权威解析结果（含无覆盖的 None），异常路径不缓存，语义与
     直接查询等价；无可信快照身份时 memo 内部自动退回逐次直查。显式
     session_id 与 runtime 推导不一致时无法用 memo 键表达，退回直查。
     """
@@ -94,22 +94,22 @@ def _session_override_max_calls(session_id: str, runtime: Mapping[str, Any] | No
                     _session_override_max_calls_per_turn,
                 )
 
-                return int(_session_override_max_calls_per_turn(runtime))
+                return _session_override_max_calls_per_turn(runtime)
             except Exception:  # noqa: BLE001 - 覆盖读取必须 best-effort
-                return 0
+                return None
     if not target:
-        return 0
+        return None
     try:
         from core.orchestration.session_budget_resolve import get_session_budget_parameters
 
         parameters = get_session_budget_parameters(target)
     except Exception:  # noqa: BLE001 - 覆盖读取必须 best-effort
-        return 0
+        return None
     value = parameters.maxCallsPerTurn if parameters is not None else None
     try:
-        return int(value) if value else 0
+        return int(value) if value is not None else None
     except (TypeError, ValueError):
-        return 0
+        return None
 
 
 def resolve_effective_max_calls_per_turn(
@@ -140,7 +140,7 @@ def resolve_effective_max_calls_per_turn(
     resolved_session_id = _coerce_text(session_id).strip() or session_id_from_runtime(runtime)
     if resolved_session_id:
         session_override = _session_override_max_calls(resolved_session_id, runtime=runtime)
-        if session_override > 0:
+        if session_override is not None:
             max_calls = session_override
     return max_calls, family
 
