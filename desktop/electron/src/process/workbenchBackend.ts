@@ -13,6 +13,7 @@ import type { Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 
 import { BoundedStdioSink, type BoundedStdioStatus } from "./boundedStdio.js";
+import { appendSupervisorEventFallback } from "../lifecycle/supervisorEventFallback.js";
 import { pythonBridgeEnv } from "./pythonBridgeEnv.js";
 import { runOwnedFrontendBuildBridge } from "./ownedFrontendBuildBridge.js";
 import {
@@ -940,6 +941,21 @@ export async function classifyWorkbenchPortOccupant(input: {
   return { kind: "same-project-backend", pid };
 }
 
+/** Timing only: diagnostics must not alter retirement or create synthetic test roots. */
+function recordBackendRetirementTiming(workspaceRoot: string, stage: string, startedAt: number): number {
+  const settledAt = Date.now();
+  try {
+    if (existsSync(launcherStatePath(workspaceRoot))) {
+      appendSupervisorEventFallback(workspaceRoot, {
+        eventCode: "electron.backend_retirement.stage",
+        message: "Backend retirement stage settled.",
+        fields: { stage, durationMs: Math.max(0, settledAt - startedAt) }
+      });
+    }
+  } catch { /* Diagnostic failure cannot change the stop outcome. */ }
+  return settledAt;
+}
+
 export async function reclaimStaleWorkbenchBackend(input: {
   port: number;
   host?: string;
@@ -1012,7 +1028,9 @@ export async function reclaimStaleWorkbenchBackend(input: {
   const expectedIdentities: Record<string, PythonProcessIdentity> = {
     ...(input.expectedIdentities ?? {})
   };
+  let stageStartedAt = Date.now();
   const occupant = await classifyWorkbenchPortOccupant(input);
+  stageStartedAt = recordBackendRetirementTiming(input.workspaceRoot, "port_observation", stageStartedAt);
   input.signal?.throwIfAborted();
   const killPid = input.killPid ?? terminatePid;
   const failedTreePids = new Set<number>();
@@ -1153,6 +1171,7 @@ export async function reclaimStaleWorkbenchBackend(input: {
         delay: input.delay
       });
       input.signal?.throwIfAborted();
+      stageStartedAt = recordBackendRetirementTiming(input.workspaceRoot, "graceful_shutdown", stageStartedAt);
       gracefulCompleted = graceful.completed;
       if (gracefulCompleted) {
         const ownedJob = hasTrackedWorkbenchJob(input.workspaceRoot);
@@ -1281,6 +1300,7 @@ export async function reclaimStaleWorkbenchBackend(input: {
       verifiedPid: occupant.pid
     };
   }
+  recordBackendRetirementTiming(input.workspaceRoot, "ownership_and_log_retirement", stageStartedAt);
   return {
     reclaimed: true,
     reason: gracefulCompleted
@@ -1712,6 +1732,7 @@ export async function executeMainLineWorkbench(
   };
 
   if (operation === "stop" || operation === "force-stop" || operation === "shutdown") {
+    const stopStartedAt = Date.now();
     if ((operation === "stop" || operation === "shutdown") && !input.interruptActiveWork) {
       const blocked = blockLifecycleIfActiveWork(
         "stop",
@@ -1894,6 +1915,7 @@ export async function executeMainLineWorkbench(
       connect: input.connect
     });
     input.signal?.throwIfAborted();
+    recordBackendRetirementTiming(input.workspaceRoot, "registered_ownership_observation", stopStartedAt);
     const reconciledDeadPids = new Set(deadHandleReconcile.reconciledPids);
     const retainedRegisteredHandles = registeredHandles.filter((pid) => !reconciledDeadPids.has(pid));
     const retainedBackendTreePids = backendTreePids.filter((pid) => !reconciledDeadPids.has(pid));
