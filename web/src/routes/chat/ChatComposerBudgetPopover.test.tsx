@@ -270,4 +270,17 @@ describe("ChatComposerBudgetPopover draft + save contract", () => {
       maxCallsPerTurn: 0,
     });
   });
+
+  it("restores default limits directly after turning off unlimited mode", async () => {
+    const onSave = vi.fn();
+    await renderPanel({ maxCallsPerTurn: 0, onSave });
+    const input = inputByLabel("每回合工具调用额度")!;
+    expect(input.disabled).toBe(true);
+    await act(async () => document.body.querySelector<HTMLElement>('[data-testid="chat-composer-budget-unlimited"]')?.click());
+    expect(input.value).toBe("");
+    expect(input.disabled).toBe(false);
+    expect(buttonByText("保存")?.disabled).toBe(false);
+    await act(async () => buttonByText("保存")?.click());
+    expect(onSave).toHaveBeenCalledExactlyOnceWith({ revision: 3, maxCallsPerTurn: null });
+  });
 });

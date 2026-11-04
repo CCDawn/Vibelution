@@ -343,6 +343,54 @@ def set_management_permission(preset: str, expected_revision: int) -> dict[str, 
         raise AssistantSessionError("ASSISTANT_PERMISSION_UNAVAILABLE") from None
 
 
+@contextmanager
+def _budget_parameters_command():
+    """Keep both sides of the fixed binding stable through the owner call."""
+    try:
+        with _session_command() as (sessions, session_id):
+            directory, personal, _, _ = _services()
+            with personal._LOCK, sessions.session_agent_lifecycle_transaction(), directory._STATE_LOCK:
+                assistant_settings()
+                if sessions._session_agent_id_snapshot(session_id) != _AGENT_ID:
+                    raise AssistantSessionError("ASSISTANT_BUDGET_UNAVAILABLE")
+                yield sessions, session_id
+    except AssistantSessionError as exc:
+        if exc.code in {"ASSISTANT_BUDGET_CONFLICT", "ASSISTANT_BUDGET_UNAVAILABLE"}:
+            raise
+        raise AssistantSessionError("ASSISTANT_BUDGET_UNAVAILABLE") from None
+    except Exception:
+        raise AssistantSessionError("ASSISTANT_BUDGET_UNAVAILABLE") from None
+
+
+def budget_parameters() -> dict[str, int | None]:
+    """Read only the fixed assistant's canonical Session budget override."""
+    from .budget_parameters import AssistantBudgetParameters
+
+    with _budget_parameters_command() as (sessions, session_id):
+        return AssistantBudgetParameters.model_validate(
+            sessions.get_session_budget_parameters_view(session_id)
+        ).model_dump()
+
+
+def set_budget_parameters(max_calls_per_turn: int | None, expected_revision: int) -> dict[str, int | None]:
+    """Save for later turns without changing a running turn's accepted budget."""
+    from .budget_parameters import AssistantBudgetParameters
+
+    try:
+        payload = AssistantBudgetParameters(revision=expected_revision, maxCallsPerTurn=max_calls_per_turn)
+    except ValueError:
+        raise AssistantSessionError("ASSISTANT_BUDGET_INVALID") from None
+    with _budget_parameters_command() as (sessions, session_id):
+        try:
+            result = sessions.update_session_budget_parameters(
+                session_id, expected_revision=payload.revision,
+                max_calls_per_turn=payload.maxCallsPerTurn,
+            )
+        except sessions.SessionBudgetParametersConflictError:
+            raise AssistantSessionError("ASSISTANT_BUDGET_CONFLICT") from None
+        return AssistantBudgetParameters.model_validate(result).model_dump()
+
+
 def set_model(model_id: str) -> dict[str, str]:
     """Rebind only this assistant through its existing settings owner."""
     from core.web.services import agent_directory_service as directory

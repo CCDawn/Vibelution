@@ -9,7 +9,7 @@ import type { AssistantHostRequest } from "../src/assistant/assistantHost.js";
  * member missing from this list, so a new host verb cannot land silently.
  */
 const HOST_REQUEST_OPERATIONS: readonly AssistantHostRequest["operation"][] = [
-  "previewTaskCleanup", "executeTaskCleanup", "teamRuns", "setModel", "setManagementPermissionPreset",
+  "previewTaskCleanup", "executeTaskCleanup", "teamRuns", "setModel", "setManagementPermissionPreset", "budgetParameters", "setBudgetParameters",
   "detail", "status", "dispatches", "config", "approvals", "assistantAvatar",
   "resolveApproval", "previewDispatchApproval", "declineDispatchApproval", "decideDispatchApproval",
   "send", "uploadAttachment", "readAttachment", "stop", "continue", "switchHead", "regenerate", "guidance",

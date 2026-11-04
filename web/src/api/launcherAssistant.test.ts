@@ -10,10 +10,33 @@ import {
   getLauncherOperatorAsset, getLauncherAssistantAvatar, openLauncherFromAssistant,
   subscribeLauncherAssistantSessionEvent,
   setLauncherManagementPermissionPreset,
+  getLauncherAssistantBudget, setLauncherAssistantBudget,
 } from "./launcherAssistant";
 import type { SessionToolApprovalRequest } from "./types";
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe("Launcher assistant budget contract", () => {
+  it("reads and saves zero, default and custom quotas through the fixed bridge", async () => {
+    const invoke = vi.fn().mockResolvedValue({ revision: 3, maxCallsPerTurn: 16 });
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    await expect(getLauncherAssistantBudget()).resolves.toEqual({ revision: 3, maxCallsPerTurn: 16 });
+    expect(invoke).toHaveBeenLastCalledWith({ operation: "budgetParameters" });
+    for (const maxCallsPerTurn of [0, null, 32]) {
+      invoke.mockResolvedValueOnce({ revision: 4, maxCallsPerTurn });
+      await expect(setLauncherAssistantBudget({ revision: 3, maxCallsPerTurn })).resolves.toEqual({ revision: 4, maxCallsPerTurn });
+      expect(invoke).toHaveBeenLastCalledWith({ operation: "setBudgetParameters", revision: 3, maxCallsPerTurn });
+    }
+    const calls = invoke.mock.calls.length;
+    await expect(setLauncherAssistantBudget({ revision: 3, maxCallsPerTurn: -1 })).rejects.toThrow("ASSISTANT_BUDGET_INVALID");
+    expect(invoke).toHaveBeenCalledTimes(calls);
+    invoke.mockRejectedValueOnce(new Error("ASSISTANT_BUDGET_CONFLICT"));
+    await expect(setLauncherAssistantBudget({ revision: 3, maxCallsPerTurn: 0 })).rejects.toThrow("ASSISTANT_BUDGET_CONFLICT");
+    expect(invoke).toHaveBeenCalledTimes(calls + 1);
+    invoke.mockResolvedValueOnce({ revision: 4, maxCallsPerTurn: 16 });
+    await expect(setLauncherAssistantBudget({ revision: 3, maxCallsPerTurn: 0 })).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
+  });
+});
 
 describe("Launcher management-permission contract", () => {
   it("writes through native CAS once and rejects invalid inputs and malformed receipts", async () => {

@@ -26,7 +26,7 @@ export type AssistantBridgeOwner = {
  * host's ASSISTANT_NOT_READY fast path; writes still await the full recovery. */
 const START_GRACE_READ_MS = 2_000;
 /** Renderer read views that keep polling while a generation is starting. */
-const READ_OPERATIONS = new Set(["status", "detail", "dispatches", "teamRuns", "config", "approvals", "curation", "assistantAvatar"]);
+const READ_OPERATIONS = new Set(["status", "detail", "dispatches", "teamRuns", "config", "approvals", "curation", "assistantAvatar", "budgetParameters"]);
 /**
  * Closed verb list a renderer may dispatch through this bridge; must cover
  * every operation of AssistantHostRequest (assistantHost.ts) and is locked to
@@ -35,7 +35,7 @@ const READ_OPERATIONS = new Set(["status", "detail", "dispatches", "teamRuns", "
  * Every member is dispatched after a full host.start() recovery except the
  * READ_OPERATIONS subset, which gets a bounded grace instead.
  */
-export const ASSISTANT_BRIDGE_OPERATIONS = ["status", "detail", "dispatches", "teamRuns", "setModel", "setManagementPermissionPreset", "previewTaskCleanup", "executeTaskCleanup", "config", "send", "uploadAttachment", "readAttachment", "stop", "continue", "switchHead", "regenerate", "guidance", "curation", "curate", "approvals", "resolveApproval", "previewDispatchApproval", "decideDispatchApproval", "declineDispatchApproval", "operatorAsset", "assistantAvatar", "computerState", "computerWindows", "computerGrant", "computerControl", "computerConfirm"];
+export const ASSISTANT_BRIDGE_OPERATIONS = ["status", "detail", "dispatches", "teamRuns", "setModel", "setManagementPermissionPreset", "budgetParameters", "setBudgetParameters", "previewTaskCleanup", "executeTaskCleanup", "config", "send", "uploadAttachment", "readAttachment", "stop", "continue", "switchHead", "regenerate", "guidance", "curation", "curate", "approvals", "resolveApproval", "previewDispatchApproval", "decideDispatchApproval", "declineDispatchApproval", "operatorAsset", "assistantAvatar", "computerState", "computerWindows", "computerGrant", "computerControl", "computerConfirm"];
 
 function delay(ms: number): Promise<void> {
   return new Promise(done => {
@@ -87,6 +87,12 @@ export async function invokeAssistant(event: Sender, payload: unknown, owner: As
     return owner.setExpanded(request.expanded);
   }
   if (request.operation === "assistantAvatar" && Object.keys(request).length !== 1) throw new Error("ASSISTANT_REQUEST_INVALID");
+  if (request.operation === "budgetParameters" && Object.keys(request).length !== 1) throw new Error("ASSISTANT_BUDGET_INVALID");
+  if (request.operation === "setBudgetParameters" && (Object.keys(request).length !== 3
+    || !Number.isSafeInteger(request.revision) || (request.revision as number) < 0
+    || request.maxCallsPerTurn !== null && (!Number.isSafeInteger(request.maxCallsPerTurn)
+      || (request.maxCallsPerTurn as number) < 0 || (request.maxCallsPerTurn as number) > 200)))
+    throw new Error("ASSISTANT_BUDGET_INVALID");
   if (request.operation === "setManagementPermissionPreset" && (Object.keys(request).length !== 3
     || typeof request.preset !== "string" || !["request_approval", "auto_review", "full_access"].includes(request.preset)
     || !Number.isSafeInteger(request.expectedRevision) || (request.expectedRevision as number) < 0))

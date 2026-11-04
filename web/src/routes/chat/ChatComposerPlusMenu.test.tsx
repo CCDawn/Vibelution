@@ -93,6 +93,20 @@ describe("lazy knowledge picker", () => {
     container?.remove();
     root = null;
   });
+  it("offers native assistant budgets without exposing unsupported capability toggles", async () => {
+    container = document.createElement("div"); document.body.append(container);
+    root = createRoot(container);
+    await act(async () => root!.render(<ChatComposerPlusMenu lang="zh" showCapabilities={false}
+      showReferences={false} attachmentDisabled={false} sessionReferences={[]}
+      budget={{ sessionId: "assistant", revision: 3, maxCallsPerTurn: 16, onSave: vi.fn() }} />));
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')!.click());
+    const menu = document.querySelector('[role="menu"]')!;
+    expect(menu.textContent).toContain("预算与额度");
+    expect(menu.querySelector('[role="menuitemcheckbox"]')).toBeNull();
+    const entry = [...menu.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes("预算与额度"))!;
+    await act(async () => entry.click());
+    expect(document.querySelector('[data-testid="chat-composer-budget-unlimited"]')).not.toBeNull();
+  });
   it("reuses the attachment menu in native hosts without phantom capabilities or references", async () => {
     container = document.createElement("div"); document.body.append(container);
     root = createRoot(container);

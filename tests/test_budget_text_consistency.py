@@ -228,6 +228,39 @@ def test_explicit_low_base_stays_as_written_without_identity():
     assert resolved == 5
 
 
+def test_disabled_session_budget_wins_in_prompts_and_direct_lookup(monkeypatch, tmp_path):
+    from core.orchestration import session_budget_resolve
+
+    monkeypatch.setattr(
+        session_budget_resolve, "get_session_budget_parameters",
+        lambda _session_id: SessionBudgetParameters(maxCallsPerTurn=0),
+    )
+    runtime = _fake_runtime(model="deepseek-chat", session_id="budget-off")
+    assert resolve_effective_max_calls_per_turn(_BASE_POLICY, runtime=runtime) == (0, "deepseek")
+    assert resolve_effective_max_calls_per_turn(
+        _BASE_POLICY, model="deepseek-chat", session_id="budget-off",
+    ) == (0, "deepseek")
+    surfaces = _render_all_surfaces(monkeypatch, runtime)
+    assert surfaces["packet"].max_calls_per_turn == 0
+    assert "64 次" not in surfaces["packet_render"]
+    assert "**64** 次" not in surfaces["spec_digest"]
+    assert "本回合 64 次" not in surfaces["env_info"]
+    assert "maxCallsPerTurn=64" not in _render_projection_block(tmp_path, monkeypatch, runtime)
+
+
+def test_failed_session_budget_read_keeps_policy_cap(monkeypatch):
+    from core.orchestration import session_budget_resolve
+
+    def fail(_session_id):
+        raise OSError("unavailable")
+
+    monkeypatch.setattr(session_budget_resolve, "get_session_budget_parameters", fail)
+    for runtime in (None, _fake_runtime(model="deepseek-chat", session_id="unavailable")):
+        assert resolve_effective_max_calls_per_turn(
+            _BASE_POLICY, model="deepseek-chat", session_id="unavailable", runtime=runtime,
+        ) == (64, "deepseek")
+
+
 def _memo_session_reads(monkeypatch, *, override: int | None) -> dict[str, int]:
     """计数会话覆盖权威解析背后的真实 store 读（chat-state + agent registry）。"""
 

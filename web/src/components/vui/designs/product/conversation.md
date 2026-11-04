@@ -459,7 +459,7 @@ import { ConversationFollowupQueueBar } from "../../conversation/ConversationFol
 
 | Prop / 槽位 | 说明 | 设计注意 |
 | --- | --- | --- |
-| budget | `ChatComposerBudgetControl \| null` | 提供 `sessionId/revision/每回合工具调用额度/存取状态/onSave`；群聊与陪伴面不传 |
+| budget | `ChatComposerBudgetControl \| null` | 提供 `sessionId/revision/每回合工具调用额度/存取状态/onSave`；个人助理也复用此入口，独立于 `showCapabilities`；群聊与陪伴面不传 |
 | capabilityDisabled | 会话级禁用 | 与能力开关同一门：无 activeSession 时禁用预算入口 |
 | knowledgeReferenceState | 可选的 `loading/error/onRequest` | 知识引用按需加载；打开知识引用选择器或输入 `@` 后读取，加载及失败时不显示空列表结论，失败可重试；未传时沿用静态候选行为 |
 
@@ -486,7 +486,7 @@ import { ConversationFollowupQueueBar } from "../../conversation/ConversationFol
 Composer 加号菜单「预算与额度」入口原地展开的会话级预算配置悬浮面板（`VPopover`，`side="right"` 锚定菜单行）：单个数字输入——每回合工具调用额度（1–200）。完整复用 `ConversationTurnModelControl` 的 draft+dirty+校验+显式保存范式：草稿只在会话切换或保存落地时重置；revision 刷新（含 409 冲突）不冲掉操作者草稿；输入为空即「清除/恢复默认」，保存时提交 `null`。
 
 ### 适用范围
-- **适用**：直连 Agent 会话（普通会话面）的预算参数查看与修改；保存走 `PATCH /api/sessions/{id}/budget-parameters`，revision 冲突时经失效刷新拿最新值并提示重试。
+- **适用**：直连 Agent 会话及 Launcher 个人助理的预算参数查看与修改；普通会话走 `PATCH /api/sessions/{id}/budget-parameters`，个人助理走固定身份的 Launcher bridge 和 `/api/assistant/budget-parameters` 适配层，两者复用原生会话预算权威。revision 冲突时刷新并保留草稿，供操作者核对后重试。
 - **不适用**：群聊房间（能力开关整体禁用，无入口）、陪伴模式、金融面（查询在 workbench 层即关闭）；不承担模型上下文/思考强度配置（`ConversationTurnModelControl` 负责）。
 
 ### 使用方式
@@ -511,11 +511,12 @@ Composer 加号菜单「预算与额度」入口原地展开的会话级预算�
 | Prop / 槽位 | 说明 | 设计注意 |
 | --- | --- | --- |
 | revision | 服务端乐观锁版本 | 未取到前保存禁用；409 后经失效刷新拿新值重试 |
-| maxCallsPerTurn | `number \| null` | null=按默认策略；空输入在保存时提交 null |
+| maxCallsPerTurn | `number \| null` | 0=关闭每回合工具额度；null=按默认策略；正数=自定义额度；空输入在保存时提交 null |
 | pending / errorMessage | 保存态与错误文案 | pending 时输入、清除、取消、保存全部禁用；保存期间 composer 同步禁用 |
 
 ### 行为
 - 校验域与服务端 422 对齐：maxCallsPerTurn ∈ [1,200]，非整数/越界即时报错且禁用保存；空串合法=清除。
+- 「不限制工具调用次数」开关显式保存 0；关闭该开关后可直接保存恢复默认，或填写正数额度。0 不作为数字草稿残留；工具授权和迭代上限仍生效。修改用于后续回合，不打断当前工作。
 - 每字段带「清除，恢复默认」按钮（RotateCcw 图标），等价于把输入清空。
 - 保存成功（pending 回落且无错误）后草稿重置为服务端真值；收起面板丢弃未保存草稿（pending 时可收起但不重置）。
 
