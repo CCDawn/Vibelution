@@ -218,6 +218,17 @@ def session_queue_hold_active(session_id: str) -> bool:
     return _session_queue_hold(conversation) is not None
 
 
+def session_queue_hold_marker(conversation: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Read-only projection helper: the active ``queued_turn_hold`` marker.
+
+    Detail projections read the conversation dict they already hold instead of
+    reloading state. The marker is {reason, turnId, heldAt} while an explicit
+    user stop freezes the session's queued rows, else None.
+    """
+
+    return _session_queue_hold(conversation)
+
+
 def set_session_queue_hold(session_id: str, *, turn_id: str, reason: str = "user_stop") -> None:
     """Freeze the session's queued rows after an explicit user stop."""
 

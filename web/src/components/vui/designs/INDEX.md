@@ -61,6 +61,7 @@
 | `ConversationTurnModelControl` | [product/conversation.md](./product/conversation.md#conversationturnmodelcontrol) |
 | `LauncherAssistantModelControl` | [product/conversation.md](./product/conversation.md#launcherassistantmodelcontrol) |
 | 会话输入区主按钮（发送／终止／继续） | [product/conversation.md](./product/conversation.md#会话输入区主按钮) |
+| 运行中引导按钮（引导／打断引导） | [product/conversation.md](./product/conversation.md#运行中引导按钮) |
 | Markdown 工作区文件链接 | [product/conversation.md](./product/conversation.md#markdown-工作区文件链接) |
 | Assistant 文件引用 chip 行 | [product/conversation.md](./product/conversation.md#assistant-文件引用-chip-行) |
 | Mermaid 代码块 | [product/conversation.md](./product/conversation.md#mermaid-代码块) |

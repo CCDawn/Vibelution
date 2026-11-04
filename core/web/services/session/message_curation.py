@@ -1,4 +1,9 @@
-"""Session message-level curation: include/exclude single assistant messages.
+"""Session message-level curation: curate the excerpt around one assistant message.
+
+The curated unit is never a single message: capturing one decision slices the
+multi-turn excerpt that starts at the session opening and stops exactly at the
+clicked assistant message (``build_latest_task_segment``), and the review
+queue/dataset records carry that excerpt.
 
 Claim scope: per-message curation decisions routed through the existing chat
 capture -> review queue -> positive/negative dataset pipeline. No parallel

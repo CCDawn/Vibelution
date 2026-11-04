@@ -124,6 +124,12 @@ function renderConversation(
     composerPending?: boolean;
     submitLabel?: string;
     stopPendingLabel?: string;
+    composerInterruptGuidancePending?: boolean;
+    interruptGuidanceLabel?: string;
+    interruptGuidancePendingLabel?: string;
+    composerStopPending?: boolean;
+    composerQueueSendPending?: boolean;
+    queueSendPendingLabel?: string;
     composerError?: string;
     composerGuidance?: string;
     followupQueue?: Array<{ id: string; text: string }>;
@@ -201,6 +207,12 @@ function renderConversation(
         composerPending={options.composerPending ?? false}
         submitLabel={options.submitLabel}
         stopPendingLabel={options.stopPendingLabel}
+        composerInterruptGuidancePending={options.composerInterruptGuidancePending}
+        interruptGuidanceLabel={options.interruptGuidanceLabel}
+        interruptGuidancePendingLabel={options.interruptGuidancePendingLabel}
+        composerStopPending={options.composerStopPending}
+        composerQueueSendPending={options.composerQueueSendPending}
+        queueSendPendingLabel={options.queueSendPendingLabel}
         composerError={options.composerError}
         composerGuidance={options.composerGuidance}
         followupQueue={options.followupQueue}
@@ -326,6 +338,19 @@ describe("ConversationView stop feedback", () => {
     });
     expect(html).toContain('data-testid="composer-stop-pending-feedback"');
     expect(html).toContain("正在停止…");
+  });
+
+  it("never borrows the stopping copy while only the queue send is in flight", () => {
+    const html = renderConversation([], {
+      showComposer: true,
+      composerActionMode: "stop",
+      composerPending: true,
+      composerQueueSendPending: true,
+      queueSendPendingLabel: "正在排队…",
+    });
+    expect(html).toContain('data-testid="composer-stop-pending-feedback"');
+    expect(html).toContain("正在排队…");
+    expect(html).not.toContain("终止中");
   });
 });
 
@@ -1554,6 +1579,16 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(html).toContain("lucide-circle-minus");
   });
 
+  it("surfaces curation results as a persistent dismissible notice under the turn", () => {
+    expect(conversationTimelineRowsSource).toContain("data-conversation-curation-feedback");
+    expect(conversationTimelineRowsSource).toContain("dismissCurationFeedback(message.id)");
+    // The 3-second auto-dismiss (and its hover-only title delivery) is gone:
+    // excerpt summaries and conflict guidance must outlive a hover.
+    expect(conversationViewSource).not.toContain("curationFeedbackTimerRef");
+    expect(conversationViewSource).toContain("dismissCurationFeedback");
+    expect(conversationViewSource).toContain("result.summary");
+  });
+
   it("shows the measured token usage on settled turns and stays quiet without wire facts", () => {
     const answerItem = {
       id: "message-assistant-usage-item-answer",
@@ -1861,12 +1896,63 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(html).toContain("打断引导会先记录再请求停止当前轮");
     expect(html).toContain('aria-label="排队"');
     expect(html).toContain(">排队</");
-    expect(html).not.toContain('aria-label="打断引导"');
+    // Draft + running turn + handler now render the interrupt guidance entry
+    // (disabled here because the composer is disabled).
+    expect(html).toContain('data-testid="composer-interrupt-guidance"');
+    expect(html).toContain('aria-label="打断并引导"');
+    expect(html).toContain('title="发送草稿并结束当前轮次"');
     expect(html).toContain('aria-label="终止"');
     expect(html).toContain("composerEditSubmitButton");
     expect(html).toContain("stopButton");
     const textarea = html.match(/<textarea[^>]*>/)?.[0] ?? "";
     expect(textarea).not.toMatch(/\sdisabled(?:[=>\s]|$)/);
+  });
+
+  it("renders the interrupt guidance entry only while a draft rides a running turn with a handler", () => {
+    const withDraft = renderConversation([], {
+      composerValue: "换成先查依赖再动手",
+      composerActionMode: "stop",
+      onInterruptGuidance: () => undefined,
+      interruptGuidanceLabel: "打断并引导",
+    });
+    expect(withDraft).toContain('data-testid="composer-interrupt-guidance"');
+    expect(withDraft).toContain('aria-label="打断并引导"');
+    expect(withDraft).toContain('title="发送草稿并结束当前轮次"');
+    expect(withDraft).not.toMatch(/data-testid="composer-interrupt-guidance"[^>]*\sdisabled(?:[=>\s]|$)/);
+
+    const withoutHandler = renderConversation([], {
+      composerValue: "换成先查依赖再动手",
+      composerActionMode: "stop",
+    });
+    expect(withoutHandler).not.toContain('data-testid="composer-interrupt-guidance"');
+
+    const idle = renderConversation([], {
+      composerValue: "换成先查依赖再动手",
+      composerActionMode: "send",
+      onInterruptGuidance: () => undefined,
+    });
+    expect(idle).not.toContain('data-testid="composer-interrupt-guidance"');
+
+    const emptyDraft = renderConversation([], {
+      composerValue: "",
+      composerActionMode: "stop",
+      onInterruptGuidance: () => undefined,
+    });
+    expect(emptyDraft).not.toContain('data-testid="composer-interrupt-guidance"');
+  });
+
+  it("shows the interrupt pending label disabled while the interrupt guidance is in flight", () => {
+    const html = renderConversation([], {
+      composerValue: "换成先查依赖再动手",
+      composerActionMode: "stop",
+      onInterruptGuidance: () => undefined,
+      composerInterruptGuidancePending: true,
+      interruptGuidancePendingLabel: "正在打断引导",
+    });
+    expect(html).toContain('data-testid="composer-interrupt-guidance"');
+    expect(html).toContain("正在打断引导");
+    const button = html.match(/<button[^>]*data-testid="composer-interrupt-guidance"[^>]*>/)?.[0] ?? "";
+    expect(button).toMatch(/\sdisabled(?:[=>\s]|$)/);
   });
 
   it("keeps the running composer stop-only until a draft or queue exists", () => {
@@ -1883,7 +1969,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(html).toContain("输入后排队，当前轮结束后自动发出");
     expect(html).not.toContain('aria-label="排队"');
     expect(html).not.toContain('aria-label="立刻引导"');
-    expect(html).not.toContain('aria-label="打断引导"');
+    expect(html).not.toContain('data-testid="composer-interrupt-guidance"');
     expect(html).toContain('aria-label="终止"');
     expect(html.match(/composerRoundButton/g)?.length).toBe(1);
     expect(html).not.toContain("sendButton");

@@ -107,8 +107,8 @@ describe("supervised embedded evidence with the real ConversationView", () => {
 
     expect(host.textContent).toContain("AUDIT: synthetic recorded evidence");
     expect(host.querySelector('button[aria-label="复制回答"]')).not.toBeNull();
-    expect(host.querySelector('button[aria-label="加入数据集"]')).toBeNull();
-    expect(host.querySelector('button[aria-label="排除"]')).toBeNull();
+    expect(host.querySelector('button[aria-label*="纳入片段到数据集"]')).toBeNull();
+    expect(host.querySelector('button[aria-label*="排除片段"]')).toBeNull();
     expect(fetchSessionDetailWindow).not.toHaveBeenCalled();
     expect(network.mock.calls.map(([url]) => String(url)).filter((url) => url.includes("/api/sessions/"))).toEqual([]);
   });
@@ -118,11 +118,11 @@ describe("supervised embedded evidence with the real ConversationView", () => {
 
     expect(host.textContent).toContain("AUDIT: synthetic recorded evidence");
     expect(fetchSessionDetailWindow).toHaveBeenCalled();
-    expect(host.querySelector('button[aria-label="加入数据集"]')).not.toBeNull();
-    expect(host.querySelector('button[aria-label="排除"]')).not.toBeNull();
+    expect(host.querySelector('button[aria-label*="纳入片段到数据集"]')).not.toBeNull();
+    expect(host.querySelector('button[aria-label*="排除片段"]')).not.toBeNull();
     expect(network.mock.calls.map(([url]) => String(url))).toContain("/api/sessions/native-session/curation");
     await act(async () => {
-      host.querySelector<HTMLButtonElement>('button[aria-label="加入数据集"]')!.click();
+      host.querySelector<HTMLButtonElement>('button[aria-label*="纳入片段到数据集"]')!.click();
       await Promise.resolve();
     });
     expect(network).toHaveBeenCalledWith(

@@ -44,9 +44,22 @@ export function resolveComposerActionLabels(input: {
   fallbackSend: string;
   fallbackStopPending: string;
   fallbackSendPending: string;
+  fallbackQueueSendPending: string;
+  /** The stop request RPC is in flight (callers pass their stopping state). */
+  stopPendingActive?: boolean;
+  /** The queue/send submit RPC is in flight while the turn keeps running. */
+  queueSendPendingActive?: boolean;
+  queueSendPendingLabel?: string;
 }) {
   const isStop = input.actionMode === "stop";
   const isContinue = input.actionMode === "continue";
+  // The queue/send RPC and the stop request are distinct pending sources.
+  // While only the queue send is in flight no stop is happening, so the busy
+  // pending label must say "queueing", never borrow the stop copy. An actual
+  // stop request (stop source active, alone or together) stays dominant.
+  const queueSendPending = isStop
+    && input.stopPendingActive !== true
+    && input.queueSendPendingActive === true;
   return {
     actionLabel: isStop
       ? (input.stopLabel ?? input.fallbackStop)
@@ -54,7 +67,9 @@ export function resolveComposerActionLabels(input: {
         ? (input.continueLabel ?? "Continue task")
         : (input.submitLabel ?? input.fallbackSend),
     pendingLabel: isStop
-      ? (input.stopPendingLabel ?? input.fallbackStopPending)
+      ? (queueSendPending
+        ? (input.queueSendPendingLabel ?? input.fallbackQueueSendPending)
+        : (input.stopPendingLabel ?? input.fallbackStopPending))
       : isContinue
         ? (input.continuePendingLabel ?? "Continuing…")
         : (input.submitPendingLabel ?? input.fallbackSendPending),

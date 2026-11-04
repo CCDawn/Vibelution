@@ -1257,6 +1257,15 @@ export type SessionDetail = SessionSummary & {
   runtimeNotices?: SessionRuntimeNotice[];
   /** Server queue of follow-up turns waiting behind the running turn. */
   queuedTurns?: SessionQueuedTurn[];
+  /**
+   * Present while an explicit user stop freezes the queued rows
+   * (``queued_turn_hold``); sending a new message clears it. Null otherwise.
+   */
+  queueHold?: {
+    reason: string;
+    turnId: string;
+    heldAt: string;
+  } | null;
   contextUsage?: {
     used: number;
     limit: number;

@@ -121,6 +121,10 @@ export type UseConversationComposerInput = {
   composerActionDisabled?: boolean;
   composerActionMode?: "send" | "stop" | "continue";
   composerPending: boolean;
+  /** The stop request RPC is in flight; keeps stop copy dominant over queueing. */
+  composerStopPending?: boolean;
+  /** The queue/send submit RPC is in flight while the turn keeps running. */
+  composerQueueSendPending?: boolean;
   composerSafeGuidancePending: boolean;
   composerInterruptGuidancePending: boolean;
   composerError?: string;
@@ -150,6 +154,9 @@ export type UseConversationComposerInput = {
   stopPendingLabel?: string;
   safeGuidanceLabel?: string;
   safeGuidancePendingLabel?: string;
+  interruptGuidanceLabel?: string;
+  interruptGuidancePendingLabel?: string;
+  queueSendPendingLabel?: string;
   editingMessageId?: string;
   composerModeNotice?: string;
   composerModeTargetPreview?: string;
@@ -164,6 +171,7 @@ export type UseConversationComposerInput = {
   onStop?: () => void;
   onContinueTurn?: () => void;
   onSafeGuidance?: () => void;
+  onInterruptGuidance?: () => void;
   onFollowupQueueUpdate?: (id: string, text: string) => void;
   onFollowupQueueRemove?: (id: string) => void;
   onFollowupQueueMove?: (fromIndex: number, toIndex: number) => void;
@@ -210,6 +218,8 @@ export function useConversationComposer({
   composerActionDisabled,
   composerActionMode,
   composerPending,
+  composerStopPending,
+  composerQueueSendPending,
   composerSafeGuidancePending,
   composerInterruptGuidancePending,
   composerError,
@@ -239,6 +249,9 @@ export function useConversationComposer({
   stopPendingLabel,
   safeGuidanceLabel,
   safeGuidancePendingLabel,
+  interruptGuidanceLabel,
+  interruptGuidancePendingLabel,
+  queueSendPendingLabel,
   editingMessageId,
   composerModeNotice,
   composerModeTargetPreview,
@@ -253,6 +266,7 @@ export function useConversationComposer({
   onStop,
   onContinueTurn,
   onSafeGuidance,
+  onInterruptGuidance,
   onFollowupQueueUpdate,
   onFollowupQueueRemove,
   onFollowupQueueMove,
@@ -336,6 +350,12 @@ export function useConversationComposer({
     fallbackSend: t("send"),
     fallbackStopPending: t("stopPending"),
     fallbackSendPending: t("sendPending"),
+    // The queue-send RPC and the stop request stay separate pending sources;
+    // queueing while busy must not borrow the "stopping" copy.
+    stopPendingActive: composerStopPending,
+    queueSendPendingActive: composerQueueSendPending,
+    queueSendPendingLabel,
+    fallbackQueueSendPending: lang === "zh" ? "正在排队…" : "Queueing…",
   });
 
   const {
@@ -353,6 +373,7 @@ export function useConversationComposer({
   });
   const {
     guidanceActionDisabled,
+    guidanceDraftReady,
     showQueuePrimary,
     queuePrimaryIsImmediate,
   } = resolveComposerGuidanceUi({
@@ -373,6 +394,11 @@ export function useConversationComposer({
   const resolvedImmediateSteerLabel = t("immediateSteer");
   const resolvedSafeGuidanceLabel = safeGuidanceLabel ?? t("safeGuidance");
   const resolvedSafeGuidancePendingLabel = safeGuidancePendingLabel ?? t("safeGuidancePending");
+  const resolvedInterruptGuidanceLabel = interruptGuidanceLabel ?? t("interruptGuidance");
+  const resolvedInterruptGuidancePendingLabel = interruptGuidancePendingLabel ?? t("interruptGuidancePending");
+  // The interrupt channel both delivers the draft and requests a stop for the
+  // running turn; the tooltip must say so before the first click.
+  const resolvedInterruptGuidanceHint = t("interruptGuidanceHint");
   const resolvedBusyPrimaryLabel = queuePrimaryIsImmediate
     ? resolvedImmediateSteerLabel
     : resolvedQueueFollowupLabel;
@@ -881,6 +907,22 @@ export function useConversationComposer({
               : resolvedActionMode === "continue"
                 ? <Play size={16} aria-hidden="true" />
                 : <ArrowUp size={16} aria-hidden="true" />)}
+        </VButton>
+      ) : null}
+      {runningGuidanceActionsEnabled && guidanceDraftReady && onInterruptGuidance ? (
+        <VButton
+          className={styles.composerInterruptGuidanceButton}
+          type="button"
+          isDisabled={composerDisabled || composerSafeGuidancePending || composerInterruptGuidancePending}
+          onClick={onInterruptGuidance}
+          title={composerInterruptGuidancePending ? resolvedInterruptGuidancePendingLabel : resolvedInterruptGuidanceHint}
+          aria-label={composerInterruptGuidancePending ? resolvedInterruptGuidancePendingLabel : resolvedInterruptGuidanceLabel}
+          data-testid="composer-interrupt-guidance"
+        >
+          {composerInterruptGuidancePending ? (
+            <LoaderCircle className={styles.statusSpinner} size={14} aria-hidden="true" />
+          ) : null}
+          <span>{composerInterruptGuidancePending ? resolvedInterruptGuidancePendingLabel : resolvedInterruptGuidanceLabel}</span>
         </VButton>
       ) : null}
       {runningGuidanceActionsEnabled ? (

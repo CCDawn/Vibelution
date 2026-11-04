@@ -633,6 +633,7 @@ from core.web.services.session.queued_turns import (
     send_now_session_queued_turn,
     session_branch_generation,
     update_session_queued_turn,
+    session_queue_hold_marker as _session_queue_hold_marker,
     session_queued_turn_rows as _session_queued_turn_rows,
     drain_session_queued_turns as _drain_session_queued_turns,
     schedule_session_queued_turn_drain as _schedule_session_queued_turn_drain,

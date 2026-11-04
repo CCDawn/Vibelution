@@ -16,6 +16,7 @@ import {
   RefreshCw,
   Sparkles,
   TerminalSquare,
+  X,
 } from "lucide-react";
 import React, { useLayoutEffect, type RefObject } from "react";
 
@@ -402,6 +403,7 @@ export type ConversationTimelineRowsDeps = {
   inlineEditInputRef: RefObject<HTMLTextAreaElement | null>;
   copiedAnswerMessageId: string;
   curationFeedback: CurationFeedback;
+  dismissCurationFeedback: (messageId: string) => void;
   openForkDialog: (message: ConversationMessage) => void;
   formatTimestamp: (timestamp: string) => string;
   compactPreview: (value: string, maxLength?: number) => string;
@@ -485,6 +487,7 @@ export function createConversationTimelineRows({
   inlineEditInputRef,
   copiedAnswerMessageId,
   curationFeedback,
+  dismissCurationFeedback,
   openForkDialog,
   formatTimestamp,
   compactPreview,
@@ -1346,6 +1349,29 @@ export function createConversationTimelineRows({
 
                   {!answerOnlyProcessMode ? responseSectionNode : null}
               </AgentMessageTurnView>
+              {/* Curation result notice: the backend speaks in excerpt
+                  granularity (session start through this message), and the
+                  409 conflict guidance must outlive a hover title. */}
+              {curationFeedback?.messageId === message.id && curationFeedback.message ? (
+                <div
+                  className={styles.turnCurationNotice}
+                  role="status"
+                  aria-live="polite"
+                  data-conversation-curation-feedback={curationFeedback.action}
+                >
+                  <span className={styles.turnCurationNoticeText}>{curationFeedback.message}</span>
+                  <VButton
+                    type="button"
+                    className={styles.turnCurationNoticeDismiss}
+                    variant="ghost"
+                    isIconOnly
+                    onClick={() => dismissCurationFeedback(message.id)}
+                    title={lang === "zh" ? "关闭提示" : "Dismiss notice"}
+                    aria-label={lang === "zh" ? "关闭提示" : "Dismiss notice"}
+                    icon={<X size={12} />}
+                  />
+                </div>
+              ) : null}
               </>
             );
                 }}

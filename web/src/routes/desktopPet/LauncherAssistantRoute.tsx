@@ -83,7 +83,8 @@ const COPY = {
     answerBelow: "去回答", answerHint: "请在下方输入回答，再点击发送。",
     editAsNew: "编辑为新消息",
     safeGuidance: "引导", safeGuidancePending: "正在引导",
-    interruptGuidance: "打断引导", interruptGuidancePending: "打断中",
+    interruptGuidance: "打断并引导", interruptGuidancePending: "正在打断引导",
+    queueSendPending: "正在排队…",
   },
   en: {
     title: "Personal assistant", expand: "Open assistant chat", chat: "Chat", hide: "Hide assistant",
@@ -102,7 +103,8 @@ const COPY = {
     answerBelow: "Answer below", answerHint: "Type your answer below, then send it.",
     editAsNew: "Edit as new message",
     safeGuidance: "Steer", safeGuidancePending: "Steering",
-    interruptGuidance: "Interrupt guide", interruptGuidancePending: "Interrupting",
+    interruptGuidance: "Interrupt & steer", interruptGuidancePending: "Interrupting steer",
+    queueSendPending: "Queueing…",
   },
 } as const;
 
@@ -1332,6 +1334,10 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       composerFocusSignal={answerFocus?.sessionId === sessionId && answerFocus.questionId === pendingQuestion?.id ? answerFocus.signal : ""}
       onComposerFocusRequestSettled={settleAnswerFocus}
       composerPending={sendPending || controlPending || stopping} composerActionMode={actionMode}
+      // While busy, a control RPC is the stop request; the queue/send submit is
+      // its own pending source so queueing never borrows the stopping copy.
+      composerStopPending={controlPending || stopping} composerQueueSendPending={sendPending}
+      queueSendPendingLabel={copy.queueSendPending}
       composerAttachmentInputDisabled={status.data?.attachmentVersion !== 1 || sendPending || sendUnconfirmed || controlPending}
       composerAttachments={attachments}
       composerReferences={composerReferences}
@@ -1414,6 +1420,11 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     {detail.data?.queuedTurns?.length || queuedAcceptance ? <section data-launcher-assistant-queue
       className={petStyles.receiptPanel}
       aria-label={lang === "zh" ? "原生消息队列" : "Native message queue"}>
+      {/* An explicit stop freezes the queue until a new message unfreezes it;
+          without this note a frozen queue reads as silently lost work. */}
+      {detail.data?.queueHold ? <p role="status" data-launcher-assistant-queue-hold>
+        {lang === "zh" ? "队列已暂停：停止后排队消息保持冻结，发送新消息即可恢复。" : "Queue paused: queued messages stay frozen after a stop; send a new message to resume."}
+      </p> : null}
       {queuedAcceptance && !queuedAcceptance.observed ? <p role="status">{waitingQueueText}</p> : null}
       {detail.data?.queuedTurns?.map(row => <p key={row.id} role="status">{launcherAssistantQueueLabel(row.status, lang)}{row.lastError ? ` · ${row.lastError}` : ""}</p>)}
       {queueReadback.removed ? <p role="status">{removedQueueText}</p> : null}
