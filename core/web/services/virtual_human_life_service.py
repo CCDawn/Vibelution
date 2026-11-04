@@ -33,6 +33,8 @@ _SERVICE_LOCK = threading.Lock()
 _SERVICE: VirtualHumanLifeService | None = None
 _RUNTIME_ACCEPTING = threading.Event()
 _RUNTIME_STARTED = threading.Event()
+_RUNTIME_STOP_LOCK = threading.Lock()
+_RUNTIME_STOP_COMPLETE = threading.Event()
 _STEWARD_PROVISION_LOCK = threading.RLock()
 
 LIFE_STEWARD_PROMPT_TEMPLATE_ID = "virtual_human_life_steward_v1"
@@ -979,8 +981,10 @@ def get_virtual_human_life_service() -> VirtualHumanLifeService:
 
 def set_virtual_human_life_service_for_tests(service: VirtualHumanLifeService | None) -> None:
     global _SERVICE
-    with _SERVICE_LOCK:
-        _SERVICE = service
+    with _RUNTIME_STOP_LOCK:
+        with _SERVICE_LOCK:
+            _SERVICE = service
+        _RUNTIME_STOP_COMPLETE.clear()
 
 
 def resolve_virtual_human_runtime_target(
@@ -1794,8 +1798,10 @@ async def run_virtual_human_life_runtime(
     """Run the in-process deterministic heartbeat supervisor."""
 
     interval = max(1.0, float(interval_seconds))
-    _RUNTIME_STARTED.set()
-    _RUNTIME_ACCEPTING.set()
+    with _RUNTIME_STOP_LOCK:
+        _RUNTIME_STOP_COMPLETE.clear()
+        _RUNTIME_STARTED.set()
+        _RUNTIME_ACCEPTING.set()
 
     async def heartbeat(name: str, *, coalesced: bool, prepare_only: bool = False) -> None:
         kwargs = {"coalesced": coalesced}
@@ -1825,38 +1831,51 @@ async def run_virtual_human_life_runtime(
 
 
 def stop_virtual_human_life_runtime() -> None:
-    """Fence new work and cancel every open plugin-owned proactive turn."""
+    """Fence admission and join one successful harvest per runtime cycle."""
 
+    # Fence immediately, including callers waiting for an in-flight harvest.
     _RUNTIME_ACCEPTING.clear()
-    try:
-        service = get_virtual_human_life_service()
-        agents = _runtime_agent_identities(service)
-    except Exception as exc:  # noqa: BLE001 - shutdown remains best-effort
-        logger.warning(
-            "Failed to enumerate virtual human Agents during host stop (%s).",
-            type(exc).__name__,
-        )
-        return
-    for agent in agents:
-        agent_id = str(agent.get("agentId") or "").strip()
-        if not agent_id:
-            continue
+    with _RUNTIME_STOP_LOCK:
+        _RUNTIME_ACCEPTING.clear()
+        if _RUNTIME_STARTED.is_set() and _RUNTIME_STOP_COMPLETE.is_set():
+            return
         try:
-            # Include bindings disabled during the shutdown race: an open delivery
-            # from the previous revision must not survive the host fence.
-            service.cancel_open_proactive_attempts(agent_id, reason="host_stop")
-            _cancel_agent_proactive_session_turns(agent_id, reason="host_stop")
-            _record_scene(
-                "host_stop_fenced",
-                agent_id=agent_id,
-                outcome="cancelled",
-            )
-        except Exception as exc:  # noqa: BLE001 - isolate one Agent shutdown failure
+            service = get_virtual_human_life_service()
+            agents = _runtime_agent_identities(service)
+        except Exception as exc:  # noqa: BLE001 - shutdown remains best-effort
             logger.warning(
-                "Failed to fence virtual human life work for agent=%s (%s).",
-                agent_id,
+                "Failed to enumerate virtual human Agents during host stop (%s).",
                 type(exc).__name__,
             )
+            return
+        complete = True
+        for agent in agents:
+            agent_id = str(agent.get("agentId") or "").strip()
+            if not agent_id:
+                continue
+            try:
+                # Include bindings disabled during the shutdown race: an open delivery
+                # from the previous revision must not survive the host fence.
+                service.cancel_open_proactive_attempts(agent_id, reason="host_stop")
+                if _cancel_agent_proactive_session_turns(agent_id, reason="host_stop") is not True:
+                    complete = False
+                    continue
+                _record_scene(
+                    "host_stop_fenced",
+                    agent_id=agent_id,
+                    outcome="cancelled",
+                )
+            except Exception as exc:  # noqa: BLE001 - isolate one Agent shutdown failure
+                complete = False
+                logger.warning(
+                    "Failed to fence virtual human life work for agent=%s (%s).",
+                    agent_id,
+                    type(exc).__name__,
+                )
+        # Before startup, direct use remains admissible and can add more work.
+        # Failed enumeration/cancellation also remains retryable by the next caller.
+        if complete and _RUNTIME_STARTED.is_set():
+            _RUNTIME_STOP_COMPLETE.set()
 
 
 def prepare_virtual_human_agent_archive(
@@ -1973,30 +1992,37 @@ def finalize_proactive_delivery(context: dict[str, Any]) -> dict[str, Any] | Non
     return receipt
 
 
-def _cancel_agent_proactive_session_turns(agent_id: str, *, reason: str) -> None:
+def _cancel_agent_proactive_session_turns(agent_id: str, *, reason: str) -> bool:
+    if not str(agent_id or "").strip():
+        return False
     try:
         from . import session_service
 
         cancel = getattr(session_service, "cancel_agent_plugin_proactive_turns", None)
-        if callable(cancel):
-            cancel(agent_id, plugin_id=PLUGIN_ID, reason=reason)
-            from core.agent_plugins.virtual_human_life.native_wakeup import (
-                resolve_worker,
-            )
-            from core.agent_plugins.virtual_human_life.self_continuity import (
-                SESSION_PATH,
-            )
+        if not callable(cancel):
+            return False
+        cancel(agent_id, plugin_id=PLUGIN_ID, reason=reason)
+        from core.agent_plugins.virtual_human_life.native_wakeup import (
+            resolve_worker,
+        )
+        from core.agent_plugins.virtual_human_life.self_continuity import (
+            SESSION_PATH,
+        )
 
-            reference = get_virtual_human_life_service().store.read_json(agent_id, SESSION_PATH) or {}
-            runtime_id = str(reference.get("runtimeAgentId") or "")
-            if runtime_id and resolve_worker(runtime_id, require_enabled=False) == agent_id:
-                cancel(runtime_id, plugin_id=PLUGIN_ID, reason=reason)
+        reference = get_virtual_human_life_service().store.read_json(agent_id, SESSION_PATH) or {}
+        runtime_id = str(reference.get("runtimeAgentId") or "")
+        if runtime_id:
+            if resolve_worker(runtime_id, require_enabled=False) != agent_id:
+                return False
+            cancel(runtime_id, plugin_id=PLUGIN_ID, reason=reason)
+        return True
     except Exception as exc:  # noqa: BLE001 - optional Session cancellation adapter
         logger.warning(
             "Failed to cancel proactive turns for agent=%s (%s).",
             str(agent_id or "").strip(),
             type(exc).__name__,
         )
+        return False
 
 
 def _record_scene(

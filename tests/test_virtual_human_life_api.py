@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
+from collections import Counter
+from contextlib import suppress
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -1821,6 +1826,237 @@ def test_host_stop_fences_open_delivery_and_requests_session_cancellation(
         assert cancelled == [("agent-a", "host_stop")]
     finally:
         set_virtual_human_life_service_for_tests(None)
+
+
+@pytest.fixture
+def host_stop_facade(monkeypatch):
+    from core.web.services import virtual_human_life_service as facade
+
+    monkeypatch.setattr(facade, "_RUNTIME_ACCEPTING", threading.Event())
+    monkeypatch.setattr(facade, "_RUNTIME_STARTED", threading.Event())
+    monkeypatch.setattr(facade, "_record_scene", lambda *_args, **_kwargs: None)
+    try:
+        yield facade
+    finally:
+        set_virtual_human_life_service_for_tests(None)
+
+
+def test_host_stop_shares_overlapping_and_repeated_harvest(host_stop_facade, monkeypatch):
+    facade = host_stop_facade
+    facade._RUNTIME_STARTED.set()
+    agents = [{"agentId": f"agent-{index}"} for index in range(53)]
+    enumerations: list[None] = []
+    deliveries: list[str] = []
+    sessions: list[str] = []
+    entered = threading.Event()
+    release = threading.Event()
+    second_started = threading.Event()
+    second_done = threading.Event()
+    errors: list[BaseException] = []
+
+    def list_agents():
+        assert not facade._RUNTIME_ACCEPTING.is_set()
+        enumerations.append(None)
+        return agents
+
+    def cancel_delivery(agent_id, *, reason):
+        assert reason == "host_stop"
+        deliveries.append(agent_id)
+        if len(deliveries) == 1:
+            entered.set()
+            assert release.wait(5), "test did not release the first harvest"
+
+    def stop(*, second=False):
+        if second:
+            second_started.set()
+        try:
+            facade.stop_virtual_human_life_runtime()
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            if second:
+                second_done.set()
+
+    set_virtual_human_life_service_for_tests(SimpleNamespace(
+        agent_lister=list_agents, cancel_open_proactive_attempts=cancel_delivery,
+    ))
+    monkeypatch.setattr(
+        facade, "_cancel_agent_proactive_session_turns",
+        lambda agent_id, *, reason: sessions.append(agent_id) or True,
+    )
+    facade._RUNTIME_ACCEPTING.set()
+    first = threading.Thread(target=stop, daemon=True)
+    second = threading.Thread(target=lambda: stop(second=True), daemon=True)
+    first.start()
+    try:
+        assert entered.wait(5)
+        second.start()
+        assert second_started.wait(5)
+        assert not second_done.wait(0.05), "a duplicate stop returned before the harvest finished"
+    finally:
+        release.set()
+        first.join(5)
+        if second.ident is not None:
+            second.join(5)
+    assert not first.is_alive() and not second.is_alive()
+    assert errors == []
+    facade.stop_virtual_human_life_runtime()
+    assert len(enumerations) == 1
+    assert Counter(deliveries) == {agent["agentId"]: 1 for agent in agents}
+    assert Counter(sessions) == Counter(deliveries)
+
+
+def test_host_stop_runs_again_after_a_new_runtime_cycle(host_stop_facade, monkeypatch):
+    facade = host_stop_facade
+    deliveries: list[str] = []
+    set_virtual_human_life_service_for_tests(SimpleNamespace(
+        agent_lister=lambda: [{"agentId": "agent-a"}],
+        cancel_open_proactive_attempts=lambda agent_id, **_kwargs: deliveries.append(agent_id),
+    ))
+    monkeypatch.setattr(facade, "_cancel_agent_proactive_session_turns", lambda *_args, **_kwargs: True)
+    async def run_cycle():
+        entered = asyncio.Event()
+
+        async def run_sync(*_args, **_kwargs):
+            assert facade._RUNTIME_ACCEPTING.is_set()
+            entered.set()
+            await asyncio.Event().wait()
+
+        task = asyncio.create_task(facade.run_virtual_human_life_runtime(run_sync=run_sync))
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+        assert not facade._RUNTIME_ACCEPTING.is_set()
+
+    for count in (1, 2):
+        asyncio.run(run_cycle())
+        facade.stop_virtual_human_life_runtime()
+        assert deliveries == ["agent-a"] * count
+
+
+def test_host_stop_before_runtime_starts_keeps_direct_use_cancellation(
+    tmp_path, host_stop_facade, monkeypatch
+):
+    facade = host_stop_facade
+    client, service = _client(tmp_path)
+    del client
+    service.runtime_acceptance_provider = facade._runtime_acceptance_allowed
+    service.proactive_submitter = lambda **_kwargs: {"accepted": True, "turnId": "turn-direct"}
+    monkeypatch.setattr(facade, "_cancel_agent_proactive_session_turns", lambda *_args, **_kwargs: True)
+    service.set_binding("agent-a", enabled=True, expected_version=0)
+    for index in range(2):
+        assert not facade._RUNTIME_STARTED.is_set()
+        assert facade._runtime_acceptance_allowed()
+        attempt = service.request_proactive_message("agent-a", reason=f"direct attempt {index}")
+        facade.stop_virtual_human_life_runtime()
+        assert service.proactive_attempt("agent-a", attempt["deliveryToken"])["status"] == "cancelled"
+
+
+@pytest.mark.parametrize("failure_stage", ["enumeration", "delivery", "session"])
+def test_host_stop_retries_failed_harvest(host_stop_facade, monkeypatch, failure_stage):
+    facade = host_stop_facade
+    facade._RUNTIME_STARTED.set()
+    enumerations: list[None] = []
+    deliveries: list[str] = []
+    sessions: list[str] = []
+    failed: list[str] = []
+
+    def fail_once(stage):
+        if stage == failure_stage and not failed:
+            failed.append(stage)
+            raise RuntimeError("one harvest failure")
+
+    def list_agents():
+        enumerations.append(None)
+        fail_once("enumeration")
+        return [{"agentId": "agent-a"}, {"agentId": "agent-b"}]
+
+    def cancel_delivery(agent_id, *, reason):
+        deliveries.append(agent_id)
+        if agent_id == "agent-a":
+            fail_once("delivery")
+
+    def cancel_session(agent_id, *, reason):
+        sessions.append(agent_id)
+        if agent_id == "agent-a":
+            fail_once("session")
+        return True
+
+    set_virtual_human_life_service_for_tests(SimpleNamespace(
+        agent_lister=list_agents, cancel_open_proactive_attempts=cancel_delivery,
+    ))
+    monkeypatch.setattr(facade, "_cancel_agent_proactive_session_turns", cancel_session)
+    facade.stop_virtual_human_life_runtime()
+    assert failed == [failure_stage]
+    facade.stop_virtual_human_life_runtime()
+    assert len(enumerations) == 2
+    expected_deliveries = {"agent-a": 1, "agent-b": 1} if failure_stage == "enumeration" else {
+        "agent-a": 2, "agent-b": 2,
+    }
+    assert Counter(deliveries) == expected_deliveries
+    assert Counter(sessions) == (
+        {"agent-a": 1, "agent-b": 2} if failure_stage == "delivery" else expected_deliveries
+    )
+    facade.stop_virtual_human_life_runtime()
+    assert len(enumerations) == 2
+    assert Counter(deliveries) == expected_deliveries
+
+
+def test_host_stop_test_service_reset_allows_another_harvest(host_stop_facade, monkeypatch):
+    facade = host_stop_facade
+    facade._RUNTIME_STARTED.set()
+    deliveries: list[str] = []
+    monkeypatch.setattr(facade, "_cancel_agent_proactive_session_turns", lambda *_args, **_kwargs: True)
+    for agent_id in ("agent-a", "agent-b"):
+        set_virtual_human_life_service_for_tests(SimpleNamespace(
+            agent_lister=lambda agent_id=agent_id: [{"agentId": agent_id}],
+            cancel_open_proactive_attempts=lambda agent_id, **_kwargs: deliveries.append(agent_id),
+        ))
+        facade.stop_virtual_human_life_runtime()
+        facade.stop_virtual_human_life_runtime()
+    assert deliveries == ["agent-a", "agent-b"]
+
+
+def test_host_stop_retries_session_adapter_failure_without_success_evidence(host_stop_facade, monkeypatch):
+    from core.web.services import session_service
+
+    facade = host_stop_facade
+    facade._RUNTIME_STARTED.set()
+    enumerations: list[None] = []
+    deliveries: list[str] = []
+    sessions: list[str] = []
+    fenced: list[str] = []
+
+    def list_agents():
+        enumerations.append(None)
+        return [{"agentId": "agent-a"}, {"agentId": "agent-b"}]
+
+    def cancel_session(agent_id, *, plugin_id, reason):
+        assert plugin_id == facade.PLUGIN_ID
+        assert reason == "host_stop"
+        sessions.append(agent_id)
+        if len(sessions) == 1:
+            raise RuntimeError("session cancellation failed once")
+        return []
+
+    set_virtual_human_life_service_for_tests(SimpleNamespace(
+        agent_lister=list_agents,
+        cancel_open_proactive_attempts=lambda agent_id, **_kwargs: deliveries.append(agent_id),
+        store=SimpleNamespace(read_json=lambda *_args: {}),
+    ))
+    monkeypatch.setattr(session_service, "cancel_agent_plugin_proactive_turns", cancel_session)
+    monkeypatch.setattr(
+        facade, "_record_scene",
+        lambda _phase, *, agent_id, **_kwargs: fenced.append(agent_id),
+    )
+    facade.stop_virtual_human_life_runtime()
+    assert fenced == ["agent-b"]
+    facade.stop_virtual_human_life_runtime()
+    facade.stop_virtual_human_life_runtime()
+    assert len(enumerations) == 2
+    assert Counter(deliveries) == Counter(sessions) == {"agent-a": 2, "agent-b": 2}
+    assert fenced == ["agent-b", "agent-a", "agent-b"]
 
 
 def test_enabling_virtual_human_initializes_only_an_unconfigured_persona(
