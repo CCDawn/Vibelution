@@ -67,7 +67,89 @@ function fixture(options: { stale?: boolean; noReadyFirst?: boolean; graceful?: 
   return { host, native, fetchImpl, inputs, root, active };
 }
 
+function usageSnapshot() {
+  const numbers = { inputTokens: 100, cachedInputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0,
+    uncachedInputTokens: 100, outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 100, latencyMs: 0,
+    cacheHitRate: 0, cacheUsageObserved: true, cacheUsageMissingReason: "" };
+  return { sessionId: "s", agentId: "a", lastTokenUsage: { ...numbers, source: "provider_usage" },
+    sessionTokenUsage: { ...numbers, callCount: 1, observedCallCount: 1, estimatedCallCount: 0, missingCallCount: 0,
+      notCalledCount: 0, cacheObservedInputTokens: 100, cacheObservedCallCount: 1, cacheUnobservedCallCount: 0,
+      cacheUsageComplete: true } };
+}
+
 describe("AssistantHost", () => {
+  it("reads a fixed compact usage snapshot and refuses identity or scope injection", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const snapshot = usageSnapshot();
+    fetchImpl.mockResolvedValueOnce(Response.json(snapshot));
+    await expect(host.request({ operation: "usageSummary" })).resolves.toEqual(snapshot);
+    const [url, options] = fetchImpl.mock.calls.at(-1)!;
+    expect(String(url)).toBe("http://127.0.0.1:12345/api/assistant/usage-summary");
+    expect(options?.method).toBe("GET");
+    expect(options?.body).toBeUndefined();
+    const calls = fetchImpl.mock.calls.length;
+    for (const key of ["sessionId", "agentId", "scope", "projectRoot", "ledgerPath"])
+      await expect(host.request({ operation: "usageSummary", [key]: "foreign" } as AssistantHostRequest))
+        .rejects.toThrow("ASSISTANT_USAGE_INVALID");
+    expect(fetchImpl.mock.calls.length).toBe(calls);
+    for (const key of ["sessionId", "agentId"]) {
+      fetchImpl.mockResolvedValueOnce(Response.json({ ...snapshot, [key]: "foreign" }));
+      await expect(host.request({ operation: "usageSummary" })).rejects.toThrow("ASSISTANT_IDENTITY_INVALID");
+    }
+    await host.stop();
+  });
+
+  it("rejects unsafe, overbroad and oversized usage responses instead of returning zero", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const snapshot = usageSnapshot();
+    for (const invalid of [{ ...snapshot, globalTokenUsage: {} },
+      { ...snapshot, lastTokenUsage: { ...snapshot.lastTokenUsage, ledgerPath: "private" } },
+      { ...snapshot, lastTokenUsage: { ...snapshot.lastTokenUsage, source: ["provider_usage"] } },
+      { ...snapshot, sessionTokenUsage: { ...snapshot.sessionTokenUsage, cacheHitRate: 1.1 } },
+      { ...snapshot, sessionTokenUsage: { ...snapshot.sessionTokenUsage, cachedInputTokens: true } },
+      { ...snapshot, sessionTokenUsage: { ...snapshot.sessionTokenUsage, cacheObservedInputTokens: Number.MAX_SAFE_INTEGER + 1 } }]) {
+      fetchImpl.mockResolvedValueOnce(Response.json(invalid));
+      await expect(host.request({ operation: "usageSummary" })).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
+    }
+    fetchImpl.mockResolvedValueOnce(Response.json({ ...snapshot, private: "x".repeat(8192) }));
+    await expect(host.request({ operation: "usageSummary" })).rejects.toThrow("ASSISTANT_RESPONSE_TOO_LARGE");
+    fetchImpl.mockResolvedValueOnce(Response.json({ private: "hidden" }, { status: 503 }));
+    await expect(host.request({ operation: "usageSummary" })).rejects.toThrow("ASSISTANT_USAGE_UNAVAILABLE");
+    await host.stop();
+  });
+
+  it("keeps usage reads safe before migration sealing and read-only during lifecycle admission", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const snapshot = usageSnapshot();
+    const admission = host.beginMigrationAdmission();
+    fetchImpl.mockResolvedValueOnce(Response.json(snapshot));
+    await expect(host.request({ operation: "usageSummary" })).resolves.toEqual(snapshot);
+    await admission.seal();
+    const calls = fetchImpl.mock.calls.length;
+    let settled = false;
+    const pending = host.request({ operation: "usageSummary" }).then(value => { settled = true; return value; });
+    await Promise.resolve(); await Promise.resolve();
+    expect(settled).toBe(false); expect(fetchImpl.mock.calls.length).toBe(calls);
+    fetchImpl.mockResolvedValueOnce(Response.json(snapshot));
+    admission.release();
+    await expect(pending).resolves.toEqual(snapshot);
+    const lifecycle = host.beginLifecycleAdmission();
+    fetchImpl.mockResolvedValueOnce(Response.json(snapshot));
+    await expect(host.request({ operation: "usageSummary" })).resolves.toEqual(snapshot);
+    await lifecycle.seal(); lifecycle.commit();
+    let lifecycleSettled = false;
+    const held = host.request({ operation: "usageSummary" }).then(value => { lifecycleSettled = true; return value; });
+    await Promise.resolve(); await Promise.resolve();
+    expect(lifecycleSettled).toBe(false);
+    fetchImpl.mockResolvedValueOnce(Response.json(snapshot));
+    lifecycle.release();
+    await expect(held).resolves.toEqual(snapshot);
+    await host.stop();
+  });
+
   it("keeps assistant budget reads and CAS writes fixed to the native owner", async () => {
     const { host, fetchImpl } = fixture({ graceful: true });
     await host.start();

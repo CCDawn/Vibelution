@@ -36,6 +36,8 @@ import type { ComposerContextRingModel } from "../../routes/chat/composerContext
 import { AgentPermissionPresetControl } from "../vui/product/agent-management";
 import { VButton, VNativeInput, VNativeTextarea } from "../vui";
 import { ComposerContextRing } from "./ComposerContextRing";
+import { ComposerCacheIndicator } from "./ComposerCacheIndicator";
+import type { ComposerCacheUsageModel } from "./composerCacheUsageModel";
 import { ConversationFollowupQueueBar } from "./ConversationFollowupQueueBar";
 import { ConversationInferenceControl } from "./ConversationInferenceControl";
 import type { ConversationImagePreviewRequest } from "./ConversationImagePreviewDialog";
@@ -144,6 +146,7 @@ export type UseConversationComposerInput = {
   turnModelControl?: ConversationTurnModelControlModel;
   onOpenAgentModelConfig?: () => void;
   composerContextRing?: ComposerContextRingModel | null;
+  composerCacheUsage?: ComposerCacheUsageModel | null;
   onOpenComposerContextDetail?: () => void;
   onCreateSession?: () => void;
   onOpenSideChat?: (draft: string, send: boolean) => void;
@@ -239,6 +242,7 @@ export function useConversationComposer({
   turnModelControl,
   onOpenAgentModelConfig,
   composerContextRing,
+  composerCacheUsage,
   onOpenComposerContextDetail,
   onCreateSession,
   onOpenSideChat,
@@ -1521,6 +1525,7 @@ export function useConversationComposer({
                   onOpenDetail={onOpenComposerContextDetail}
                 />
               ) : null}
+              {composerCacheUsage ? <ComposerCacheIndicator sessionId={sessionId} model={composerCacheUsage} lang={lang} /> : null}
               {composerVariant === "codex" ? composerActions : null}
             </div>
           </div>

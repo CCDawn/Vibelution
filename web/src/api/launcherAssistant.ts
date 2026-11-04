@@ -1,4 +1,4 @@
-import type { AgentPermissionPreset, ConfigBootstrap, SessionBudgetParameters, SessionDetail, SessionMessageCurationAction, SessionMessageCurationMutationResponse, SessionMessageCurationResponse, SessionReferenceAttachment, SessionToolApprovalRequest } from "./types";
+import type { AgentPermissionPreset, ConfigBootstrap, SessionBudgetParameters, SessionDetail, SessionMessageCurationAction, SessionMessageCurationMutationResponse, SessionMessageCurationResponse, SessionReferenceAttachment, SessionToolApprovalRequest, TokenUsageRollup, TokenUsageSample } from "./types";
 import type { DesktopPetPreferences } from "../routes/desktopPet/desktopPetPreferences";
 import type { SessionContinuationExpectation } from "./chat";
 
@@ -82,6 +82,7 @@ export type LauncherAssistantRequest =
   | { operation: "teamRuns"; cursor?: string }
   | { operation: "setModel"; modelId: string }
   | { operation: "budgetParameters" }
+  | { operation: "usageSummary" }
   | { operation: "setBudgetParameters"; revision: number; maxCallsPerTurn: number | null }
   | { operation: "setManagementPermissionPreset"; preset: AgentPermissionPreset; expectedRevision: number }
   | { operation: "detail"; beforeMessageIndex?: number }
@@ -116,6 +117,44 @@ export type LauncherTaskCleanupTarget =
 
 export function launcherAssistantInvoke(payload: LauncherAssistantRequest): Promise<unknown> {
   return launcherAssistantBridge().invoke(payload);
+}
+
+export type LauncherAssistantUsageSummary = {
+  sessionId: string;
+  agentId: string;
+  sessionTokenUsage: TokenUsageRollup;
+  lastTokenUsage: TokenUsageSample;
+};
+
+const usageNumberFields = ["inputTokens", "cachedInputTokens", "cacheReadInputTokens", "cacheCreationInputTokens",
+  "uncachedInputTokens", "outputTokens", "reasoningOutputTokens", "totalTokens", "latencyMs"];
+const usageRollupCountFields = ["callCount", "observedCallCount", "estimatedCallCount", "missingCallCount",
+  "notCalledCount", "cacheObservedInputTokens", "cacheObservedCallCount", "cacheUnobservedCallCount"];
+function validUsageProjection(value: unknown, rollup: boolean): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  const fields = [...usageNumberFields, "cacheHitRate", "cacheUsageObserved", "cacheUsageMissingReason",
+    ...(rollup ? [...usageRollupCountFields, "cacheUsageComplete"] : ["source"])];
+  return Object.keys(row).length === fields.length && Object.keys(row).every(key => fields.includes(key))
+    && [...usageNumberFields, ...(rollup ? usageRollupCountFields : [])].every(key =>
+      Number.isSafeInteger(row[key]) && (row[key] as number) >= 0)
+    && typeof row.cacheHitRate === "number" && Number.isFinite(row.cacheHitRate) && row.cacheHitRate >= 0 && row.cacheHitRate <= 1
+    && typeof row.cacheUsageObserved === "boolean" && typeof row.cacheUsageMissingReason === "string"
+    && ["", "not_called", "provider_cache_usage_missing", "partial_provider_cache_usage"].includes(row.cacheUsageMissingReason)
+    && (rollup ? typeof row.cacheUsageComplete === "boolean"
+      : typeof row.source === "string" && ["provider_usage", "estimated", "missing", "not_called"].includes(row.source));
+}
+
+export async function getLauncherAssistantUsageSummary(): Promise<LauncherAssistantUsageSummary> {
+  const result = await launcherAssistantInvoke({ operation: "usageSummary" });
+  if (!result || typeof result !== "object" || Array.isArray(result)) throw new Error("ASSISTANT_RESPONSE_INVALID");
+  const row = result as Record<string, unknown>;
+  if (Object.keys(row).length !== 4
+    || !Object.keys(row).every(key => ["sessionId", "agentId", "sessionTokenUsage", "lastTokenUsage"].includes(key))
+    || ![row.sessionId, row.agentId].every(id => typeof id === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(id))
+    || !validUsageProjection(row.sessionTokenUsage, true) || !validUsageProjection(row.lastTokenUsage, false))
+    throw new Error("ASSISTANT_RESPONSE_INVALID");
+  return result as LauncherAssistantUsageSummary;
 }
 
 function validBudget(value: unknown): value is SessionBudgetParameters {

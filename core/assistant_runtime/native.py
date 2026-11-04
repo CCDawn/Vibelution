@@ -362,6 +362,28 @@ def _budget_parameters_command():
         raise AssistantSessionError("ASSISTANT_BUDGET_UNAVAILABLE") from None
 
 
+def usage_summary() -> dict[str, Any]:
+    """Read the real ledger only while the fixed native binding is stable."""
+    from .cache_usage import read_usage_summary
+
+    try:
+        with _session_command() as (sessions, session_id):
+            directory, personal, _, directory_runtime = _services()
+            with personal._LOCK, sessions.session_agent_lifecycle_transaction(), directory._STATE_LOCK:
+                root = assistant_native_root()
+                if (sessions.PROJECT_ROOT != root or directory.PROJECT_ROOT != root
+                        or directory_runtime.directory_store_project_root() != root):
+                    raise AssistantSessionError("ASSISTANT_USAGE_UNAVAILABLE")
+                agent = directory.get_agent_parameter_snapshot(_AGENT_ID, include_archived=False)
+                if (not agent or agent.get("agentId") != _AGENT_ID
+                        or agent.get("directSessionId") != session_id
+                        or sessions._session_agent_id_snapshot(session_id) != _AGENT_ID):
+                    raise AssistantSessionError("ASSISTANT_USAGE_UNAVAILABLE")
+                return read_usage_summary(project_root=root, session_id=session_id, agent_id=_AGENT_ID)
+    except Exception:
+        raise AssistantSessionError("ASSISTANT_USAGE_UNAVAILABLE") from None
+
+
 def budget_parameters() -> dict[str, int | None]:
     """Read only the fixed assistant's canonical Session budget override."""
     from .budget_parameters import AssistantBudgetParameters

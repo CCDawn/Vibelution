@@ -1,5 +1,29 @@
 # Composer context usage
 
+## ComposerCacheIndicator
+
+### 功能
+
+输入框旁以图标与百分比显示本会话累计缓存命中率；点开只显示「本会话」「最近一次」两行。
+
+### 适用范围
+
+普通聊天和 Launcher 个人助理共用同一组件。普通聊天读取当前 Session 的 usage summary；个人助理通过固定身份原生桥读取自己的隔离账本。Companion 和金融专用 composer 沿用既有入口边界。
+
+### 使用方式
+
+传入 `sessionId`、`lang` 与 `ComposerCacheUsageModel`。`useComposerCacheUsage` 根据现有 detail 的调用时间与状态变化刷新，不增加独立轮询。切换 Session 时重置浮层；查询按来源、Agent、Session 隔离，过期读取不可投影到新身份。
+
+- 累计比例为账本中的缓存读取总量 ÷ 已上报缓存明细的输入总量；不平均每次调用的比例，缓存写入不计入命中。
+- 最近一次只认供应商明确上报的实际用量。真实零显示 `0%`，未上报或未调用显示 `—`，不以估算补齐。
+- 正常状态不展示说明段落或 Token 分解。部分上报保留短提示与覆盖次数，读取失败和生成中仅显示必要状态。
+- 入口使用 `VButton`，浮层使用 `VPopover` 与共享主题。浮层约 224px，限制到视口可用高度；键盘可打开，一次 Escape 关闭并返回入口焦点，Session 改变时关闭。
+- 打开详情时停用入口 tooltip，避免 tooltip 先消费 Escape。触屏入口及关闭按钮至少 44px。
+
+### 实现落点与验证
+
+`components/conversation/ComposerCacheIndicator.tsx`、`composerCacheUsageModel.ts` 与 `routes/chat/useComposerCacheUsage.ts`。覆盖加权统计、0/未知/部分上报、身份隔离、延迟读取、现有调用更新、两处入口和窄屏键盘操作。
+
 ## ComposerContextRing
 
 ### 功能

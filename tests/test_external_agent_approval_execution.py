@@ -399,7 +399,15 @@ def test_preview_and_bound_decision_http_require_both_control_and_task_capabilit
     from tests.test_external_agent_routes import _client, _headers
     from core.web.control import CONTROL_TOKEN_HEADER
     client, service = _client(monkeypatch)
-    service.preview_task_approval = lambda **kwargs: {"taskId": kwargs["task_id"], "argumentsJson": "{}"}
+    from core.web.services.external_agent.approval_binding import freeze_approval
+    payload = freeze_approval(
+        task_id="task-1", session_id="session-1", agent_id="agent-1", request_id="approval-1",
+        turn_id="turn-1", call_id="call-1", tool_name="test_tool", decision_fingerprint="f" * 64,
+        config_revision=3, config_hash="c" * 64, approval="ask", risk="high", permission_preset="balanced",
+        arguments={"value": 2**80},
+    ).preview()
+    payload["futureField"] = "preserved"
+    service.preview_task_approval = lambda **kwargs: dict(payload)
     service.resolve_task_approval_bound = lambda **kwargs: {"status": "ok", "decision": kwargs["decision"]}
     path = "/api/v1/external-agent/tasks/task-1/approvals/approval-1"
     headers = _headers()
@@ -407,6 +415,8 @@ def test_preview_and_bound_decision_http_require_both_control_and_task_capabilit
     assert client.get(path + "/preview", headers={CONTROL_TOKEN_HEADER: headers[CONTROL_TOKEN_HEADER]}).status_code == 403
     preview = client.get(path + "/preview", headers=headers)
     assert preview.status_code == 200
+    assert preview.json() == payload
+    assert str(2**80) in preview.json()["argumentsJson"]
     assert preview.headers["cache-control"] == "no-store"
     assert client.post(path + "/resolve-bound", headers=headers, json={"decision": "accept"}).status_code == 422
     assert client.post(path + "/resolve-bound", json={"decision": "accept", "expected_revision": "a" * 64}).status_code == 403

@@ -17,6 +17,7 @@ vi.mock("../../components/conversation/LazyConversationView", () => ({
   LazyConversationView: (props: ConversationViewProps) => {
     conversation = props;
     return <div data-testid="native-conversation">
+      {props.toolbarSlot}
       {props.composerPrecedingContent}
       <textarea aria-label="draft" value={props.composerValue}
         onChange={event => props.onComposerChange(event.target.value)} />
@@ -32,6 +33,13 @@ const STATUS = {
       showCompletion: true, idleMessage: "在的，随时吩咐。" } },
 };
 const DETAIL = { id: "s", agentId: "a", status: "ready", messages: [] };
+const USAGE_NUMBERS = { inputTokens: 100, cachedInputTokens: 75, cacheReadInputTokens: 75,
+  cacheCreationInputTokens: 0, uncachedInputTokens: 25, outputTokens: 0, reasoningOutputTokens: 0,
+  totalTokens: 100, latencyMs: 0, cacheHitRate: .75, cacheUsageObserved: true, cacheUsageMissingReason: "" };
+const USAGE = { sessionId: "s", agentId: "a", lastTokenUsage: { ...USAGE_NUMBERS, source: "provider_usage" },
+  sessionTokenUsage: { ...USAGE_NUMBERS, callCount: 1, observedCallCount: 1, estimatedCallCount: 0,
+    missingCallCount: 0, notCalledCount: 0, cacheObservedInputTokens: 100, cacheObservedCallCount: 1,
+    cacheUnobservedCallCount: 0, cacheUsageComplete: true } };
 const READ_OPERATIONS = ["detail", "approvals", "dispatches", "operatorAsset"];
 
 let root: Root | undefined;
@@ -58,6 +66,7 @@ async function mount({ initiallyFail = [], withTaskOwner = false }: { initiallyF
       case "status": return STATUS;
       case "config": return { language: "zh" };
       case "detail": return DETAIL;
+      case "usageSummary": return USAGE;
       case "approvals": return [];
       case "dispatches": return { dispatches: [] };
       case "operatorAsset": return { schemaVersion: 1, kind: request.kind, image: null, readability: "standard" };
@@ -129,6 +138,22 @@ afterEach(async () => {
 });
 
 describe("Launcher assistant hosted notifications", () => {
+  it("recovers cache statistics from the page refresh button without a new detail marker", async () => {
+    await mount({ initiallyFail: ["usageSummary"] });
+    expect(conversation?.composerCacheUsage?.state).toBe("error");
+    const draft = "刷新时保留草稿";
+    await act(async () => conversation!.onComposerChange(draft));
+    failing.delete("usageSummary");
+    invoke.mockClear();
+    const refresh = [...body().querySelectorAll("button")].find(button => button.textContent?.trim() === "刷新");
+    expect(refresh).toBeTruthy();
+    await click(refresh!);
+    expect(conversation?.composerCacheUsage).toMatchObject({ state: "ready", sessionPercent: 75, lastCallPercent: 75 });
+    expect(operations().filter(operation => operation === "usageSummary")).toHaveLength(1);
+    expect(operations()).not.toContain("send");
+    expect(body().querySelector("textarea")?.value).toBe(draft);
+  });
+
   it("deduplicates shared status while retaining independent task-query failures", async () => {
     await mount({withTaskOwner:true});
     failing.add("status");

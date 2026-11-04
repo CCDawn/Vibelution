@@ -94,3 +94,26 @@ class ExternalAgentApprovalResponse(BaseModel):
 
     status: str = ""
     decision: str = ""
+
+
+class ExternalAgentApprovalPreviewResponse(BaseModel):
+    """ApprovalBinding.preview wire format; keep JSON arguments as lossless text."""
+
+    model_config = ConfigDict(extra="allow")
+
+    taskId: str
+    sessionId: str
+    agentId: str
+    requestId: str
+    turnId: str
+    callId: str
+    toolName: str
+    revision: str
+    approval: str
+    risk: str
+    permissionPreset: str
+    decisionFingerprint: str
+    configRevision: int
+    configHash: str
+    argumentsJson: str
+    executionArgumentsJson: str

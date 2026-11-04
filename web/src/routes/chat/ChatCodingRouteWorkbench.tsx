@@ -256,6 +256,7 @@ import { useChatAgentDirectoryActions } from "./useChatAgentDirectoryActions";
 import { useChatCliAgentTerminal } from "./useChatCliAgentTerminal";
 import { buildChatCacheDetailViewModel } from "./chatCacheDetailModel";
 import { buildComposerContextRingModel, resolveComposerContextLimit, resolveComposerContextUsage } from "./composerContextModel";
+import { useComposerCacheUsage } from "./useComposerCacheUsage";
 import { useChatCacheDetailDialog } from "./useChatCacheDetailDialog";
 import { useAgentPermissionPresetMutation } from "./useAgentPermissionPresetMutation";
 import { useChatWorkbenchCatalogQueries } from "./useChatWorkbenchCatalogQueries";
@@ -1913,6 +1914,12 @@ export function ChatCodingRouteWorkbench() {
     runtime?.contextCompression,
     t,
   ]);
+  const composerCacheUsage = useComposerCacheUsage({
+    sessionId: activeSessionId ?? "", agentId: detail?.agentId ?? "", source: "session",
+    enabled: !financeSurface && !verifiedCompanionMode,
+    refreshMarker: `${detail?.llmUsage?.recordedAt ?? ""}:${detail?.status ?? ""}`,
+    running: detail?.status === "running",
+  });
   const {
     sessionIdsNeedingApproval,
     toolApproval,
@@ -3095,6 +3102,7 @@ export function ChatCodingRouteWorkbench() {
     cacheDetailAvailable,
     companionConversationComposer,
     composerContextRing,
+    composerCacheUsage,
     composerFocusRequest,
     composerKnowledgeReferenceOptions,
     knowledgeReferenceState,

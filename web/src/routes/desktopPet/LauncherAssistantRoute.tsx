@@ -65,6 +65,7 @@ import { readLauncherAssistantTaskSource } from "./launcherAssistantTaskReads";
 import { readLauncherManagementStatus, useLauncherManagementPermission } from "./useLauncherManagementPermission";
 import { LauncherManagementPermissionControl } from "./LauncherManagementPermissionControl";
 import { useLauncherAssistantBudget } from "./useLauncherAssistantBudget";
+import { composerCacheUsageQueryKey, useComposerCacheUsage } from "../chat/useComposerCacheUsage";
 import { agentPurgeBatchPreviewIsValid, launcherAgentPurgeBatchActionPreview } from "./launcherAgentPurgeBatchPreview";
 import { usePublishLauncherNotices } from "../../app/LauncherNotifications";
 import { launcherAssistantPageNotices, launcherNoticeReadFailed } from "./launcherAssistantPageNotices";
@@ -1194,6 +1195,9 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   // Null before the first usage frame; diagnostics handoff and the auto-compaction
   // countdown are absent because this surface mounts neither dialog nor setting.
   const composerContextRing = useMemo(() => launcherAssistantContextRing(detail.data, lang), [detail.data, lang]);
+  const composerCacheUsage = useComposerCacheUsage({ sessionId, agentId: status.data?.assistant.agentId ?? "", source: "assistant",
+    refreshMarker: `${detail.data?.llmUsage?.recordedAt ?? ""}:${detail.data?.status ?? ""}`,
+    running: detail.data?.status === "running" });
   const modelDisplay = launcherAssistantModelDisplay(status.data?.settings?.modelId, lang);
   // The header keeps the normal session status line for a weakly degraded poll;
   // "unavailable" is reserved for the hard-down case (persistent failure AND a
@@ -1223,6 +1227,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     void client.invalidateQueries({ queryKey: assetQueryPrefix });
     void client.invalidateQueries({ queryKey: assistantAvatarPrefix });
     void client.invalidateQueries({ queryKey: launcherAssistantBudgetQueryKey(status.data?.assistant.agentId || "", sessionId), exact: true });
+    void client.invalidateQueries({ queryKey: composerCacheUsageQueryKey("assistant", status.data?.assistant.agentId || "", sessionId), exact: true });
   };
 
   if (!expanded) return <main className={petStyles.root} data-vui-domain-recipe="launcher-assistant"
@@ -1381,6 +1386,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       onComposerChange={changeDraft} onSubmit={() => void submit()}
       onStop={() => void stopTurn()} onContinueTurn={() => void continueTurn()}
       composerContextRing={composerContextRing}
+      composerCacheUsage={composerCacheUsage}
       onEditUserMessage={editMessageToComposer}
       editUserMessageLabel={copy.editAsNew}
       editUserMessageDisabled={sendPending || sendUnconfirmed || controlPending || busy || stopping}

@@ -19,7 +19,7 @@ router = APIRouter(tags=["usage"])
     response_model_exclude_unset=True,
 )
 def usage_summary(
-    scope: str = Query("global", pattern="^(global|session|agent|model)$"),
+    scope: str = Query("global", pattern="^(global|session|session_agent|agent|model)$"),
     sessionId: str = "",
     agentId: str = "",
     provider: str = "",
@@ -30,6 +30,8 @@ def usage_summary(
     agent_id = str(agentId or "").strip()
     provider_id = str(provider or "").strip()
     model_id = str(model or "").strip()
+    if normalized_scope == "session_agent" and not (session_id and agent_id):
+        raise HTTPException(status_code=400, detail="sessionId and agentId are required when scope=session_agent")
     if normalized_scope == "session" and not session_id:
         raise HTTPException(status_code=400, detail="sessionId is required when scope=session")
     if normalized_scope == "agent" and not agent_id:

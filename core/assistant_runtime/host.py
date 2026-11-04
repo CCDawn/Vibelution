@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .budget_parameters import AssistantBudgetParameters
+from .cache_usage import AssistantUsageSummary
 
 # The renderer polls /api/assistant at a multi-second cadence while chat detail
 # and submit hold native._LOCK for their own reads. Serving the lock-bound
@@ -534,6 +535,10 @@ class NativeFacade:
             self._identity_snapshot = None
         return result
 
+    def usage_summary(self):
+        from . import native
+        return native.usage_summary()
+
     def budget_parameters(self):
         from . import native
         return native.budget_parameters()
@@ -880,6 +885,8 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
             "ASSISTANT_BUDGET_INVALID": (422, "The assistant budget request is invalid"),
             "ASSISTANT_BUDGET_CONFLICT": (409, "Assistant budget changed; refresh before retrying"),
             "ASSISTANT_BUDGET_UNAVAILABLE": (503, "Assistant budget settings are unavailable"),
+            "ASSISTANT_USAGE_INVALID": (422, "The assistant usage request is invalid"),
+            "ASSISTANT_USAGE_UNAVAILABLE": (503, "Assistant usage is unavailable"),
             "ASSISTANT_QUIESCING": (503, "Native assistant is quiescing; retry after the migration fence"),
             "ASSISTANT_QUIESCENCE_BUSY": (503, "Native assistant is quiescing; retry after the migration fence"),
             "ATTACHMENT_NOT_FOUND": (404, "Native assistant attachment not found"),
@@ -1420,6 +1427,23 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
             raise AssistantSessionError("ASSISTANT_PERMISSION_UNAVAILABLE")
         response.headers["Cache-Control"] = "no-store"
         return setter(payload.preset, payload.expectedRevision)
+
+    @app.get("/api/assistant/usage-summary", response_model=AssistantUsageSummary)
+    async def usage_summary(request: Request, response: Response):
+        if request.query_params or await request.body():
+            raise AssistantSessionError("ASSISTANT_USAGE_INVALID")
+        getter = getattr(native, "usage_summary", None)
+        if not callable(getter):
+            raise AssistantSessionError("ASSISTANT_USAGE_UNAVAILABLE")
+        try:
+            result = AssistantUsageSummary.model_validate(await asyncio.to_thread(getter))
+            identity = (getattr(app.state, "assistant", {}) or {}).get("assistant", {})
+            if result.sessionId != identity.get("directSessionId") or result.agentId != identity.get("agentId"):
+                raise ValueError("usage_identity_mismatch")
+        except Exception:
+            raise AssistantSessionError("ASSISTANT_USAGE_UNAVAILABLE") from None
+        response.headers["Cache-Control"] = "no-store"
+        return result
 
     @app.get("/api/assistant/budget-parameters", response_model=AssistantBudgetParameters)
     def budget_parameters(request: Request, response: Response):

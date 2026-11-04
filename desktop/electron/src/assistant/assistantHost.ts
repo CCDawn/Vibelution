@@ -49,6 +49,7 @@ export type AssistantHostRequest =
   | { operation: "teamRuns"; cursor?: string }
   | { operation: "setModel"; modelId: string }
   | { operation: "budgetParameters" }
+  | { operation: "usageSummary" }
   | { operation: "setBudgetParameters"; revision: number; maxCallsPerTurn: number | null }
   | { operation: "setManagementPermissionPreset"; preset: "request_approval" | "auto_review" | "full_access"; expectedRevision: number }
   | { operation: "detail"; beforeMessageIndex?: number }
@@ -77,7 +78,7 @@ export type AssistantHostRequest =
 /** Read-only requests still drain with migration, but cannot submit new work. */
 const LIFECYCLE_READ_OPERATIONS: ReadonlySet<AssistantHostRequest["operation"]> = new Set([
   "status", "detail", "dispatches", "teamRuns", "config", "approvals", "curation",
-  "operatorAsset", "assistantAvatar", "computerState", "readAttachment", "budgetParameters"
+  "operatorAsset", "assistantAvatar", "computerState", "readAttachment", "budgetParameters", "usageSummary"
 ]);
 
 /** Private to Electron main; attemptToken must never cross the renderer bridge. */
@@ -155,6 +156,29 @@ function object(value: unknown): value is Record<string, unknown> {
 }
 function ownKeys(value: Record<string, unknown>, allowed: string[]): boolean {
   return Object.keys(value).every(key => allowed.includes(key));
+}
+const USAGE_NUMBER_FIELDS = ["inputTokens", "cachedInputTokens", "cacheReadInputTokens", "cacheCreationInputTokens",
+  "uncachedInputTokens", "outputTokens", "reasoningOutputTokens", "totalTokens", "latencyMs"];
+const USAGE_ROLLUP_COUNT_FIELDS = ["callCount", "observedCallCount", "estimatedCallCount", "missingCallCount",
+  "notCalledCount", "cacheObservedInputTokens", "cacheObservedCallCount", "cacheUnobservedCallCount"];
+function validUsageProjection(value: unknown, rollup: boolean): boolean {
+  const fields = [...USAGE_NUMBER_FIELDS, "cacheHitRate", "cacheUsageObserved", "cacheUsageMissingReason",
+    ...(rollup ? [...USAGE_ROLLUP_COUNT_FIELDS, "cacheUsageComplete"] : ["source"])];
+  if (!object(value) || Object.keys(value).length !== fields.length || !ownKeys(value, fields)
+    || [...USAGE_NUMBER_FIELDS, ...(rollup ? USAGE_ROLLUP_COUNT_FIELDS : [])].some(key =>
+      !Number.isSafeInteger(value[key]) || (value[key] as number) < 0)
+    || typeof value.cacheHitRate !== "number" || !Number.isFinite(value.cacheHitRate)
+    || value.cacheHitRate < 0 || value.cacheHitRate > 1 || typeof value.cacheUsageObserved !== "boolean"
+    || typeof value.cacheUsageMissingReason !== "string"
+    || !["", "not_called", "provider_cache_usage_missing", "partial_provider_cache_usage"].includes(value.cacheUsageMissingReason)) return false;
+  return rollup ? typeof value.cacheUsageComplete === "boolean"
+    : typeof value.source === "string" && ["provider_usage", "estimated", "missing", "not_called"].includes(value.source);
+}
+function validUsageSummary(value: unknown): value is Record<string, unknown> {
+  return object(value) && Object.keys(value).length === 4
+    && ownKeys(value, ["sessionId", "agentId", "sessionTokenUsage", "lastTokenUsage"])
+    && [value.sessionId, value.agentId].every(id => typeof id === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(id))
+    && validUsageProjection(value.sessionTokenUsage, true) && validUsageProjection(value.lastTokenUsage, false);
 }
 function positiveInteger(value: unknown, max = Number.MAX_SAFE_INTEGER): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 && value <= max;
@@ -932,7 +956,7 @@ export class AssistantHost {
         if (lifecycle.committed) throw new HostError("ASSISTANT_LIFECYCLE_CLOSING");
         lifecycle.arrival = true;
       }
-      const safeWhileWaiting = ["status", "detail", "dispatches", "teamRuns", "config", "approvals", "curation", "operatorAsset", "assistantAvatar", "setManagementPermissionPreset", "budgetParameters", "setBudgetParameters", "resolveApproval", "previewDispatchApproval", "decideDispatchApproval", "declineDispatchApproval", "stop", "computerState"]
+      const safeWhileWaiting = ["status", "detail", "dispatches", "teamRuns", "config", "approvals", "curation", "operatorAsset", "assistantAvatar", "setManagementPermissionPreset", "budgetParameters", "setBudgetParameters", "usageSummary", "resolveApproval", "previewDispatchApproval", "decideDispatchApproval", "declineDispatchApproval", "stop", "computerState"]
         .includes(captured.operation);
       // Confirmation only settles an existing native waiter; it remains a
       // counted writer in the host barrier even after admission is sealed.
@@ -964,6 +988,15 @@ export class AssistantHost {
     }
     if (!object(payload)) throw new HostError("ASSISTANT_REQUEST_INVALID");
     switch (payload.operation) {
+      case "usageSummary": {
+        if (Object.keys(payload).length !== 1 || !ownKeys(payload, ["operation"]))
+          throw new HostError("ASSISTANT_USAGE_INVALID");
+        const result = await this.rpc(generation, "/api/assistant/usage-summary", "GET", undefined, READ_MS, false, 8192);
+        if (!validUsageSummary(result)) throw new HostError("ASSISTANT_RESPONSE_INVALID");
+        if (result.sessionId !== generation.sessionId || result.agentId !== generation.agentId)
+          throw new HostError("ASSISTANT_IDENTITY_INVALID");
+        return result;
+      }
       case "budgetParameters":
       case "setBudgetParameters": {
         const write = payload.operation === "setBudgetParameters";
@@ -1857,6 +1890,10 @@ export class AssistantHost {
           if (response.status === 409) throw new HostError("ASSISTANT_BUDGET_CONFLICT");
           if (response.status === 422) throw new HostError("ASSISTANT_BUDGET_INVALID");
           if (response.status === 503 || response.status === 404) throw new HostError("ASSISTANT_BUDGET_UNAVAILABLE");
+        }
+        if (path === "/api/assistant/usage-summary") {
+          if (response.status === 422) throw new HostError("ASSISTANT_USAGE_INVALID");
+          throw new HostError("ASSISTANT_USAGE_UNAVAILABLE");
         }
         if (path === "/api/assistant/management-permission") {
           if (response.status === 409) throw new HostError("ASSISTANT_PERMISSION_CONFLICT");

@@ -413,20 +413,22 @@ def build_usage_summary(
         "provider": str(provider or "").strip(),
         "model": str(model or "").strip(),
     }
+    scoped_where, scoped_params = _scope_where(
+        normalized_scope,
+        session_id=filters["sessionId"],
+        agent_id=filters["agentId"],
+        provider=filters["provider"],
+        model=filters["model"],
+    )
     path = usage_ledger_path(project_root)
     connection = _connect(path)
     try:
-        scoped_where, scoped_params = _scope_where(
-            normalized_scope,
-            session_id=filters["sessionId"],
-            agent_id=filters["agentId"],
-            provider=filters["provider"],
-            model=filters["model"],
-        )
         last_row = _query_last_valid_row(connection, scoped_where, scoped_params)
         rollup_filters = _derive_rollup_filters(filters, last_row)
         session_rollup = (
-            _rollup_sql(
+            _rollup_sql(connection, scoped_where, scoped_params, provider_cache_only=True)[0]
+            if normalized_scope == "session_agent"
+            else _rollup_sql(
                 connection,
                 "session_id=?",
                 [rollup_filters["sessionId"]],
@@ -460,7 +462,9 @@ def build_usage_summary(
             model=filters["model"],
         )
         scoped_rollup = (
-            global_rollup
+            session_rollup
+            if normalized_scope == "session_agent"
+            else global_rollup
             if _scoped_filter_equals_global(normalized_scope, filters)
             else _rollup_sql(
                 connection,
@@ -507,7 +511,12 @@ def _scope_where(
     if model:
         clauses.append("model=?")
         parameters.append(model)
-    if normalized_scope in {"session", "chat_session"} and session_id:
+    if normalized_scope == "session_agent":
+        if not session_id or not agent_id:
+            raise ValueError("sessionId and agentId are required when scope=session_agent")
+        clauses.extend(("session_id=?", "agent_id=?"))
+        parameters.extend((session_id, agent_id))
+    elif normalized_scope in {"session", "chat_session"} and session_id:
         clauses.append("session_id=?")
         parameters.append(session_id)
     elif normalized_scope == "agent" and agent_id:
@@ -563,6 +572,11 @@ SELECT
   COALESCE(SUM(CASE WHEN source IN {valid} AND cache_usage_observed
     THEN CASE WHEN cache_read_input_tokens > 0 THEN MAX(0, cache_read_input_tokens)
          ELSE MAX(0, cached_input_tokens) END ELSE 0 END), 0) AS cache_read_input_tokens,
+  COALESCE(SUM(CASE WHEN source='provider_usage' AND cache_usage_observed
+    THEN MAX(0, cached_input_tokens) ELSE 0 END), 0) AS provider_cached_input_tokens,
+  COALESCE(SUM(CASE WHEN source='provider_usage' AND cache_usage_observed
+    THEN CASE WHEN cache_read_input_tokens > 0 THEN MAX(0, cache_read_input_tokens)
+         ELSE MAX(0, cached_input_tokens) END ELSE 0 END), 0) AS provider_cache_read_input_tokens,
   COALESCE(SUM(CASE WHEN source IN {valid} AND cache_usage_observed
     THEN MAX(0, cache_creation_input_tokens) ELSE 0 END), 0) AS cache_creation_input_tokens,
   COALESCE(SUM(CASE WHEN source IN {valid} AND cache_usage_observed
@@ -593,6 +607,7 @@ def _rollup_sql(
     *,
     provider: str = "",
     model: str = "",
+    provider_cache_only: bool = False,
 ) -> tuple[UsageRollup, int]:
     where, parameters = _rollup_where(
         base_clause, base_params, provider=provider, model=model
@@ -601,18 +616,26 @@ def _rollup_sql(
         _ROLLUP_SQL.format(valid=_VALID_SOURCES_SQL) + where,
         parameters,
     ).fetchone()
-    return _rollup_from_row(row)
+    return _rollup_from_row(row, provider_cache_only=provider_cache_only)
 
 
-def _rollup_from_row(row: sqlite3.Row) -> tuple[UsageRollup, int]:
+def _rollup_from_row(row: sqlite3.Row, *, provider_cache_only: bool = False) -> tuple[UsageRollup, int]:
     if row is None:
         return UsageRollup(), 0
     skipped = int(row["skipped"] or 0)
+    cached_column = "provider_cached_input_tokens" if provider_cache_only else "cached_input_tokens"
+    read_column = "provider_cache_read_input_tokens" if provider_cache_only else "cache_read_input_tokens"
+    # A token estimate or missing usage is not provider cache evidence, even
+    # when the event retains cache counters. A not_called marker is not a call.
+    unobserved_calls = (
+        int(row["call_count"] or 0) - int(row["not_called_count"] or 0) - int(row["cache_observed_call_count"] or 0)
+        if provider_cache_only else int(row["cache_unobserved_call_count"] or 0)
+    )
     return (
         UsageRollup(
             input_tokens=int(row["input_tokens"] or 0),
-            cached_input_tokens=int(row["cached_input_tokens"] or 0),
-            cache_read_input_tokens=int(row["cache_read_input_tokens"] or 0),
+            cached_input_tokens=int(row[cached_column] or 0),
+            cache_read_input_tokens=int(row[read_column] or 0),
             cache_creation_input_tokens=int(row["cache_creation_input_tokens"] or 0),
             uncached_input_tokens=int(row["uncached_input_tokens"] or 0),
             output_tokens=int(row["output_tokens"] or 0),
@@ -626,7 +649,7 @@ def _rollup_from_row(row: sqlite3.Row) -> tuple[UsageRollup, int]:
             latency_ms=int(row["latency_ms"] or 0),
             cache_observed_input_tokens=int(row["cache_observed_input_tokens"] or 0),
             cache_observed_call_count=int(row["cache_observed_call_count"] or 0),
-            cache_unobserved_call_count=int(row["cache_unobserved_call_count"] or 0),
+            cache_unobserved_call_count=unobserved_calls,
         ),
         skipped,
     )

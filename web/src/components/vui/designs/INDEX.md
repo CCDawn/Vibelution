@@ -241,6 +241,7 @@
 | 组件 | 设计说明 |
 | --- | --- |
 | `ComposerContextRing` | [product/composer-context.md](./product/composer-context.md#composercontextring) |
+| `ComposerCacheIndicator` | [product/composer-context.md](./product/composer-context.md#composercacheindicator) |
 | `ConversationTokenSpeedIndicator` | [product/token-speed.md](./product/token-speed.md#conversationtokenspeedindicator) |
 
 ## Product — Launcher 个人助理任务

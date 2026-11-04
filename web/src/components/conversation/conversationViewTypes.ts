@@ -14,6 +14,7 @@ import type { ReferenceTypeaheadOption } from "./conversationReferenceTypeahead"
 import type { ConversationStreamingFramePaintMetrics } from "./conversationStreamingMetrics";
 import type { ComposerQueueItem } from "./composerFollowupQueueModel";
 import type { ComposerContextRingModel } from "../../routes/chat/composerContextModel";
+import type { ComposerCacheUsageModel } from "./composerCacheUsageModel";
 
 export type ConversationProcessDisplayMode = "answer" | "trace";
 
@@ -194,6 +195,7 @@ export type ConversationViewProps = {
   onOpenAgentModelConfig?: () => void;
   /** Compact context composition ring (left of send). */
   composerContextRing?: ComposerContextRingModel | null;
+  composerCacheUsage?: ComposerCacheUsageModel | null;
   onOpenComposerContextDetail?: () => void;
   /** Client-side /新会话 builtin: create a session and navigate to it. */
   onCreateSession?: () => void;

@@ -29,6 +29,7 @@ import type {
   ChatConversationComposerBridgeState,
 } from "./ChatConversationComposerBridge";
 import type { ComposerContextRingModel } from "./composerContextModel";
+import type { ComposerCacheUsageModel } from "../../components/conversation/composerCacheUsageModel";
 import type { UpdateAgentPermissionPresetInput } from "./useAgentPermissionPresetMutation";
 
 const EMPTY_SESSION_CHANGED_FILES: string[] = [];
@@ -76,6 +77,7 @@ type ChatConversationComposerChromeKey =
   | "turnModelControl"
   | "onOpenAgentModelConfig"
   | "composerContextRing"
+  | "composerCacheUsage"
   | "onOpenComposerContextDetail"
   | "onCreateSession"
   | "onOpenSideChat"
@@ -160,6 +162,7 @@ export type ChatConversationSurfaceModelInput = {
   companionConversationComposer: ChatConversationComposerBridgeState;
   composerBudgetControl: ChatComposerBudgetControl | undefined;
   composerContextRing: ComposerContextRingModel | null;
+  composerCacheUsage?: ComposerCacheUsageModel | null;
   composerFocusRequest: { sessionId: string; signal: string };
   composerKnowledgeReferenceOptions: ChatComposerSessionReferenceOption[];
   knowledgeReferenceState?: ChatComposerKnowledgeReferenceState;
@@ -252,6 +255,7 @@ export function useChatConversationSurfaceModel({
   companionConversationComposer,
   composerBudgetControl,
   composerContextRing,
+  composerCacheUsage,
   composerFocusRequest,
   composerKnowledgeReferenceOptions,
   knowledgeReferenceState,
@@ -464,6 +468,7 @@ export function useChatConversationSurfaceModel({
         ? () => handleOpenAgentConfig(activeSessionAgent, sessionsById.get(activeSessionId ?? "") ?? null)
         : undefined,
       composerContextRing: financeSurface || verifiedCompanionMode ? null : composerContextRing,
+      composerCacheUsage: financeSurface || verifiedCompanionMode ? null : composerCacheUsage,
       onOpenComposerContextDetail: !financeSurface && !verifiedCompanionMode && cacheDetailAvailable ? openCacheDetail : undefined,
       onCreateSession: !verifiedCompanionMode && selectedChatAgent ? () => handleCreateAgentSession(selectedChatAgent) : undefined,
       onOpenSideChat: ordinaryChangeRail && detail.sessionKind !== "child" ? openOrdinarySideChat : undefined,
@@ -538,6 +543,7 @@ export function useChatConversationSurfaceModel({
       cacheDetailAvailable,
       composerBudgetControl,
       composerContextRing,
+      composerCacheUsage,
       composerFocusRequest,
       composerKnowledgeReferenceOptions,
       knowledgeReferenceState,
@@ -647,6 +653,7 @@ export function useChatConversationSurfaceModel({
       turnModelControl: true,
       onOpenAgentModelConfig: true,
       composerContextRing: true,
+      composerCacheUsage: true,
       onOpenComposerContextDetail: true,
       onCreateSession: true,
       onOpenSideChat: true,
@@ -738,6 +745,7 @@ export function useChatConversationSurfaceModel({
       turnModelControl: model.turnModelControl,
       onOpenAgentModelConfig: model.onOpenAgentModelConfig,
       composerContextRing: model.composerContextRing,
+      composerCacheUsage: model.composerCacheUsage,
       onOpenComposerContextDetail: model.onOpenComposerContextDetail,
       onCreateSession: model.onCreateSession,
       onOpenSideChat: model.onOpenSideChat,

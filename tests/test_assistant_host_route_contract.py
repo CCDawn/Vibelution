@@ -33,13 +33,12 @@ from fastapi.testclient import TestClient
 from core.assistant_runtime.host import Message, NativeFacade, create_app
 
 # Frozen snapshot of set(SessionMessagePayload.model_fields) -
-# set(Message.model_fields) at main=7269e3c68 (12 fields). Update this set only
-# with a deliberate decision, never to make a red test pass silently.
+# set(Message.model_fields), rebased to the references support already shipped
+# in 3b47d0e948. The raw field gap shrank from 12 to 11; forwarding is pinned below.
 FROZEN_HOST_FIELD_GAP = frozenset({
     "clientSubmissionId",  # renamed host equivalent: requestId
     "content",  # renamed host equivalent: message
     "contentUtf8Base64",
-    "references",
     "mentalModelEnabled",
     "runtimeStatusEnabled",
     "turnStatusTail",
@@ -50,7 +49,7 @@ FROZEN_HOST_FIELD_GAP = frozenset({
     "continuation",
 })
 
-HOST_MESSAGE_FIELDS = frozenset({"message", "requestId", "attachmentIds"})
+HOST_MESSAGE_FIELDS = frozenset({"message", "requestId", "attachmentIds", "references"})
 
 ASSISTANT = {"agentId": "local-assistant", "directSessionId": "native-session"}
 AUTH = {"Authorization": "Bearer private-test-token"}
@@ -132,7 +131,21 @@ def test_host_submit_pins_queue_if_busy_true_diverging_from_platform_default(fak
     assert response.status_code == 200
     assert fake_native_state.lightweight_calls == [
         ("native-session", "hello",
-         {"client_submission_id": "submit-pin-1", "queue_if_busy": True, "attachment_ids": None}),
+         {"client_submission_id": "submit-pin-1", "queue_if_busy": True, "attachment_ids": None, "references": None}),
+    ]
+
+
+def test_host_submit_forwards_reference_objects_to_the_native_owner(fake_native_state):
+    client = TestClient(create_app(native=NativeFacade(None), token="private-test-token"),
+                        base_url="http://127.0.0.1", headers=AUTH)
+    references = [{"referenceType": "session", "sessionId": "reference-session"}]
+    response = client.post("/api/assistant/messages", json={
+        "message": "hello", "requestId": "submit-reference-pin", "references": references,
+    })
+    assert response.status_code == 200
+    assert fake_native_state.lightweight_calls == [
+        ("native-session", "hello", {"client_submission_id": "submit-reference-pin", "queue_if_busy": True,
+                                      "attachment_ids": None, "references": references}),
     ]
 
 

@@ -9,7 +9,7 @@ import type { AssistantHostRequest } from "../src/assistant/assistantHost.js";
  * member missing from this list, so a new host verb cannot land silently.
  */
 const HOST_REQUEST_OPERATIONS: readonly AssistantHostRequest["operation"][] = [
-  "previewTaskCleanup", "executeTaskCleanup", "teamRuns", "setModel", "setManagementPermissionPreset", "budgetParameters", "setBudgetParameters",
+  "previewTaskCleanup", "executeTaskCleanup", "teamRuns", "setModel", "setManagementPermissionPreset", "budgetParameters", "setBudgetParameters", "usageSummary",
   "detail", "status", "dispatches", "config", "approvals", "assistantAvatar",
   "resolveApproval", "previewDispatchApproval", "declineDispatchApproval", "decideDispatchApproval",
   "send", "uploadAttachment", "readAttachment", "stop", "continue", "switchHead", "regenerate", "guidance",
@@ -27,6 +27,18 @@ function setup() {
 
 describe("Launcher assistant private bridge", () => {
   afterEach(() => { vi.useRealTimers(); });
+
+  it("rejects usage identity, scope and path injection before host start", async () => {
+    const { owner, event } = setup();
+    for (const field of ["sessionId", "agentId", "scope", "projectRoot", "ledgerPath"])
+      await expect(invokeAssistant(event, { operation: "usageSummary", [field]: "foreign" }, owner))
+        .rejects.toThrow("ASSISTANT_USAGE_INVALID");
+    expect(owner.host.start).not.toHaveBeenCalled();
+    await expect(invokeAssistant({ ...event, sender: {} }, { operation: "usageSummary" }, owner))
+      .rejects.toThrow("ASSISTANT_SENDER_FORBIDDEN");
+    await invokeAssistant(event, { operation: "usageSummary" }, owner);
+    expect(owner.host.request).toHaveBeenCalledExactlyOnceWith({ operation: "usageSummary" });
+  });
 
   it("admits only a closed management-permission CAS request before starting the host", async () => {
     const { owner, event } = setup();
@@ -163,14 +175,14 @@ describe("Launcher assistant private bridge", () => {
     await expect(invokeAssistant(event, { operation: "readAttachment", artifactId: "file-1" }, owner))
       .rejects.toThrow("ATTACHMENT_NOT_FOUND");
   });
-  it("bounds a read invoke's wait on host start so a restarting host fails fast instead", async () => {
+  it.each(["status", "budgetParameters", "usageSummary"])("bounds %s read wait on host start", async operation => {
     vi.useFakeTimers();
     const { owner, event } = setup();
     let releaseStart!: (value: unknown) => void;
     owner.host.start.mockImplementation(() => new Promise(resolve => { releaseStart = resolve; }));
     owner.host.request.mockRejectedValue(new Error("ASSISTANT_NOT_READY"));
     let failure = "";
-    const read = invokeAssistant(event, { operation: "status" }, owner)
+    const read = invokeAssistant(event, { operation }, owner)
       .catch((error: unknown) => { failure = error instanceof Error ? error.message : ""; });
     await vi.advanceTimersByTimeAsync(1_999);
     expect(failure).toBe("");
@@ -180,7 +192,7 @@ describe("Launcher assistant private bridge", () => {
     expect(failure).toBe("ASSISTANT_NOT_READY");
     // The recovery start itself was still triggered and stays in flight.
     expect(owner.host.start).toHaveBeenCalledTimes(1);
-    expect(owner.host.request).toHaveBeenCalledExactlyOnceWith({ operation: "status" });
+    expect(owner.host.request).toHaveBeenCalledExactlyOnceWith({ operation });
     releaseStart({});
     await Promise.resolve();
   });

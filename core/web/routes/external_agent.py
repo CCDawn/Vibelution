@@ -15,6 +15,7 @@ from core.web.routes.external_agent_models import (
     CancelExternalAgentTaskPayload,
     ExternalAgentAgentListResponse,
     ExternalAgentApprovalResponse,
+    ExternalAgentApprovalPreviewResponse,
     ExternalAgentConnectionShutdownResponse,
     ExternalAgentHeartbeatPayload,
     ExternalAgentInfoResponse,
@@ -302,7 +303,8 @@ def resolve_external_agent_approval(
         raise _handle_service_error(exc) from exc
 
 
-@router.get("/v1/external-agent/tasks/{task_id}/approvals/{approval_id}/preview")
+@router.get("/v1/external-agent/tasks/{task_id}/approvals/{approval_id}/preview",
+            response_model=ExternalAgentApprovalPreviewResponse, response_model_exclude_unset=True)
 def preview_external_agent_approval(
     task_id: str, approval_id: str, request: Request, response: Response,
     task_capability: Annotated[str, Header(alias=TASK_CAPABILITY_HEADER)] = "",

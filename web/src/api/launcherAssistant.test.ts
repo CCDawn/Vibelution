@@ -11,10 +11,58 @@ import {
   subscribeLauncherAssistantSessionEvent,
   setLauncherManagementPermissionPreset,
   getLauncherAssistantBudget, setLauncherAssistantBudget,
+  getLauncherAssistantUsageSummary,
 } from "./launcherAssistant";
 import type { SessionToolApprovalRequest } from "./types";
 
 afterEach(() => vi.unstubAllGlobals());
+
+function usageSnapshot() {
+  const numbers = { inputTokens: 100, cachedInputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0,
+    uncachedInputTokens: 100, outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 100, latencyMs: 0,
+    cacheHitRate: 0, cacheUsageObserved: true, cacheUsageMissingReason: "" };
+  return { sessionId: "s", agentId: "a", lastTokenUsage: { ...numbers, source: "provider_usage" },
+    sessionTokenUsage: { ...numbers, callCount: 1, observedCallCount: 1, estimatedCallCount: 0, missingCallCount: 0,
+      notCalledCount: 0, cacheObservedInputTokens: 100, cacheObservedCallCount: 1, cacheUnobservedCallCount: 0,
+      cacheUsageComplete: true } };
+}
+
+describe("Launcher assistant usage snapshot", () => {
+  it("uses only the native parameterless operation and preserves zero, missing and partial data", async () => {
+    const invoke = vi.fn();
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    const zero = usageSnapshot();
+    const missing = { ...zero, lastTokenUsage: { ...zero.lastTokenUsage, cacheUsageObserved: false,
+      cacheUsageMissingReason: "provider_cache_usage_missing" }, sessionTokenUsage: { ...zero.sessionTokenUsage,
+      cacheObservedCallCount: 0, cacheObservedInputTokens: 0, cacheUnobservedCallCount: 1,
+      cacheUsageObserved: false, cacheUsageComplete: false, cacheUsageMissingReason: "provider_cache_usage_missing" } };
+    const partial = { ...zero, sessionTokenUsage: { ...zero.sessionTokenUsage, cacheUnobservedCallCount: 1,
+      cacheUsageComplete: false, cacheUsageMissingReason: "partial_provider_cache_usage" } };
+    for (const snapshot of [zero, missing, partial]) {
+      invoke.mockResolvedValueOnce(snapshot);
+      await expect(getLauncherAssistantUsageSummary()).resolves.toEqual(snapshot);
+      expect(invoke).toHaveBeenLastCalledWith({ operation: "usageSummary" });
+    }
+    invoke.mockRejectedValueOnce(new Error("ASSISTANT_USAGE_UNAVAILABLE"));
+    await expect(getLauncherAssistantUsageSummary()).rejects.toThrow("ASSISTANT_USAGE_UNAVAILABLE");
+    expect(invoke).toHaveBeenCalledTimes(4);
+  });
+
+  it("rejects overbroad or malformed snapshots at the renderer boundary", async () => {
+    const invoke = vi.fn();
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    const snapshot = usageSnapshot();
+    for (const invalid of [null, [], { ...snapshot, globalTokenUsage: {} }, { ...snapshot, sessionId: "../other" },
+      { ...snapshot, lastTokenUsage: { ...snapshot.lastTokenUsage, ledgerPath: "private" } },
+      { ...snapshot, lastTokenUsage: { ...snapshot.lastTokenUsage, cacheUsageObserved: "false" } },
+      { ...snapshot, lastTokenUsage: { ...snapshot.lastTokenUsage, source: ["provider_usage"] } },
+      { ...snapshot, sessionTokenUsage: { ...snapshot.sessionTokenUsage, cacheHitRate: NaN } },
+      { ...snapshot, sessionTokenUsage: { ...snapshot.sessionTokenUsage, cachedInputTokens: true } }]) {
+      invoke.mockResolvedValueOnce(invalid);
+      await expect(getLauncherAssistantUsageSummary()).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
+    }
+  });
+});
 
 describe("Launcher assistant budget contract", () => {
   it("reads and saves zero, default and custom quotas through the fixed bridge", async () => {
