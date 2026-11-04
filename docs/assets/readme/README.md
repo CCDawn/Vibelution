@@ -143,3 +143,16 @@ python docs/assets/readme/capture.py
 | `showcase/evolution.png` → `evolution.webp` | 3013 × 1672、720,938 字节 → 1200 × 666、65,450 字节，同规格压缩；原 PNG 已删除。 |
 
 压缩后，2026-10-16 表中 `showcase/companion.png`、`showcase/knowledge.png`、`showcase/evolution.png` 三个条目的文件现以 `.webp` 形式存在。`docs/architecture/index.html`（离线单文件交互式架构地图，约 14MB）首次在两版 README「文档与参与」节获得入口。
+
+## 2026-11-04 三维知识图谱实拍
+
+中英文 README 将个人助理介绍提前至对话功能之后，保持 Agent 工作台为首页定位。知识章节改用批准后的正式 `PlatformKnowledgeGraphWorkbench` 页面实拍，旧 `knowledge.webp` 保留供历史引用。
+
+| 文件 | 内容与来源 |
+| --- | --- |
+| `showcase/knowledge-3d.png` | 1440×1000 原始 PNG，计算物理与能耗主题的 24 条真实正式知识；哑光多面体、真实透视、旋转避让标签及紧凑工具栏。 |
+| `showcase/knowledge-detail.png` | 同一正式页面点选 Dennard scaling，显示已有摘要、知识归属、版本和相关关系。 |
+
+拍摄使用任务 Launcher 实例，健康响应确认源码和前端产物属于任务工作树。实例中的科研知识、来源和生命周期元数据是原工作区正式记录的逐文件哈希一致副本；没有创建演示知识、改写标题或伪造关系，没有复制会话或私有记忆。副本只用于隔离验收，原记录未修改。页面经真实 API 读取，未拦截或模拟响应。截图保留原始像素，不替换文字或补画内容。
+
+浏览器核对包含主题进入、点选详情、自动环绕 120 帧标签矩形检查、旋转后适配和窄屏显示设置；没有捕获页面或控制台错误。图谱内容是已有知识记录，截图不代表对条目科学结论进行了独立验证。个人助理章节说明沿用前述事实来源，本轮没有用虚拟人画面代替个人助理截图。

@@ -88,21 +88,39 @@ Choose different Agents for different tasks, keeping everyday questions, project
 
 [Chat and workspace](web/src/routes/chat/README.md) · [Tool authorization](docs/agents/tool-authorization-entrypoints.md)
 
+<a id="personal-assistant"></a>
+## 02 / A personal assistant for your tasks and goals
+
+Bring daily tasks, near-term goals, and work across the platform into one conversation. Your first visit to the **Personal assistant** page initializes a dedicated Agent and session. Configure a model to start chatting.
+
+| What you can ask for | Available capabilities |
+| --- | --- |
+| Organize tasks and goals | Discuss your to-do list, break down the next step, and record preferences and goals in the assistant's own private memory. |
+| Check platform status | View Agents, sessions, activity, and items awaiting confirmation; filter by status and open the relevant session. |
+| Manage on request | Create, update, or archive Agents; create, stop, or delete sessions. Management actions go through the platform's tool approval flow. |
+| Keep chatting on the desktop | Use a floating window on Windows. The page and desktop mode share one assistant identity, session, and memory. |
+
+Try asking: **"Check which tasks are running, awaiting confirmation, or in an error state, and suggest what I should do. Observe first; do not make changes."**
+
+The floating window requires the Windows desktop workbench. [Model configuration](docs/ops/config/INDEX.md) · [Tool authorization](docs/agents/tool-authorization-entrypoints.md)
+
 <a id="knowledge"></a>
-## 02 / Keep knowledge connected to its sources
+## 03 / Keep knowledge connected to its sources
 
 Agent-private memory, team material, and formal knowledge have separate management surfaces. Browse the knowledge overview by topic, then open individual materials and their sources to carry useful context into your next task.
 
-[![Platform knowledge overview: topic groups and knowledge, ownership, and evidence relation views](docs/assets/readme/showcase/knowledge.webp)](docs/assets/readme/showcase/knowledge.webp)
+[![3D knowledge graph: 24 formal knowledge items in the computing physics and energy topic](docs/assets/readme/showcase/knowledge-3d.png)](docs/assets/readme/showcase/knowledge-3d.png)
 
 **Find material through topics:** browse groups and search knowledge and sources. **Retain evidence:** formal knowledge supports proposals, review, and source management; private memory keeps its own access boundaries.
 
-*The clusters represent topic groups. The displayed data has not established content relations such as support or contradiction; spatial distance does not imply causality or support.*
+[![Selecting Dennard scaling reveals its summary, ownership, revision and recorded source relations](docs/assets/readme/showcase/knowledge-detail.png)](docs/assets/readme/showcase/knowledge-detail.png)
+
+*Captured from the production page using an isolated copy of local formal research knowledge. Spatial positions aid navigation; edges preserve recorded relations and imply no additional causal claims.*
 
 [Memory and retrieval](core/web/services/memory_rag_services.md) · [Team knowledge](core/web/services/team_knowledge/README.md)
 
 <a id="evolution"></a>
-## 03 / Review the evidence behind each improvement
+## 04 / Review the evidence behind each improvement
 
 Self-evolution checks, changes, and verifies work against a goal. Supervised evolution brings the baseline, candidate, and independent reevaluation into one process, with review deciding whether to integrate the result.
 
@@ -115,7 +133,7 @@ Self-evolution checks, changes, and verifies work against a goal. Supervised evo
 [Evolution modes](core/web/services/evolution_services.md) · [Evolution configuration](docs/ops/config/06-agent-evolution.md)
 
 <a id="finance"></a>
-## 04 / A dedicated financial research workspace
+## 05 / A dedicated financial research workspace
 
 Research stocks and topics with analyst collaboration, market data, simulated accounts, portfolio research, and report materials in one place, reducing the need to move context between tools.
 
@@ -132,7 +150,7 @@ Research stocks and topics with analyst collaboration, market data, simulated ac
 [Financial workspace](web/src/routes/finance/README.md) · [Financial report service setup](docs/ops/config/financial-report-agent.md)
 
 <a id="companion"></a>
-## 05 / There is room for everyday life, too
+## 06 / There is room for everyday life, too
 
 Continue everyday conversations in character scenes. Configure identity, schedules, emotions, and long-term memory for Agents with the virtual-human plugin explicitly enabled.
 
@@ -154,22 +172,6 @@ Continue everyday conversations in character scenes. Configure identity, schedul
 *Left: the character scene screenshot. Right: a recorded idle animation of the desktop pet. Proactive scheduling and animated presentation depend on runtime support. Character names and third-party assets belong to their respective rights holders.*
 
 [Virtual-human plugin](core/agent_plugins/virtual_human_life/README.md)
-
-<a id="personal-assistant"></a>
-## 06 / A personal assistant for your tasks and goals
-
-Bring daily tasks, near-term goals, and work across the platform into one conversation. Your first visit to the **Personal assistant** page initializes a dedicated Agent and session. Configure a model to start chatting.
-
-| What you can ask for | Available capabilities |
-| --- | --- |
-| Organize tasks and goals | Discuss your to-do list, break down the next step, and record preferences and goals in the assistant's own private memory. |
-| Check platform status | View Agents, sessions, activity, and items awaiting confirmation; filter by status and open the relevant session. |
-| Manage on request | Create, update, or archive Agents; create, stop, or delete sessions. Management actions go through the platform's tool approval flow. |
-| Keep chatting on the desktop | Use a floating window on Windows. The page and desktop mode share one assistant identity, session, and memory. |
-
-Try asking: **"Check which tasks are running, awaiting confirmation, or in an error state, and suggest what I should do. Observe first; do not make changes."**
-
-The floating window requires the Windows desktop workbench. [Model configuration](docs/ops/config/INDEX.md) · [Tool authorization](docs/agents/tool-authorization-entrypoints.md)
 
 ## Configure the workbench your way
 

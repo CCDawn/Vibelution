@@ -88,21 +88,39 @@ macOS / Linux 使用浏览器工作台。当前安装需要上述运行环境，
 
 [会话与工作区](web/src/routes/chat/README.md) · [工具授权](docs/agents/tool-authorization-entrypoints.md)
 
+<a id="personal-assistant"></a>
+## 02 / 让个人助理跟进你的事务
+
+把日常事务、近期目标和平台里的工作带到同一段对话中。首次进入工作台的「个人助理」页面，会初始化专属 Agent 和会话；完成模型配置后即可开始交流。
+
+| 你可以让助理做什么 | 已有能力 |
+| --- | --- |
+| 梳理事务与目标 | 通过对话整理待办、拆解下一步，在助理自己的私有记忆中记录偏好与目标。 |
+| 查看平台概况 | 查看 Agent、会话、运行状态和待确认事项，按状态筛选并进入相应会话。 |
+| 按指令管理 | 创建、调整或归档 Agent，创建、停止或删除会话；管理操作经过平台工具审批。 |
+| 在桌面继续聊天 | 使用 Windows 桌面浮窗，页面与桌面模式共享同一个助理身份、会话与记忆。 |
+
+可以先试一句：**「看看平台有哪些正在运行、等待确认或异常的任务，给我处理建议。先观察，不执行操作。」**
+
+桌面浮窗需要 Windows 桌面工作台。[模型配置](docs/ops/config/INDEX.md) · [工具授权](docs/agents/tool-authorization-entrypoints.md)
+
 <a id="knowledge"></a>
-## 02 / 让知识有出处，也有去处
+## 03 / 让知识有出处，也有去处
 
 各 Agent 的私有记忆、团队资料与正式知识分别管理。在知识全景中按主题浏览，再进入具体资料与来源，把已经积累的内容带到下一次工作中。
 
-[![平台知识全景：按主题分组浏览正式知识，提供知识、归属与证据关系入口](docs/assets/readme/showcase/knowledge.webp)](docs/assets/readme/showcase/knowledge.webp)
+[![三维知识图谱：计算物理与能耗主题中的24条正式知识，可旋转浏览具体条目](docs/assets/readme/showcase/knowledge-3d.png)](docs/assets/readme/showcase/knowledge-3d.png)
 
 **从主题找到资料**：浏览主题分组、检索知识与来源。**保留依据**：正式知识有提案、审核和来源管理；私有记忆遵循各自的访问范围。
 
-*图中的星域表示主题分组；当前展示数据尚未建立支持、反驳等内容关系，空间距离不代表因果或支持关系。*
+[![点选 Dennard scaling 后查看摘要、知识归属、修订信息和已记录来源关系](docs/assets/readme/showcase/knowledge-detail.png)](docs/assets/readme/showcase/knowledge-detail.png)
+
+*实拍正式页面，使用本机正式科研知识的独立副本；图中空间位置用于浏览，连线保留已记录关系，不代表额外的因果推断。*
 
 [记忆与检索](core/web/services/memory_rag_services.md) · [团队知识](core/web/services/team_knowledge/README.md)
 
 <a id="evolution"></a>
-## 03 / 每一次改进，都能回看依据
+## 04 / 每一次改进，都能回看依据
 
 自进化围绕目标开展检查、修改与验证；监督进化把基线、候选和独立复评放在同一条流程中，交由审核决定是否集成。
 
@@ -115,7 +133,7 @@ macOS / Linux 使用浏览器工作台。当前安装需要上述运行环境，
 [两种进化模式](core/web/services/evolution_services.md) · [进化配置](docs/ops/config/06-agent-evolution.md)
 
 <a id="finance"></a>
-## 04 / 一个专属的金融研究工作台
+## 05 / 一个专属的金融研究工作台
 
 围绕股票与主题展开研究，把分析员协作、行情、模拟账户、组合研究和报告资料放在同一处，减少在不同工具之间搬运上下文。
 
@@ -132,7 +150,7 @@ macOS / Linux 使用浏览器工作台。当前安装需要上述运行环境，
 [金融工作台说明](web/src/routes/finance/README.md) · [财报服务配置](docs/ops/config/financial-report-agent.md)
 
 <a id="companion"></a>
-## 05 / 工作之外，也可以聊聊生活
+## 06 / 工作之外，也可以聊聊生活
 
 在人物场景中继续日常对话。为显式启用虚拟人插件的 Agent 配置人物身份、日程、情绪与长期记忆，让陪伴有自己的呈现方式。
 
@@ -154,22 +172,6 @@ macOS / Linux 使用浏览器工作台。当前安装需要上述运行环境，
 *左侧为人物场景截图，右侧为桌宠待机动效实录；主动调度和动态表现需要运行环境支持。角色名称与第三方素材的权利归各自权利人所有。*
 
 [虚拟人插件](core/agent_plugins/virtual_human_life/README.md)
-
-<a id="personal-assistant"></a>
-## 06 / 让个人助理跟进你的事务
-
-把日常事务、近期目标和平台里的工作带到同一段对话中。首次进入工作台的「个人助理」页面，会初始化专属 Agent 和会话；完成模型配置后即可开始交流。
-
-| 你可以让助理做什么 | 已有能力 |
-| --- | --- |
-| 梳理事务与目标 | 通过对话整理待办、拆解下一步，在助理自己的私有记忆中记录偏好与目标。 |
-| 查看平台概况 | 查看 Agent、会话、运行状态和待确认事项，按状态筛选并进入相应会话。 |
-| 按指令管理 | 创建、调整或归档 Agent，创建、停止或删除会话；管理操作经过平台工具审批。 |
-| 在桌面继续聊天 | 使用 Windows 桌面浮窗，页面与桌面模式共享同一个助理身份、会话与记忆。 |
-
-可以先试一句：**「看看平台有哪些正在运行、等待确认或异常的任务，给我处理建议。先观察，不执行操作。」**
-
-桌面浮窗需要 Windows 桌面工作台。[模型配置](docs/ops/config/INDEX.md) · [工具授权](docs/agents/tool-authorization-entrypoints.md)
 
 ## 按你的方式配置工作台
 
