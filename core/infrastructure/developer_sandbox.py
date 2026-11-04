@@ -300,11 +300,13 @@ def update_developer_mode_status(
         "updated_by": str(updated_by or "launcher").strip() or "launcher",
     }
     save_public_config(public_config, config_path or CONFIG_PATH)
+    clear_failures: list[dict[str, str]] = []
     if normalized:
         state = _ensure_active_state(root)
     else:
         state = _read_active_state(root)
-        clear_active_sandbox(project_root=root)
+        cleared = clear_active_sandbox(project_root=root)
+        clear_failures = list(cleared.get("failures") or [])
     _clear_developer_mode_config_cache()
     status = get_developer_mode_status(
         config_path=config_path,
@@ -313,6 +315,8 @@ def update_developer_mode_status(
     )
     if normalized and state:
         status["sandbox"]["createdAt"] = str(state.get("createdAt") or status["sandbox"].get("createdAt") or "")
+    if clear_failures:
+        status["failures"] = clear_failures
     return status
 
 
@@ -535,32 +539,41 @@ def _clear_active_sandbox_locked(root: Path) -> dict[str, Any]:
     state = _read_active_state(root)
     sandbox_id = str(state.get("sandboxId") or "").strip()
     deleted_root = ""
+    # Collect per-target removal failures (Windows file locks are common) instead
+    # of silently reporting success; callers surface them as `failures`.
+    failures: list[dict[str, str]] = []
     if sandbox_id:
         target = _sandbox_root(root, sandbox_id)
         deleted_root = str(target)
         if _is_relative_to(target, _sandboxes_root(root)) and target.exists():
-            shutil.rmtree(target, ignore_errors=True)
+            try:
+                shutil.rmtree(target)
+            except OSError as exc:
+                failures.append({"path": str(target), "error": str(exc)})
+    state_path = _active_state_path(root)
     try:
-        _active_state_path(root).unlink()
-    except OSError:
-        pass
+        state_path.unlink()
+    except OSError as exc:
+        failures.append({"path": str(state_path), "error": str(exc)})
     _invalidate_active_state_cache(root)
     return {
-        "ok": True,
+        "ok": not failures,
         "sandboxId": sandbox_id,
         "deletedRoot": deleted_root,
+        "failures": failures,
     }
 
 
 def reset_active_sandbox(*, project_root: Path | None = None) -> dict[str, Any]:
     root = _project_root(project_root)
     with route_writer_gate(root):
-        _clear_active_sandbox_locked(root)
+        cleared = _clear_active_sandbox_locked(root)
         state = _ensure_active_state(root)
         return {
-            "ok": True,
+            "ok": bool(cleared.get("ok")),
             "sandboxId": str(state.get("sandboxId") or ""),
             "root": str(_sandbox_root(root, str(state.get("sandboxId") or ""))),
+            "failures": list(cleared.get("failures") or []),
         }
 
 

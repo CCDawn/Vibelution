@@ -9,6 +9,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from core.infrastructure import developer_sandbox
 from core.infrastructure import git_memory
 from core.launcher import developer_mode
 from core.launcher import service as launcher_service
@@ -122,6 +123,84 @@ def test_developer_sandbox_reset_requires_enabled_and_rotates_sandbox(tmp_path, 
     assert reset["setting"]["enabled"] is True
     assert reset["sandbox"]["sandboxId"] != first_sandbox
     assert not marker.exists()
+
+
+def test_developer_sandbox_reset_reports_clear_failures_instead_of_ok(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[launcher]\n", encoding="utf-8")
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    monkeypatch.setattr(developer_mode, "PROJECT_ROOT", project_root)
+
+    initial = developer_mode.get_developer_mode_setting(config_path=config_path)
+    enabled = developer_mode.update_developer_mode_setting(
+        True,
+        base_hash=initial["configHash"],
+        config_path=config_path,
+    )["setting"]
+    first_sandbox = enabled["sandbox"]["sandboxId"]
+    sandbox_root = project_root / ".runtime" / "developer-mode" / "sandboxes" / first_sandbox
+    locked_file = sandbox_root / "workspace" / "locked.db"
+    locked_file.parent.mkdir(parents=True, exist_ok=True)
+    locked_file.write_text("locked", encoding="utf-8")
+
+    real_rmtree = developer_sandbox.shutil.rmtree
+
+    def locked_rmtree(path, *args, **kwargs):
+        if Path(path).resolve() == sandbox_root.resolve():
+            raise OSError("sandbox dir locked")
+        return real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(developer_sandbox.shutil, "rmtree", locked_rmtree)
+
+    reset = developer_mode.reset_developer_sandbox(config_path=config_path, project_root=project_root)
+
+    assert reset["ok"] is False
+    assert len(reset["failures"]) == 1
+    assert reset["failures"][0]["path"] == str(sandbox_root)
+    assert "sandbox dir locked" in reset["failures"][0]["error"]
+    assert "1 个路径仍被占用" in reset["message"]
+    assert locked_file.exists()
+    # Rotation still happens so the next write lands in a fresh sandbox.
+    assert reset["sandbox"]["sandboxId"] != first_sandbox
+
+
+def test_developer_mode_disable_reports_sandbox_clear_failures_instead_of_ok(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[launcher]\n", encoding="utf-8")
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    monkeypatch.setattr(developer_mode, "PROJECT_ROOT", project_root)
+
+    initial = developer_mode.get_developer_mode_setting(config_path=config_path)
+    enabled = developer_mode.update_developer_mode_setting(
+        True,
+        base_hash=initial["configHash"],
+        config_path=config_path,
+    )["setting"]
+    sandbox_root = project_root / ".runtime" / "developer-mode" / "sandboxes" / enabled["sandbox"]["sandboxId"]
+    sandbox_root.mkdir(parents=True, exist_ok=True)
+
+    real_rmtree = developer_sandbox.shutil.rmtree
+
+    def locked_rmtree(path, *args, **kwargs):
+        if Path(path).resolve() == sandbox_root.resolve():
+            raise OSError("sandbox dir locked")
+        return real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(developer_sandbox.shutil, "rmtree", locked_rmtree)
+
+    response = developer_mode.update_developer_mode_setting(
+        False,
+        base_hash=enabled["configHash"],
+        config_path=config_path,
+    )
+
+    assert response["ok"] is False
+    assert response["setting"]["enabled"] is False
+    assert len(response["failures"]) == 1
+    assert response["failures"][0]["path"] == str(sandbox_root)
+    assert "1 个路径仍被占用" in response["message"]
 
 
 def test_developer_cleanup_plan_requires_confirm_and_matching_hash(tmp_path):

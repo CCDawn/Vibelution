@@ -51,7 +51,7 @@ import {
 } from "../app/projectCloseGuard";
 import { useStableBeforeUnload } from "../app/useStableBeforeUnload";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
-import { VDenseOpsPage, VStateSurface, VTabs, VTooltip } from "../components/vui";
+import { VConfirmDialog, VDenseOpsPage, VStateSurface, VTabs, VTooltip } from "../components/vui";
 import { useLauncherLanguage } from "../i18n/useLauncherLanguage";
 import { launcherToolsRouteStyles as styles } from "./LauncherToolsRoute.styles";
 
@@ -316,6 +316,13 @@ type LauncherCopy = {
   developerModeControlled: string;
   developerModeSettingsReadonly: string;
   developerModeUpdated: string;
+  confirmDialogTitle: string;
+  confirmActionLabel: string;
+  cancelActionLabel: string;
+  developerModeDisableConfirmDetail: string;
+  developerModeResetSandboxConfirmDetail: string;
+  sandboxCleanupFailedTargets: string;
+  cleanupFailedTargets: string;
   maintenanceTitle: string;
   maintenancePanelTitle: string;
   maintenanceEmptyItems: string;
@@ -1173,6 +1180,13 @@ export function LauncherToolsRoute() {
         developerModeControlled: "Launcher 控制",
         developerModeSettingsReadonly: "设置页只读展示，不能在工作台设置里改动",
         developerModeUpdated: "开发者沙盒已更新",
+        confirmDialogTitle: "危险操作确认",
+        confirmActionLabel: "确认执行",
+        cancelActionLabel: "取消",
+        developerModeDisableConfirmDetail: "关闭开发者模式会删除当前无痕沙盒及其全部数据，正式链路不受影响。",
+        developerModeResetSandboxConfirmDetail: "重置会删除当前沙盒并生成新的沙盒 ID，正式链路不受影响。",
+        sandboxCleanupFailedTargets: "个文件未能删除",
+        cleanupFailedTargets: "个目标清理失败",
         maintenanceTitle: "恢复初始化",
         maintenancePanelTitle: "项目维护",
         maintenanceEmptyItems: "无须清理",
@@ -1453,6 +1467,13 @@ export function LauncherToolsRoute() {
         developerModeControlled: "Launcher controlled",
         developerModeSettingsReadonly: "Settings shows this read-only and cannot change it",
         developerModeUpdated: "Developer sandbox updated",
+        confirmDialogTitle: "Confirm destructive action",
+        confirmActionLabel: "Confirm",
+        cancelActionLabel: "Cancel",
+        developerModeDisableConfirmDetail: "Disabling developer mode deletes the current no-trace sandbox and all of its data. The formal pipeline is not affected.",
+        developerModeResetSandboxConfirmDetail: "Resetting deletes the current sandbox and issues a new sandbox ID. The formal pipeline is not affected.",
+        sandboxCleanupFailedTargets: "files could not be removed",
+        cleanupFailedTargets: "targets failed to clean",
         maintenanceTitle: "Restore initialization",
         maintenancePanelTitle: "Project maintenance",
         maintenanceEmptyItems: "Nothing to clean",
@@ -1517,6 +1538,11 @@ export function LauncherToolsRoute() {
   const [cleanupPlan, setCleanupPlan] = useState<LauncherDeveloperCleanupPlan | null>(null);
   const [maintenanceProfile, setMaintenanceProfile] = useState<LauncherMaintenanceProfileId>("clean_start");
   const [maintenancePlansByProfile, setMaintenancePlansByProfile] = useState<Partial<Record<LauncherMaintenanceProfileId, LauncherMaintenancePlan>>>({});
+  // Dangerous launcher actions confirm through VConfirmDialog request state (no blocking browser dialog).
+  const [developerDisableRequest, setDeveloperDisableRequest] = useState(false);
+  const [resetSandboxRequest, setResetSandboxRequest] = useState(false);
+  const [cleanupApplyRequest, setCleanupApplyRequest] = useState<LauncherDeveloperCleanupPlan | null>(null);
+  const [maintenanceApplyRequest, setMaintenanceApplyRequest] = useState<LauncherMaintenancePlan | null>(null);
   const [diagnosticsTab, setDiagnosticsTab] = useState("processes");
   const [maintenanceTab, setMaintenanceTab] = useState("project");
   const maintenancePlan = maintenancePlansByProfile[maintenanceProfile] ?? null;
@@ -1847,7 +1873,13 @@ export function LauncherToolsRoute() {
     mutationFn: updateLauncherDeveloperMode,
     onSuccess: (response) => {
       setCleanupPlan(null);
-      setNotice({ tone: response.setting.enabled ? "warning" : "success", text: response.message || copy.developerModeUpdated });
+      const failureCount = response.failures?.length ?? 0;
+      setNotice({
+        tone: failureCount > 0 ? "warning" : response.setting.enabled ? "warning" : "success",
+        text: failureCount > 0
+          ? `${response.message || copy.developerModeUpdated} · ${failureCount} ${copy.sandboxCleanupFailedTargets}`
+          : response.message || copy.developerModeUpdated,
+      });
       void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.launcherDeveloperNoiseOverview() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.configPublic() });
@@ -1861,7 +1893,13 @@ export function LauncherToolsRoute() {
     mutationFn: resetLauncherDeveloperSandbox,
     onSuccess: (response) => {
       setCleanupPlan(null);
-      setNotice({ tone: "success", text: response.message || copy.developerModeUpdated });
+      const failureCount = response.failures?.length ?? 0;
+      setNotice({
+        tone: failureCount > 0 ? "warning" : "success",
+        text: failureCount > 0
+          ? `${response.message || copy.developerModeUpdated} · ${failureCount} ${copy.sandboxCleanupFailedTargets}`
+          : response.message || copy.developerModeUpdated,
+      });
       void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.launcherDeveloperNoiseOverview() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.configPublic() });
@@ -1887,7 +1925,13 @@ export function LauncherToolsRoute() {
     mutationFn: applyLauncherDeveloperCleanup,
     onSuccess: (response) => {
       setCleanupPlan(null);
-      setNotice({ tone: "success", text: response.message || copy.cleanupApplied });
+      const failedCount = response.failed?.length ?? 0;
+      setNotice({
+        tone: response.ok ? "success" : "warning",
+        text: failedCount > 0
+          ? `${copy.cleanupApplied} · ${failedCount} ${copy.cleanupFailedTargets}`
+          : response.message || copy.cleanupApplied,
+      });
       void queryClient.invalidateQueries({ queryKey: queryKeys.launcherDeveloperNoiseOverview() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
     },
@@ -2154,10 +2198,29 @@ export function LauncherToolsRoute() {
   const actionLockLabel = projectIsClosed ? copy.actionsStartOnly : destructiveActionDisabled ? copy.actionsLocked : copy.actionsAvailable;
   const guardianProgress = `${guardian?.ownedCount ?? 0}/${guardian?.adapterCount ?? 0}`;
   const toggleDeveloperMode = (enabled: boolean, baseHash: string) => {
+    // Disabling wipes the sandbox — route through the confirm dialog request state.
+    if (!enabled) {
+      setDeveloperDisableRequest(true);
+      return;
+    }
     developerModeMutation.mutate({ enabled, baseHash });
   };
+  const handleConfirmDisableDeveloperMode = () => {
+    setDeveloperDisableRequest(false);
+    developerModeMutation.mutate({ enabled: false, baseHash: developerModeSetting?.configHash ?? "" });
+  };
+  const handleCancelDisableDeveloperMode = () => {
+    setDeveloperDisableRequest(false);
+  };
   const resetDeveloperSandbox = () => {
+    setResetSandboxRequest(true);
+  };
+  const handleConfirmResetSandbox = () => {
+    setResetSandboxRequest(false);
     resetDeveloperSandboxMutation.mutate();
+  };
+  const handleCancelResetSandbox = () => {
+    setResetSandboxRequest(false);
   };
   const previewDeveloperCleanup = () => {
     setCleanupPlan(null);
@@ -2167,16 +2230,23 @@ export function LauncherToolsRoute() {
     if (!cleanupPlan) {
       return;
     }
-    const confirmed = window.confirm(copy.cleanupRequiresConfirm);
-    if (!confirmed) {
+    setCleanupApplyRequest(cleanupPlan);
+  };
+  const handleConfirmCleanupApply = () => {
+    const request = cleanupApplyRequest;
+    setCleanupApplyRequest(null);
+    if (!request) {
       return;
     }
     cleanupApplyMutation.mutate({
-      action: cleanupPlan.action,
-      planId: cleanupPlan.planId,
-      planHash: cleanupPlan.planHash,
+      action: request.action,
+      planId: request.planId,
+      planHash: request.planHash,
       confirm: true,
     });
+  };
+  const handleCancelCleanupApply = () => {
+    setCleanupApplyRequest(null);
   };
   const previewMaintenancePlan = () => {
     setMaintenancePlansByProfile((plans) => {
@@ -2190,16 +2260,23 @@ export function LauncherToolsRoute() {
     if (!maintenancePlan) {
       return;
     }
-    const confirmed = window.confirm(copy.maintenanceRequiresConfirm);
-    if (!confirmed) {
+    setMaintenanceApplyRequest(maintenancePlan);
+  };
+  const handleConfirmMaintenanceApply = () => {
+    const request = maintenanceApplyRequest;
+    setMaintenanceApplyRequest(null);
+    if (!request) {
       return;
     }
     maintenanceApplyMutation.mutate({
-      planId: maintenancePlan.planId,
-      planHash: maintenancePlan.planHash,
+      planId: request.planId,
+      planHash: request.planHash,
       profileId: maintenanceProfile,
       confirm: true,
     });
+  };
+  const handleCancelMaintenanceApply = () => {
+    setMaintenanceApplyRequest(null);
   };
   const residualItems = status?.lifecycleProof.residualProcesses?.items ?? [];
   const residualCount = Math.max(status?.lifecycleProof.residualProcesses?.count ?? 0, residualItems.length);
@@ -2679,6 +2756,7 @@ export function LauncherToolsRoute() {
                     backendPortOverride={backendPortOverride}
                     frontendPortOverride={frontendPortOverride}
                     pending={startupSettingsMutation.isPending}
+                    uiLang={uiLang}
                     onSave={(nextSetting) => startupSettingsMutation.mutate(nextSetting)}
                   />
                 </div>
@@ -2807,6 +2885,58 @@ export function LauncherToolsRoute() {
             </section>
           </div>
       </div>
+      <VConfirmDialog
+        open={developerDisableRequest}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) handleCancelDisableDeveloperMode();
+        }}
+        tone="danger"
+        title={copy.confirmDialogTitle}
+        description={copy.developerModeDisableConfirmDetail}
+        confirmLabel={copy.confirmActionLabel}
+        cancelLabel={copy.cancelActionLabel}
+        confirmPending={developerModeMutation.isPending}
+        onConfirm={() => handleConfirmDisableDeveloperMode()}
+      />
+      <VConfirmDialog
+        open={resetSandboxRequest}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) handleCancelResetSandbox();
+        }}
+        tone="danger"
+        title={copy.confirmDialogTitle}
+        description={copy.developerModeResetSandboxConfirmDetail}
+        confirmLabel={copy.confirmActionLabel}
+        cancelLabel={copy.cancelActionLabel}
+        confirmPending={resetDeveloperSandboxMutation.isPending}
+        onConfirm={() => handleConfirmResetSandbox()}
+      />
+      <VConfirmDialog
+        open={Boolean(cleanupApplyRequest)}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) handleCancelCleanupApply();
+        }}
+        tone="danger"
+        title={copy.confirmDialogTitle}
+        description={copy.cleanupRequiresConfirm}
+        confirmLabel={copy.confirmActionLabel}
+        cancelLabel={copy.cancelActionLabel}
+        confirmPending={cleanupApplyMutation.isPending}
+        onConfirm={() => handleConfirmCleanupApply()}
+      />
+      <VConfirmDialog
+        open={Boolean(maintenanceApplyRequest)}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) handleCancelMaintenanceApply();
+        }}
+        tone="danger"
+        title={copy.confirmDialogTitle}
+        description={copy.maintenanceRequiresConfirm}
+        confirmLabel={copy.confirmActionLabel}
+        cancelLabel={copy.cancelActionLabel}
+        confirmPending={maintenanceApplyMutation.isPending}
+        onConfirm={() => handleConfirmMaintenanceApply()}
+      />
     </VDenseOpsPage>
   );
 }

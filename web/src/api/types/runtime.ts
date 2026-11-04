@@ -925,6 +925,8 @@ export type LauncherDeveloperModeUpdateResponse = {
   ok: boolean;
   setting: LauncherDeveloperModeSetting;
   message: string;
+  /** Paths that could not be removed when disabling/clearing the sandbox (Windows file locks). */
+  failures?: Array<{ path: string; error: string }>;
 };
 
 export type LauncherDeveloperCleanupAction = "quick_clean" | "db_compact" | "worktree_cleanup";
@@ -1008,6 +1010,8 @@ export type LauncherDeveloperCleanupApplyResponse = {
   planHash: string;
   action: LauncherDeveloperCleanupAction;
   applied: LauncherDeveloperCleanupTarget[];
+  /** Targets that failed to be cleaned; present when the apply partially failed. */
+  failed?: LauncherDeveloperCleanupTarget[];
   reclaimedBytes: number;
   message: string;
 };

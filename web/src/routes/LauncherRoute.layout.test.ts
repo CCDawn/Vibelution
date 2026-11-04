@@ -834,10 +834,24 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("getLauncherDeveloperNoiseOverview");
     expect(routeSource).toContain("previewLauncherDeveloperCleanup");
     expect(routeSource).toContain("applyLauncherDeveloperCleanup");
-    expect(routeSource).toContain("planId: cleanupPlan.planId");
-    expect(routeSource).toContain("planHash: cleanupPlan.planHash");
+    expect(routeSource).toContain("planId: request.planId");
+    expect(routeSource).toContain("planHash: request.planHash");
     expect(routeSource).toContain("confirm: true");
-    expect(routeSource).toContain("window.confirm(copy.cleanupRequiresConfirm)");
+    // Destructive launcher confirms are VConfirmDialog request states, not blocking window.confirm.
+    expect(routeSource).toContain("<VConfirmDialog");
+    expect(routeSource).toContain("developerDisableRequest");
+    expect(routeSource).toContain("handleConfirmDisableDeveloperMode");
+    expect(routeSource).toContain("handleCancelDisableDeveloperMode");
+    expect(routeSource).toContain("resetSandboxRequest");
+    expect(routeSource).toContain("handleConfirmResetSandbox");
+    expect(routeSource).toContain("handleCancelResetSandbox");
+    expect(routeSource).toContain("cleanupApplyRequest");
+    expect(routeSource).toContain("handleConfirmCleanupApply");
+    expect(routeSource).toContain("handleCancelCleanupApply");
+    expect(routeSource).toContain("maintenanceApplyRequest");
+    expect(routeSource).toContain("handleConfirmMaintenanceApply");
+    expect(routeSource).toContain("handleCancelMaintenanceApply");
+    expect(routeSource).not.toContain("window.confirm");
     expect(routeSource).toContain("开发者模式");
     expect(routeSource).toContain("当前状态");
     expect(routeSource).toContain("最近保存");

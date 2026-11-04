@@ -106,10 +106,11 @@ def update_developer_mode_setting(
             "developer_mode_config_conflict",
             "开发者模式保存前配置已被其他页面或进程改动，请刷新 Launcher 后重试。",
         )
+    clear_failures = list(setting.get("failures") or [])
     _record_event(
         "launcher.developer_mode.updated",
         phase="settings",
-        outcome="succeeded",
+        outcome="partial" if clear_failures else "succeeded",
         message="Global developer sandbox mode setting updated.",
         fields={
             "previousEnabled": previous["enabled"],
@@ -118,12 +119,17 @@ def update_developer_mode_setting(
             "configHash": setting["configHash"],
             "developerSandboxId": (setting.get("sandbox") or {}).get("sandboxId", ""),
             "recordKind": "debug" if setting["enabled"] else "control",
+            "clearFailureCount": len(clear_failures),
         },
     )
+    message = "开发者模式已由 Launcher 保存；开启时写入会进入无痕开发沙盒。"
+    if clear_failures:
+        message = f"{message} 沙盒清理未完全成功：{len(clear_failures)} 个路径仍被占用。"
     return {
-        "ok": True,
+        "ok": not clear_failures,
         "setting": setting,
-        "message": "开发者模式已由 Launcher 保存；开启时写入会进入无痕开发沙盒。",
+        "failures": clear_failures,
+        "message": message,
     }
 
 
@@ -194,23 +200,29 @@ def reset_developer_sandbox(*, config_path: Path | None = None, project_root: Pa
         raise DeveloperModeDisabled("开发者模式未开启，无法重置开发者沙盒。")
     previous_sandbox_id = str((mode.get("sandbox") or {}).get("sandboxId") or "")
     reset = developer_sandbox.reset_active_sandbox(project_root=root)
+    clear_failures = list(reset.get("failures") or [])
     setting = get_developer_mode_setting(config_path=config_path)
     _record_event(
         "launcher.developer_mode.sandbox.reset",
         phase="settings",
-        outcome="succeeded",
+        outcome="partial" if clear_failures else "succeeded",
         message="Developer sandbox reset.",
         fields={
             "previousDeveloperSandboxId": previous_sandbox_id,
             "developerSandboxId": str((setting.get("sandbox") or {}).get("sandboxId") or reset.get("sandboxId") or ""),
             "recordKind": "debug",
+            "clearFailureCount": len(clear_failures),
         },
     )
+    message = "开发者沙盒已重置；正式链路未被修改。"
+    if clear_failures:
+        message = f"{message} 沙盒清理未完全成功：{len(clear_failures)} 个路径仍被占用。"
     return {
-        "ok": True,
+        "ok": not clear_failures,
         "setting": setting,
         "sandbox": setting.get("sandbox") or {},
-        "message": "开发者沙盒已重置；正式链路未被修改。",
+        "failures": clear_failures,
+        "message": message,
     }
 
 
