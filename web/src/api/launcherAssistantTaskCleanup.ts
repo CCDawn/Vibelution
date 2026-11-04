@@ -7,14 +7,14 @@ export type LauncherTaskCleanupPreview = {
   schemaVersion: 1; fingerprint: string; estimatedBytes: number;
   items: { key: string; title: string; status: "ready" | "blocked"; estimatedBytes: number;
     resources: { kind: string; count: number; bytes: number }[]; retained: LauncherTaskCleanupRetained[]; reason?: string;
-    sourceConfirmed?: string }[];
+    sourceConfirmed?: string; nativeCleanup?: "blocked" }[];
 };
 export type LauncherTaskCleanupResult = {
   schemaVersion: 1; releasedBytes: number;
   storageDeltaBytes?: number;
   items: { key: string; status: "deleted" | "partial" | "blocked"; releasedBytes: number;
     retained: LauncherTaskCleanupRetained[]; failures: { code: string; message: string }[];
-    sourceConfirmed?: string }[];
+    sourceConfirmed?: string; nativeCleanup?: "blocked" }[];
 };
 
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -23,6 +23,7 @@ const text = (value: unknown, max = 2000): value is string => typeof value === "
 const retained = (value: unknown): boolean => Array.isArray(value) && value.length <= 256
   && value.every(item => record(item) && text(item.kind, 100) && text(item.reason));
 const optionalSourceConfirmed = (value: unknown): boolean => value === undefined || text(value, 64);
+const optionalNativeCleanup = (value: unknown): boolean => value === undefined || value === "blocked";
 const invalid = () => new Error("Launcher 任务清理结果不可用，请重试。");
 const targetKey = (target: LauncherTaskCleanupTarget) => JSON.stringify([target.kind, target.projectId,
   target.kind === "dispatch" ? target.dispatchId : target.originAction, target.kind === "team_run" ? target.requestId : null]);
@@ -39,6 +40,7 @@ function previewValue(result: unknown, targets: LauncherTaskCleanupTarget[]): La
     || !result.items.every(item => record(item) && text(item.key, 1000) && text(item.title, 200)
       && ["ready", "blocked"].includes(String(item.status)) && count(item.estimatedBytes) && retained(item.retained)
       && (item.reason === undefined || text(item.reason)) && optionalSourceConfirmed(item.sourceConfirmed)
+      && optionalNativeCleanup(item.nativeCleanup)
       && Array.isArray(item.resources) && item.resources.length <= 256
       && item.resources.every(resource => record(resource) && text(resource.kind, 100) && count(resource.count) && count(resource.bytes)))) throw invalid();
   const preview = result as LauncherTaskCleanupPreview;
@@ -50,7 +52,7 @@ function resultValue(result: unknown, targets: LauncherTaskCleanupTarget[]): Lau
   if (!record(result) || result.schemaVersion !== 1 || !count(result.releasedBytes) || result.storageDeltaBytes !== undefined && !Number.isSafeInteger(result.storageDeltaBytes) || !Array.isArray(result.items) || result.items.length > 32
     || !result.items.every(item => record(item) && text(item.key, 1000)
       && ["deleted", "partial", "blocked"].includes(String(item.status)) && count(item.releasedBytes) && retained(item.retained)
-      && optionalSourceConfirmed(item.sourceConfirmed)
+      && optionalSourceConfirmed(item.sourceConfirmed) && optionalNativeCleanup(item.nativeCleanup)
       && Array.isArray(item.failures) && item.failures.length <= 256
       && item.failures.every(failure => record(failure) && text(failure.code, 100) && text(failure.message)))) throw invalid();
   const outcome = result as LauncherTaskCleanupResult;
@@ -179,5 +181,18 @@ export function launcherTaskCleanupSourceNote(code: string | undefined, lang: "z
   if (!code) return null;
   const note = SOURCE_CONFIRMED_NOTES[code];
   if (!note) return lang === "zh" ? "已确认源任务不存在或无法恢复，已移除本地关联。" : "The source task was confirmed absent or unrecoverable; the local association was removed.";
+  return note[lang === "zh" ? 0 : 1];
+}
+
+const NATIVE_CLEANUP_NOTES: Record<string, [string, string]> = {
+  blocked: ["已移除任务关联；源任务资源因共用或归属未确认已保留，可在源任务管理中处理。",
+    "The task association was removed; the source task's resources were kept because they are shared or their ownership is unconfirmed. Manage them from the source task."],
+};
+
+/** Evidence note for a deletion that kept the source task's own retained resources. */
+export function launcherTaskCleanupNativeNote(code: string | undefined, lang: "zh" | "en"): string | null {
+  if (!code) return null;
+  const note = NATIVE_CLEANUP_NOTES[code];
+  if (!note) return lang === "zh" ? "已移除任务关联；源任务资源已保留，可在源任务管理中处理。" : "The task association was removed; the source task's resources were kept and can be managed from the source task.";
   return note[lang === "zh" ? 0 : 1];
 }

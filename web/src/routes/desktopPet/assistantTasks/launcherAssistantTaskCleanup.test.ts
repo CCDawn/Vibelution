@@ -48,6 +48,20 @@ describe("Launcher task cleanup batched transport", () => {
     const result = await api.executeLauncherTaskCleanup(input, plan.fingerprint);
     expect(result.items[0].sourceConfirmed).toBe("task_absent");
   });
+  it("keeps a native-blocked evidence note through validation and falls back for unknown codes", async () => {
+    expect(api.launcherTaskCleanupNativeNote("blocked", "zh")).toContain("已移除任务关联");
+    expect(api.launcherTaskCleanupNativeNote("blocked", "en")).toContain("source task");
+    expect(api.launcherTaskCleanupNativeNote("future_code", "zh")).toContain("已移除任务关联");
+    expect(api.launcherTaskCleanupNativeNote(undefined, "zh")).toBeNull();
+    const input = scope(1), plan = await api.previewLauncherTaskCleanup(input);
+    invoke.mockImplementation(async (request: { operation: string; targets: LauncherTaskCleanupTarget[] }) =>
+      request.operation === "previewTaskCleanup"
+        ? { ...preview(request.targets), items: preview(request.targets).items.map(item => ({ ...item, nativeCleanup: "blocked" })) }
+        : { ...deleted(request.targets), items: deleted(request.targets).items.map(item => ({ ...item, nativeCleanup: "blocked" })) });
+    const result = await api.executeLauncherTaskCleanup(input, plan.fingerprint);
+    expect(result.items[0].status).toBe("deleted");
+    expect(result.items[0].nativeCleanup).toBe("blocked");
+  });
   it("deducts storage growth in one batch from release in another batch", async () => {
     const input = scope(33), plan = await api.previewLauncherTaskCleanup(input);
     let batch = 0;

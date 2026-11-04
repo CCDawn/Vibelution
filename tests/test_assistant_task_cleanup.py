@@ -324,6 +324,73 @@ async def test_verified_native_tombstone_keeps_prior_deletion_reachable(scene):
     assert scene.client.calls == 1
 
 
+def _blocked_native_preview(reasons):
+    return {"schemaVersion": 1, "taskId": "eat-1", "revision": 3, "status": "blocked",
+            "fingerprint": "f" * 64, "estimatedBytes": 0, "resources": [],
+            "retained": [{"kind": kind, "reason": reason} for kind, reason in reasons]}
+
+
+@pytest.mark.anyio
+async def test_permanently_blocked_native_preview_degrades_to_reference_only_removal(scene):
+    async def blocked(**_):
+        return _blocked_native_preview([("workspace", "shared_project_source"),
+                                        ("workspace", "workspace_shared_by_task"),
+                                        ("session", "session_shared_by_task"),
+                                        ("shared_runtime_storage", "shared_database_and_git_objects")])
+    scene.client.preview_task_cleanup = blocked
+    preview = await scene.service.preview(scene.payload)
+    item = preview["items"][0]
+    assert item["status"] == "ready" and item["nativeCleanup"] == "blocked"
+    reasons = {row["reason"] for row in item["retained"]}
+    assert {"项目源码由其他任务共用。", "工作区仍被其他任务引用，仅清理本项的独占记录。",
+            "会话仍被其他任务引用。"} <= reasons
+    result = await scene.service.execute(CleanupExecute(**scene.payload.model_dump(), fingerprint=preview["fingerprint"]))
+    item = result["items"][0]
+    assert item["status"] == "deleted" and item["nativeCleanup"] == "blocked"
+    assert not scene.path.exists() and (scene.root / "deleted" / "dispatch-1.json").is_file()
+    marker = json.loads((scene.root / "deleted" / "dispatch-1.json").read_text())
+    assert marker["requestDigest"] == "a" * 64 and marker["projectBinding"] == "binding"
+    # The degraded exit never deletes native resources.
+    assert scene.client.calls == 0
+
+
+@pytest.mark.anyio
+async def test_native_blocked_preview_that_turns_ready_at_execute_needs_a_fresh_preview(scene):
+    responses = ["blocked", "ready"]
+
+    async def preview(**_):
+        if responses[0] == "blocked":
+            responses.pop(0)
+            return _blocked_native_preview([("session", "session_shared_by_task")])
+        return {"schemaVersion": 1, "taskId": "eat-1", "revision": 3, "status": "ready",
+                "fingerprint": "f" * 64, "estimatedBytes": 100, "resources": [], "retained": []}
+
+    scene.client.preview_task_cleanup = preview
+    stale = await scene.service.preview(scene.payload)
+    assert stale["items"][0]["nativeCleanup"] == "blocked"
+    result = await scene.service.execute(CleanupExecute(**scene.payload.model_dump(), fingerprint=stale["fingerprint"]))
+    assert result["items"][0]["status"] == "blocked" and scene.path.exists() and scene.client.calls == 0
+    fresh = await scene.service.preview(scene.payload)
+    assert "nativeCleanup" not in fresh["items"][0]
+    result = await scene.service.execute(CleanupExecute(**scene.payload.model_dump(), fingerprint=fresh["fingerprint"]))
+    assert result["items"][0]["status"] == "deleted" and not scene.path.exists() and scene.client.calls == 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("code,phrase", [("BACKEND_UNAVAILABLE", "恢复连接"), ("TASK_NOT_TERMINAL", "结束任务")])
+async def test_bound_native_source_that_cannot_confirm_or_is_active_stays_blocked(scene, code, phrase):
+    async def unavailable(**_):
+        raise BackendClientError("private source detail", code=code)
+
+    scene.client.preview_task_cleanup = unavailable
+    preview = await scene.service.preview(scene.payload)
+    assert preview["items"][0]["status"] == "blocked" and "private" not in json.dumps(preview)
+    assert phrase in preview["items"][0]["reason"]
+    result = await scene.service.execute(CleanupExecute(**scene.payload.model_dump(), fingerprint=preview["fingerprint"]))
+    assert result["items"][0]["status"] == "blocked" and scene.path.exists()
+    assert not (scene.root / "deleted" / "dispatch-1.json").exists() and scene.client.calls == 0
+
+
 @pytest.mark.anyio
 @pytest.mark.parametrize("change", ["source_acknowledged", "running", "project_binding", "terminal_status"])
 async def test_unstarted_reference_cleanup_rechecks_status_and_binding_before_delete(scene, change):

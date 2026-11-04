@@ -429,8 +429,23 @@ class TaskCleanup:
                 or not isinstance(native.get("fingerprint"), str)):
             raise ValueError("cleanup_source_unconfirmed")
         if native.get("status", "ready") != "ready":
-            return None, {"status": "blocked", "estimatedBytes": 0, "resources": [],
-                          "retained": _retained(native.get("retained", [])), "reason": "有资源尚不能安全删除，请处理保留原因后重试。"}
+            # A successful preview that still reports retained sources (shared
+            # sessions, unproven workspace ownership) can never turn "ready" by
+            # operator action, so blocking here dead-ends the association.
+            # Degrade to the reference-only exit: remove only the assistant-side
+            # record and keep every source resource, exactly like _reference_plan.
+            rows = [entry for entry in [*native.get("retained", []), *native.get("failures", [])]
+                    if isinstance(entry, dict)]
+            size = _size(path)
+            return {"path": path, "binding": _dispatch_binding(row), "referenceOnly": True,
+                    "nativeCleanup": "blocked",
+                    "sourceStatus": ("native_blocked", tuple(sorted({str(entry.get("reason")) for entry in rows}))),
+                    "bytes": size}, {
+                "status": "ready", "nativeCleanup": "blocked", "estimatedBytes": size,
+                "resources": [{"kind": "launcher_task_record", "count": 1, "bytes": size}],
+                "retained": [{"kind": "source_resources",
+                              "reason": "本次仅移除助理中的任务关联，源任务的共用或归属未确认资源均已保留。"},
+                             *_retained(rows)]}
         return {"path": path, "binding": _dispatch_binding(row), "native": native, "bytes": _size(path)}, {
             "status": "ready", "estimatedBytes": _size(path) + max(0, int(native.get("estimatedBytes", 0))),
             "resources": [{"kind": "launcher_task_record", "count": 1, "bytes": _size(path)}, *native.get("resources", [])],
@@ -509,6 +524,8 @@ class TaskCleanup:
                             item.update(status="deleted", retained=summary["retained"])
                             if summary.get("sourceConfirmed"):
                                 item["sourceConfirmed"] = summary["sourceConfirmed"]
+                            if summary.get("nativeCleanup"):
+                                item["nativeCleanup"] = summary["nativeCleanup"]
                         if not plan.get("referenceOnly"):
                             # Persist recovery before an irreversible native request.
                             # Local-only removal must not become a native-cleanup retry.
