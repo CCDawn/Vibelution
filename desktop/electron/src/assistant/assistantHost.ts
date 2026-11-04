@@ -1814,6 +1814,11 @@ export class AssistantHost {
           // prefix lets the code cross assistantBridge's renderer allowlist.
           throw new HostError("ASSISTANT_SESSION_CONFLICT");
         }
+        // host.py's attachment-read 404 reports the unprefixed ATTACHMENT_NOT_
+        // FOUND code. Pass it through under the same name, listed explicitly
+        // instead of widening the prefix family: every unprefixed passthrough
+        // stays a deliberate, consumed decision.
+        if (failureCode === "ATTACHMENT_NOT_FOUND") throw new HostError(failureCode);
         if (failureCode !== null && /^ASSISTANT_[A-Z_]+$/.test(failureCode)) throw new HostError(failureCode);
         if (path === "/api/assistant/management-permission") {
           if (response.status === 409) throw new HostError("ASSISTANT_PERMISSION_CONFLICT");

@@ -203,6 +203,20 @@ describe("AssistantHost", () => {
     await host.stop();
   });
 
+  it("passes the attachment-read 404 through under its native code and keeps other unprefixed codes folded", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    fetchImpl.mockResolvedValueOnce(Response.json({ detail: { code: "ATTACHMENT_NOT_FOUND" } }, { status: 404 }));
+    await expect(host.request({ operation: "readAttachment", artifactId: "gone-1" })).rejects.toThrow("ATTACHMENT_NOT_FOUND");
+    // Only the explicitly listed unprefixed code crosses; a foreign code and a
+    // bare 404 keep the legacy status-only fold, never an attachment verdict.
+    fetchImpl.mockResolvedValueOnce(Response.json({ detail: { code: "SOMETHING_ELSE" } }, { status: 404 }));
+    await expect(host.request({ operation: "readAttachment", artifactId: "gone-2" })).rejects.toThrow("ASSISTANT_HTTP_FAILED");
+    fetchImpl.mockResolvedValueOnce(Response.json({ detail: "private" }, { status: 404 }));
+    await expect(host.request({ operation: "readAttachment", artifactId: "gone-3" })).rejects.toThrow("ASSISTANT_HTTP_FAILED");
+    await host.stop();
+  });
+
   it.each(["idle", "active", "unknown"] as const)("observes native %s privately and closes lifecycle admission before its final proof", async state => {
     const { host, fetchImpl } = fixture({ graceful: true });
     expect(await host.lifecycleStatus()).toBe("idle");

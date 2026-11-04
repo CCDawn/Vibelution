@@ -52,4 +52,17 @@ describe("useChatAgentDirectoryActions contract", () => {
     expect(routeSource).toContain("isAgentArchivePending,");
     expect(routeSource).toContain("enqueueAgentArchive(variables.agentId)");
   });
+
+  it("confirms agent archive through the VConfirmDialog request state instead of window.confirm", () => {
+    expect(actionsSource).not.toContain("window.confirm(");
+    expect(actionsSource).toContain("setAgentArchiveConfirm");
+    expect(actionsSource).toContain("confirmAgentArchive");
+    expect(actionsSource).toContain("cancelAgentArchive");
+    // The confirm copy is unchanged and owned by the hook.
+    expect(actionsSource).toContain("确认归档");
+    expect(routeSource).toContain("agentArchiveConfirm.message");
+    expect(routeSource).toContain("onConfirm={confirmAgentArchive}");
+    expect(routeSource).toContain("onCancel={cancelAgentArchive}");
+    expect(routeSource).toContain("confirmPending={isAgentArchivePending(agentArchiveConfirm.agentId)}");
+  });
 });

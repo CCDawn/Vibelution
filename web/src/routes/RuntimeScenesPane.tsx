@@ -37,7 +37,7 @@ import {
 import { paneWidthCssVar } from "../components/layout/paneCssVariables";
 import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
-import { VButton, VIconButton, VNativeInput, VTabs } from "../components/vui";
+import { VButton, VConfirmDialog, VIconButton, VNativeInput, VTabs } from "../components/vui";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { TranslationKey } from "../i18n/dictionary";
 import { classifyRuntimeSceneEvent, type LogSeverityFilter, matchesSeverityFilter } from "../logs/logSeverity";
@@ -886,6 +886,8 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
   );
   const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
   const [actionNotice, setActionNotice] = useState<ActionNotice | null>(null);
+  // Deleting scene bundles is destructive — confirm through the VConfirmDialog request state.
+  const [deleteScenesConfirmRequest, setDeleteScenesConfirmRequest] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   useEffect(() => {
     const media = window.matchMedia("(max-width: 900px)");
@@ -1180,10 +1182,16 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
     if (selectedSceneIds.length === 0 || deleteRuntimeScenesMutation.isPending) {
       return;
     }
-    if (!window.confirm(buildDeleteConfirmationLabel(selectedSceneIds))) {
-      return;
-    }
+    setDeleteScenesConfirmRequest(true);
+  }
+
+  function handleConfirmDeleteSelected() {
+    setDeleteScenesConfirmRequest(false);
     deleteRuntimeScenesMutation.mutate(selectedSceneIds);
+  }
+
+  function handleCancelDeleteSelected() {
+    setDeleteScenesConfirmRequest(false);
   }
 
   const previewActions = (
@@ -1651,6 +1659,23 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
           <div className={styles.emptySurface}>{t("loadingFilePreview")}</div>
         )}
       </section>
+
+      <VConfirmDialog
+        open={deleteScenesConfirmRequest}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) handleCancelDeleteSelected();
+        }}
+        tone="danger"
+        title={t("deleteSelectedRuntimeScenes")}
+        description={selectedSceneIds.length > 0
+          ? <span className="whitespace-pre-line">{buildDeleteConfirmationLabel(selectedSceneIds)}</span>
+          : ""}
+        confirmLabel={lang === "zh" ? "确认删除" : "Delete"}
+        cancelLabel={lang === "zh" ? "取消" : "Cancel"}
+        confirmPending={deleteRuntimeScenesMutation.isPending}
+        onConfirm={handleConfirmDeleteSelected}
+        onCancel={handleCancelDeleteSelected}
+      />
     </div>
   );
 }

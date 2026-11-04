@@ -8,7 +8,7 @@ import {
   unlinkSync,
   writeFileSync
 } from "node:fs";
-import { dirname, join, resolve as resolvePath } from "node:path";
+import { basename, dirname, join, resolve as resolvePath } from "node:path";
 import type { Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -297,6 +297,10 @@ export function runtimeManagerDaemonPidPath(workspaceRoot: string): string {
   return join(resolveRuntimeManagerDir(workspaceRoot), "daemon.pid");
 }
 
+export function runtimeManagerDaemonLockPath(workspaceRoot: string): string {
+  return join(resolveRuntimeManagerDir(workspaceRoot), "daemon.lock");
+}
+
 export function runtimeManagerDaemonIdentityPath(workspaceRoot: string): string {
   return join(resolveRuntimeManagerDir(workspaceRoot), "daemon.identity.json");
 }
@@ -412,6 +416,106 @@ export function readDaemonIdentity(workspaceRoot: string): PythonProcessIdentity
   } catch {
     return null;
   }
+}
+
+const PYTHON_DAEMON_EXECUTABLE_NAME = /^pythonw?(\d+(\.\d+)*)?$/;
+
+/**
+ * Whether an executable path could plausibly belong to a Runtime Manager
+ * daemon (the python/pythonw family the product spawns). Windows pid reuse
+ * turns a stale daemon.pid into an unrelated conhost/node pid; this check
+ * separates that reuse from a real daemon whose identity file was lost.
+ */
+export function executableLooksLikePythonDaemon(executable: string): boolean {
+  const name = basename(String(executable || "").trim()).toLowerCase();
+  if (!name) {
+    return false;
+  }
+  return PYTHON_DAEMON_EXECUTABLE_NAME.test(name.endsWith(".exe") ? name.slice(0, -".exe".length) : name);
+}
+
+export type RuntimeManagerDaemonRecordCleanupResult = {
+  removedPaths: string[];
+  failedPaths: string[];
+};
+
+/**
+ * Delete only the stale daemon record files (daemon.pid, daemon.lock,
+ * daemon.identity.json). Callers must first have proven the recorded pid is
+ * dead or reused by a foreign process: while a daemon runs, the Python side
+ * owns these descriptors and an O_EXCL claim depends on them staying intact.
+ * No process is ever signalled here.
+ */
+export function clearStaleRuntimeManagerDaemonRecords(
+  workspaceRoot: string
+): RuntimeManagerDaemonRecordCleanupResult {
+  const paths = [
+    runtimeManagerDaemonPidPath(workspaceRoot),
+    runtimeManagerDaemonLockPath(workspaceRoot),
+    runtimeManagerDaemonIdentityPath(workspaceRoot)
+  ];
+  const removedPaths: string[] = [];
+  const failedPaths: string[] = [];
+  for (const path of paths) {
+    try {
+      unlinkSync(path);
+      removedPaths.push(path);
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
+        failedPaths.push(path);
+      }
+    }
+  }
+  return { removedPaths, failedPaths };
+}
+
+type RuntimeManagerDaemonRecordReconciliation = {
+  /**
+   * True when the record no longer describes a plausible daemon and its files
+   * may be (or have been) removed: the recorded pid is dead, or the pid now
+   * belongs to a confirmed non-python process.
+   */
+  stale: boolean;
+  cleared: boolean;
+  failedPaths: string[];
+  note: string;
+};
+
+/**
+ * Classify a daemon.pid record against the live process table and drop the
+ * record files when they are provably stale. A live python-family pid (or one
+ * whose identity cannot be captured) is left untouched so the conservative
+ * fail-closed paths keep their meaning; only record files are ever removed.
+ */
+async function reconcileStaleRuntimeManagerDaemonRecords(input: {
+  workspaceRoot: string;
+  daemonPid: number;
+  pidAlive: (pid: number) => boolean;
+  captureIdentity: (pid: number) => Promise<PythonProcessIdentity | null>;
+}): Promise<RuntimeManagerDaemonRecordReconciliation> {
+  const daemonPid = input.daemonPid;
+  if (daemonPid <= 0) {
+    return { stale: false, cleared: false, failedPaths: [], note: "" };
+  }
+  let foreignExecutable = "";
+  if (input.pidAlive(daemonPid)) {
+    const identity = await input.captureIdentity(daemonPid);
+    if (!identity || executableLooksLikePythonDaemon(identity.executable)) {
+      return { stale: false, cleared: false, failedPaths: [], note: "" };
+    }
+    foreignExecutable = basename(identity.executable.trim());
+  }
+  const cleanup = clearStaleRuntimeManagerDaemonRecords(input.workspaceRoot);
+  return {
+    stale: true,
+    cleared: cleanup.failedPaths.length === 0,
+    failedPaths: cleanup.failedPaths,
+    note: cleanup.failedPaths.length > 0
+      ? `Runtime Manager daemon records for pid ${daemonPid} could not be cleared: ${cleanup.failedPaths.join(", ")}`
+      : foreignExecutable
+        ? `Ignored stale Runtime Manager daemon pid ${daemonPid}; the pid was reused by ${foreignExecutable} and its record files were cleared without terminating any process.`
+        : `Cleared stale Runtime Manager daemon pid ${daemonPid} records; the recorded process had exited.`
+  };
 }
 
 function stateProcessIdentities(state: WorkbenchBackendState): Readonly<Record<string, PythonProcessIdentity>> {
@@ -1708,8 +1812,14 @@ export async function executeMainLineWorkbench(
           portClosed: async () => !(await (input.connect ? input.connect(port, host) : probeTcpConnect(port, host, 100))),
           commitClosed: async () => {
             if (!isCurrent()) return false;
+            // Admission proved the recorded daemon pid was dead before this
+            // retirement started, so its record files are stale leftovers.
+            const daemonRecordCleanup = clearStaleRuntimeManagerDaemonRecords(input.workspaceRoot);
             const closed = { ...readRetirementState(), desiredState: "closed", observedState: "closed", phase: "steady",
-              failureMessage: "", lifecycleWarning: "", backgroundRetirementId: "",
+              failureMessage: "", lifecycleWarning: daemonRecordCleanup.failedPaths.length > 0
+                ? `Runtime Manager daemon records could not be cleared: ${daemonRecordCleanup.failedPaths.join(", ")}`
+                : "",
+              backgroundRetirementId: "",
               backendPid: 0, backendLaunchPid: 0, spawnPid: 0, backendCreateTime: 0, backendExecutable: "",
               backendLaunchCreateTime: 0, backendLaunchExecutable: "", spawnCreateTime: 0, spawnExecutable: "",
               lastReason: "electron_background_retirement_verified", lastSource: "electron_main", updatedAt: isoNow(input.now) };
@@ -1738,10 +1848,16 @@ export async function executeMainLineWorkbench(
         return { schemaVersion: 1, accepted: false, operation, commandId,
           code: "backend_retire_incomplete", message: "Owned backend retirement was not verified within the close deadline." };
       }
+      // Admission refused while the recorded daemon pid was still alive, so
+      // the pid is dead here and its record files are stale leftovers.
+      const daemonRecordCleanup = clearStaleRuntimeManagerDaemonRecords(input.workspaceRoot);
       clearWorkbenchLauncherRuntimeState(input.workspaceRoot);
       await writeState({
         ...previous, desiredState: "closed", observedState: "closed", phase: "steady",
-        failureMessage: "", lifecycleWarning: "",
+        failureMessage: "",
+        lifecycleWarning: daemonRecordCleanup.failedPaths.length > 0
+          ? `Runtime Manager daemon records could not be cleared: ${daemonRecordCleanup.failedPaths.join(", ")}`
+          : "",
         backendPid: 0, backendLaunchPid: 0, spawnPid: 0,
         backendCreateTime: 0, backendExecutable: "",
         backendLaunchCreateTime: 0, backendLaunchExecutable: "",
@@ -1965,6 +2081,16 @@ export async function executeMainLineWorkbench(
     const previousBrowserWindowPid = Math.trunc(Number(previous.browserWindowPid || previous.workbenchBrowserWindowPid || 0));
     const retainedBrowserLaunchPid = unverifiedHandles.includes(previousBrowserLaunchPid) ? previousBrowserLaunchPid : 0;
     const retainedBrowserWindowPid = unverifiedHandles.includes(previousBrowserWindowPid) ? previousBrowserWindowPid : 0;
+    // Every verified daemon was retired above, so its record files are stale.
+    // An unverified record is only dropped when the pid is dead or provably
+    // reused by a foreign process; a live python-family pid keeps its records
+    // and stays skipped without being terminated.
+    const daemonRecordReconciliation = await reconcileStaleRuntimeManagerDaemonRecords({
+      workspaceRoot: input.workspaceRoot,
+      daemonPid,
+      pidAlive: input.pidAlive ?? knownPidIsAlive,
+      captureIdentity: captureCurrentBackendIdentity
+    });
     const lifecycleWarnings = [
       deadHandleReconcile.reconciledPids.length > 0
         ? `${deadHandleReconcile.reason}; no process was terminated during reconciliation`
@@ -1972,7 +2098,8 @@ export async function executeMainLineWorkbench(
       postReclaimReconcileReason
         ? `${postReclaimReconcileReason}; no process was terminated during post-reclaim reconciliation`
         : "",
-      unverifiedDaemonPid > 0
+      daemonRecordReconciliation.note,
+      !daemonRecordReconciliation.stale && unverifiedDaemonPid > 0
         ? `Skipped unverified Runtime Manager daemon pid ${unverifiedDaemonPid}; no process was terminated.`
         : "",
       unverifiedHandles.length > 0
@@ -2083,18 +2210,39 @@ export async function executeMainLineWorkbench(
   const daemonIdentity = (input.readDaemonIdentity ?? readDaemonIdentity)(input.workspaceRoot);
   const verifiedDaemonPid = daemonIdentity?.pid === daemonPid ? daemonPid : 0;
   const daemonPidIsAlive = daemonPid > 0 && (input.pidAlive ?? knownPidIsAlive)(daemonPid);
+  let reusedDaemonRecordNote = "";
   if (daemonPid > 0 && !verifiedDaemonPid && daemonPidIsAlive) {
-    const error = new Error(
-      `Runtime Manager daemon pid ${daemonPid} is live but has no verifiable identity; refusing to retire it before starting the workbench.`,
-    );
-    await persistStartPreflightFailure(error);
-    throw error;
+    // Windows may have handed the recorded pid to an unrelated process after
+    // the historical daemon exited. Only when the live executable is provably
+    // foreign (not the python family the daemon runs as) is the record stale
+    // beyond doubt; then the record files alone are dropped and the start
+    // proceeds. A python-family pid, or one whose identity cannot be captured,
+    // keeps the conservative refusal.
+    const reusedPidIdentity = await captureCurrentBackendIdentity(daemonPid);
+    if (!reusedPidIdentity || executableLooksLikePythonDaemon(reusedPidIdentity.executable)) {
+      const error = new Error(
+        `Runtime Manager daemon pid ${daemonPid} is live but has no verifiable identity; refusing to retire it before starting the workbench.`,
+      );
+      await persistStartPreflightFailure(error);
+      throw error;
+    }
+    const recordCleanup = clearStaleRuntimeManagerDaemonRecords(input.workspaceRoot);
+    if (recordCleanup.failedPaths.length > 0) {
+      const error = new Error(
+        `Runtime Manager daemon pid ${daemonPid} was reused by ${basename(reusedPidIdentity.executable.trim())} `
+        + `but its stale records could not be cleared (${recordCleanup.failedPaths.join(", ")}); refusing to start.`,
+      );
+      await persistStartPreflightFailure(error);
+      throw error;
+    }
+    reusedDaemonRecordNote = `Ignored stale Runtime Manager daemon pid ${daemonPid}; the pid was reused by `
+      + `${basename(reusedPidIdentity.executable.trim())} and its record files were cleared without terminating any process.`;
   }
   // A PID alone is not ownership evidence: Windows can reuse it after the
   // historical Runtime Manager process has exited. Keep the stale record on
   // disk for the owning lifecycle to reconcile, but never let it block a new
   // workbench start or target an unrelated process for termination.
-  const ignoredStaleDaemonPid = daemonPid > 0 && !verifiedDaemonPid ? daemonPid : 0;
+  const ignoredStaleDaemonPid = daemonPid > 0 && !verifiedDaemonPid && !reusedDaemonRecordNote ? daemonPid : 0;
   const extraPids = verifiedDaemonPid > 0 ? [verifiedDaemonPid] : [];
   const expectedIdentities: Record<string, PythonProcessIdentity> = {
     ...stateProcessIdentities(previous),
@@ -2406,6 +2554,7 @@ export async function executeMainLineWorkbench(
         ? `${deadHandleReconcileReasons.join("; ")}; no process was terminated during reconciliation`
         : "",
       unretiredRegisteredNote,
+      reusedDaemonRecordNote,
       ignoredStaleDaemonPid > 0
         ? `Ignored stale Runtime Manager daemon pid ${ignoredStaleDaemonPid} without a verifiable identity; no process was terminated.`
         : ""

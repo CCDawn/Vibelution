@@ -157,6 +157,12 @@ describe("Launcher assistant private bridge", () => {
     await invokeAssistant(event, { operation: "status" }, owner);
     expect(owner.host.request).toHaveBeenCalledTimes(2);
   });
+  it("passes the native attachment-not-found code through for the renderer's missing-attachment verdict", async () => {
+    const { owner, event } = setup();
+    owner.host.request.mockRejectedValueOnce(new Error("ATTACHMENT_NOT_FOUND"));
+    await expect(invokeAssistant(event, { operation: "readAttachment", artifactId: "file-1" }, owner))
+      .rejects.toThrow("ATTACHMENT_NOT_FOUND");
+  });
   it("bounds a read invoke's wait on host start so a restarting host fails fast instead", async () => {
     vi.useFakeTimers();
     const { owner, event } = setup();

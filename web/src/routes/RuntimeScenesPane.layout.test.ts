@@ -44,6 +44,19 @@ describe("RuntimeScenesPane layout contract", () => {
     expect(paneSource).not.toMatch(/<input\b/);
   });
 
+  it("confirms destructive scene-bundle deletes through the VConfirmDialog request state", () => {
+    expect(paneSource).not.toContain("window.confirm(");
+    expect(paneSource).toContain("setDeleteScenesConfirmRequest(true)");
+    expect(paneSource).toContain("<VConfirmDialog");
+    expect(paneSource).toContain("tone=\"danger\"");
+    expect(paneSource).toContain("confirmPending={deleteRuntimeScenesMutation.isPending}");
+    expect(paneSource).toContain("onConfirm={handleConfirmDeleteSelected}");
+    expect(paneSource).toContain("onCancel={handleCancelDeleteSelected}");
+    // The confirm copy stays the multi-line scene list shown before.
+    expect(paneSource).toContain("whitespace-pre-line");
+    expect(paneSource).toContain("buildDeleteConfirmationLabel(selectedSceneIds)");
+  });
+
   it("renders package diagnosis before evidence metrics and raw log sections", () => {
     const diagnosisIndex = paneSource.indexOf("{renderPackageDiagnosisPanel(scene, lang, handleOpenRawLog)}");
     const evidenceIndex = paneSource.indexOf('<div className={styles.sceneEvidenceStrip}>');

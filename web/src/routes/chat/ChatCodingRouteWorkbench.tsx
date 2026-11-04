@@ -98,7 +98,7 @@ import {
 import type { ConversationStreamingFramePaintMetrics } from "../../components/conversation/conversationStreamingMetrics";
 import type { ConversationForkScope } from "../../components/conversation/conversationViewTypes";
 import { shouldShowNextStateSignalInConversation } from "../../components/conversation/conversationNextStateSignal";
-import { VButton, VContextualHint, VInput, VNativeInput, VStateSurface, VTooltip, type VButtonProps } from "../../components/vui";
+import { VButton, VConfirmDialog, VContextualHint, VInput, VNativeInput, VStateSurface, VTooltip, type VButtonProps } from "../../components/vui";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../../app/browserTelemetry";
 import { getPageInstanceId } from "../../app/pageInstance";
 import { usePageVisibility, useStartupWarmup } from "../../app/pollingPolicy";
@@ -1760,6 +1760,10 @@ export function ChatCodingRouteWorkbench() {
     mountedCliAgentRuns,
     handleCliAgentTerminalSessionChange,
     closeCliAgentRun,
+    cliAgentCloseConfirm,
+    cliAgentCloseStopping,
+    confirmCliAgentClose,
+    cancelCliAgentClose,
   } = useChatCliAgentTerminal({
     activeSessionId,
     activeCliAgentRunId,
@@ -2843,6 +2847,9 @@ export function ChatCodingRouteWorkbench() {
     handleOpenAgentConfig,
     handleRenameAgent,
     handleArchiveAgent,
+    confirmAgentArchive,
+    cancelAgentArchive,
+    agentArchiveConfirm,
     agentRenameDraft,
     setAgentRenameDraftName,
     cancelAgentRename,
@@ -3740,6 +3747,38 @@ export function ChatCodingRouteWorkbench() {
         }}
         onRerunOnly={keepFilesAndRerun}
       />
+      {agentArchiveConfirm ? (
+        <VConfirmDialog
+          open
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) cancelAgentArchive();
+          }}
+          tone="danger"
+          title={lang === "zh" ? "归档 Agent" : "Archive agent"}
+          description={agentArchiveConfirm.message}
+          confirmLabel={lang === "zh" ? "确认归档" : "Archive"}
+          cancelLabel={lang === "zh" ? "取消" : "Cancel"}
+          confirmPending={isAgentArchivePending(agentArchiveConfirm.agentId)}
+          onConfirm={confirmAgentArchive}
+          onCancel={cancelAgentArchive}
+        />
+      ) : null}
+      {cliAgentCloseConfirm ? (
+        <VConfirmDialog
+          open
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) cancelCliAgentClose();
+          }}
+          tone="danger"
+          title={lang === "zh" ? "关闭终端会话" : "Close terminal session"}
+          description={cliAgentCloseConfirm.message}
+          confirmLabel={lang === "zh" ? "确认关闭" : "Close"}
+          cancelLabel={lang === "zh" ? "取消" : "Cancel"}
+          confirmPending={cliAgentCloseStopping}
+          onConfirm={confirmCliAgentClose}
+          onCancel={cancelCliAgentClose}
+        />
+      ) : null}
     </ActiveTurnLayersStoreProvider>
   );
 }
