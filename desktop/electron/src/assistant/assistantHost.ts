@@ -72,6 +72,12 @@ export type AssistantHostRequest =
   | { operation: "computerControl"; grantId: string; action: "pause" | "resume" | "takeover" | "return" | "end" }
   | { operation: "computerConfirm"; grantId: string; pendingId: string; approved: boolean };
 
+/** Read-only requests still drain with migration, but cannot submit new work. */
+const LIFECYCLE_READ_OPERATIONS: ReadonlySet<AssistantHostRequest["operation"]> = new Set([
+  "status", "detail", "dispatches", "teamRuns", "config", "approvals", "curation",
+  "operatorAsset", "assistantAvatar", "computerState", "readAttachment"
+]);
+
 /** Private to Electron main; attemptToken must never cross the renderer bridge. */
 export type AssistantReminder = {
   id: string; kind: "affair_reminder"; severity: "high" | "medium";
@@ -201,6 +207,7 @@ export class AssistantHost {
   private migrationAdmission: { release: () => void; released: Promise<void>; sealed: boolean } | null = null;
   private lifecycleAdmission: { arrival: boolean; committed: boolean } | null = null;
   private rendererRequests = 0;
+  private rendererMutationRequests = 0;
   private mainControlRequests = 0;
   private mainControlUncertain = false;
   private rendererDrainWaiters = new Set<() => void>();
@@ -830,7 +837,7 @@ export class AssistantHost {
   }
 
   /** Read-only native observation; this is not a held shutdown proof.
-   * Producer ambiguity (a request in flight, an admission held, the host
+   * Producer ambiguity (a write in flight, an admission held, the host
    * leaving its ready generation, or the native side itself reporting
    * "unknown") stays "unknown" and always fails closed. A lost observation
    * (rpc timeout, unparsable payload) while this exact generation is still
@@ -839,20 +846,20 @@ export class AssistantHost {
   async lifecycleStatus(): Promise<"idle" | "active" | "unknown" | "unobservable"> {
     const generation = this.current;
     if (!generation && this.view.state === "stopped" && !this.starting) return "idle";
-    if (!generation || generation.closed || generation.abort.signal.aborted || this.view.state !== "ready"
-      || this.migrationAdmission || this.mainControlUncertain || this.rendererRequests || this.mainControlRequests) return "unknown";
-    const leftReadyGeneration = () => this.current !== generation || generation.closed
-      || generation.abort.signal.aborted || this.view.state !== "ready";
+    const producerUncertain = () => !generation || this.current !== generation || generation.closed
+      || generation.abort.signal.aborted || this.view.state !== "ready" || this.migrationAdmission
+      || this.mainControlUncertain || this.rendererMutationRequests > 0 || this.mainControlRequests > 0;
+    if (!generation || producerUncertain()) return "unknown";
     try {
       const result = await this.rpc(generation, "/api/assistant/lifecycle-status", "GET", undefined, 2_000, false, 8192);
-      if (leftReadyGeneration()) return "unknown";
+      if (producerUncertain()) return "unknown";
       if (!object(result) || Object.keys(result).length !== 2 || result.schemaVersion !== 1
         || !["idle", "active", "unknown"].includes(String(result.state))) return "unobservable";
       return result.state as "idle" | "active" | "unknown";
     } catch {
-      // A failure caused by the host leaving its ready generation is a
-      // producer event, not a lost observation.
-      return leftReadyGeneration() ? "unknown" : "unobservable";
+      // A new writer or a host leaving its ready generation keeps the
+      // observation ambiguous even if the native reply was lost.
+      return producerUncertain() ? "unknown" : "unobservable";
     }
   }
 
@@ -917,7 +924,7 @@ export class AssistantHost {
     while (this.migrationAdmission) {
       const admission = this.migrationAdmission;
       const lifecycle = this.lifecycleAdmission;
-      if (lifecycle && !["status", "detail", "dispatches", "teamRuns", "config", "approvals", "curation", "operatorAsset", "assistantAvatar", "computerState", "readAttachment"].includes(captured.operation)) {
+      if (lifecycle && !LIFECYCLE_READ_OPERATIONS.has(captured.operation)) {
         // Before commit, preserve the original request and veto replacement.
         // Afterwards it was never admitted: the persistent composer retains it.
         if (lifecycle.committed) throw new HostError("ASSISTANT_LIFECYCLE_CLOSING");
@@ -932,9 +939,12 @@ export class AssistantHost {
       await admission.released;
     }
     this.rendererRequests += 1;
+    const mutation = !LIFECYCLE_READ_OPERATIONS.has(captured.operation);
+    if (mutation) this.rendererMutationRequests += 1;
     try { return await this.requestNow(captured); }
     finally {
       this.rendererRequests -= 1;
+      if (mutation) this.rendererMutationRequests -= 1;
       this.settleMigrationAdmissionDrain();
     }
   }

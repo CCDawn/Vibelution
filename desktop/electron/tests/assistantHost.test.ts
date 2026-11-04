@@ -257,11 +257,11 @@ describe("AssistantHost", () => {
     await host.start();
     fetchImpl.mockResolvedValueOnce(Response.json({ schemaVersion: 1, state: "idle" }));
     expect(await host.lifecycleStatus()).toBe("idle");
-    // A renderer request left in flight is a real producer: the held request
+    // A renderer write left in flight is a real producer: the held request
     // must keep the status unknown, never downgraded to unobservable.
     let release: ((response: Response) => void) | undefined;
     fetchImpl.mockImplementationOnce(() => new Promise<Response>((resolve) => { release = resolve; }));
-    const pending = host.request({ operation: "status" });
+    const pending = host.request({ operation: "send", message: "hello", requestId: "pending-write" });
     expect(await host.lifecycleStatus()).toBe("unknown");
     release!(Response.json({ assistant: { agentId: "a", directSessionId: "s", displayName: "Assistant" },
       settings: { managementPermission: { preset: "auto_review", revision: 0 } } }));
@@ -269,6 +269,65 @@ describe("AssistantHost", () => {
     // The native side reporting its own uncertainty is producer ambiguity too.
     fetchImpl.mockResolvedValueOnce(Response.json({ schemaVersion: 1, state: "unknown" }));
     expect(await host.lifecycleStatus()).toBe("unknown");
+    await host.stop();
+  });
+
+  it.each<AssistantHostRequest>([
+    { operation: "status" }, { operation: "detail" }, { operation: "dispatches" },
+    { operation: "teamRuns" }, { operation: "config" }, { operation: "approvals" },
+    { operation: "curation", sessionId: "s" }, { operation: "operatorAsset", kind: "avatar" },
+    { operation: "assistantAvatar" }, { operation: "computerState" },
+    { operation: "readAttachment", artifactId: "file-1" }
+  ])("observes native lifecycle while a read-only $operation poll is pending", async request => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    let release!: (response: Response) => void;
+    fetchImpl.mockImplementationOnce(() => new Promise<Response>(resolve => { release = resolve; }));
+    const pending = host.request(request).catch(() => undefined);
+    fetchImpl.mockResolvedValueOnce(Response.json({ schemaVersion: 1, state: "idle" }));
+    const state = await host.lifecycleStatus();
+    release(Response.json({}));
+    await pending;
+    expect(state).toBe("idle");
+    expect(fetchImpl.mock.calls.some(([url]) => String(url).endsWith("/api/assistant/lifecycle-status"))).toBe(true);
+    await host.stop();
+  });
+
+  it("still drains read-only polls before sealing migration admission", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    let release!: (response: Response) => void;
+    fetchImpl.mockImplementationOnce(() => new Promise<Response>(resolve => { release = resolve; }));
+    const pending = host.request({ operation: "status" }).catch(() => undefined);
+    const admission = host.beginMigrationAdmission();
+    let drained = false;
+    const sealed = admission.seal().then(() => { drained = true; });
+    await Promise.resolve();
+    expect(drained).toBe(false);
+    release(Response.json({}));
+    await pending;
+    await sealed;
+    expect(drained).toBe(true);
+    admission.release();
+    await host.stop();
+  });
+
+  it.each(["idle", "failed"])("keeps a write arriving during a %s lifecycle probe unknown", async outcome => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    let releaseObservation!: (response: Response) => void;
+    let releaseWrite!: (response: Response) => void;
+    fetchImpl.mockImplementationOnce(() => new Promise<Response>(resolve => { releaseObservation = resolve; }));
+    const observation = host.lifecycleStatus();
+    fetchImpl.mockImplementationOnce(() => new Promise<Response>(resolve => { releaseWrite = resolve; }));
+    const pending = host.request({ operation: "send", message: "hello", requestId: "concurrent-write" }).catch(() => undefined);
+    releaseObservation(outcome === "idle"
+      ? Response.json({ schemaVersion: 1, state: "idle" })
+      : new Response("invalid json", { status: 200 }));
+    const state = await observation;
+    releaseWrite(Response.json({}));
+    await pending;
+    expect(state).toBe("unknown");
     await host.stop();
   });
 
