@@ -15,6 +15,7 @@ import { collectBrowserPageSnapshot, postBrowserTelemetry } from "./browserTelem
 import { applyWorkbenchDocumentLanguage } from "./documentLanguage";
 import { currentInstanceWindowTitle } from "./instanceWindowTitle";
 import { LauncherTitlebar } from "./LauncherTitlebar";
+import { LauncherNotificationProvider } from "./LauncherNotifications";
 import { LauncherNavigation } from "./LauncherNavigation";
 import {LauncherAssistantTaskCards} from "../routes/desktopPet/assistantTasks/LauncherAssistantTaskCards";
 import {LauncherTaskNavigationSlot} from "../routes/desktopPet/assistantTasks/LauncherTaskNavigationSlot";
@@ -103,7 +104,7 @@ export function LauncherShell() {
     });
   }, []);
 
-  return (
+  return (<LauncherNotificationProvider>
    <LauncherAssistantTaskCards lang={lang} routePath={location.pathname} onOpenConversation={()=>{setNavigationOpen(false);void navigate("/launcher/assistant");}}>
     <div
       className={styles.root}
@@ -123,6 +124,6 @@ export function LauncherShell() {
         <div className={styles.mobileNavigation}><LauncherTaskNavigationSlot lang={lang} onNavigate={()=>setNavigationOpen(false)}><LauncherNavigation lang={lang} items={branchInstancesQuery.data?.items ?? []} onNavigate={() => setNavigationOpen(false)} updateAvailable={updateAvailable} updateFailed={updateFailed}/></LauncherTaskNavigationSlot></div>
       </VDialog>
     </div>
-   </LauncherAssistantTaskCards>
+   </LauncherAssistantTaskCards></LauncherNotificationProvider>
   );
 }

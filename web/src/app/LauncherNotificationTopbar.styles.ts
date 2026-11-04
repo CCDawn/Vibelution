@@ -1,0 +1,28 @@
+const styles = {
+  root: "min-w-0 shrink-0 [-webkit-app-region:no-drag]",
+  trigger: "!h-auto min-h-8 max-w-full gap-1.5 border border-transparent px-2 py-1 text-vui-xs pointer-coarse:min-h-11",
+  triggerWarning: "!bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] !text-[var(--state-warning)] hover:!border-[color-mix(in_srgb,var(--state-warning)_28%,transparent)]",
+  triggerQuiet: "!text-vui-fg-secondary",
+  triggerLabel: "min-w-0 truncate max-[520px]:sr-only",
+  count: "min-w-5 justify-center !border-0 !bg-[color-mix(in_srgb,currentColor_10%,transparent)] px-1 tabular-nums !text-inherit",
+  panel: "flex min-w-0 w-[23.125rem] max-w-[calc(100vw_-_1.5rem)] max-h-[min(36rem,calc(100dvh_-_5rem),var(--radix-popover-content-available-height))] flex-col overflow-hidden [-webkit-app-region:no-drag]",
+  header: "flex shrink-0 items-center justify-between gap-3 border-b border-vui-border-subtle px-4 py-3",
+  heading: "m-0 flex min-w-0 flex-wrap items-center gap-2 text-vui-sm font-semibold",
+  metadata: "text-vui-xs font-normal text-vui-fg-tertiary",
+  close: "!h-auto min-h-7 !w-auto min-w-7 !aspect-auto p-1 pointer-coarse:min-h-11 pointer-coarse:min-w-11",
+  list: "m-0 min-h-0 list-none overflow-y-auto overscroll-contain p-0",
+  item: "min-w-0 border-b border-vui-border-subtle last:border-b-0",
+  notice: "!rounded-none !border-0 !bg-transparent !px-4 !py-4 !shadow-none",
+  copy: "grid min-w-0 gap-1.5",
+  title: "text-vui-sm font-semibold",
+  description: "text-vui-xs font-normal leading-relaxed text-vui-fg-secondary",
+  labels: "flex min-w-0 flex-wrap gap-1 pt-1",
+  label: "!h-auto max-w-full !whitespace-normal break-words",
+  action: "!h-auto min-h-7 max-w-full px-2 py-1 text-vui-xs pointer-coarse:min-h-11 [&_[data-slot=vui-button-label]]:!whitespace-normal [&_[data-slot=vui-button-label]]:break-words",
+  details: "font-mono text-vui-xs",
+  empty: "grid min-h-32 place-content-center gap-2 px-4 py-7 text-center text-vui-sm text-vui-fg-secondary",
+  emptyIcon: "mx-auto text-vui-fg-tertiary",
+  footer: "shrink-0 border-t border-vui-border-subtle px-4 py-2.5 text-vui-xs text-vui-fg-tertiary",
+} as const;
+
+export default styles;

@@ -176,12 +176,12 @@ describe("Launcher browser workspace", () => {
     expect(invoke.mock.calls.at(-1)?.[0]).toEqual({ operation: "bounds", bounds: null });
     root = createRoot(host);
   });
-  it("hides the native page behind a dialog and restores its bounds after closing", async () => {
+  it.each(["dialog-overlay", "popover"])("hides the native page behind a %s and restores its bounds after closing", async overlayKind => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ x: 40, y: 50, left: 40, top: 50, right: 440, bottom: 350, width: 400, height: 300, toJSON: () => ({}) });
     await render();
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 40)); });
     expect(invoke.mock.calls.some(([payload]) => payload.operation === "bounds" && payload.bounds?.width === 400)).toBe(true);
-    const dialog = document.createElement("div"); dialog.setAttribute("data-vui", "dialog-overlay");
+    const dialog = document.createElement("div"); dialog.setAttribute("data-vui", overlayKind);
     await act(async () => { document.body.appendChild(dialog); await new Promise(resolve => setTimeout(resolve, 40)); });
     expect(invoke.mock.calls.at(-1)?.[0]).toEqual({ operation: "bounds", bounds: null });
     await act(async () => { dialog.remove(); await new Promise(resolve => setTimeout(resolve, 40)); });

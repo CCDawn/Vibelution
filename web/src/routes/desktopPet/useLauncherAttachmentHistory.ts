@@ -51,9 +51,11 @@ export function useLauncherAttachmentHistory(messages: ConversationMessage[], se
     attempted.current.add(id);
     const request = { sessionId, id };
     flight.current = request;
+    setVersion(value => value + 1);
     void readLauncherAttachment(id).then(url => {
       if (!mounted.current || current.current.sessionId !== sessionId || !current.current.enabled || !current.current.desired.has(id)) return;
       const values = cache.current.values;
+      failed.current.delete(id);
       values.set(id, url);
       let size = [...values.values()].reduce((total, value) => total + value.length, 0);
       while (values.size > MAX_CACHE_ENTRIES || size > MAX_CACHE_CHARS) {
@@ -83,8 +85,9 @@ export function useLauncherAttachmentHistory(messages: ConversationMessage[], se
       return { ...attachment, url, imageUrl: attachment.kind === "user_image" ? url : "", downloadUrl: url };
     }) };
   });
-  return { messages: safeMessages, missingGenerated, failed: enabled && desired.some(id => failed.current.has(id)), retry: () => {
+  return { messages: safeMessages, missingGenerated, failed: enabled && desired.some(id => failed.current.has(id)), pending: enabled && flight.current?.sessionId === sessionId, retry: () => {
+    if (flight.current) return;
     for (const id of failed.current) attempted.current.delete(id);
-    failed.current.clear(); setVersion(value => value + 1);
+    setVersion(value => value + 1);
   } };
 }
