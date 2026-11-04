@@ -1316,9 +1316,11 @@ describe("Launcher assistant composer surface model", () => {
     bridge.setLauncherAssistantModel.mockResolvedValue({ modelId: "m2" });
     bridge.getLauncherAssistantStatus.mockResolvedValue({ ...status, settings: { ...status.settings, modelId: "m2" } });
     await act(async () => container?.querySelector<HTMLButtonElement>('[data-launcher-assistant-model-control] button')?.click());
-    const select = document.querySelector<HTMLSelectElement>('select[aria-label="切换助理模型"]')!;
-    expect(select.disabled).toBe(false);
-    await act(async () => { select.value = "m2"; select.dispatchEvent(new Event("change", { bubbles: true })); });
+    const selectTrigger = document.querySelector<HTMLButtonElement>('[role="combobox"][aria-label="切换助理模型"]')!;
+    expect(selectTrigger.disabled).toBe(false);
+    await act(async () => selectTrigger.click());
+    const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(node => node.textContent === "模型二")!;
+    await act(async () => option.click());
     await settle(); await settle();
     expect(bridge.setLauncherAssistantModel).toHaveBeenCalledWith("m2");
     expect(container?.querySelector('[data-launcher-assistant-model-control] button')?.textContent).toBe("模型二");
