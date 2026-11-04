@@ -44,6 +44,17 @@ Chat 的可写普通原生 Session；不用于 Finance、Companion、只读历�
 ### 实现落点与边界
 `useChatComposerBridgeState` 与 `conversationContinuationModel` 派生显示状态，`useChatContinueTurn` 复用原 mutation；服务端在接受锁内检查 Turn、分支和日志序号，旧快照只读拒绝。没有第二套 transcript、恢复 worker 或压缩状态；保留原生历史与压缩摘要。
 
+## 运行中引导按钮
+
+### 功能
+轮次运行且草稿非空时，输入区动作排提供运行中引导入口：主按钮与 Enter 走安全引导（不动当前轮），「打断并引导」描边 pill 走 interrupt 通道——发送草稿并请求停止当前轮。引导 pending 时禁用并显示 pending 文案与 spinner；无引导 handler 时不渲染占位。
+
+### 适用范围
+ConversationView 的运行中引导（普通 Chat 与 Launcher 个人助理共用）；空闲输入区不出现。
+
+### 使用方式
+沿用既有 VButton pill 几何与 accent token，位置在队列主按钮和终止按钮之间；label 经 `interruptGuidance` / `interruptGuidancePending` 传入，tooltip 固定说明「发送草稿并结束当前轮次」，先于首次点击表达结束本轮的语义。附件或引用在草稿上时 Enter 仍按既有语义转排队，不经打断通道。
+
 ## ChatSessionIndexToolbar
 
 ### 功能

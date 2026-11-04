@@ -44,6 +44,7 @@ describe("composer Enter delivery (running Enter sends immediately)", () => {
   async function renderEnterDeliveryComposer(options: {
     actionMode: "send" | "stop";
     onSafeGuidance?: () => void;
+    onInterruptGuidance?: () => void;
     onSubmit: () => void;
     onOpenSideChat?: (prompt: string, autoSend: boolean) => void;
     withReference?: boolean;
@@ -84,6 +85,7 @@ describe("composer Enter delivery (running Enter sends immediately)", () => {
               setValue("");
             }}
             onSafeGuidance={options.onSafeGuidance}
+            onInterruptGuidance={options.onInterruptGuidance}
             onOpenSideChat={options.onOpenSideChat}
             onEditUserMessage={() => undefined}
           />
@@ -209,6 +211,39 @@ describe("composer Enter delivery (running Enter sends immediately)", () => {
     });
     expect(onSubmit).toHaveBeenCalledTimes(2);
     expect(onSafeGuidance).not.toHaveBeenCalled();
+  });
+
+  it("routes the interrupt guidance pill to its handler and never to send/stop", async () => {
+    const onSubmit = vi.fn();
+    const onSafeGuidance = vi.fn();
+    const onInterruptGuidance = vi.fn();
+    const textarea = await renderEnterDeliveryComposer({
+      actionMode: "stop",
+      onSubmit,
+      onSafeGuidance,
+      onInterruptGuidance,
+    });
+
+    typeIntoTextarea(textarea, "停下这轮，改问预算");
+    await act(async () => {
+      const interruptButton = container?.querySelector<HTMLButtonElement>(
+        'button[data-testid="composer-interrupt-guidance"]',
+      );
+      expect(interruptButton).not.toBeNull();
+      expect(interruptButton?.getAttribute("title")).toBe(dictionary.zh.interruptGuidanceHint);
+      interruptButton?.click();
+    });
+    expect(onInterruptGuidance).toHaveBeenCalledTimes(1);
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onSafeGuidance).not.toHaveBeenCalled();
+
+    // An empty draft hides the pill again.
+    await act(async () => {
+      typeIntoTextarea(textarea, "");
+    });
+    expect(
+      container?.querySelector<HTMLButtonElement>('button[data-testid="composer-interrupt-guidance"]'),
+    ).toBeNull();
   });
 
   it("queues on Enter when the draft rides attachments or references", async () => {

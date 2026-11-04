@@ -818,6 +818,12 @@ def _build_session_detail_from_summary(
         # it, so this is a passthrough, not another state read. Unconditional —
         # the floating widget and SSE light polls both run include_secondary=False.
         "pendingQuestion": conversation.get("pendingQuestion"),
+        # Same passthrough contract: the queued_turn_hold marker the normalized
+        # conversation projected ({reason, turnId, heldAt}) while an explicit
+        # user stop freezes the queued rows, else null. The renderer says
+        # "queue paused; send a new message to resume" so a frozen queue is
+        # never read as lost work.
+        "queueHold": conversation.get("queueHold"),
         "terminalReason": summary.get("terminalReason")
         or s._terminal_reason_from_conversation(conversation),
         "ledgerSeq": ledger_sequence,
@@ -1361,6 +1367,12 @@ def _normalize_conversation(
         "_hasLedgerMessages": has_ledger_messages,
         "runtimeNotices": visible_runtime_notices,
         "queuedTurns": s._session_queued_turn_rows(raw),
+        # Always-present detail contract key: the queued_turn_hold marker
+        # ({reason, turnId, heldAt}) while an explicit user stop freezes the
+        # queued rows, else null. Reads the raw dict already in hand; summaries
+        # stay without it. The renderer surfaces "queue paused" so a frozen
+        # queue is never read as lost work.
+        "queueHold": s._session_queue_hold_marker(raw),
         "lastTurnStatus": last_turn_status,
         # Always-present detail contract key: the pending slot's public shape
         # ({id, questionText, askedAt, turnId}) or null. Reads the raw row
