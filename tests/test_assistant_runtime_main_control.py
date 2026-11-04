@@ -80,6 +80,34 @@ async def test_governed_action_and_project_permissions_precede_queue_admission()
 
 
 @pytest.mark.anyio
+async def test_branch_instance_project_id_is_a_registry_member_admitted_like_a_main_project():
+    """Branch worktree instances are addressed by their registry projectId.
+
+    The broker gates on registry membership only: a registered branch projectId
+    is admitted and queued exactly like a main project, while a non-member is
+    refused before admission. Branch execution semantics live in Electron
+    (assistantBranchLifecycle.test.ts); this only pins the Python admission.
+    """
+    service = Dispatch()
+    service.projects.append("p:branch")
+    owner = broker(service, claim_seconds=2)
+    branch_request = {"projectId": "p:branch", "operation": "start", "requestId": "branch-1"}
+    try:
+        task = asyncio.create_task(owner.invoke("project_lifecycle", branch_request))
+        wire = (await owner.claim())["request"]
+        assert {key: wire[key] for key in ("action", "projectId", "operation", "requestId")} == {
+            "action": "project_lifecycle", "projectId": "p:branch", "operation": "start", "requestId": "branch-1"}
+        assert owner.settle(wire["deliveryId"], result(branch_request))
+        assert await task == result(branch_request)
+        assert await owner.claim() == {"schemaVersion": 1, "request": None}
+        with pytest.raises(ValueError, match="authorized"):
+            await owner.invoke("project_lifecycle", {**branch_request, "projectId": "p:stranger"})
+        assert await owner.claim() == {"schemaVersion": 1, "request": None}
+    finally:
+        owner.close()
+
+
+@pytest.mark.anyio
 async def test_history_import_uses_approved_native_turn_and_never_accepts_model_paths():
     service = Dispatch()
     owner = broker(service, claim_seconds=2)
