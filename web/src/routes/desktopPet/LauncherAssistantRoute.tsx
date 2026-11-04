@@ -1363,9 +1363,10 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       interruptGuidanceLabel={copy.interruptGuidance} interruptGuidancePendingLabel={copy.interruptGuidancePending}
       composerSafeGuidancePending={guidancePendingMode === "safe"}
       composerInterruptGuidancePending={guidancePendingMode === "interrupt"}
-      composerLeadingControl={<ChatComposerPlusMenu lang={lang} showCapabilities={false} showReferences={false}
+      composerLeadingControl={<><ChatComposerPlusMenu lang={lang} showCapabilities={false} showReferences={false}
         sessionReferences={[]} onAddAttachments={addAttachments}
-        attachmentDisabled={status.data?.attachmentVersion !== 1 || sendPending || sendUnconfirmed || controlPending} />}
+        attachmentDisabled={status.data?.attachmentVersion !== 1 || sendPending || sendUnconfirmed || controlPending} />
+        <LauncherManagementPermissionControl state={managementPermission} lang={lang} /></>}
       composerModelControl={status.data ? <LauncherAssistantModelControl key={sessionId} lang={lang}
         modelId={status.data.settings?.modelId || ""} modelDisplay={modelDisplay}
         choices={status.data.settings?.modelChoices} pending={modelConfigPending}
@@ -1396,7 +1397,6 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       fallback={<VStateSurface fill tone="loading" title={copy.loading} />}
     /> : <VStateSurface fill tone={detail.isError ? "error" : "loading"} title={detail.isError ? copy.unavailable : copy.loading}
       actions={detail.isError ? <VButton onClick={() => void detail.refetch()}>{copy.retry}</VButton> : undefined}>{detail.error?.message}</VStateSurface>}
-    {detail.data ? <LauncherManagementPermissionControl state={managementPermission} lang={lang} /> : null}
     {!detail.data ? approvalPrompt : null}
     {historyAttachments.missingGenerated ? <VStateSurface tone="error" title={lang === "zh" ? "历史图片缺少附件标识，暂不可查看" : "Historical image has no artifact ID"}
       actions={<VButton onClick={() => void detail.refetch()}>{copy.retry}</VButton>} /> : null}

@@ -9,16 +9,9 @@ export function LauncherManagementPermissionControl({ state, lang }: {
   lang: "zh" | "en";
 }) {
   const unavailable = lang === "zh" ? "当前版本暂不支持切换权限，请更新 Launcher。" : "This version cannot change permissions. Update Launcher.";
-  return <div className={styles.footer} data-launcher-management-permission>
-    <div className={styles.row}>
-      <AgentPermissionPresetControl value={state.value} context="launcher" lang={lang} surface="composer"
-        side="top" align="start" disabled={state.disabled} pending={state.pending} onChange={state.choose} />
-      <span className={styles.scope} title={lang === "zh"
-        ? "新档位仅用于之后的操作，已有待确认操作仍需单独处理；不会增加项目或私人资料的访问权限。"
-        : "The new level applies to future actions. Existing approvals still need a separate decision. Access to projects and private data will not expand."}>
-        {lang === "zh" ? "仅 Launcher 助理" : "Launcher assistant only"}
-      </span>
-    </div>
+  return <div className={styles.root} data-launcher-management-permission>
+    <AgentPermissionPresetControl value={state.value} context="launcher" lang={lang} surface="composer"
+      side="top" align="start" disabled={state.disabled} pending={state.pending} onChange={state.choose} />
     {state.disabled || state.error ? <p className={styles.notice} role={state.error ? "alert" : "status"}>
       {state.error || unavailable}
     </p> : null}

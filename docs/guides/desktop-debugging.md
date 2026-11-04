@@ -75,3 +75,5 @@ try {
 先在隔离的 `show:false` Electron 中验证只监听 loopback、读取页面、断开客户端后壳仍存活、退出后重新启动并重新发现端口。再验证实际产品的窗口角色和版本、守卫允许的完整退出及重新连接；磁盘编译成功或 backend restart 成功不能替代实际壳更新证据。
 
 实现复用 Electron 原生 [remote-debugging-port](https://www.electronjs.org/docs/latest/api/command-line-switches#--remote-debugging-portport) 与 Playwright [connectOverCDP](https://playwright.dev/docs/api/class-browsertype#browser-type-connect-over-cdp)，进程身份和生命周期继续由项目现有 owner/Launcher 管理。
+
+涉及隔离 Electron 实例的验证结束后，须按 [tests/README.md「隔离测试收尾（硬性要求）」](../../tests/README.md#44-隔离测试收尾硬性要求) 主动关闭实例并附收尾证据。
