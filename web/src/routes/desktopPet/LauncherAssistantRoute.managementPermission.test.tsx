@@ -80,13 +80,16 @@ async function choose(preset: string) {
 }
 const calls = (operation: string) => invoke.mock.calls.filter(([request]) => request.operation === operation);
 
-describe("Launcher permission footer integration", () => {
+describe("Launcher permission composer toolbar integration", () => {
   it.each([false, true])("saves while busy=%s, preserves the mounted composer and leaves existing approvals undecided", async busy => {
     await renderRoute({ busy, approval: true, holdWrite: true });
     await act(async () => conversation!.onComposerChange!("保留这份草稿")); await settle();
     const composerDisabled = conversation!.composerDisabled;
     const actionMode = conversation!.composerActionMode;
-    expect(container.querySelector('[data-launcher-management-permission]')?.previousElementSibling?.getAttribute("data-testid")).toBe("native-conversation");
+    expect(container.querySelectorAll('[data-launcher-management-permission]')).toHaveLength(1);
+    expect(container.querySelector('[data-testid="existing-toolbar"] [data-launcher-management-permission]')).not.toBeNull();
+    expect(container.querySelector('[data-launcher-management-permission]')?.closest('[data-testid="native-conversation"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="existing-toolbar"]')?.textContent).not.toContain("仅 Launcher 助理");
     expect(conversation!.permissionControl).toBeUndefined();
     expect(container.querySelector('[data-testid="existing-toolbar"]')?.textContent).toContain("model");
     await choose("full_access");
