@@ -86,6 +86,10 @@ it("retries an unconfirmed send with the identical request and attachment IDs", 
   await act(async () => conversation.onSubmit()); await settle(); await settle();
   expect(conversation.composerAttachments).toHaveLength(1);
   expect(conversation.composerAttachmentInputDisabled).toBe(true);
+  // Unknown outcome: the unconfirmed banner keeps the backend's own message
+  // visible next to it instead of silently discarding the diagnosis.
+  expect(document.body.textContent).toContain("尚未确认消息是否收到");
+  expect(document.body.textContent).toContain("lost acknowledgement");
   const first = invoke.mock.calls.find(([request]) => request.operation === "send")?.[0];
   setSendFailure(null);
   await act(async () => conversation.onSubmit()); await settle(); await settle();
@@ -115,6 +119,35 @@ it("unlocks the composer after a definite pre-admission rejection instead of dea
   expect(sends).toHaveLength(2);
   expect(sends[1]).toMatchObject({ message: "修改后的草稿" });
   expect(sends[1].requestId).not.toBe(sends[0]!.requestId);
+});
+
+it("unlocks the composer on a retryable-busy host code, naming it, without the unconfirmed banner", async () => {
+  const { invoke, setSendFailure } = await setup(true);
+  await act(async () => conversation.onComposerChange!("稍后重试的草稿"));
+  // Electron wraps the structured 503 quiescence gate across the context bridge.
+  setSendFailure("Error invoking remote method 'launcherAssistant:invoke': Error: ASSISTANT_QUIESCING");
+  await act(async () => conversation.onSubmit()); await settle(); await settle();
+  const first = invoke.mock.calls.find(([request]) => request.operation === "send");
+  expect(first).toBeTruthy();
+  // Pre-admission gate: nothing executed, so the conservative unconfirmed
+  // lock must not dead-end the composer and the draft survives for the retry.
+  expect(conversation.composerDisabled).toBe(false);
+  expect(conversation.composerValue).toBe("稍后重试的草稿");
+  expect(conversation.composerError).toBe("");
+  // The busy feedback names what happened and keeps the raw code for diagnosis.
+  expect(document.body.textContent).toContain("助理正忙");
+  expect(document.body.textContent).toContain("ASSISTANT_QUIESCING");
+  // No unknown-outcome retry banner anywhere on the page.
+  expect(document.body.textContent).not.toContain("尚未确认消息是否收到");
+  // The retry resends from the unlocked composer (a fresh request identity,
+  // exactly like the corrected resend after a definite rejection).
+  setSendFailure(null);
+  await act(async () => conversation.onSubmit()); await settle(); await settle();
+  const sends = invoke.mock.calls.filter(([request]) => request.operation === "send").map(([request]) => request);
+  expect(sends).toHaveLength(2);
+  expect(sends[1]).toMatchObject({ message: "稍后重试的草稿" });
+  expect(sends[1].requestId).not.toBe(sends[0]!.requestId);
+  expect(invoke.mock.calls.filter(([request]) => request.operation === "uploadAttachment")).toHaveLength(0);
 });
 
 it("blocks an over-limit draft locally before any upload or send", async () => {

@@ -50,7 +50,8 @@ import { classifyComposerFiles, mergeComposerAttachmentsWithRejections, type Com
 import {
   launcherAssistantActivity, launcherAssistantMessageOverLimit, launcherAssistantPollInterval, launcherAssistantSubmission,
   launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
-  launcherAssistantSendDefinitelyRejected, launcherAssistantSessionEventRefreshesDetail, launcherAssistantSseHealthy,
+  launcherAssistantSendBusyCode, launcherAssistantSendDefinitelyRejected, launcherAssistantSendRetryableBusy,
+  launcherAssistantSessionEventRefreshesDetail, launcherAssistantSseHealthy,
   launcherAssistantStatusDegradeTone, launcherAssistantWaitInterval, launcherAssistantContextRing, launcherAssistantModelDisplay,
   launcherAssistantEditBackfillDraft,
   type LauncherAssistantSubmission, type LauncherAssistantQueuedAcceptance,
@@ -71,6 +72,7 @@ const COPY = {
     retry: "重试", refresh: "刷新", placeholder: "和个人助理聊一聊…", send: "发送", sending: "正在发送…",
     unknownSend: "尚未确认消息是否收到。输入已保留，重试会核对同一条消息。",
     sendRejected: "本次发送已被拒绝，未进入对话；请修改后重新发送。",
+    sendBusy: "助理正忙（如迁移、停止中或会话已切换），请稍后重试",
     tooLong: "消息超出 64,000 字上限，请精简后再发送。",
     imageUnsupported: "当前模型不支持图片输入，请移除图片附件后再发送。",
     receipts: "任务状态暂不可用", checking: "正在连接 Launcher…",
@@ -89,6 +91,7 @@ const COPY = {
     retry: "Retry", refresh: "Refresh", placeholder: "Chat with your assistant…", send: "Send", sending: "Sending…",
     unknownSend: "Delivery is unconfirmed. Your input is retained; retry checks the same message.",
     sendRejected: "This send was rejected and never entered the conversation; edit and send again.",
+    sendBusy: "Assistant is busy (migrating, stopping, or the session changed); try again shortly",
     tooLong: "Message exceeds the 64,000-character limit; shorten it before sending.",
     imageUnsupported: "The current model does not support image input; remove image attachments before sending.",
     receipts: "Task status unavailable", checking: "Connecting to Launcher…",
@@ -183,6 +186,9 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   const [sendPending, setSendPending] = useState(false);
   const [resizePending, setResizePending] = useState(false);
   const [sendUnconfirmed, setSendUnconfirmed] = useState(false);
+  // The unknown-outcome state keeps the backend's own message (bounded) next to
+  // the conservative banner instead of silently discarding it.
+  const [sendUnknownDetail, setSendUnknownDetail] = useState("");
   const [feedback, setFeedback] = useState("");
   const launcherGate = useRef(false);
   const [launcherPending, setLauncherPending] = useState(false);
@@ -352,7 +358,10 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       signal.throwIfAborted();
       return mergeSessionDetailMessageWindow(client.getQueryData<SessionDetail>(["launcher-assistant", "detail", sessionId]), result);
     },
-    enabled: observingOwnSession, retry: false,
+    // A hidden window must keep the self-healing readback alive for an
+    // outstanding send, so these are states (not the outstanding ref): an
+    // in-flight send or an epoch-preempted ACK can land while already hidden.
+    enabled: observingOwnSession || sendPending || sendUnconfirmed, retry: false,
     refetchInterval: query => {
       const continuation = client.getQueryData<ComposerSnapshot>(composerKey)?.continuation;
       const requests = [outstanding.current?.requestId, continuation && !continuation.accepted ? continuation.requestId : ""]
@@ -363,7 +372,9 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       return launcherAssistantPollInterval(observingOwnSession, query.state.data, acceptedTurnId, queuedAcceptance, requests,
         { sseHealthy: launcherAssistantSseHealthy(sseAliveAt.current, Date.now()) });
     },
-    refetchIntervalInBackground: false,
+    // Interval refetches pause in the background by default; an outstanding
+    // send opts in so the hidden-window fallback poll (the 10s readback) runs.
+    refetchIntervalInBackground: sendPending || sendUnconfirmed,
   });
   const sessionStream = useMemo(() => createLauncherAssistantStream(sessionId), [sessionId]);
   const [activeLayer, setActiveLayer] = useState<ActiveTurnLayerState>();
@@ -849,6 +860,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     sending.current = flight;
     setSendPending(true);
     setSendUnconfirmed(false);
+    setSendUnknownDetail("");
     setFeedback("");
     const requestEpoch = epochRef.current;
     try {
@@ -879,8 +891,21 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
           saveComposer({ outstanding: null });
           setSendUnconfirmed(false);
           setFeedback(copy.sendRejected);
+        } else if (launcherAssistantSendRetryableBusy(error)) {
+          // These host codes are pre-admission quiescence gates (the native
+          // layer asks callers to retain and retry) or the idempotent 409
+          // session-changed conflict: nothing is executing, so a verbatim
+          // retry with the same requestId is safe and the unconfirmed lock
+          // would only dead-end the composer. The draft stays for that retry.
+          outstanding.current = null;
+          saveComposer({ outstanding: null });
+          setSendUnconfirmed(false);
+          setSendUnknownDetail("");
+          const code = launcherAssistantSendBusyCode(error);
+          setFeedback(code ? `${copy.sendBusy} (${code})` : copy.sendBusy);
         } else {
           setSendUnconfirmed(true);
+          setSendUnknownDetail(boundedErrorDetail(error));
         }
       }
     } finally {
@@ -1394,7 +1419,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       {queueReadback.removed ? <p role="status">{removedQueueText}</p> : null}
     </section> : null}
     {sendUnconfirmed ? <VStateSurface tone="error" title={copy.unknownSend}
-      actions={<VButton onClick={() => void submit()} isDisabled={sendPending || controlPending || stopping}>{copy.retry}</VButton>} /> : null}
+      actions={<VButton onClick={() => void submit()} isDisabled={sendPending || controlPending || stopping}>{copy.retry}</VButton>}>{sendUnknownDetail}</VStateSurface> : null}
     {detail.isError && detail.data && statusDegradeTone !== "error" ? <VStateSurface tone="error" title={copy.unavailable}
       actions={<VButton onClick={() => void detail.refetch()}>{copy.retry}</VButton>}>{detail.error.message}</VStateSurface> : null}
     {dispatches.isError ? <VStateSurface tone="error" title={copy.receipts}
@@ -1404,6 +1429,14 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** A bounded, single-line extract of the backend's own failure text for the
+ * unknown-send banner. Transport wrappers can be long and multiline; the
+ * conversation only needs the diagnosis, so collapse whitespace and cap it. */
+function boundedErrorDetail(error: unknown): string {
+  const flat = (error instanceof Error ? error.message : "").replace(/\s+/g, " ").trim();
+  return flat.length > 200 ? `${flat.slice(0, 200)}…` : flat;
 }
 
 /** Launcher control-surface session page: the same assistant conversation

@@ -96,6 +96,33 @@ export function launcherAssistantSendDefinitelyRejected(error: unknown): boolean
       || /^Error invoking remote method '[^']+': (?:Error: )?ASSISTANT_REQUEST_INVALID$/.test(error.message));
 }
 
+/** Host codes that prove the send never entered execution: quiescence gates
+ * (503, pre-admission — the native layer explicitly asks callers to retain and
+ * retry the request) and the 409 session-changed conflict (the requestId is
+ * idempotent, so a verbatim retry is safe). ASSISTANT_MODEL_BUSY stays out —
+ * the api layer already rewrites it into a friendly switch-model message —
+ * and so do timeouts and transport failures: their outcome is genuinely
+ * unknown and keeps the conservative unconfirmed lock. Codes are matched
+ * structurally (name/message, exact equality plus the Electron context-bridge
+ * wrapper) exactly like launcherAssistantSendDefinitelyRejected. */
+const LAUNCHER_ASSISTANT_RETRYABLE_BUSY_CODES = ["ASSISTANT_QUIESCING", "ASSISTANT_QUIESCENCE_BUSY", "ASSISTANT_STOPPING", "ASSISTANT_NOT_READY", "ASSISTANT_SESSION_CONFLICT"] as const;
+
+function launcherAssistantSendBusyMatch(error: Error, code: string): boolean {
+  return error.name === code || error.message === code
+    || new RegExp(`^Error invoking remote method '[^']+': (?:Error: )?${code}$`).test(error.message);
+}
+
+export function launcherAssistantSendRetryableBusy(error: unknown): boolean {
+  return error instanceof Error
+    && LAUNCHER_ASSISTANT_RETRYABLE_BUSY_CODES.some(code => launcherAssistantSendBusyMatch(error, code));
+}
+
+/** The matched busy code for diagnostics feedback; "" when not retryable-busy. */
+export function launcherAssistantSendBusyCode(error: unknown): string {
+  if (!(error instanceof Error)) return "";
+  return LAUNCHER_ASSISTANT_RETRYABLE_BUSY_CODES.find(code => launcherAssistantSendBusyMatch(error, code)) ?? "";
+}
+
 export function launcherAssistantActivity(source: SessionActivitySource = {}): {
   tone: PetActivityTone; animationState: PetAnimationState;
 } {
@@ -175,15 +202,25 @@ export function launcherAssistantSessionEventRefreshesDetail(event: LauncherAssi
   return event.type === "assistant_delta" && (event as { done?: unknown }).done === true;
 }
 
+/** A visible window polls every "keep reading" reason below. A hidden window
+ * keeps exactly one lifeline: reading back outstanding sends, pinned to the
+ * fixed fallback cadence — its push subscription is torn down with the window,
+ * so a once-healthy flag would otherwise decay into the 2s active cadence on
+ * stale evidence instead of admitting the channel is gone. */
 export function launcherAssistantPollInterval(visible: boolean, source?: LauncherAssistantActivitySource, acceptedTurnId?: string, queuedAcceptance?: LauncherAssistantQueuedAcceptance | null, pendingRequestIds: readonly string[] = [], options: { sseHealthy?: boolean } = {}): number | false {
-  if (!visible) return false;
+  const hiddenReadback = !visible && pendingRequestIds.length > 0;
+  if (!visible && !hiddenReadback) return false;
   // Every "keep reading" branch below shares one cadence: a healthy push channel
-  // already refreshes detail on events, so polling only backstops it.
-  const active = options.sseHealthy ? SSE_FALLBACK_POLL_MS : ACTIVE_POLL_MS;
+  // already refreshes detail on events, so polling only backstops it. Hidden
+  // readback always takes the fallback cadence regardless of the stale flag.
+  const active = visible && !options.sseHealthy ? ACTIVE_POLL_MS : SSE_FALLBACK_POLL_MS;
   for (const requestId of pendingRequestIds) {
     const recovered = launcherAssistantRequestReadback(source, requestId);
     if (!recovered || (recovered.turnId && source?.activeTurnId !== recovered.turnId && source?.lastTurnTerminalTurnId !== recovered.turnId)) return active;
   }
+  // Hidden: the outstanding requests all read back (the route's state settles
+  // on the next render), and no branch below justifies a hidden poll.
+  if (!visible) return false;
   if (queuedAcceptance && !queuedAcceptance.observed) return active;
   if (source?.queuedTurns?.some(row => row.status === "queued" || row.status === "starting")) return active;
   // Acceptance precedes the detail projection. A stale ready/previous terminal

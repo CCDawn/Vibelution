@@ -7,7 +7,9 @@ import type { ConversationViewProps } from "../../components/conversation/conver
 import type { ConversationMessage, SessionDetail, SessionReferenceAttachment, SessionToolApprovalRequest } from "../../api/types";
 import type { LauncherAssistantSessionEvent } from "../../api/launcherAssistant";
 import {
-  launcherAssistantActivity, launcherAssistantMessageOverLimit, launcherAssistantPollInterval, launcherAssistantSendDefinitelyRejected, launcherAssistantSubmission, launcherDispatchLabel, launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
+  launcherAssistantActivity, launcherAssistantMessageOverLimit, launcherAssistantPollInterval, launcherAssistantSendBusyCode,
+  launcherAssistantSendDefinitelyRejected, launcherAssistantSendRetryableBusy, launcherAssistantSubmission,
+  launcherDispatchLabel, launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
   launcherAssistantSessionEventRefreshesDetail, launcherAssistantSseHealthy, launcherAssistantWaitInterval,
   launcherAssistantStatusDegradeTone,
   launcherAssistantContextRing, launcherAssistantModelDisplay, launcherAssistantEditBackfillDraft,
@@ -68,12 +70,16 @@ async function renderAssistant(initialDetail?: Record<string, unknown>, initialS
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   await act(async () => {
     root?.render(createElement(QueryClientProvider, { client }, createElement(LauncherAssistantRoute, { key: "pet", ...routeProps })));
-    await new Promise(resolve => setTimeout(resolve, 10));
+    if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(10);
+    else await new Promise(resolve => setTimeout(resolve, 10));
   });
   await settle();
 }
 async function settle() {
-  await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
+  await act(async () => {
+    if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(10);
+    else await new Promise(resolve => setTimeout(resolve, 10));
+  });
 }
 async function click(label: string) {
   await act(async () => {
@@ -324,6 +330,51 @@ describe("Launcher assistant state", () => {
     } finally { visibility.mockRestore(); }
   });
 
+  it("keeps reading an unconfirmed send back while hidden and stops once the evidence lands", async () => {
+    vi.useFakeTimers();
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    try {
+      // An unknown send outcome keeps the conservative unconfirmed lock and the
+      // original request; nothing here is a provable pre-admission refusal.
+      bridge.sendLauncherAssistantMessage.mockRejectedValueOnce(new Error("ASSISTANT_HTTP_FAILED"));
+      await renderAssistant();
+      await showConversation();
+      await act(async () => conversation?.onComposerChange("请求 A"));
+      await act(async () => conversation?.onSubmit());
+      const requestId = bridge.sendLauncherAssistantMessage.mock.calls[0][1];
+      expect(client?.getQueryData(["launcher-assistant", "composer", "s"])).toMatchObject({ outstanding: { requestId } });
+      expect(conversation?.composerDisabled).toBe(true);
+      await act(async () => {
+        visibility.mockReturnValue("hidden");
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      await settle();
+      // Past one fallback window the hidden window has kept reading for the send.
+      const reads = bridge.getLauncherAssistantDetail.mock.calls.length;
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_500); });
+      await settle();
+      expect(bridge.getLauncherAssistantDetail).toHaveBeenCalledTimes(reads + 1);
+      // The readback evidence lands through that hidden poll and heals the send.
+      bridge.getLauncherAssistantDetail.mockResolvedValue({ id: "s", status: "ready", lastTurnTerminalTurnId: "healed", terminalReason: "success",
+        messages: [{ role: "user", metadata: { clientSubmissionId: requestId, turnId: "healed" } }] });
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_500); });
+      await settle();
+      // The outstanding lock clears; the accepted turn ID is consumed at once
+      // by the route's authoritative-confirmation effect ("healed" appears in
+      // the terminal snapshot), so it reads back empty rather than pending.
+      expect(client?.getQueryData(["launcher-assistant", "composer", "s"])).toMatchObject({ outstanding: null, acceptedTurnId: "" });
+      expect(conversation?.composerDisabled).toBe(false);
+      // Hidden again with nothing outstanding: the polling is off once more.
+      const healed = bridge.getLauncherAssistantDetail.mock.calls.length;
+      await act(async () => { await vi.advanceTimersByTimeAsync(21_000); });
+      await settle();
+      expect(bridge.getLauncherAssistantDetail).toHaveBeenCalledTimes(healed);
+    } finally {
+      visibility.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("follows an accepted queue through collapsed admission and terminal without using its queue ID as a Turn", async () => {
     await renderAssistant(); await showConversation();
     bridge.sendLauncherAssistantMessage.mockImplementationOnce(async (_message: string, clientSubmissionId: string) => ({ turnId: "", queuedTurnId: "queue-only", clientSubmissionId }));
@@ -350,10 +401,13 @@ describe("Launcher assistant state", () => {
     const unrelated = { status: "ready", lastTurnTerminalTurnId: "old", terminalReason: "success", messages: [{ role: "user", metadata: { clientSubmissionId: "other", turnId: "old" } }] } as unknown as SessionDetail;
     expect(launcherAssistantRequestReadback(unrelated, "original")).toBeNull();
     expect(launcherAssistantPollInterval(true, unrelated, "", null, ["original"])).toBe(2_000);
-    expect(launcherAssistantPollInterval(false, unrelated, "", null, ["original"])).toBe(false);
+    // Hidden keeps only the outstanding-request readback alive, pinned to the fallback cadence.
+    expect(launcherAssistantPollInterval(false, unrelated, "", null, ["original"])).toBe(10_000);
     const terminal = { ...unrelated, lastTurnTerminalTurnId: "matching", messages: [{ role: "user", metadata: { clientSubmissionId: "original", turnId: "matching" } }] } as unknown as SessionDetail;
     expect(launcherAssistantRequestReadback(terminal, "original")).toEqual({ turnId: "matching", queuedAcceptance: null });
     expect(launcherAssistantPollInterval(true, terminal, "", null, ["original"])).toBe(false);
+    // Authoritative evidence for the pending request stops the hidden readback too.
+    expect(launcherAssistantPollInterval(false, terminal, "", null, ["original"])).toBe(false);
     const queued = { ...unrelated, queuedTurns: [{ id: "queue-only", clientSubmissionId: "original", status: "paused" }] } as unknown as SessionDetail;
     expect(launcherAssistantRequestReadback(queued, "original")).toEqual({ turnId: "", queuedAcceptance: { id: "queue-only", clientSubmissionId: "original", observed: true } });
     expect(launcherAssistantPollInterval(true, queued, "", null, ["original"])).toBe(false);
@@ -388,6 +442,39 @@ describe("Launcher assistant state", () => {
     expect(launcherAssistantSendDefinitelyRejected(bridgeRefused)).toBe(true);
     expect(launcherAssistantSendDefinitelyRejected(new Error("Error invoking remote method 'assistant:request': Error: ASSISTANT_REQUEST_INVALID"))).toBe(true);
     for (const error of unknown) expect(launcherAssistantSendDefinitelyRejected(error)).toBe(false);
+    // An HTTP failure is neither a provable refusal nor retryable-busy: its
+    // outcome is unknown, so the conservative unconfirmed lock stays.
+    expect(launcherAssistantSendRetryableBusy(new Error("ASSISTANT_HTTP_FAILED"))).toBe(false);
+  });
+
+  it.each([
+    ["ASSISTANT_QUIESCING", new Error("ASSISTANT_QUIESCING")],
+    ["ASSISTANT_QUIESCING (ipc wrap)", new Error("Error invoking remote method 'launcherAssistant:invoke': Error: ASSISTANT_QUIESCING")],
+    ["ASSISTANT_QUIESCENCE_BUSY", new Error("ASSISTANT_QUIESCENCE_BUSY")],
+    ["ASSISTANT_QUIESCENCE_BUSY (ipc wrap)", new Error("Error invoking remote method 'launcherAssistant:invoke': ASSISTANT_QUIESCENCE_BUSY")],
+    ["ASSISTANT_STOPPING (name)", Object.assign(new Error("host is stopping"), { name: "ASSISTANT_STOPPING" })],
+    ["ASSISTANT_NOT_READY", new Error("ASSISTANT_NOT_READY")],
+    ["ASSISTANT_NOT_READY (ipc wrap)", new Error("Error invoking remote method 'assistant:request': Error: ASSISTANT_NOT_READY")],
+    ["ASSISTANT_SESSION_CONFLICT", new Error("ASSISTANT_SESSION_CONFLICT")],
+  ] as const)("classifies %s as retryable busy and reports its code", (_label, error) => {
+    expect(launcherAssistantSendRetryableBusy(error)).toBe(true);
+    // Never a provable rejection: these codes retry the retained request.
+    expect(launcherAssistantSendDefinitelyRejected(error)).toBe(false);
+    expect(launcherAssistantSendBusyCode(error)).toBe(_label.split(" ")[0]);
+  });
+
+  it.each([
+    ["timeout", new Error("host request timed out after 5000ms")],
+    ["transport failure", new Error("TRANSPORT_FAILED")],
+    ["http failure", new Error("ASSISTANT_HTTP_FAILED")],
+    ["model busy keeps its api-layer path", new Error("ASSISTANT_MODEL_BUSY")],
+    ["definite rejection keeps its own unlock", new Error("ASSISTANT_REQUEST_INVALID")],
+    ["prefix must not match (ASSISTANT_NOT_YET_READY)", new Error("ASSISTANT_NOT_YET_READY")],
+    ["substring must not match", new Error("retry after ASSISTANT_STOPPING completed")],
+    ["non-error value", "ASSISTANT_QUIESCING"],
+  ] as const)("does not classify %s as retryable busy", (_label, error) => {
+    expect(launcherAssistantSendRetryableBusy(error)).toBe(false);
+    expect(launcherAssistantSendBusyCode(error)).toBe("");
   });
 
   it("polls only a visible initial or active native session", () => {
@@ -420,11 +507,16 @@ describe("Launcher assistant state", () => {
     expect(launcherAssistantPollInterval(true, { status: "ready" }, "", receipt, [], healthy)).toBe(10_000);
     expect(launcherAssistantPollInterval(true, { status: "ready", queuedTurns: [{ id: "q", status: "starting" }] }, "", null, [], healthy)).toBe(10_000);
     expect(launcherAssistantPollInterval(true, unrecovered, "", null, ["missing"], healthy)).toBe(10_000);
-    // Idle, settled and hidden branches stay off no matter how healthy the channel is.
+    // Idle and settled branches stay off no matter how healthy the channel is,
+    // and a hidden window without outstanding requests stays off too.
     expect(launcherAssistantPollInterval(true, { status: "ready" }, "", null, [], healthy)).toBe(false);
     expect(launcherAssistantPollInterval(true, { status: "ready", lastTurnTerminalTurnId: "new", terminalReason: "success" }, "new", null, [], healthy)).toBe(false);
     expect(launcherAssistantPollInterval(false, { status: "running" }, "", null, [], healthy)).toBe(false);
-    expect(launcherAssistantPollInterval(false, undefined, "", null, ["missing"], healthy)).toBe(false);
+    // Hidden with an outstanding request keeps exactly one lifeline alive: the
+    // readback, at the fixed fallback cadence whether the stale flag still says
+    // healthy or has already decayed (the push subscription died with the window).
+    expect(launcherAssistantPollInterval(false, undefined, "", null, ["missing"], healthy)).toBe(10_000);
+    expect(launcherAssistantPollInterval(false, undefined, "", null, ["missing"])).toBe(10_000);
   });
 
   it("calls the push channel healthy only for an event inside the 35s window", () => {
