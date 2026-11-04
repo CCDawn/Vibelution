@@ -2677,7 +2677,9 @@ def test_config_workspace_batch_image_capability_persists_model_only(monkeypatch
             width, height = struct.unpack(">II", png[16:24])
             assert width >= 32
             assert height >= 32
-            return {"ok": True}
+            # The reply must reference the image content for the probe to
+            # assert support; bare success is accepted-only evidence.
+            return {"content": "The image shows a small grey square."}
 
     monkeypatch.setattr("core.llm.LLMClient", FakeClient)
 
@@ -2705,6 +2707,60 @@ def test_config_workspace_batch_image_capability_persists_model_only(monkeypatch
     assert "capability_source" not in profile
     assert "capability_checked_at" not in profile
     assert payload["capabilityResults"][0]["supportsImageInput"] is True
+
+
+def test_config_workspace_batch_image_capability_stays_unknown_without_reply_confirmation(monkeypatch, tmp_path):
+    monkeypatch.setenv(MODEL_CAPABILITY_CACHE_ENV, str(tmp_path / "model-capabilities.json"))
+    public_config = copy.deepcopy(load_public_config())
+    public_config["llm"]["model_library"]["local_quiet_probe"] = {
+        "provider": {
+            "kind": "local",
+            "api_key_env": "",
+            "base_url": "http://127.0.0.1:11434/v1",
+            "compat_mode": "openai",
+            "requires_api_key": False,
+            "context_window": 65536,
+        },
+        "model": "local-quiet",
+        "label": "Local Quiet",
+        "api_key_env": "",
+        "transport": "chat_completions",
+        "contract": "tool_chat",
+        "streaming": True,
+        "tool_calling_mode": "auto",
+        "discovery_enabled": True,
+        "supports_image_input": False,
+    }
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def invoke(self, messages, tools=None, metadata=None):
+            # A relay that silently dropped the image would reply like this.
+            return {"ok": True}
+
+    monkeypatch.setattr("core.llm.LLMClient", FakeClient)
+
+    response = client.post(
+        "/api/config/draft/check-model-capabilities",
+        json={
+            "publicConfig": public_config,
+            "draftMeta": {},
+            "baseHash": public_config_hash(public_config),
+            "modelIds": ["local_quiet_probe"],
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    model = payload["publicConfig"]["llm"]["model_library"]["local_quiet_probe"]
+    # Accepted-only evidence keeps the explicit declaration untouched.
+    assert model["supports_image_input"] is False
+    assert model["capability_status"] == "unknown"
+    assert model["capability_source"] == "runtime_probe"
+    assert payload["capabilityResults"][0]["supportsImageInput"] is None
 
 
 def test_config_workspace_batch_image_capability_records_unsupported(monkeypatch, tmp_path):

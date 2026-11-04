@@ -533,9 +533,10 @@ describe("Electron main Launcher IPC facade", () => {
     const shutdownBody = mainSource.slice(shutdownStart, mainSource.indexOf("async function requestDesktopShellExit", shutdownStart));
     expect(shutdownBody).toContain('orchestrateLauncherLifecycle("shutdown"');
     const exitStart = mainSource.indexOf("async function requestDesktopShellExit");
-    const exitBody = mainSource.slice(exitStart, mainSource.indexOf("async function requestForcedDesktopShellExit", exitStart));
+    const exitBody = mainSource.slice(exitStart, mainSource.indexOf("function notifyDesktopTray(", exitStart));
+    expect(exitBody).toContain('const interruptActiveWork = decision.reason === "operator_confirmed"');
     expect(exitBody).toMatch(
-      /stopManagedRuntime:\s*mainRuntimeAlreadyStopped\s*\? async \(\) => undefined\s*:\s*\(signal\) => stopMainRuntimeForApprovedShutdown\(false, signal\)/
+      /stopManagedRuntime:\s*mainRuntimeAlreadyStopped\s*\? async \(\) => undefined\s*:\s*\(signal\) => stopMainRuntimeForApprovedShutdown\(interruptActiveWork, signal\)/
     );
     const managedStart = mainSource.indexOf("async function stopManagedRuntime(");
     expect(managedStart).toBeGreaterThan(0);
