@@ -4321,6 +4321,7 @@ async function requestDesktopShellExit(
         try {
           await withDesktopShellExitTimeout(async (signal) => {
             signal.throwIfAborted();
+            const assistantStopStartedAt = Date.now();
             if (operatorRequested) {
               await stopLauncherAssistant();
             } else {
@@ -4330,10 +4331,27 @@ async function requestDesktopShellExit(
               }, () => undefined);
               assistantGuard.lease = await pendingGuard;
             }
+            recordSupervisorEventFallbackLocally({
+              eventCode: "electron.desktop_shell.exit_stage",
+              message: "Desktop shell exit stage settled.",
+              fields: { stage: "assistant_stop", durationMs: Date.now() - assistantStopStartedAt }
+            });
             signal.throwIfAborted();
             pendingWorkbenchCloseAck = null;
+            const workbenchJoinStartedAt = Date.now();
             const mainRuntimeAlreadyStopped = await joinWorkbenchCloseBackendStop(deadline);
+            recordSupervisorEventFallbackLocally({
+              eventCode: "electron.desktop_shell.exit_stage",
+              message: "Desktop shell exit stage settled.",
+              fields: { stage: "workbench_close_join", durationMs: Date.now() - workbenchJoinStartedAt }
+            });
+            const isolatedStopStartedAt = Date.now();
             await stopIsolatedInstancesForApprovedShutdown(interruptActiveWork, deadline);
+            recordSupervisorEventFallbackLocally({
+              eventCode: "electron.desktop_shell.exit_stage",
+              message: "Desktop shell exit stage settled.",
+              fields: { stage: "isolated_instances_stop", durationMs: Date.now() - isolatedStopStartedAt }
+            });
             const shutdownResult = await executeApprovedDesktopShellShutdown({
               decision,
               closeDesktopSession: async (signal) => {
