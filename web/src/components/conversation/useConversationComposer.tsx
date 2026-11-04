@@ -121,6 +121,10 @@ export type UseConversationComposerInput = {
   composerActionDisabled?: boolean;
   composerActionMode?: "send" | "stop" | "continue";
   composerPending: boolean;
+  /** The stop request RPC is in flight; keeps stop copy dominant over queueing. */
+  composerStopPending?: boolean;
+  /** The queue/send submit RPC is in flight while the turn keeps running. */
+  composerQueueSendPending?: boolean;
   composerSafeGuidancePending: boolean;
   composerInterruptGuidancePending: boolean;
   composerError?: string;
@@ -152,6 +156,7 @@ export type UseConversationComposerInput = {
   safeGuidancePendingLabel?: string;
   interruptGuidanceLabel?: string;
   interruptGuidancePendingLabel?: string;
+  queueSendPendingLabel?: string;
   editingMessageId?: string;
   composerModeNotice?: string;
   composerModeTargetPreview?: string;
@@ -213,6 +218,8 @@ export function useConversationComposer({
   composerActionDisabled,
   composerActionMode,
   composerPending,
+  composerStopPending,
+  composerQueueSendPending,
   composerSafeGuidancePending,
   composerInterruptGuidancePending,
   composerError,
@@ -244,6 +251,7 @@ export function useConversationComposer({
   safeGuidancePendingLabel,
   interruptGuidanceLabel,
   interruptGuidancePendingLabel,
+  queueSendPendingLabel,
   editingMessageId,
   composerModeNotice,
   composerModeTargetPreview,
@@ -342,6 +350,12 @@ export function useConversationComposer({
     fallbackSend: t("send"),
     fallbackStopPending: t("stopPending"),
     fallbackSendPending: t("sendPending"),
+    // The queue-send RPC and the stop request stay separate pending sources;
+    // queueing while busy must not borrow the "stopping" copy.
+    stopPendingActive: composerStopPending,
+    queueSendPendingActive: composerQueueSendPending,
+    queueSendPendingLabel,
+    fallbackQueueSendPending: lang === "zh" ? "正在排队…" : "Queueing…",
   });
 
   const {

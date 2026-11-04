@@ -84,6 +84,7 @@ const COPY = {
     editAsNew: "编辑为新消息",
     safeGuidance: "引导", safeGuidancePending: "正在引导",
     interruptGuidance: "打断并引导", interruptGuidancePending: "正在打断引导",
+    queueSendPending: "正在排队…",
   },
   en: {
     title: "Personal assistant", expand: "Open assistant chat", chat: "Chat", hide: "Hide assistant",
@@ -103,6 +104,7 @@ const COPY = {
     editAsNew: "Edit as new message",
     safeGuidance: "Steer", safeGuidancePending: "Steering",
     interruptGuidance: "Interrupt & steer", interruptGuidancePending: "Interrupting steer",
+    queueSendPending: "Queueing…",
   },
 } as const;
 
@@ -1332,6 +1334,10 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       composerFocusSignal={answerFocus?.sessionId === sessionId && answerFocus.questionId === pendingQuestion?.id ? answerFocus.signal : ""}
       onComposerFocusRequestSettled={settleAnswerFocus}
       composerPending={sendPending || controlPending || stopping} composerActionMode={actionMode}
+      // While busy, a control RPC is the stop request; the queue/send submit is
+      // its own pending source so queueing never borrows the stopping copy.
+      composerStopPending={controlPending || stopping} composerQueueSendPending={sendPending}
+      queueSendPendingLabel={copy.queueSendPending}
       composerAttachmentInputDisabled={status.data?.attachmentVersion !== 1 || sendPending || sendUnconfirmed || controlPending}
       composerAttachments={attachments}
       composerReferences={composerReferences}

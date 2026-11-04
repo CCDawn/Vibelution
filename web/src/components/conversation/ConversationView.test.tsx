@@ -127,6 +127,9 @@ function renderConversation(
     composerInterruptGuidancePending?: boolean;
     interruptGuidanceLabel?: string;
     interruptGuidancePendingLabel?: string;
+    composerStopPending?: boolean;
+    composerQueueSendPending?: boolean;
+    queueSendPendingLabel?: string;
     composerError?: string;
     composerGuidance?: string;
     followupQueue?: Array<{ id: string; text: string }>;
@@ -207,6 +210,9 @@ function renderConversation(
         composerInterruptGuidancePending={options.composerInterruptGuidancePending}
         interruptGuidanceLabel={options.interruptGuidanceLabel}
         interruptGuidancePendingLabel={options.interruptGuidancePendingLabel}
+        composerStopPending={options.composerStopPending}
+        composerQueueSendPending={options.composerQueueSendPending}
+        queueSendPendingLabel={options.queueSendPendingLabel}
         composerError={options.composerError}
         composerGuidance={options.composerGuidance}
         followupQueue={options.followupQueue}
@@ -332,6 +338,19 @@ describe("ConversationView stop feedback", () => {
     });
     expect(html).toContain('data-testid="composer-stop-pending-feedback"');
     expect(html).toContain("正在停止…");
+  });
+
+  it("never borrows the stopping copy while only the queue send is in flight", () => {
+    const html = renderConversation([], {
+      showComposer: true,
+      composerActionMode: "stop",
+      composerPending: true,
+      composerQueueSendPending: true,
+      queueSendPendingLabel: "正在排队…",
+    });
+    expect(html).toContain('data-testid="composer-stop-pending-feedback"');
+    expect(html).toContain("正在排队…");
+    expect(html).not.toContain("终止中");
   });
 });
 
