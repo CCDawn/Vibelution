@@ -22,6 +22,13 @@ export type AgentRenameDraft = {
   draftName: string;
 };
 
+export type AgentArchiveConfirmRequest = {
+  agentId: string;
+  agentName: string;
+  /** Full confirm copy shown in the VConfirmDialog description. */
+  message: string;
+};
+
 export type UseChatAgentDirectoryActionsOptions = {
   lang: "zh" | "en";
   navigate: NavigateFunction;
@@ -37,8 +44,6 @@ export type UseChatAgentDirectoryActionsOptions = {
   setSessionContextMenu: Dispatch<SetStateAction<SessionContextMenuState | null>>;
   setSessionComposerErrors: Dispatch<SetStateAction<Record<string, string>>>;
   renameAgentEmptyMessage: string;
-  /** Optional archive confirm (defaults to window.confirm). */
-  confirmArchive?: (message: string) => boolean;
 };
 
 /**
@@ -61,11 +66,12 @@ export function useChatAgentDirectoryActions(options: UseChatAgentDirectoryActio
     setSessionContextMenu,
     setSessionComposerErrors,
     renameAgentEmptyMessage,
-    confirmArchive = (message) => window.confirm(message),
   } = options;
 
   const [agentRenameDraft, setAgentRenameDraft] = useState<AgentRenameDraft | null>(null);
   const [agentCreateWizardOpen, setAgentCreateWizardOpen] = useState(false);
+  // Archiving is destructive — confirm through the VConfirmDialog request state (no blocking browser dialog).
+  const [agentArchiveConfirm, setAgentArchiveConfirm] = useState<AgentArchiveConfirmRequest | null>(null);
   const agentCreateTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const handleCreateAgent = useCallback(() => {
@@ -189,20 +195,31 @@ export function useChatAgentDirectoryActions(options: UseChatAgentDirectoryActio
       return;
     }
     const agentName = String(agent.displayName || agent.agentCode || agentId).trim();
-    const confirmed = confirmArchive(
-      lang === "zh"
+    setAgentArchiveConfirm({
+      agentId,
+      agentName,
+      message: lang === "zh"
         ? `确认归档 ${agentName}？它及其会话会立即从普通聊天区和标签中移除；保留的数据只在 Agent 管理中查看或彻底删除。`
         : `Archive ${agentName}? It and its sessions leave normal Chat and tabs immediately. Retained data is available only in Agent Management for inspection or permanent deletion.`,
-    );
-    if (!confirmed) {
+    });
+  }, [isAgentArchivePending, lang]);
+
+  const confirmAgentArchive = useCallback(() => {
+    const request = agentArchiveConfirm;
+    setAgentArchiveConfirm(null);
+    if (!request) {
       return;
     }
     setSessionComposerErrors((current) => ({
       ...current,
       __sessions__: "",
     }));
-    archiveAgent({ agentId });
-  }, [archiveAgent, confirmArchive, isAgentArchivePending, lang, setSessionComposerErrors]);
+    archiveAgent({ agentId: request.agentId });
+  }, [agentArchiveConfirm, archiveAgent, setSessionComposerErrors]);
+
+  const cancelAgentArchive = useCallback(() => {
+    setAgentArchiveConfirm(null);
+  }, []);
 
   return {
     handleCreateAgent,
@@ -212,6 +229,9 @@ export function useChatAgentDirectoryActions(options: UseChatAgentDirectoryActio
     handleOpenAgentConfig,
     handleRenameAgent,
     handleArchiveAgent,
+    confirmAgentArchive,
+    cancelAgentArchive,
+    agentArchiveConfirm,
     agentRenameDraft,
     setAgentRenameDraftName,
     cancelAgentRename,

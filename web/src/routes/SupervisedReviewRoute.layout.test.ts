@@ -222,6 +222,16 @@ describe("SupervisedReviewRoute layout contract", () => {
     expect(routeSource).toContain("mergeWorktreeConfirm");
   });
 
+  it("confirms discard/merge worktree actions through the VConfirmDialog request state", () => {
+    expect(routeSource).not.toContain("window.confirm(");
+    expect(routeSource).toContain("setWorktreeActionConfirm({ run, action })");
+    expect(routeSource).toContain("<VConfirmDialog");
+    expect(routeSource).toContain('tone="danger"');
+    expect(routeSource).toContain("confirmPending={worktreeActionMutation.isPending}");
+    expect(routeSource).toContain("onConfirm={handleConfirmWorktreeAction}");
+    expect(routeSource).toContain("onCancel={handleCancelWorktreeAction}");
+  });
+
   it("loads chat review queue summaries and selected candidate details separately", () => {
     expect(routeSource).toContain("fetchEvolutionChatReviewQueue<");
     expect(routeSource).toContain("queryKeys.evolutionChatReviewCandidate");

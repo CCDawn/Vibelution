@@ -280,10 +280,15 @@ describe("chat hand-test substitute: CLI terminal lifecycle", () => {
       { id: "run-7", status: "running", terminalSessionId: "term-7" } as never,
       { alive: true, status: "running", terminalSessionId: "term-7" } as never,
     )).toBe(true);
-    expect(cliTerminalHookSource).toContain("window.confirm(");
+    // Close-stop confirmation routes through the VConfirmDialog request state, not a blocking browser dialog.
+    expect(cliTerminalHookSource).not.toContain("window.confirm(");
+    expect(cliTerminalHookSource).toContain("setCliAgentCloseConfirm");
+    expect(cliTerminalHookSource).toContain("confirmCliAgentClose");
     expect(cliTerminalHookSource).toContain("stopCliAgentTerminalSession");
     expect(routeSource).toContain("useChatCliAgentTerminal");
     expect(routeSource).toContain("<ChatCliAgentTerminalStack");
+    expect(routeSource).toContain("onConfirm={confirmCliAgentClose}");
+    expect(routeSource).toContain("cliAgentCloseConfirm.message");
   });
 });
 

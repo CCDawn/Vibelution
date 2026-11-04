@@ -29,6 +29,7 @@ import {
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import {
   VButton,
+  VConfirmDialog,
   VListDetailPage,
   VNativeInput,
   VNativeTextarea,
@@ -216,6 +217,8 @@ export function SupervisedReviewRoute() {
   const [actionFeedback, setActionFeedback] = useState("");
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
   const [bulkFeedback, setBulkFeedback] = useState("");
+  // Destructive worktree actions confirm through the VConfirmDialog request state (no blocking browser dialog).
+  const [worktreeActionConfirm, setWorktreeActionConfirm] = useState<{ run: SupervisedWorktreeRun; action: string } | null>(null);
   useEffect(() => {
     migrateLegacyNumericPane(REVIEW_LAYOUT_ID, "queue", REVIEW_QUEUE_WIDTH_KEY);
   }, []);
@@ -505,15 +508,29 @@ export function SupervisedReviewRoute() {
       return;
     }
     if (action === "discard" || action === "merge") {
-      const confirmKey = action === "discard" ? "discardWorktreeConfirm" : "mergeWorktreeConfirm";
-      if (!window.confirm(t(confirmKey).replace("{runId}", run.runId))) {
-        return;
-      }
+      setWorktreeActionConfirm({ run, action });
+      return;
     }
     worktreeActionMutation.mutate({
       runId: run.runId,
       action,
     });
+  }
+
+  function handleConfirmWorktreeAction() {
+    const request = worktreeActionConfirm;
+    setWorktreeActionConfirm(null);
+    if (!request?.run.runId) {
+      return;
+    }
+    worktreeActionMutation.mutate({
+      runId: request.run.runId,
+      action: request.action,
+    });
+  }
+
+  function handleCancelWorktreeAction() {
+    setWorktreeActionConfirm(null);
   }
 
   const reasonOptions = draftDecision === "positive"
@@ -535,7 +552,8 @@ export function SupervisedReviewRoute() {
       ];
 
   return (
-    <VListDetailPage
+    <>
+      <VListDetailPage
       className={styles.page}
       headerClassName={styles.header}
       workspaceClassName={styles.workspace}
@@ -1057,6 +1075,26 @@ export function SupervisedReviewRoute() {
           )}
         </section>
       )}
-    />
+      />
+      <VConfirmDialog
+        open={Boolean(worktreeActionConfirm)}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) handleCancelWorktreeAction();
+        }}
+        tone="danger"
+        title={lang === "zh" ? "危险操作确认" : "Confirm destructive action"}
+        description={worktreeActionConfirm
+          ? t(worktreeActionConfirm.action === "discard" ? "discardWorktreeConfirm" : "mergeWorktreeConfirm")
+            .replace("{runId}", worktreeActionConfirm.run.runId)
+          : ""}
+        confirmLabel={worktreeActionConfirm
+          ? t(worktreeActionConfirm.action === "discard" ? "discardWorktree" : "mergeWorktree")
+          : ""}
+        cancelLabel={lang === "zh" ? "取消" : "Cancel"}
+        confirmPending={worktreeActionMutation.isPending}
+        onConfirm={handleConfirmWorktreeAction}
+        onCancel={handleCancelWorktreeAction}
+      />
+    </>
   );
 }

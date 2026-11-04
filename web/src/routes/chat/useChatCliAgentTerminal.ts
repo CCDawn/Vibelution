@@ -24,6 +24,12 @@ export type UseChatCliAgentTerminalOptions = {
   refetchSessionDetail: () => Promise<unknown> | unknown;
 };
 
+export type CliAgentCloseConfirmRequest = {
+  run: CliAgentRunView;
+  /** Full confirm copy shown in the VConfirmDialog description. */
+  message: string;
+};
+
 export type UseChatCliAgentTerminalResult = {
   cliAgentRunTabs: CliAgentRunView[];
   activeCliAgentRun: CliAgentRunView | undefined;
@@ -31,6 +37,11 @@ export type UseChatCliAgentTerminalResult = {
   cliAgentTerminalSessions: Record<string, CliAgentTerminalSession>;
   handleCliAgentTerminalSessionChange: (runId: string, session: CliAgentTerminalSession) => void;
   closeCliAgentRun: (run: CliAgentRunView) => Promise<void>;
+  /** Pending close of an active terminal session, confirmed through the VConfirmDialog request state. */
+  cliAgentCloseConfirm: CliAgentCloseConfirmRequest | null;
+  cliAgentCloseStopping: boolean;
+  confirmCliAgentClose: () => void;
+  cancelCliAgentClose: () => void;
 };
 
 /**
@@ -50,6 +61,9 @@ export function useChatCliAgentTerminal({
   const [closedCliAgentRunTokensBySession, setClosedCliAgentRunTokensBySession] = useState<Record<string, string[]>>({});
   const [cliAgentTerminalSessions, setCliAgentTerminalSessions] = useState<Record<string, CliAgentTerminalSession>>({});
   const [mountedCliAgentRunIdsBySession, setMountedCliAgentRunIdsBySession] = useState<Record<string, string[]>>({});
+  // Closing an active terminal session is destructive — confirm through the VConfirmDialog request state.
+  const [cliAgentCloseConfirm, setCliAgentCloseConfirm] = useState<CliAgentCloseConfirmRequest | null>(null);
+  const [cliAgentCloseStopping, setCliAgentCloseStopping] = useState(false);
 
   const closedCliAgentRunTokens = activeSessionId
     ? (closedCliAgentRunTokensBySession[activeSessionId] ?? EMPTY_CLI_AGENT_RUN_TOKENS)
@@ -143,23 +157,19 @@ export function useChatCliAgentTerminal({
     });
   }, []);
 
-  const closeCliAgentRun = useCallback(async (run: CliAgentRunView) => {
+  const buildCliAgentCloseConfirmMessage = useCallback((run: CliAgentRunView) => {
+    return lang === "zh"
+      ? `关闭后将结束当前 ${run.title} 终端会话，是否关闭？`
+      : `Closing will end the current ${run.title} terminal session. Close it?`;
+  }, [lang]);
+
+  const performCliAgentClose = useCallback(async (run: CliAgentRunView) => {
     if (!activeSessionId) {
       return;
     }
     const terminalSession = cliAgentTerminalSessions[run.id];
     const terminalSessionId = String(terminalSession?.terminalSessionId || run.terminalSessionId || run.result?.terminalSessionId || "").trim();
     const shouldStopTerminal = isCliAgentRunActiveForClose(run, terminalSession);
-    if (shouldStopTerminal && typeof window !== "undefined") {
-      const confirmed = window.confirm(
-        lang === "zh"
-          ? `关闭后将结束当前 ${run.title} 终端会话，是否关闭？`
-          : `Closing will end the current ${run.title} terminal session. Close it?`,
-      );
-      if (!confirmed) {
-        return;
-      }
-    }
     if (shouldStopTerminal && terminalSessionId) {
       try {
         await stopCliAgentTerminalSession<CliAgentTerminalSession>(
@@ -220,6 +230,35 @@ export function useChatCliAgentTerminal({
     setActiveTab,
   ]);
 
+  const closeCliAgentRun = useCallback(async (run: CliAgentRunView) => {
+    if (!activeSessionId) {
+      return;
+    }
+    const terminalSession = cliAgentTerminalSessions[run.id];
+    const shouldStopTerminal = isCliAgentRunActiveForClose(run, terminalSession);
+    if (shouldStopTerminal) {
+      setCliAgentCloseConfirm({ run, message: buildCliAgentCloseConfirmMessage(run) });
+      return;
+    }
+    await performCliAgentClose(run);
+  }, [activeSessionId, buildCliAgentCloseConfirmMessage, cliAgentTerminalSessions, performCliAgentClose]);
+
+  const confirmCliAgentClose = useCallback(() => {
+    const request = cliAgentCloseConfirm;
+    setCliAgentCloseConfirm(null);
+    if (!request) {
+      return;
+    }
+    setCliAgentCloseStopping(true);
+    void performCliAgentClose(request.run).finally(() => {
+      setCliAgentCloseStopping(false);
+    });
+  }, [cliAgentCloseConfirm, performCliAgentClose]);
+
+  const cancelCliAgentClose = useCallback(() => {
+    setCliAgentCloseConfirm(null);
+  }, []);
+
   return {
     cliAgentRunTabs,
     activeCliAgentRun,
@@ -227,5 +266,9 @@ export function useChatCliAgentTerminal({
     cliAgentTerminalSessions,
     handleCliAgentTerminalSessionChange,
     closeCliAgentRun,
+    cliAgentCloseConfirm,
+    cliAgentCloseStopping,
+    confirmCliAgentClose,
+    cancelCliAgentClose,
   };
 }
