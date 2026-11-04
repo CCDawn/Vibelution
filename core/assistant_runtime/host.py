@@ -69,6 +69,29 @@ class MigrationQuiescenceUnavailable(RuntimeError):
     """No completed drain proof; keep the resident host and retry later."""
 
 
+_MIGRATION_BARRIER_CODES = frozenset({
+    "dispatch_unavailable", "session_unavailable", "history_busy", "session_busy_or_unknown",
+    "session_release_unknown", "dispatch_busy_or_unknown", "main_control_busy_or_unknown",
+    "ASSISTANT_QUIESCENCE_BUSY", "ASSISTANT_QUIESCENCE_UNKNOWN", "ASSISTANT_QUIESCENCE_UNAVAILABLE",
+    "ASSISTANT_IDENTITY_INVALID", "DISPATCH_DRAIN_ADMISSION_BUSY", "DISPATCH_DRAIN_ACTIVE",
+    "DISPATCH_DRAIN_INACTIVE", "DISPATCH_DRAIN_OWNER", "DISPATCH_DRAIN_SEALED",
+    "PROJECT_REGISTRY_RECONCILE_REQUIRED", "records_unknown", "records_changed", "not_terminal",
+    "reminder_lease_owner_closed", "reminder_lease_unavailable", "cancelled",
+})
+
+
+def _log_migration_quiescence_failure(stage, reason, started, *, barrier=False):
+    """Emit only fixed codes; exception messages and observations remain private."""
+    code = reason if isinstance(reason, str) else getattr(reason, "code", None)
+    if code is None and isinstance(reason, BaseException) and len(reason.args) == 1:
+        code = reason.args[0]
+    if type(code) is not str or code not in _MIGRATION_BARRIER_CODES:
+        code = "unexpected"
+    logging.getLogger(__name__).warning("%s stage=%s code=%s elapsed_ms=%d",
+        "assistant_migration_barrier" if barrier else "assistant_migration_quiescence",
+        stage, code, max(0, round((time.monotonic() - started) * 1000)))
+
+
 @asynccontextmanager
 async def migration_runtime_quiescence(native, dispatch, history_control, main_control):
     """Hold native Session, history writer, and dispatch fences together.
@@ -77,29 +100,38 @@ async def migration_runtime_quiescence(native, dispatch, history_control, main_c
     reminder senders and HTTP mutation admission, and retain those fences for
     this entire scope. This helper never itself authorizes host shutdown.
     """
+    started = time.monotonic()
     if dispatch is None or not callable(getattr(dispatch, "drain_fence", None)):
+        _log_migration_quiescence_failure("dispatch_fence", "dispatch_unavailable", started)
         raise MigrationQuiescenceUnavailable("dispatch_unavailable")
     session_quiescence = getattr(native, "session_quiescence", None)
     if not callable(session_quiescence):
+        _log_migration_quiescence_failure("native_quiescence", "session_unavailable", started)
         raise MigrationQuiescenceUnavailable("session_unavailable")
     loop = asyncio.get_running_loop()
     ready = loop.create_future()
     release = threading.Event()
 
     def worker():
+        stage = "native_quiescence"
         try:
             with session_quiescence():
+                stage = "history_import"
                 lock = getattr(history_control, "_import_lock", None) if history_control is not None else None
                 if history_control is not None and (lock is None or not lock.acquire(blocking=False)):
                     raise MigrationQuiescenceUnavailable("history_busy")
                 try:
+                    stage = "barrier_hold"
                     loop.call_soon_threadsafe(lambda: not ready.done() and ready.set_result(None))
                     release.wait()
                 finally:
+                    stage = "history_release"
                     if lock is not None:
                         lock.release()
+                stage = "native_release"
             return True
-        except Exception:
+        except Exception as error:
+            _log_migration_quiescence_failure(stage, error, started)
             loop.call_soon_threadsafe(lambda: not ready.done() and ready.set_exception(
                 MigrationQuiescenceUnavailable("session_busy_or_unknown")))
             return False
@@ -107,19 +139,31 @@ async def migration_runtime_quiescence(native, dispatch, history_control, main_c
     owner = asyncio.create_task(asyncio.to_thread(worker))
     try:
         await ready
-        async with dispatch.drain_fence() as fence:
-            observation = await fence.observe()
-            blocked = None
-            if not isinstance(observation, dict) or observation.get("drained") is not True:
-                blocked = "dispatch_busy_or_unknown"
-            elif main_control is not None:
-                pending = getattr(main_control, "_pending", None)
-                tokens = getattr(main_control, "_initial_tokens", None)
-                if not isinstance(pending, dict) or pending or not isinstance(tokens, set) or any(
-                        not token._done.is_set() for token in tokens):
-                    blocked = "main_control_busy_or_unknown"
-            if blocked is None:
-                yield
+        stage = "dispatch_fence"
+        try:
+            async with dispatch.drain_fence() as fence:
+                stage = "dispatch_observation"
+                observation = await fence.observe()
+                blocked = None
+                if not isinstance(observation, dict) or observation.get("drained") is not True:
+                    blocked = "dispatch_busy_or_unknown"
+                    reason = observation.get("reason", blocked) if isinstance(observation, dict) else blocked
+                    _log_migration_quiescence_failure(stage, reason, started)
+                elif main_control is not None:
+                    stage = "main_control"
+                    pending = getattr(main_control, "_pending", None)
+                    tokens = getattr(main_control, "_initial_tokens", None)
+                    if not isinstance(pending, dict) or pending or not isinstance(tokens, set) or any(
+                            not token._done.is_set() for token in tokens):
+                        blocked = "main_control_busy_or_unknown"
+                        _log_migration_quiescence_failure(stage, blocked, started)
+                if blocked is None:
+                    stage = "barrier_hold"
+                    yield
+                stage = "dispatch_release"
+        except Exception as error:
+            _log_migration_quiescence_failure(stage, error, started)
+            raise
         if blocked is not None:
             raise MigrationQuiescenceUnavailable(blocked)
     finally:
@@ -670,23 +714,32 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                  "task": None, "release": None, "state": "idle", "committing": False}
 
     async def hold_migration_barrier():
+        started = time.monotonic()
+        stage = "http_writers"
         try:
             while migration["writers"]:
                 migration["changed"].clear()
                 if migration["writers"]:
                     await migration["changed"].wait()
+            stage = "source_permits"
             async with source_permit_fence():
+                stage = "runtime_quiescence"
                 async with migration_runtime_quiescence(native, dispatch, history_control, main_control):
                     if migration["release"].is_set():
                         migration["state"] = "released"
                         return
                     migration["state"] = "ready"
+                    stage = "barrier_hold"
                     await migration["release"].wait()
+                    stage = "runtime_release"
+                stage = "source_permits_release"
             migration["state"] = "released"
         except asyncio.CancelledError:
+            _log_migration_quiescence_failure(stage, "cancelled", started, barrier=True)
             migration["state"] = "busy"
             raise
-        except Exception:
+        except Exception as error:
+            _log_migration_quiescence_failure(stage, error, started, barrier=True)
             migration["state"] = "busy"
         finally:
             if not migration["committing"]:
