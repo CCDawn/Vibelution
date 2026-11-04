@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -36,15 +38,54 @@ class ClaimBinding:
     scopes: tuple[str, ...]
 
 
+@functools.lru_cache(maxsize=1)
+def _resolve_git_executable() -> str:
+    """Resolve a real git.exe, avoiding console-allocating cmd/bin trampolines.
+
+    This script also runs from the self-contained hook cache snapshot (no
+    ``core`` package), so this is the minimal in-place equivalent of
+    core.infrastructure.no_console_git.resolve_git_executable.
+    """
+
+    found = shutil.which("git")
+    if not found:
+        return "git"
+    if os.name != "nt":
+        return found
+    path = Path(found)
+    if path.parent.name.lower() in {"cmd", "bin"}:
+        mingw = path.parent.parent / "mingw64" / "bin" / "git.exe"
+        if mingw.is_file():
+            return str(mingw)
+    return found
+
+
+def _no_window_kwargs() -> dict[str, object]:
+    """Subprocess kwargs that never allocate a visible console (development-standard 8.0)."""
+
+    if os.name != "nt":
+        return {}
+    kwargs: dict[str, object] = {
+        "creationflags": int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    }
+    if hasattr(subprocess, "STARTUPINFO"):
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= int(getattr(subprocess, "STARTF_USESHOWWINDOW", 0))
+        startupinfo.wShowWindow = int(getattr(subprocess, "SW_HIDE", 0))
+        kwargs["startupinfo"] = startupinfo
+    return kwargs
+
+
 def _run_git(root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["git", *arguments],
+        [_resolve_git_executable(), *arguments],
         cwd=root,
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
         check=False,
+        **_no_window_kwargs(),
     )
 
 
@@ -160,6 +201,7 @@ def coordination_call(root: Path, *arguments: str) -> dict[str, object]:
         encoding="utf-8",
         errors="replace",
         check=False,
+        **_no_window_kwargs(),
     )
     if completed.returncode != 0:
         detail = completed.stderr.strip() or completed.stdout.strip()
@@ -177,10 +219,18 @@ def coordination_call(root: Path, *arguments: str) -> dict[str, object]:
 
 def staged_paths(root: Path) -> tuple[str, ...]:
     completed = subprocess.run(
-        ["git", "diff", "--cached", "--name-only", "-z", "--diff-filter=ACMRD"],
+        [
+            _resolve_git_executable(),
+            "diff",
+            "--cached",
+            "--name-only",
+            "-z",
+            "--diff-filter=ACMRD",
+        ],
         cwd=root,
         capture_output=True,
         check=False,
+        **_no_window_kwargs(),
     )
     if completed.returncode != 0:
         raise ClaimGuardError("staged_paths_unavailable")
@@ -210,10 +260,18 @@ def committed_task_paths(root: Path) -> tuple[str, ...]:
             translated = history.translate_task_dag(root, "HEAD", receipt)
             revision = f"main...{translated.head}"
     completed = subprocess.run(
-        ["git", "--no-replace-objects", "diff", "--name-only", "-z", revision],
+        [
+            _resolve_git_executable(),
+            "--no-replace-objects",
+            "diff",
+            "--name-only",
+            "-z",
+            revision,
+        ],
         cwd=root,
         capture_output=True,
         check=False,
+        **_no_window_kwargs(),
     )
     if completed.returncode != 0:
         raise ClaimGuardError("task_paths_unavailable")
