@@ -1861,8 +1861,36 @@ def _wait_for_desktop_shell_build_lock(root: Path, *, deadline: float) -> None:
         time.sleep(min(DESKTOP_SHELL_BUILD_LOCK_POLL_SECONDS, remaining))
 
 
+def _project_venv_python(root: Path) -> Path:
+    """Return the project-local venv interpreter, matching boot_pipeline.project_venv_python.
+
+    boot_pipeline is deliberately not imported here: it drags in the supervised
+    evaluation stack, and desktop shell helpers must stay cheap to import.
+    """
+
+    if sys.platform == "win32":
+        return root / ".venv" / "Scripts" / "python.exe"
+    return root / ".venv" / "bin" / "python"
+
+
+def _assistant_payload_builder_python(root: Path) -> str:
+    """Interpreter for the payload packaging subprocess: project .venv first.
+
+    build_assistant_runtime's RECORD safety check only accepts venv-layout
+    site-packages, so a helper running on a bare system Python must still
+    package through the project venv interpreter when one exists; without a
+    venv the running interpreter keeps today's behavior.
+    """
+
+    candidate = _project_venv_python(root)
+    if candidate.is_file():
+        return str(candidate)
+    return sys.executable
+
+
 def _build_assistant_payload(root: Path, payload: Path, *, deadline: float, env: dict[str, str]) -> str:
-    command = [sys.executable, "-B", "-c",
+    builder_python = _assistant_payload_builder_python(root)
+    command = [builder_python, "-B", "-c",
                ("import sys; from scripts.build_assistant_runtime import build_launcher_assistant_payload; "
                 "build_launcher_assistant_payload(sys.argv[1], sys.argv[2])"), str(root), str(payload)]
     _run_owned_process(command, cwd=root, deadline=deadline, label="desktop assistant payload", env=env)

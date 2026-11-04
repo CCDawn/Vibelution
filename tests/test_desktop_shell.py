@@ -73,6 +73,9 @@ def test_assistant_payload_build_reuses_owned_deadline_and_unique_session(tmp_pa
     calls = []
     payload = tmp_path / "dist/.desktop-shell-build-fixture/launcher-assistant"
     deadline = time.monotonic() + 30
+    # tmp_path has no .venv, so this also pins the fallback: packaging keeps
+    # the running interpreter when the project venv is absent.
+    assert desktop_shell._project_venv_python(tmp_path).is_file() is False
 
     def owned(command, **kwargs):
         calls.append((command, kwargs))
@@ -87,6 +90,23 @@ def test_assistant_payload_build_reuses_owned_deadline_and_unique_session(tmp_pa
     assert "build_launcher_assistant_payload" in command[3]
     assert command[-2:] == [str(tmp_path), str(payload)]
     assert options["deadline"] == deadline and options["env"] == {"fixture": "1"}
+
+
+def test_assistant_payload_build_prefers_project_venv_interpreter(tmp_path, monkeypatch):
+    calls = []
+    payload = tmp_path / "dist/.desktop-shell-build-fixture/launcher-assistant"
+    venv_python = desktop_shell._project_venv_python(tmp_path)
+    _write(venv_python.parent, venv_python.name, b"")
+
+    def owned(command, **kwargs):
+        calls.append((command, kwargs))
+        _write(payload, "manifest.json", b"{}")
+
+    monkeypatch.setattr(desktop_shell, "_run_owned_process", owned)
+    desktop_shell._build_assistant_payload(tmp_path, payload, deadline=time.monotonic() + 30, env={"fixture": "1"})
+    command, _options = calls[0]
+    assert command[0] == str(venv_python)
+    assert "build_launcher_assistant_payload" in command[3]
 
 
 def test_lightweight_shell_import_does_not_require_assistant_build_dependencies():
