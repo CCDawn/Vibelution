@@ -8,6 +8,7 @@ import { LauncherNotificationTopbar } from "../../app/LauncherNotificationTopbar
 import { LauncherNotificationProvider } from "../../app/LauncherNotifications";
 import type { ConversationViewProps } from "../../components/conversation/conversationViewTypes";
 import { LauncherAssistantRoute } from "./LauncherAssistantRoute";
+import { LauncherAssistantTaskCards } from "./assistantTasks/LauncherAssistantTaskCards";
 
 // Keep the real route, bridge validation, queries and notification presentation.
 // Only the transcript renderer is replaced with its public composer contract.
@@ -44,7 +45,7 @@ async function settle() {
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
 }
 
-async function mount({ initiallyFail = [] }: { initiallyFail?: string[] } = {}) {
+async function mount({ initiallyFail = [], withTaskOwner = false }: { initiallyFail?: string[]; withTaskOwner?: boolean } = {}) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("fetch", vi.fn(() => { throw new Error("HTTP is forbidden in this window"); }));
   failing = new Set(initiallyFail);
@@ -73,7 +74,8 @@ async function mount({ initiallyFail = [] }: { initiallyFail?: string[] } = {}) 
   await act(async () => root!.render(<QueryClientProvider client={client}>
     <LauncherNotificationProvider>
       <header data-testid="topbar"><LauncherNotificationTopbar lang="zh" /></header>
-      <main data-testid="assistant-body"><LauncherAssistantRoute embedded /></main>
+      {withTaskOwner ? <LauncherAssistantTaskCards><main data-testid="assistant-body"><LauncherAssistantRoute embedded /></main></LauncherAssistantTaskCards>
+        : <main data-testid="assistant-body"><LauncherAssistantRoute embedded /></main>}
     </LauncherNotificationProvider>
   </QueryClientProvider>));
   await settle(); await settle();
@@ -127,6 +129,27 @@ afterEach(async () => {
 });
 
 describe("Launcher assistant hosted notifications", () => {
+  it("uses the task owner once for shared status and task-source failures", async () => {
+    await mount({withTaskOwner:true});
+    failing.add("status");
+    await act(async()=>{await client.refetchQueries({queryKey:["launcher-assistant","status"]});});
+    await settle(); await settle();
+    expect(trigger().getAttribute("aria-label")).toContain("1 项提醒");
+    await click(trigger());
+    expect(panel().querySelectorAll("li")).toHaveLength(1);
+    expect(panel().textContent).toContain("任务状态未更新");
+    expect(panel().textContent).not.toContain("部分状态未更新");
+    failing.delete("status");
+    await click(panelButton("刷新"));
+    expect(trigger().getAttribute("aria-label")).toContain("0 项提醒");
+    failing.add("dispatches");
+    await act(async()=>{await client.refetchQueries({queryKey:["launcher-assistant"]});});
+    await settle(); await settle();
+    expect(trigger().getAttribute("aria-label")).toContain("1 项提醒");
+    expect(panel().querySelectorAll("li")).toHaveLength(1);
+    expect(panel().textContent).toContain("任务状态未更新");
+  });
+
   it("groups failed reads and appearance while retaining the mounted conversation and draft", async () => {
     await mount();
     const originalConversation = body().querySelector('[data-testid="native-conversation"]');
