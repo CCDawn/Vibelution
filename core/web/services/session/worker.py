@@ -14,6 +14,7 @@ import hashlib
 import json
 import logging
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,7 @@ from core.web.services.financial_research.as_of import (
 )
 from core.llm.error_classification import PERMANENT
 from .turn_model_parameters import pin_agent_model_parameters
+from . import control as _stop_control
 from core.orchestration.context_engine import AgentContextInterrupted
 from core.orchestration.turn_stop_signal import attach_stop_event
 from core.web.services.session.research_thinking_budget import (
@@ -1061,6 +1063,17 @@ def _wait_for_tool_execution_quiescence(scope: ToolExecutionScope) -> None:
                     "budgetSeconds": round(budget_seconds, 3),
                 },
             )
+            # 停止阶段：teardown 兜底等待被放弃，工具执行按已取消收尾。
+            try:
+                if s._is_session_stop_requested(scope.session_id):
+                    _stop_control._record_session_stop_stage(
+                        scope.session_id,
+                        scope.turn_id,
+                        _stop_control.SESSION_STOP_STAGE_TOOLS_CANCELLED,
+                        outcome="wait_abandoned",
+                    )
+            except Exception:
+                pass
             return
         if scope.wait_for_quiescence(timeout=min(1.0, remaining_budget)):
             break
@@ -1075,6 +1088,17 @@ def _wait_for_tool_execution_quiescence(scope: ToolExecutionScope) -> None:
                 outcome="waiting",
                 fields=snapshot,
             )
+    # 停止阶段：工具执行已全部退出（停止轮次的 teardown 观测点）。
+    try:
+        if s._is_session_stop_requested(scope.session_id):
+            _stop_control._record_session_stop_stage(
+                scope.session_id,
+                scope.turn_id,
+                _stop_control.SESSION_STOP_STAGE_TOOLS_CANCELLED,
+                outcome="quiescent",
+            )
+    except Exception:
+        pass
     s._record_session_turn_lifecycle_event(
         scope.session_id,
         "tool_quiescence_wait_finished",
@@ -1165,6 +1189,11 @@ def _finish_session_turn_worker(
         "finished",
         details={"wasCurrentTurn": s._is_session_turn_current(session_id, turn_id)},
     )
+    # 轮次终局：释放停止阶段登记（无论正常结束还是停止收尾）。
+    try:
+        _stop_control._clear_session_stop_stages(session_id, turn_id)
+    except Exception:
+        pass
     s._set_session_running(session_id, False, turn_id=turn_id)
     s._clear_session_turn_control(session_id, turn_id=turn_id)
     s._publish_session_detail_snapshot(session_id)
@@ -1229,6 +1258,17 @@ def _abort_session_turn_for_stop(
     stop_reason = s._get_turn_control_stop_reason(turn_control)
     if not stop_reason:
         return False
+    # 停止阶段：协作检查点观察到停止（provider abort / 检查点到达后的统一
+    # 收敛点；stage 字段保留具体检查点名）。
+    try:
+        _stop_control._record_session_stop_stage(
+            session_id,
+            turn_id,
+            _stop_control.SESSION_STOP_STAGE_STOP_OBSERVED,
+            stage=str(stage or "").strip(),
+        )
+    except Exception:
+        pass
     s._record_session_turn_lifecycle_event(
         session_id,
         "stop_observed",
@@ -3159,6 +3199,23 @@ def _run_session_continuation_loop(
                 chat_history=iteration_chat_history,
                 chat_history_ledger_fingerprint=chat_history_ledger_fingerprint,
             )
+            # 停止阶段：停止事件在本轮模型调用窗口内置位——provider abort
+            # 观察器已切断在途 HTTP 流（Chat/Responses 取消监视共用该事件），
+            # 迭代前的 preflight 检查未命中，说明停止落在流执行中途。
+            try:
+                iteration_stop_event = getattr(turn_control, "stop_event", None)
+                if (
+                    isinstance(iteration_stop_event, threading.Event)
+                    and iteration_stop_event.is_set()
+                ):
+                    _stop_control._record_session_stop_stage(
+                        session_id,
+                        canonical_turn_id,
+                        _stop_control.SESSION_STOP_STAGE_PROVIDER_ABORTED,
+                        turnIndex=turn_index,
+                    )
+            except Exception:
+                pass
             # The LLM response callback cannot raise through EventBus. Convert
             # its fail-closed marker into the normal worker exception path
             # before any continuation or success persist.

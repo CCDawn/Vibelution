@@ -28,6 +28,7 @@ from core.research.workflow.contracts.discussion_scope import (
 from core.web.services.session.signals_format import _current_session_route_fallback
 from core.web.services.session.timebase import parse_timestamp_utc
 from core.web.services.session import conversation_references
+from core.web.services.session import control as _stop_control
 from core.web.services.session import pending_question
 
 
@@ -876,6 +877,18 @@ def _build_session_detail_from_summary(
         "stopReason": ""
         if bool(turn_snapshot.get("releasedToUser"))
         else str(turn_snapshot["stopReason"] or "").strip(),
+        # 停止阶段进度（requested / provider_aborted / tools_cancelled /
+        # snapshot_persisted / forced ...）：stop 状态字段的相邻扩展，读自
+        # control 的进程内阶段登记；仅在停止未 settle 的窗口透出，settle 后
+        # 由登记释放，终态证据保留在 journal（stopForced / stop_watchdog_forced）。
+        "stopStages": []
+        if (
+            not bool(turn_snapshot["stopRequested"])
+            or bool(turn_snapshot.get("releasedToUser"))
+        )
+        else _stop_control._session_stop_stages_for_projection(
+            conversation["id"], str(turn_snapshot.get("turnId") or "").strip()
+        ),
     }
     if message_window is not None:
         detail["messageWindow"] = message_window

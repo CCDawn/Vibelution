@@ -9,12 +9,65 @@ Late-bound facade keeps monkeypatches stable.
 
 from __future__ import annotations
 
+import logging
+import os
 import threading
+import time
 from contextlib import contextmanager
 from typing import Any
 
 
 _RUNTIME_STOP_REASONS = frozenset({"electron_user_restart", "electron_user_close", "runtime_shutdown"})
+
+# ---------------------------------------------------------------------------
+# 停止收尾总上界 watchdog（stop settlement watchdog）与停止阶段登记
+# ---------------------------------------------------------------------------
+# 停止是设计内的多阶段异步协作：stop 登记（fast_ack）→ worker 在 provider
+# HTTP abort（仅 Chat 流）或下一个协作检查点才观察到停止；长工具执行期间
+# 没有检查点；teardown 还有 TOOL_QUIESCENCE_WAIT_BUDGET_SECONDS=10.0 的兜底
+# 等待。整条链此前没有任何一段维护「停止必须完成」的总 deadline。本 watchdog
+# 只做最后一道兜底：优雅路径（检查点 / provider abort）永远优先，到点仍未
+# settle 才升级为强制收尾，且仅作用于已经明确登记了 stopRequested 的轮次
+# （正常慢模型、长 thinking 与此完全无关——计时起点是 stopRequested，不是
+# 轮次开始）。
+#
+# 阈值量级依据：25s ≈ 2.5 倍 tool quiescence 预算（10s），显著大于「检查点
+# 间隔 + provider abort 延迟 + 10s teardown」的正常最坏路径（不与优雅收尾
+# 赛跑），又把用户的最坏等待压在可感知的有限上界内。0 或负值显式禁用
+# （供运维/测试关闭）。覆盖用 VIBELUTION_STOP_SETTLEMENT_WATCHDOG_SECONDS。
+STOP_SETTLEMENT_WATCHDOG_SECONDS = 25.0
+_STOP_SETTLEMENT_WATCHDOG_ENV = "VIBELUTION_STOP_SETTLEMENT_WATCHDOG_SECONDS"
+# watchdog 轮询间隔：秒级总上界不需要更细的粒度，同时让测试里的 fake 时钟
+# 推进能在一个真实 tick 内被观察到。
+_STOP_SETTLEMENT_WATCHDOG_TICK_SECONDS = 0.25
+
+# 停止阶段常量：写入进程内阶段登记（_SESSION_STOP_STAGES），并由 detail
+# 投影以 ``stopStages`` 透出（见 projection._build_session_detail_from_summary）。
+# 这是既有 stop 状态字段（stopRequested/stopRequestedAt/stopReason）的相邻
+# 扩展，不新增第二套事件通道。
+SESSION_STOP_STAGE_REQUESTED = "requested"
+SESSION_STOP_STAGE_PROVIDER_ABORTED = "provider_aborted"
+SESSION_STOP_STAGE_TOOLS_CANCELLED = "tools_cancelled"
+SESSION_STOP_STAGE_SNAPSHOT_PERSISTED = "snapshot_persisted"
+SESSION_STOP_STAGE_STOP_OBSERVED = "stop_observed"
+SESSION_STOP_STAGE_FORCED = "forced"
+
+# 防无界增长：单轮阶段条目上限（真实链路 ≤ 6 条，上限只为兜底）。
+_SESSION_STOP_STAGE_MAX_ENTRIES = 32
+
+_STOP_STAGE_LOCK = threading.Lock()
+# (session_id, turn_id) -> [stage entry]；settle 时由 _clear_session_stop_stages
+# 释放（worker finally / 排队路径 / 强制收尾都会走）。
+_SESSION_STOP_STAGES: dict[tuple[str, str], list[dict[str, Any]]] = {}
+
+_ARMED_STOP_WATCHDOGS_LOCK = threading.Lock()
+_ARMED_STOP_WATCHDOGS: set[tuple[str, str]] = set()
+
+# 测试用时钟缝隙：watchdog 的 deadline 与轮询比较统一走这里，测试以 fake
+# 时钟替换本符号即可推进/回拨时间轴。
+_MONOTONIC = time.monotonic
+
+_LOGGER = logging.getLogger(__name__)
 
 #: Public read-only view of the runtime stop reasons. Lifecycle-stop recovery
 #: sweeps (knowledge sideflow dead-turn gate) import this to recognize turns
@@ -93,6 +146,257 @@ def _service():
     return session_service
 
 
+def _record_session_stop_stage(
+    session_id: str,
+    turn_id: str,
+    stage: str,
+    **fields: Any,
+) -> None:
+    """登记一次停止链路阶段（requested / provider_aborted / ... / forced）。
+
+    进程内阶段登记只服务投影读取（``stopStages``），不承载任何控制流；
+    写入失败绝不影响停止本身。settle 时整体清除。
+    """
+
+    normalized_session_id = str(session_id or "").strip()
+    normalized_turn_id = str(turn_id or "").strip()
+    normalized_stage = str(stage or "").strip()
+    if not normalized_session_id or not normalized_turn_id or not normalized_stage:
+        return
+    try:
+        timestamp = _service()._now_timestamp()
+    except Exception:
+        timestamp = ""
+    entry: dict[str, Any] = {"stage": normalized_stage, "at": timestamp}
+    for key, value in fields.items():
+        if value is not None:
+            entry[str(key)] = value
+    with _STOP_STAGE_LOCK:
+        entries = _SESSION_STOP_STAGES.setdefault(
+            (normalized_session_id, normalized_turn_id), []
+        )
+        if len(entries) < _SESSION_STOP_STAGE_MAX_ENTRIES:
+            entries.append(entry)
+
+
+def _session_stop_stages_for_projection(session_id: str, turn_id: str) -> list[dict[str, Any]]:
+    """detail 投影读取当前停止轮次的阶段列表（只读副本）。"""
+
+    normalized_session_id = str(session_id or "").strip()
+    normalized_turn_id = str(turn_id or "").strip()
+    if not normalized_session_id or not normalized_turn_id:
+        return []
+    with _STOP_STAGE_LOCK:
+        entries = _SESSION_STOP_STAGES.get((normalized_session_id, normalized_turn_id))
+        return [dict(entry) for entry in list(entries or [])]
+
+
+def _clear_session_stop_stages(session_id: str, turn_id: str) -> None:
+    normalized_session_id = str(session_id or "").strip()
+    normalized_turn_id = str(turn_id or "").strip()
+    if not normalized_session_id or not normalized_turn_id:
+        return
+    with _STOP_STAGE_LOCK:
+        _SESSION_STOP_STAGES.pop((normalized_session_id, normalized_turn_id), None)
+
+
+def _stop_settlement_watchdog_seconds() -> float:
+    raw = os.environ.get(_STOP_SETTLEMENT_WATCHDOG_ENV, "").strip()
+    if raw:
+        try:
+            value = float(raw)
+        except ValueError:
+            return STOP_SETTLEMENT_WATCHDOG_SECONDS
+        return value
+    return STOP_SETTLEMENT_WATCHDOG_SECONDS
+
+
+def _stop_turn_settled(session_id: str, controller: Any) -> bool:
+    """停止轮次是否已经 settle（终态落定、不再需要 watchdog）。
+
+    三个等价信号任一成立即视为 settle：控制器已释放给用户（排队路径）；
+    回合控制登记里已不是同一个控制器对象（worker finally 清理或新轮次
+    接管）；运行标记已清除。任何读取异常按 fail-closed 处理为已 settle，
+    避免 watchdog 在坏控制器上误升级。
+    """
+
+    s = _service()
+    try:
+        snapshot = controller.snapshot()
+    except Exception:
+        return True
+    if bool(snapshot.get("releasedToUser")):
+        return True
+    try:
+        if s._get_session_turn_control(session_id) is not controller:
+            return True
+    except Exception:
+        return True
+    try:
+        if not s._is_session_running(session_id):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _arm_stop_settlement_watchdog(
+    session_id: str,
+    controller: Any,
+    *,
+    turn_id: str,
+    lang: str,
+) -> None:
+    """为已登记 stopRequested 的轮次武装停止收尾 watchdog。
+
+    只在「stop 已登记、settle 归 worker 所有」的路径武装（排队路径同步
+    settle，不需要 watchdog）。同一 (session, turn) 只武装一次；重复点击
+    停止不会叠加 watchdog。
+    """
+
+    budget_seconds = _stop_settlement_watchdog_seconds()
+    if budget_seconds <= 0:
+        return
+    key = (str(session_id or "").strip(), str(turn_id or "").strip())
+    if not key[0] or not key[1]:
+        return
+    with _ARMED_STOP_WATCHDOGS_LOCK:
+        if key in _ARMED_STOP_WATCHDOGS:
+            return
+        _ARMED_STOP_WATCHDOGS.add(key)
+    try:
+        threading.Thread(
+            target=_stop_settlement_watchdog_loop,
+            args=(session_id, controller),
+            kwargs={
+                "turn_id": turn_id,
+                "budget_seconds": budget_seconds,
+                "lang": lang,
+                "key": key,
+            },
+            name=f"session-stop-watchdog-{key[0]}",
+            daemon=True,
+        ).start()
+    except Exception:
+        with _ARMED_STOP_WATCHDOGS_LOCK:
+            _ARMED_STOP_WATCHDOGS.discard(key)
+
+
+def _stop_settlement_watchdog_loop(
+    session_id: str,
+    controller: Any,
+    *,
+    turn_id: str,
+    budget_seconds: float,
+    lang: str,
+    key: tuple[str, str],
+) -> None:
+    """有界等待停止 settle；到点仍未 settle 才升级强制收尾。"""
+
+    try:
+        deadline = _MONOTONIC() + budget_seconds
+        while True:
+            if _stop_turn_settled(session_id, controller):
+                return
+            if _MONOTONIC() >= deadline:
+                _force_settle_stopped_turn(
+                    session_id,
+                    controller,
+                    turn_id=turn_id,
+                    budget_seconds=budget_seconds,
+                    lang=lang,
+                )
+                return
+            time.sleep(_STOP_SETTLEMENT_WATCHDOG_TICK_SECONDS)
+    finally:
+        with _ARMED_STOP_WATCHDOGS_LOCK:
+            _ARMED_STOP_WATCHDOGS.discard(key)
+
+
+def _force_settle_stopped_turn(
+    session_id: str,
+    controller: Any,
+    *,
+    turn_id: str,
+    budget_seconds: float,
+    lang: str,
+) -> None:
+    """watchdog 到点后的强制收尾（仅限用户已明确请求停止的轮次）。
+
+    升级动作按既有机制复用：再次置位 stop event 唤醒 provider abort /
+    命令等待者；快照走既有 `_persist_session_interrupted_snapshot`（保住
+    部分输出）；bookkeeping 与 worker 终局同构（清运行标记、释放控制器、
+    发布 detail）。worker 若在之后才自然结束，其结果会被既有的
+    not-current / terminal-event 双守卫丢弃，不会覆盖强制快照。
+    每一步独立兜底：强制收尾绝不允许抛异常逃出后台线程。
+    """
+
+    s = _service()
+    if _stop_turn_settled(session_id, controller):
+        return
+    try:
+        snapshot = controller.snapshot()
+    except Exception:
+        return
+    if not bool(snapshot.get("stopRequested")):
+        return
+    _record_session_stop_stage(
+        session_id,
+        turn_id,
+        SESSION_STOP_STAGE_FORCED,
+        watchdogSeconds=round(float(budget_seconds), 3),
+    )
+    try:
+        s._record_session_turn_lifecycle_event(
+            session_id,
+            "stop_watchdog_forced",
+            turn_id=turn_id,
+            outcome="forced",
+            fields={
+                "watchdogSeconds": round(float(budget_seconds), 3),
+                "stopRequestedAt": str(snapshot.get("stopRequestedAt") or ""),
+            },
+        )
+    except Exception:
+        _LOGGER.warning("Stop watchdog lifecycle event failed (%s).", session_id)
+    # 再次置位：覆盖「事件在极端路径下被消费后未再触发 provider abort」的
+    # 残余等待者；幂等。
+    stop_event = getattr(controller, "stop_event", None)
+    if isinstance(stop_event, threading.Event):
+        try:
+            stop_event.set()
+        except Exception:
+            pass
+    forced_snapshot = dict(snapshot)
+    forced_snapshot["stopForced"] = True
+    try:
+        s._persist_session_interrupted_snapshot(
+            session_id,
+            forced_snapshot,
+            lang=lang,
+        )
+    except Exception as exc:
+        _LOGGER.warning(
+            "Stop watchdog forced snapshot failed (%s): %s", session_id, type(exc).__name__
+        )
+    try:
+        s._set_session_running(session_id, False, turn_id=turn_id)
+    except Exception:
+        _LOGGER.warning("Stop watchdog running-flag settle failed (%s).", session_id)
+    try:
+        controller.mark_released_to_user()
+    except Exception:
+        pass
+    try:
+        s._clear_session_turn_control(session_id, turn_id=turn_id)
+    except Exception:
+        pass
+    try:
+        s._publish_session_detail_snapshot(session_id)
+    except Exception:
+        pass
+
+
 def request_stop_session_turn(
     session_id: str,
     *,
@@ -168,6 +472,8 @@ def request_stop_session_turn(
     )
     stop_snapshot = controller.snapshot()
     stop_turn_id = str(stop_snapshot.get("turnId") or controller.turn_id)
+    # 停止阶段：请求已登记（fast_ack 与水合路径共用这一步）。
+    _record_session_stop_stage(conversation_id, stop_turn_id, SESSION_STOP_STAGE_REQUESTED)
     effective_reason = str(stop_snapshot.get("stopReason") or "").strip()
     if cascade:
         # Explicit cancel of this turn closes the whole descendant subtree:
@@ -217,7 +523,18 @@ def request_stop_session_turn(
         )
         s._set_session_running(conversation_id, False, turn_id=controller.turn_id)
         controller.mark_released_to_user()
+        # 排队路径同步 settle：阶段登记随终态一并释放，不留给投影。
+        _clear_session_stop_stages(conversation_id, stop_turn_id)
     else:
+        # settle 归 worker 所有（provider abort 或下一个协作检查点）：武装
+        # 停止收尾 watchdog 作为总上界兜底。fast_ack 语义不变——这里只是
+        # 后台登记，不改变 202 响应的内容与时序。
+        _arm_stop_settlement_watchdog(
+            conversation_id,
+            controller,
+            turn_id=stop_turn_id,
+            lang=lang,
+        )
         if fast_ack:
             # The controller has the stop request; acknowledge before the
             # worker persists and publishes the authoritative stopped snapshot.
@@ -367,6 +684,10 @@ def _persist_session_interrupted_snapshot(
             conversation.setdefault("updated_at", s._now_timestamp())
             s.save_session_chat_state(s.PROJECT_ROOT, session_id, conversation)
             s._clear_session_live_output(session_id)
+            _record_session_stop_stage(
+                session_id, turn_id, SESSION_STOP_STAGE_SNAPSHOT_PERSISTED,
+                outcome="already_stop",
+            )
             return
         if queued_before_worker:
             stopped_at = str(stop_snapshot.get("stopRequestedAt") or "").strip() or s._now_timestamp()
@@ -422,8 +743,13 @@ def _persist_session_interrupted_snapshot(
                     "reason": reason or "queued_before_worker_start",
                     "marker": s.TURN_INTERRUPTED_MARKER,
                     "summary": notice_message,
+                    **({"stopForced": True} if bool(stop_snapshot.get("stopForced")) else {}),
                 },
                 source="persist_interrupted_snapshot",
+            )
+            _record_session_stop_stage(
+                session_id, turn_id, SESSION_STOP_STAGE_SNAPSHOT_PERSISTED,
+                outcome="queued",
             )
             return
         existing_active_task = s._normalize_session_active_task(
@@ -520,8 +846,14 @@ def _persist_session_interrupted_snapshot(
             "reason": reason or "user_stop",
             "marker": s.TURN_INTERRUPTED_MARKER,
             "summary": assistant_text,
+            **({"stopForced": True} if bool(stop_snapshot.get("stopForced")) else {}),
         },
         source="persist_interrupted_snapshot",
+    )
+    # 停止阶段：interrupted 快照已落盘（部分输出已保住）。
+    _record_session_stop_stage(
+        session_id, turn_id, SESSION_STOP_STAGE_SNAPSHOT_PERSISTED,
+        outcome="persisted",
     )
 
 
