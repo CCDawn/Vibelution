@@ -1584,8 +1584,9 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
         throw new Error("ASSISTANT_LIFECYCLE_UNAVAILABLE");
       migrationRunning = true;
       return acquireAssistantLifecycleLease({ host, projects: projectConnection, reminders,
-        current: () => !shutdownApproved && launcherAssistantHost === host && stopLauncherAssistantReminders === reminders,
-        reopen: () => !shutdownApproved && launcherAssistantHost === host,
+        current: () => !shutdownApproved && !launcherAssistantStartupAbort.signal.aborted
+          && launcherAssistantHost === host && stopLauncherAssistantReminders === reminders,
+        reopen: () => !shutdownApproved && !launcherAssistantStartupAbort.signal.aborted && launcherAssistantHost === host,
         releaseOwner: () => { migrationRunning = false; scheduleInitialMigration(); },
         drainQueues: async () => {
           const drains = Object.values(projectConnection.snapshot().projects).map(root => {
@@ -1783,6 +1784,8 @@ async function exitDesktopShellProcess(): Promise<void> {
  * that has not settled could still receive a live turn once its host surfaces:
  * wait this bounded window for the start promise before judging. */
 const ASSISTANT_START_SETTLE_WAIT_MS = 5_000;
+// Optional overlap must not delay the established serial shutdown path.
+const IDLE_ASSISTANT_SHUTDOWN_PROBE_MS = 500;
 
 function residentAssistantStatus(state: "idle" | "active" | "unknown" | "unobservable"): ActiveWorkStatus {
   if (state === "idle") return { state, message: "" };
@@ -4361,12 +4364,42 @@ async function requestDesktopShellExit(
         const deadline = createDesktopShellExitDeadline(DESKTOP_QUIT_TOTAL_BUDGET_MS);
         const interruptActiveWork = decision.reason === "operator_confirmed";
         const assistantGuard: { lease: AssistantLifecycleLease | null } = { lease: null };
+        let assistantStop: Promise<void> | null = null;
         try {
           await withDesktopShellExitTimeout(async (signal) => {
             signal.throwIfAborted();
             const assistantStopStartedAt = Date.now();
+            const recordAssistantStop = () => recordSupervisorEventFallbackLocally({
+              eventCode: "electron.desktop_shell.exit_stage",
+              message: "Desktop shell exit stage settled.",
+              fields: { stage: "assistant_stop", durationMs: Date.now() - assistantStopStartedAt }
+            });
+            if (operatorRequested && decision.reason === "no_active_work") {
+              try {
+                const lease = await withDesktopShellExitTimeout(probeSignal => {
+                  const pending = acquireResidentAssistantShutdownGuard();
+                  void pending.then(lateLease => {
+                    if (probeSignal.aborted) void lateLease.release().catch(() => undefined);
+                  }, () => undefined);
+                  return pending;
+                }, Math.min(IDLE_ASSISTANT_SHUTDOWN_PROBE_MS, deadline.remainingMs()), "prepare idle assistant shutdown");
+                try {
+                  signal.throwIfAborted();
+                  lease.commit();
+                  // All producers are fenced. Both processes may now retire,
+                  // retaining their original owners until both drains finish.
+                  assistantStop = stopLauncherAssistant().finally(recordAssistantStop);
+                  void assistantStop.catch(() => undefined);
+                } finally {
+                  if (!assistantStop) void lease.release().catch(() => undefined);
+                }
+              } catch {
+                // Busy or unavailable barriers keep the established serial stop.
+                signal.throwIfAborted();
+              }
+            }
             if (operatorRequested) {
-              await stopLauncherAssistant();
+              if (!assistantStop) await stopLauncherAssistant();
             } else {
               const pendingGuard = acquireResidentAssistantShutdownGuard();
               void pendingGuard.then(lease => {
@@ -4374,11 +4407,7 @@ async function requestDesktopShellExit(
               }, () => undefined);
               assistantGuard.lease = await pendingGuard;
             }
-            recordSupervisorEventFallbackLocally({
-              eventCode: "electron.desktop_shell.exit_stage",
-              message: "Desktop shell exit stage settled.",
-              fields: { stage: "assistant_stop", durationMs: Date.now() - assistantStopStartedAt }
-            });
+            if (!assistantStop) recordAssistantStop();
             signal.throwIfAborted();
             pendingWorkbenchCloseAck = null;
             const workbenchJoinStartedAt = Date.now();
@@ -4420,9 +4449,16 @@ async function requestDesktopShellExit(
                   }
                 });
               },
-              stopManagedRuntime: mainRuntimeAlreadyStopped
-                ? async () => undefined
-                : (signal) => stopMainRuntimeForApprovedShutdown(interruptActiveWork, signal),
+              stopManagedRuntime: async (signal) => {
+                const results = await Promise.allSettled([
+                  mainRuntimeAlreadyStopped
+                    ? Promise.resolve()
+                    : stopMainRuntimeForApprovedShutdown(interruptActiveWork, signal),
+                  assistantStop ?? Promise.resolve()
+                ]);
+                const failed = results.find(result => result.status === "rejected");
+                if (failed?.status === "rejected") throw failed.reason;
+              },
               stopPythonLauncher: stopOwnedPythonLauncherService,
               approveShutdown: () => {
                 assistantGuard.lease?.commit();
@@ -4437,6 +4473,9 @@ async function requestDesktopShellExit(
             }
           }, deadline, "desktop shell exit");
         } finally {
+          if (assistantStop) {
+            await withDesktopShellExitTimeout(assistantStop, deadline, "stop personal assistant").catch(() => undefined);
+          }
           deadline.dispose();
           if (!shutdownApproved && assistantGuard.lease) void assistantGuard.lease.release().catch(() => undefined);
         }

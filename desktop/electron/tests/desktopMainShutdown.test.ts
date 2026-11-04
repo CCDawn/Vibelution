@@ -41,6 +41,7 @@ function harness() {
     DESKTOP_QUIT_TOTAL_BUDGET_MS: 30_000,
     QUIT_ACTIVE_WORK_STATUS_TIMEOUT_MS: 8_000,
     ASSISTANT_START_SETTLE_WAIT_MS: 5_000,
+    IDLE_ASSISTANT_SHUTDOWN_PROBE_MS: 500,
     launcherBootstrap: { mode: "attached" },
     launcherStateStore: { snapshot: vi.fn(() => ({ instances: [] as unknown[] })),
       refresh: vi.fn(async (_reason: string) => ({ instances: [] as unknown[] })) },
@@ -96,7 +97,7 @@ function harness() {
     runTrayStopAll: () => Promise<void>;
     captureShutdownIsolatedInstanceIds: (deadline: ReturnType<typeof createDesktopShellExitDeadline>) => Promise<string[]>;
   };
-  return { context, workspace, release, acquire, stopMain, stopIsolated, closeSession, closeWindow, dialog, quit,
+  return { context, workspace, release, commit, acquire, stopMain, stopIsolated, closeSession, closeWindow, dialog, quit,
     exit: (operatorRequested = true) => actions.requestDesktopShellExit("desktop_shell_quit", operatorRequested),
     capture: async () => {
       const deadline = createDesktopShellExitDeadline();
@@ -293,12 +294,96 @@ describe("actual Electron main shutdown functions", () => {
     expect(h.context.trayQuitAllInFlight).toBe(false);
   });
 
+  it("overlaps idle process retirement only after committing the assistant barrier", async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    const startedAt = Date.now();
+    h.context.stopLauncherAssistant.mockImplementation(async () => {
+      expect(h.commit).toHaveBeenCalledOnce();
+      await new Promise(resolve => setTimeout(resolve, 3000));
+    });
+    h.stopMain.mockImplementation(async () => {
+      expect(h.commit).toHaveBeenCalledOnce();
+      await new Promise(resolve => setTimeout(resolve, 6000));
+    });
+    const exiting = h.exit();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.stopMain).toHaveBeenCalledOnce();
+    expect(h.quit).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(5999);
+    expect(h.quit).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await exiting;
+    expect(Date.now() - startedAt).toBe(6000);
+    expect(h.quit).toHaveBeenCalledOnce();
+    expect(h.commit).toHaveBeenCalledOnce();
+    expect(h.release).not.toHaveBeenCalled();
+  });
+
+  it("joins the assistant when the main runtime is already stopped", async () => {
+    const h = harness();
+    let finishAssistant!: () => void;
+    h.context.joinWorkbenchCloseBackendStop = async () => true;
+    h.context.stopLauncherAssistant.mockImplementation(() => new Promise(resolve => { finishAssistant = resolve; }));
+    const exiting = h.exit();
+    await vi.waitFor(() => expect(h.closeSession).toHaveBeenCalledOnce());
+    expect(h.stopMain).not.toHaveBeenCalled();
+    expect(h.quit).not.toHaveBeenCalled();
+    finishAssistant();
+    await exiting;
+    expect(h.quit).toHaveBeenCalledOnce();
+  });
+
+  it("waits for the main retirement after a parallel assistant failure and keeps quit blocked", async () => {
+    const h = harness();
+    let finishMain!: () => void;
+    h.context.stopLauncherAssistant.mockRejectedValue(new Error("ASSISTANT_DRAIN_TIMEOUT"));
+    h.stopMain.mockImplementation(() => new Promise(resolve => { finishMain = resolve; }));
+    let settled = false;
+    const exiting = h.exit().then(() => { settled = true; });
+    await vi.waitFor(() => expect(h.stopMain).toHaveBeenCalledOnce());
+    expect(settled).toBe(false);
+    expect(h.quit).not.toHaveBeenCalled();
+    finishMain();
+    await exiting;
+    expect(h.quit).not.toHaveBeenCalled();
+    expect(h.release).not.toHaveBeenCalled();
+  });
+
+  it("falls back to serial exit when the optional barrier times out and releases its late lease", async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    let finishLease!: (value: { release: typeof h.release; commit: typeof h.commit }) => void;
+    h.acquire.mockImplementation(() => new Promise(resolve => { finishLease = resolve; }));
+    const exiting = h.exit();
+    await vi.advanceTimersByTimeAsync(500);
+    await exiting;
+    expect(h.context.stopLauncherAssistant).toHaveBeenCalledOnce();
+    expect(h.stopMain).toHaveBeenCalledOnce();
+    expect(h.quit).toHaveBeenCalledOnce();
+    finishLease({ release: h.release, commit: h.commit });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.release).toHaveBeenCalledOnce();
+    expect(h.commit).not.toHaveBeenCalled();
+  });
+
+  it("keeps serial retirement when only degraded idle observations are available", async () => {
+    const h = harness();
+    h.workspace.state = "unobservable";
+    const result = await h.exit();
+    expect(result).toMatchObject({ allowed: true, reason: "no_active_work_observation_degraded" });
+    expect(h.acquire).not.toHaveBeenCalled();
+    expect(h.context.stopLauncherAssistant).toHaveBeenCalledOnce();
+    expect(h.stopMain).toHaveBeenCalledOnce();
+    expect(h.quit).toHaveBeenCalledOnce();
+  });
+
   it("finishes explicit idle exit even when the migration-only idle lease is busy", async () => {
     const h = harness();
     h.acquire.mockRejectedValue(new Error("ASSISTANT_LIFECYCLE_BUSY"));
     await h.tray();
     expect(h.context.stopLauncherAssistant).toHaveBeenCalledOnce();
-    expect(h.acquire).not.toHaveBeenCalled();
+    expect(h.acquire).toHaveBeenCalledOnce();
     expect(h.dialog).not.toHaveBeenCalled();
     expect(h.stopMain).toHaveBeenCalledExactlyOnceWith(false, expect.anything());
     expect(h.quit).toHaveBeenCalledOnce();
@@ -363,9 +448,10 @@ describe("actual Electron main shutdown functions", () => {
     expect(h.stopMain).not.toHaveBeenCalled();
   });
 
-  it("does not stop projects when an explicit assistant stop finishes after timeout", async () => {
+  it("does not stop projects when an unfenced assistant stop finishes after timeout", async () => {
     vi.useFakeTimers();
     const h = harness();
+    h.acquire.mockRejectedValue(new Error("ASSISTANT_LIFECYCLE_BUSY"));
     let finishStop!: () => void;
     h.context.stopLauncherAssistant.mockImplementation(() => new Promise(resolve => { finishStop = resolve; }));
     const pending = h.tray();
@@ -377,5 +463,53 @@ describe("actual Electron main shutdown functions", () => {
     expect(h.stopMain).not.toHaveBeenCalled();
     expect(h.closeSession).not.toHaveBeenCalled();
     expect(h.quit).not.toHaveBeenCalled();
+  });
+
+  it.each(["acquire", "commit"])("retains serial retirement when the idle barrier fails during %s", async stage => {
+    const h = harness();
+    if (stage === "acquire") h.acquire.mockRejectedValue(new Error("ASSISTANT_LIFECYCLE_BUSY"));
+    else h.commit.mockImplementation(() => { throw new Error("ASSISTANT_LIFECYCLE_UNAVAILABLE"); });
+    let finishAssistant!: () => void;
+    h.context.stopLauncherAssistant.mockImplementation(() => new Promise(resolve => { finishAssistant = resolve; }));
+    const exiting = h.exit();
+    await vi.waitFor(() => expect(h.context.stopLauncherAssistant).toHaveBeenCalledOnce());
+    expect(h.stopMain).not.toHaveBeenCalled();
+    finishAssistant();
+    await exiting;
+    expect(h.stopMain).toHaveBeenCalledOnce();
+    expect(h.quit).toHaveBeenCalledOnce();
+    if (stage === "commit") expect(h.release).toHaveBeenCalledOnce();
+  });
+
+  it("joins assistant retirement after a main stop failure without approving quit", async () => {
+    const h = harness();
+    let finishAssistant!: () => void;
+    h.context.stopLauncherAssistant.mockImplementation(() => new Promise(resolve => { finishAssistant = resolve; }));
+    h.stopMain.mockRejectedValue(new Error("main stop failed"));
+    let settled = false;
+    const exiting = h.exit().then(() => { settled = true; });
+    await vi.waitFor(() => expect(h.stopMain).toHaveBeenCalledOnce());
+    expect(settled).toBe(false);
+    expect(h.quit).not.toHaveBeenCalled();
+    finishAssistant();
+    await exiting;
+    expect(h.quit).not.toHaveBeenCalled();
+    expect(h.release).not.toHaveBeenCalled();
+  });
+
+  it("keeps quit blocked when guarded assistant retirement misses the execution deadline", async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    let finishAssistant!: () => void;
+    h.context.stopLauncherAssistant.mockImplementation(() => new Promise(resolve => { finishAssistant = resolve; }));
+    const exiting = h.exit();
+    await vi.advanceTimersByTimeAsync(30000);
+    await exiting;
+    expect(h.stopMain).toHaveBeenCalledOnce();
+    expect(h.quit).not.toHaveBeenCalled();
+    finishAssistant();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.quit).not.toHaveBeenCalled();
+    expect(h.release).not.toHaveBeenCalled();
   });
 });
