@@ -255,7 +255,9 @@ export async function runMainControlPump(options: {
   /** Private native admission owners distinguish rejected from unknown ACKs. */
   onSettled?: (request: MainControlRequest, result: PublicResult, accepted: boolean | undefined) => void | Promise<void>;
   onProgress?: () => void;
-  onFailure: (uncertainRequests?: readonly MainControlRequest[]) => void;
+  /** The failing error is forensics-only: the shell derives a bounded name
+   * from it and never relays messages or stacks to callers. */
+  onFailure: (uncertainRequests?: readonly MainControlRequest[], error?: unknown) => void;
 }): Promise<void> {
   let failed = false;
   const active = new Map<string, MainControlRequest>();
@@ -295,8 +297,8 @@ export async function runMainControlPump(options: {
           // accepted:false is an expired waiter, not permission to repeat an effect.
         } finally { active.delete(request.deliveryId); }
       }
-    } catch {
-      if (current()) { failed = true; options.onFailure([...active.values(), ...(uncertain ? [uncertain] : [])]); }
+    } catch (error) {
+      if (current()) { failed = true; options.onFailure([...active.values(), ...(uncertain ? [uncertain] : [])], error); }
     }
   };
   await Promise.all(Array.from({ length: 4 }, worker));

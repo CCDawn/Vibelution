@@ -16,6 +16,12 @@ const REQUEST_MS = 15_000;
  * the explicit long operations keep REQUEST_MS or their own budgets. */
 const STATUS_READ_MS = 5_000;
 const READ_MS = 8_000;
+/** Control-channel claim/settle RPC budget. A claim is a bounded 10s
+ * host-side long poll and settle carries full results, while a chronic
+ * global lock can hold one host turn for ~14s (2026-11-03 live-fire): at
+ * REQUEST_MS=15s that left ~1s of margin, and one trip killed the host.
+ * Only this channel gets the doubled budget; every other RPC keeps its own. */
+const MAIN_CONTROL_RPC_MS = 30_000;
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 /** Error responses only need to carry a short structured code; larger failure
  * bodies are cancelled unread and fall back to the status-only mapping. */
@@ -36,6 +42,14 @@ const FORENSICS_STDERR_TAIL_BYTES = 2_048;
  * a live host's control-channel failure. */
 const CONTROL_FAILURE_SETTLE_MS = 1_000;
 const CONTROL_FAILURE_SETTLE_POLL_MS = 50;
+/** Consecutive control-channel pump failures tolerated on a live host before
+ * it is retired. Tonight one healthy host was terminated three times, 5-13
+ * minutes apart, on single RPC hiccups behind the chronic slow handler;
+ * each kill silently dropped reminders and native sessions until the next
+ * renderer request revived it. Up to LIMIT-1 failures now reconnect the
+ * transport instead, and any successful claim resets the count, so only a
+ * channel that stays broken across reconnects reaches the limit. */
+const MAIN_CONTROL_FAILURE_LIMIT = 3;
 
 /** Which shell observer first classified an unexpected host exit. */
 type HostDeathObserver = "liveness_poll" | "main_control";
@@ -137,6 +151,13 @@ type Generation = {
   referenceRecovery?: boolean;
   controlRetryMs?: number;
   controlPump?: AbortController;
+  /** Consecutive failed control-channel pumps on this generation; any
+   * successful claim resets it. Reaching MAIN_CONTROL_FAILURE_LIMIT retires
+   * a live host the old code killed on the first failure. Survives pump
+   * reconnects; a fresh generation starts uncounted. */
+  controlFailures?: number;
+  /** Bounded name of the last control-channel failure; forensics only. */
+  lastControlError?: string;
   /** Job root pid captured at spawn; forensics only, never an ownership proof. */
   pid?: number;
   /** ready.json pid of the serving host; differs from pid under a venv redirector. Forensics only. */
@@ -179,6 +200,13 @@ function identity(value: unknown): string {
 }
 function code(error: unknown): string {
   return error instanceof HostError ? error.code : "ASSISTANT_HOST_FAILED";
+}
+/** Bounded error name/code for control-failure forensics; never a body,
+ * stack or unbounded message. */
+function controlErrorName(error: unknown): string {
+  const text = error instanceof HostError ? error.code
+    : error instanceof Error ? (error.message ? `${error.name}: ${error.message}` : error.name) : String(error);
+  return text.slice(0, 120) || "unknown";
 }
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) return Promise.reject(new HostError("ASSISTANT_STOPPED"));
@@ -684,21 +712,28 @@ export class AssistantHost {
   }
 
   /** One greppable shell-log line plus a best-effort death-forensics.json in
-   * the generation directory: packaged shells capture no main stdout. */
-  private recordHostDeathForensics(generation: Generation, detectedBy: HostDeathObserver): void {
+   * the generation directory: packaged shells capture no main stdout. An
+   * unexpected exit classifies a Job that died on its own; a control-failure
+   * retire records the deliberate terminate of a live host that reached the
+   * failure limit, whose failing RPC would otherwise stay unattributable. */
+  private recordHostDeathForensics(generation: Generation, detectedBy: HostDeathObserver,
+    controlFailure?: { consecutiveFailures: number; lastError: string }): void {
     let exitCode: number | null = null;
     try { exitCode = typeof generation.native.exitCode === "function" ? generation.native.exitCode(generation.job) : null; }
     catch { exitCode = null; }
     const uptimeMs = typeof generation.readyAt === "number" ? Math.max(0, Date.now() - generation.readyAt) : null;
     const stderrTail = this.stderrTail(generation);
-    console.warn(`ASSISTANT_HOST_DEATH phase=unexpected_exit detectedBy=${detectedBy} exitCode=${exitCode ?? "unknown"} `
+    const phase = controlFailure ? "control_failure_retire" : "unexpected_exit";
+    console.warn(`ASSISTANT_HOST_DEATH phase=${phase} detectedBy=${detectedBy} exitCode=${exitCode ?? "unknown"} `
       + `instanceId=${generation.id} pid=${generation.pid ?? "unknown"} uptimeMs=${uptimeMs ?? "unknown"} `
+      + (controlFailure ? `consecutiveFailures=${controlFailure.consecutiveFailures} lastError=${JSON.stringify(controlFailure.lastError)} ` : "")
       + `stderrTail=${JSON.stringify(stderrTail)}`);
     try {
       writeFileSync(join(generation.directory, "death-forensics.json"), JSON.stringify({
-        schemaVersion: 1, phase: "unexpected_exit", detectedBy, recordedAt: new Date().toISOString(), exitCode,
+        schemaVersion: 1, phase, detectedBy, recordedAt: new Date().toISOString(), exitCode,
         instanceId: generation.id, pid: generation.pid ?? null, hostPid: generation.hostPid ?? null, uptimeMs, revision: this.revision,
         deathsInSession: this.hostDeaths, stderrTail,
+        ...(controlFailure ? { consecutiveControlFailures: controlFailure.consecutiveFailures, lastControlError: controlFailure.lastError } : {}),
       }), { encoding: "utf8", mode: 0o600 });
     } catch { /* Best-effort evidence never blocks classification or respawn. */ }
   }
@@ -1603,7 +1638,7 @@ export class AssistantHost {
     void runMainControlPump({
       signal: generation.abort.signal,
       isCurrent: current,
-      invoke: (path, method, body) => this.rpc(generation, path, method, body, REQUEST_MS, false, 8_192, pump.signal),
+      invoke: (path, method, body) => this.rpc(generation, path, method, body, MAIN_CONTROL_RPC_MS, false, 8_192, pump.signal),
       onRequest: async (request, signal) => {
         const referenceSettlement = isConfigurationReferenceRequest(request) && request.action !== "configuration_reference_acquire";
         while (this.migrationAdmission && !referenceSettlement) {
@@ -1631,15 +1666,23 @@ export class AssistantHost {
         try { await this.options.mainControlSettled?.(request, result, accepted, contexts.get(request.deliveryId)); }
         finally { contexts.delete(request.deliveryId); }
       },
-      onProgress: () => { if (current()) { generation.referenceRecovery = false; generation.controlRetryMs = 100; } },
-      onFailure: uncertain => {
+      onProgress: () => {
+        if (!current()) return;
+        generation.referenceRecovery = false;
+        generation.controlRetryMs = 100;
+        // A completed claim (or any settled RPC behind one) proves the channel
+        // works again: the failure count is consecutive only.
+        generation.controlFailures = 0;
+      },
+      onFailure: (uncertain, error) => {
         if (this.current !== generation || generation.abort.signal.aborted) return;
+        generation.lastControlError = controlErrorName(error);
         if (uncertain?.some(request => !isConfigurationReferenceRequest(request))) this.mainControlUncertain = true;
         pump.abort();
         if (generation.referenceLeases?.size || generation.referenceRecovery
             || uncertain?.some(request => isConfigurationReferenceRequest(request))) {
           // A dead Job's leases died with their writer: never reconnect to it.
-          if (this.jobExited(generation)) { this.concludeDeadReferenceRecovery(generation); return; }
+          if (this.jobExited(generation)) { this.concludeDeadControlRecovery(generation); return; }
           // Retain the exact native writer. Only the transport is replaced;
           // original deliveries are neither retried nor sent to another Job.
           generation.referenceRecovery = true;
@@ -1650,7 +1693,7 @@ export class AssistantHost {
                 || this.view.state !== "ready" || generation.controlPump !== pump) return;
             // The retry delay doubles as a settle window: never reconnect a
             // transport to a Job that died meanwhile.
-            if (this.jobExited(generation)) { this.concludeDeadReferenceRecovery(generation); return; }
+            if (this.jobExited(generation)) { this.concludeDeadControlRecovery(generation); return; }
             this.startMainControl(generation);
           }).catch(() => undefined);
           return;
@@ -1664,8 +1707,32 @@ export class AssistantHost {
           return;
         }
         if (this.jobExited(generation)) { this.retireFailedGeneration(generation, true); return; }
-        this.settleMainControlFailure(generation);
+        this.noteControlChannelFailure(generation, pump);
       },
+    }).catch(() => undefined);
+  }
+
+  /** A live host's plain control-channel failure reconnects the transport
+   * instead of the old first-failure terminate: tonight one healthy host was
+   * killed three times on single RPC hiccups 5-13 minutes apart. The count
+   * is consecutive (any successful claim clears it) and survives reconnects;
+   * the limit-th failure falls through to the same settle window and
+   * control-failure retire the old code ran on the first failure. */
+  private noteControlChannelFailure(generation: Generation, pump: AbortController): void {
+    generation.controlFailures = (generation.controlFailures ?? 0) + 1;
+    const failures = generation.controlFailures;
+    console.warn(`ASSISTANT_MAIN_CONTROL phase=channel_failure failures=${failures} limit=${MAIN_CONTROL_FAILURE_LIMIT} `
+      + `instanceId=${generation.id} lastError=${JSON.stringify(generation.lastControlError ?? "unknown")}`);
+    if (failures >= MAIN_CONTROL_FAILURE_LIMIT) { this.settleMainControlFailure(generation); return; }
+    const retry = generation.controlRetryMs ?? 100;
+    generation.controlRetryMs = Math.min(1000, retry * 2);
+    void sleep(retry, generation.abort.signal).then(() => {
+      if (this.current !== generation || generation.closed || generation.abort.signal.aborted
+          || this.view.state !== "ready" || generation.controlPump !== pump) return;
+      // The retry delay doubles as a settle window: never reconnect a
+      // transport to a Job that died meanwhile.
+      if (this.jobExited(generation)) { this.concludeDeadControlRecovery(generation); return; }
+      this.startMainControl(generation);
     }).catch(() => undefined);
   }
 
@@ -1698,11 +1765,12 @@ export class AssistantHost {
     })().catch(() => undefined);
   }
 
-  /** A held admission owns a Job the pump saw dead during reference recovery:
-   * never abort, retire or classify it here; the liveness poll classifies it
-   * once the admission is released. Only a lifecycle hold marks control
-   * uncertain, so migration's own dead-Job retirement stays available. */
-  private concludeDeadReferenceRecovery(generation: Generation): void {
+  /** A held admission owns a Job the pump saw dead during recovery (reference
+   * or plain control reconnect): never abort, retire or classify it here; the
+   * liveness poll classifies it once the admission is released. Only a
+   * lifecycle hold marks control uncertain, so migration's own dead-Job
+   * retirement stays available. */
+  private concludeDeadControlRecovery(generation: Generation): void {
     if (this.lifecycleAdmission) { this.mainControlUncertain = true; return; }
     if (this.migrationAdmission) return;
     this.retireFailedGeneration(generation, true);
@@ -1710,11 +1778,20 @@ export class AssistantHost {
 
   /** abort, classify, then retire on the serialized Job owner. Classification
    * and any respawn scheduling complete first; a failed retirement only
-   * leaves cleanup to the respawn's own previous-generation retirement. */
+   * leaves cleanup to the respawn's own previous-generation retirement. A
+   * live host retired at the control-failure limit leaves the same on-disk
+   * evidence as an unexpected exit: the terminate is deliberate, but without
+   * a record the failing RPC stays unattributable. */
   private retireFailedGeneration(generation: Generation, exited: boolean): void {
     generation.abort.abort();
     if (exited) this.handleUnexpectedDeath(generation, "main_control");
-    else this.view = { state: "failed", errorCode: "ASSISTANT_MAIN_CONTROL_FAILED" };
+    else {
+      this.recordHostDeathForensics(generation, "main_control", {
+        consecutiveFailures: generation.controlFailures ?? 0,
+        lastError: generation.lastControlError ?? "unknown",
+      });
+      this.view = { state: "failed", errorCode: "ASSISTANT_MAIN_CONTROL_FAILED" };
+    }
     // Reuse the same serialized Job owner; never race another retirement or
     // cancel a native project command when only the assistant channel failed.
     const operation = this.serial.then(async () => {
