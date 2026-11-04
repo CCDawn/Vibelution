@@ -25,6 +25,58 @@ describe("conversationMessageToAgentMessage", () => {
     expect(result.parts.map((part) => part.type === "thought" && part.sequence)).toEqual([10, 20]);
   });
 
+  it("passes structured tool error facts into the failed tool-call part", () => {
+    const base = {
+      version: 3,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      type: "tool_call",
+      status: "failed",
+      revision: 1,
+      callId: "call-1",
+      toolName: "run_command",
+    } as const;
+    const result = conversationMessageToAgentMessage(assistantTurn([
+      { ...base, id: "tool-1", itemId: "tool-1", sequence: 1, error: { code: "fault.tool.timeout", message: "命令超时" } },
+    ]));
+
+    expect(result.parts).toEqual([
+      expect.objectContaining({
+        id: "tool-1",
+        type: "tool-call",
+        name: "run_command",
+        status: "failed",
+        error: "命令超时",
+      }),
+    ]);
+  });
+
+  it("keeps legacy tool items without structured error identical to before", () => {
+    const base = {
+      version: 3,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      type: "tool_call",
+      status: "failed",
+      revision: 1,
+      callId: "call-1",
+      toolName: "run_command",
+    } as const;
+    const result = conversationMessageToAgentMessage(assistantTurn([
+      { ...base, id: "tool-legacy", itemId: "tool-legacy", sequence: 1 },
+    ]));
+
+    expect(result.parts).toEqual([
+      expect.objectContaining({
+        id: "tool-legacy",
+        type: "tool-call",
+        name: "run_command",
+        status: "failed",
+      }),
+    ]);
+    expect(result.parts[0].type === "tool-call" && result.parts[0].error).toBeUndefined();
+  });
+
   it("skips malformed persisted reasoning without losing the reachable assistant answer", () => {
     const incompleteReasoning = {
       id: "reasoning-1",
