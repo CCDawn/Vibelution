@@ -1414,6 +1414,11 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     {detail.data?.queuedTurns?.length || queuedAcceptance ? <section data-launcher-assistant-queue
       className={petStyles.receiptPanel}
       aria-label={lang === "zh" ? "原生消息队列" : "Native message queue"}>
+      {/* An explicit stop freezes the queue until a new message unfreezes it;
+          without this note a frozen queue reads as silently lost work. */}
+      {detail.data?.queueHold ? <p role="status" data-launcher-assistant-queue-hold>
+        {lang === "zh" ? "队列已暂停：停止后排队消息保持冻结，发送新消息即可恢复。" : "Queue paused: queued messages stay frozen after a stop; send a new message to resume."}
+      </p> : null}
       {queuedAcceptance && !queuedAcceptance.observed ? <p role="status">{waitingQueueText}</p> : null}
       {detail.data?.queuedTurns?.map(row => <p key={row.id} role="status">{launcherAssistantQueueLabel(row.status, lang)}{row.lastError ? ` · ${row.lastError}` : ""}</p>)}
       {queueReadback.removed ? <p role="status">{removedQueueText}</p> : null}
