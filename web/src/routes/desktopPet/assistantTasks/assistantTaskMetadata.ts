@@ -6,6 +6,7 @@ export type AssistantTaskMetadata = {
   createdAt?: string;
   updatedAt?: string;
   error?: string;
+  errorCode?: string;
   resultSummary?: string;
   current?: string;
   stepCount?: number;
@@ -25,6 +26,14 @@ export function displayError(value: unknown): string {
   return displayText(typeof value === "object" && value !== null ? (value as { message?: unknown }).message : value);
 }
 
+/** The structured error's machine code (the API keeps it alongside `message`);
+ * legacy plain-string errors have no code and yield "". A code is display
+ * evidence only — it never changes task state. */
+export function displayErrorCode(value: unknown): string {
+  const code = typeof value === "object" && value !== null && !Array.isArray(value) ? (value as { code?: unknown }).code : undefined;
+  return typeof code === "string" && code.trim() && code.length <= 120 ? code : "";
+}
+
 export function taskMetadata(value: unknown): AssistantTaskMetadata {
   const row = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
   const date = (key: string) => typeof row[key] === "string" && /^\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:\d{2})$/.test(row[key] as string)
@@ -32,7 +41,8 @@ export function taskMetadata(value: unknown): AssistantTaskMetadata {
   const count = (key: string) => Number.isSafeInteger(row[key]) && (row[key] as number) >= 0 ? row[key] as number : undefined;
   return {
     agentName: displayText(row.agentName, 100), teamName: displayText(row.teamName, 100), projectName: displayText(row.projectName, 100),
-    createdAt: date("createdAt"), updatedAt: date("updatedAt"), error: displayError(row.error), resultSummary: displayText(row.resultSummary),
+    createdAt: date("createdAt"), updatedAt: date("updatedAt"), error: displayError(row.error), errorCode: displayErrorCode(row.error),
+    resultSummary: displayText(row.resultSummary),
     current: Number.isSafeInteger(row.current) && (row.current as number) >= 0 ? String(row.current) : displayText(row.current, 160),
     stepCount: count("stepCount"), attemptCount: count("attemptCount"),
     currentAgentName: displayText(row.currentAgentName, 100),

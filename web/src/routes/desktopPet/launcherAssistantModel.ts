@@ -7,6 +7,7 @@ import {
   type ComposerContextRingModel,
 } from "../chat/composerContextModel";
 import { promptSegmentDisplayLabel } from "../chat/chatRoutePresentation";
+import { dispatchFailureCodeLabel } from "./assistantTasks/assistantTaskPresentation";
 import { hasExecutionOwnership, resolveSessionActivity, type SessionActivitySource } from "../sessionActivityState";
 
 export type LauncherAssistantSubmission = { message: string; requestId: string; draftSnapshot?: string; attachmentIds?: string[]; attachmentSnapshotIds?: string[]; references?: SessionReferenceAttachment[]; preserveDraft?: true };
@@ -230,21 +231,28 @@ export function launcherAssistantPollInterval(visible: boolean, source?: Launche
   return false;
 }
 
-/** Receipt status belongs to the native task; do not project it as business acceptance. */
+/** Receipt status belongs to the native task; do not project it as business acceptance.
+ * A known failure code reads as its short label; unknown codes keep the generic fallback. */
 export function launcherDispatchLabel(row: LauncherAssistantDispatch, lang: "zh" | "en"): string {
-  if (row.lastError) return lang === "zh" ? "回执暂不可用" : "Receipt unavailable";
+  if (row.lastError) {
+    return dispatchFailureCodeLabel(row.lastError.code, lang)
+      || (lang === "zh" ? "回执暂不可用" : "Receipt unavailable");
+  }
   const status = row.receipt?.status;
   return status ? `${lang === "zh" ? "原生任务状态" : "Native task status"}: ${status}`
     : lang === "zh" ? "等待原生任务回执" : "Waiting for native task receipt";
 }
 
 /** Humanized receipt lead for the embedded page rows. Same branch shape as
- * launcherDispatchLabel (error → unavailable, known enum → word, else
- * waiting), but terminal native statuses read as plain words and an unknown
- * enum keeps the raw fallback instead of pretending success. The floating
- * window keeps launcherDispatchLabel untouched. */
+ * launcherDispatchLabel (error → known-code label, else unavailable, known
+ * enum → word, else waiting), but terminal native statuses read as plain
+ * words and an unknown enum keeps the raw fallback instead of pretending
+ * success. The floating window keeps launcherDispatchLabel untouched. */
 export function launcherDispatchReceiptLabel(row: LauncherAssistantDispatch, lang: "zh" | "en"): string {
-  if (row.lastError) return lang === "zh" ? "回执暂不可用" : "Receipt unavailable";
+  if (row.lastError) {
+    return dispatchFailureCodeLabel(row.lastError.code, lang)
+      || (lang === "zh" ? "回执暂不可用" : "Receipt unavailable");
+  }
   const status = row.receipt?.status;
   const words: Record<string, readonly [string, string]> = {
     succeeded: ["成功", "Succeeded"], failed: ["失败", "Failed"],

@@ -9,7 +9,7 @@ import type { LauncherAssistantSessionEvent } from "../../api/launcherAssistant"
 import {
   launcherAssistantActivity, launcherAssistantMessageOverLimit, launcherAssistantPollInterval, launcherAssistantSendBusyCode,
   launcherAssistantSendDefinitelyRejected, launcherAssistantSendRetryableBusy, launcherAssistantSubmission,
-  launcherDispatchLabel, launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
+  launcherDispatchLabel, launcherDispatchReceiptLabel, launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
   launcherAssistantSessionEventRefreshesDetail, launcherAssistantSseHealthy, launcherAssistantWaitInterval,
   launcherAssistantStatusDegradeTone,
   launcherAssistantContextRing, launcherAssistantModelDisplay, launcherAssistantEditBackfillDraft,
@@ -704,6 +704,17 @@ describe("Launcher assistant state", () => {
   it("labels raw native receipts without inventing business acceptance", () => {
     expect(launcherDispatchLabel({ dispatchId: "d", receipt: { status: "ready" } }, "zh")).toBe("原生任务状态: ready");
     expect(launcherDispatchLabel({ dispatchId: "d", lastError: { code: "unavailable" } }, "zh")).toBe("回执暂不可用");
+  });
+
+  it("reads a known failure code as its short label and keeps the generic fallback for unknown codes", () => {
+    expect(launcherDispatchLabel({ dispatchId: "d", lastError: { code: "TASK_NOT_FOUND" } }, "zh")).toBe("任务不存在");
+    expect(launcherDispatchLabel({ dispatchId: "d", lastError: { code: "BACKEND_TIMEOUT" } }, "en")).toBe("Backend timeout");
+    expect(launcherDispatchLabel({ dispatchId: "d", lastError: { code: "FUTURE_CODE" } }, "en")).toBe("Receipt unavailable");
+    expect(launcherDispatchLabel({ dispatchId: "d", lastError: { message: "no code" } }, "zh")).toBe("回执暂不可用");
+    expect(launcherDispatchReceiptLabel({ dispatchId: "d", lastError: { code: "RUNTIME_IDENTITY_MISMATCH" } }, "zh")).toBe("运行时身份不匹配");
+    expect(launcherDispatchReceiptLabel({ dispatchId: "d", lastError: { code: "FUTURE_CODE" } }, "en")).toBe("Receipt unavailable");
+    // Receipt statuses stay plain words; the classification only applies to a lastError.
+    expect(launcherDispatchReceiptLabel({ dispatchId: "d", receipt: { status: "failed", error: { code: "TASK_NOT_FOUND" } } }, "zh")).toBe("失败");
   });
 
   it("waits for accepted native queue readback, then follows queued status instead of idle polling", () => {
