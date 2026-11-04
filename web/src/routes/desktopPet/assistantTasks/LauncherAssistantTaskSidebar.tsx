@@ -1,5 +1,5 @@
 import {useState} from "react";
-import {Bot,LoaderCircle,RefreshCw,UsersRound} from "lucide-react";
+import {Bot,LoaderCircle,RefreshCw,Trash2,UsersRound} from "lucide-react";
 import {VButton,VTabs,VSkeleton} from "../../../components/vui";
 // Approved reuse boundary: use the existing Agent-card recipe as the geometry authority.
 // Do not import its Agent/Session directory controller or alter ordinary conversation code.
@@ -17,6 +17,7 @@ function TaskRow({task,lang,onNavigate}:{task:AssistantTask;lang:"zh"|"en";onNav
  const title=taskCardTitle(task,lang),owner=taskCardOwner(task,lang),state=taskCardState(task,lang);
  const active=model.selectedId===task.id;
  const localOnly=task.state==="unknown";
+ const removeLabel=localOnly?COPY[lang].removeRecord:task.kind==="dispatch"&&task.cleanupPending===true?COPY[lang].retryCleanup:COPY[lang].remove;
  const tone=task.state==="running"||task.state==="stopping"?"running":task.state==="waiting_user"||task.state==="waiting_input"?"approval":task.state==="failed"?"error":"none";
  const indicator=tone==="running"?agentStyles.agentActivityRunning:tone==="approval"?agentStyles.agentActivityApproval:tone==="error"?agentStyles.agentActivityError:"";
  const avatar=task.kind==="team_run"?<UsersRound size={16}/>:task.agentName&&task.agentName!==task.agentId?Array.from(task.agentName)[0]:<Bot size={16}/>;
@@ -35,10 +36,10 @@ function TaskRow({task,lang,onNavigate}:{task:AssistantTask;lang:"zh"|"en";onNav
     </span>:null}
    </span>
   </VButton>
-  {taskCleanupTargets(task).length>0?<VButton variant="ghost" density="compact" className={styles.remove}
+  {taskCleanupTargets(task).length>0?<VButton variant="ghost" density="compact" isIconOnly icon={<Trash2 size={14}/>} className={styles.remove}
    aria-label={lang==="zh"?`${localOnly?"移除记录":"清理"}“${title}”`:`${localOnly?"Remove record":"Clean up"} “${title}”`}
-   tooltip={localOnly?COPY[lang].removeRecordHint:undefined} isDisabled={!model.enabled||model.cleanupBusy}
-   onClick={()=>{onNavigate?.();model.remove(task);}}>{localOnly?COPY[lang].removeRecord:task.kind==="dispatch"&&task.cleanupPending===true?COPY[lang].retryCleanup:COPY[lang].remove}</VButton>:null}
+   tooltip={localOnly?`${removeLabel} · ${COPY[lang].removeRecordHint}`:removeLabel} isDisabled={!model.enabled||model.cleanupBusy}
+   onClick={()=>{onNavigate?.();model.remove(task);}}/>:null}
  </article>;
 }
 export function LauncherAssistantTaskSidebar({lang="zh",onNavigate}:{lang?:"zh"|"en";onNavigate?:()=>void}){
