@@ -73,8 +73,13 @@ DEFAULT_WORKBENCH_PORT = 8000
 DEFAULT_LAUNCHER_CONTROL_PORT = 8765
 MANAGED_LAUNCHER_MARKER = "--managed-launcher-control"
 SOURCE_SIGNATURE_PATHS = (
+    "core/infrastructure/git_process.py",
+    "core/infrastructure/no_console_git.py",
     "core/launcher/app.py",
+    "core/launcher/branch_instance_lifecycle.py",
+    "core/launcher/desktop_shell.py",
     "core/launcher/developer_mode.py",
+    "core/launcher/frontend_build.py",
     "core/launcher/service.py",
     "core/runtime_manager/__init__.py",
     "core/runtime_manager/constants.py",
@@ -85,6 +90,8 @@ SOURCE_SIGNATURE_PATHS = (
     "core/runtime_manager/workbench_controller.py",
     "core/web/control.py",
     "core/version.py",
+    "scripts/vibelution_launcher.py",
+    "scripts/windowless_subprocess.py",
     "web/package.json",
     "web/package-lock.json",
     "web/vite.config.ts",
