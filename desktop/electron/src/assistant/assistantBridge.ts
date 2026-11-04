@@ -115,7 +115,11 @@ export async function invokeAssistant(event: Sender, payload: unknown, owner: As
     }
     return await owner.host.request(payload as AssistantHostRequest);
   } catch (error) {
-    const code = error instanceof Error && /^ASSISTANT_[A-Z_]+$/.test(error.message)
+    // The host passes host.py's attachment-read 404 through under its native
+    // unprefixed code; admit it here too so the renderer can distinguish a
+    // missing attachment, while every other failure still folds to one code.
+    const code = error instanceof Error
+      && (/^ASSISTANT_[A-Z_]+$/.test(error.message) || error.message === "ATTACHMENT_NOT_FOUND")
       ? error.message : "ASSISTANT_REQUEST_FAILED";
     throw new Error(code);
   }
