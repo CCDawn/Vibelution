@@ -7,9 +7,10 @@ import { assistantTaskErrorProbeInterval } from "./assistantTaskProbes";
 import { taskCleanupTargets, taskGroup, taskTime, useAssistantTaskCleanup, type AssistantCleanupCollection, type AssistantCleanupSourceError } from "./assistantTaskCleanup";
 import { LauncherTaskCleanupDialog } from "./LauncherTaskCleanupDialog";
 import { LauncherAssistantTaskDetail } from "./LauncherAssistantTaskDetail";
-import { LauncherTaskContext, type TaskReviewRequest } from "./LauncherTaskContext";
+import { LauncherTaskContext, usePublishLauncherTaskNotices, type TaskReviewRequest } from "./LauncherTaskContext";
 import { LauncherAssistantTaskSidebar } from "./LauncherAssistantTaskSidebar";
 import { readLauncherAssistantTaskSource } from "../launcherAssistantTaskReads";
+import { launcherNoticeReadFailed } from "../launcherAssistantPageNotices";
 
 const PAGE_SIZE=10;
 type Props={lang?:"zh"|"en";routePath?:string;children?:ReactNode;onReview?:(task:AssistantTask)=>void;onApproval?:(task:AssistantDispatchTask)=>void;onOpenConversation?:()=>void};
@@ -253,6 +254,10 @@ export function LauncherAssistantTaskCards({onReview,onApproval,onOpenConversati
   loadingMore:teamRuns.isFetchingNextPage,selectedId:selected?.id??null,cleanableCount:cleanable.length,
   cleanupBusy:cleanup.busy,canCleanCompleted:cleanable.length>0||(teamEnabled&&Boolean(teamRuns.hasNextPage)),
   refresh,more,openTask,remove,cleanCompleted,reviewRequest:identityConfirmed&&reviewRequest?.identity===identity?reviewRequest:null};
+ usePublishLauncherTaskNotices({...context,
+  unavailable:launcherNoticeReadFailed(status)||launcherNoticeReadFailed(dispatches),
+  teamUnavailable:teamSupported&&launcherNoticeReadFailed(teamRuns),
+ },lang);
  return <LauncherTaskContext.Provider value={context}>
   {children??<LauncherAssistantTaskSidebar lang={lang}/>}
   {selected?<LauncherAssistantTaskDetail key={JSON.stringify([identity,selected.id])} task={selected} lang={lang}

@@ -109,7 +109,7 @@ export function LauncherAssistantBrowserWorkspace({ revealRequested = false, ass
     const publish = () => {
       const node = viewRef.current;
       const rect = node?.getBoundingClientRect();
-      const overlay = document.querySelector('[data-vui="dialog-overlay"], [role="alertdialog"], [role="menu"], [role="listbox"]');
+      const overlay = document.querySelector('[data-vui="dialog-overlay"], [data-vui="popover"], [role="alertdialog"], [role="menu"], [role="listbox"]');
       const visible = canShowPage && !overlay && node && rect && rect.width > 0 && rect.height > 0
         && getComputedStyle(node).visibility !== "hidden" && getComputedStyle(node).display !== "none";
       const left = rect ? Math.max(0, Math.ceil(rect.left)) : 0;

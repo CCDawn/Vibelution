@@ -7,7 +7,7 @@
 ### 适用范围
 Launcher 控制窗口。显式工作区 start/open 和深链仍执行对应动作；普通工作台、分支工作台和 Companion Session 核心不受导航改动影响。
 ### 使用方式
-`LauncherShell` 组合 `LauncherTitlebar`、`VSplitWorkspace` 和同一份 `LauncherNavigation`。左栏主入口为对话、项目与分支；网页属于对话右侧按需面板，不单列导航页。有更新或更新失败时在底部单独显示更新入口，状态与名称分开对齐；设置菜单提供模型连接、诊断、维护、启动设置和版本更新，其中模型连接入口打开 Workbench 的 `/config` 模型服务设置且不依赖助理会话，供 Agent 不可用时恢复模型连接，其余设置仍为 Launcher 壳内页面。无常驻的关闭窗口说明。旧的助理功能深链仍可访问，待办、电脑操作与偏好由助理按需处理。右侧只渲染选中内容，无常驻右功能栏。窄屏通过 `VDialog` 展开同一目录，切换后关闭。标题栏只承担身份和原生窗口拖动。
+`LauncherShell` 组合 `LauncherTitlebar`、`VSplitWorkspace` 和同一份 `LauncherNavigation`。左栏主入口为对话、项目与分支；网页属于对话右侧按需面板，不单列导航页。有更新或更新失败时在底部单独显示更新入口，状态与名称分开对齐；设置菜单提供模型连接、诊断、维护、启动设置和版本更新，其中模型连接入口打开 Workbench 的 `/config` 模型服务设置且不依赖助理会话，供 Agent 不可用时恢复模型连接，其余设置仍为 Launcher 壳内页面。无常驻的关闭窗口说明。旧的助理功能深链仍可访问，待办、电脑操作与偏好由助理按需处理。右侧只渲染选中内容，无常驻右功能栏。窄屏通过 `VDialog` 展开同一目录，切换后关闭。标题栏承担身份、原生窗口拖动和紧凑运行提醒；页面级读取异常的汇总与恢复遵循 [LauncherNotificationTopbar](launcher-notifications.md)。
 
 `LauncherProjectRoute` 保留原项目/分支与启动设置的服务和操作保护；未选择项目有独立原生目录选择入口，取消不创建项目、不启动工作区。失败显示错误，不能将所有错误解释为没有项目。`LauncherUpdatesRoute` 复用原 Launcher 更新、确认、保存与序列化重启组件。
 

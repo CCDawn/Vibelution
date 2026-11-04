@@ -1,4 +1,5 @@
 import { VButton, VDialog } from "../../../components/vui";
+import { launcherTaskCleanupSourceNote } from "../../../api/launcherAssistantTaskCleanup";
 import type { AssistantCleanupDialogState } from "./assistantTaskCleanup";
 import styles from "./LauncherTaskCleanupDialog.styles";
 import { COPY } from "./assistantTaskCopy";
@@ -59,6 +60,8 @@ export function LauncherTaskCleanupDialog({ state, onClose, onRetry, onCloseAuto
           <span>{item.status === "deleted" ? zh ? "已清理" : "Cleaned up" : item.status === "partial"
             ? zh ? "部分清理，可重试" : "Partially cleaned up; retry available" : zh ? "暂不能清理" : "Cannot clean up yet"} · {bytes(item.releasedBytes)}</span>
           {item.retained.map((resource, index) => <p key={index}>{zh ? "保留 " : "Retained "}{resourceName(resource.kind)} — {reason(resource.reason)}</p>)}
+          {item.status === "deleted" && item.sourceConfirmed
+            ? <p>{launcherTaskCleanupSourceNote(item.sourceConfirmed, lang)}</p> : null}
           {item.failures.map((failure, index) => <p role="alert" key={index}>{failure.message} ({failure.code})</p>)}
         </li>)}</ul>
       </> : null}
