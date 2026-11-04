@@ -128,6 +128,10 @@ async function finishTurn(turnId: string) {
 }
 
 describe("Launcher operator image consumption", () => {
+  it("includes the permission toolbar styles in the Launcher Tailwind bundle", () => {
+    expect(launcherCss).toContain('@source "../../routes/desktopPet/LauncherManagementPermissionControl.styles.ts";');
+  });
+
   it("shows the fixed assistant image, refreshes revisions without retaining old content, and stops reading when hidden", async () => {
     await renderAssistant({ assistantCapability: true, startHidden: true, operatorName: "  " });
     const reads = () => invoke.mock.calls.filter(([request]) => request.operation === "assistantAvatar").length;
