@@ -63,9 +63,12 @@ export function resolveDesktopLaunchSettings(input: DesktopLaunchSettingsInput):
     configPath,
     pythonPath: firstString(
       input.env.VIBELUTION_PYTHON_PATH,
+      // The project venv outranks a bare inherited PYTHON: refresh helpers and
+      // assistant payload packaging need the checkout's interpreter, and a
+      // system Python cannot package the venv-layout runtime payload.
+      resolveWorkspacePythonPath(workspaceRoot, fileExists),
       input.env.PYTHON,
-      profilePythonPath,
-      resolveWorkspacePythonPath(workspaceRoot, fileExists)
+      profilePythonPath
     ),
     profilePath: loadedProfile.path,
     profileError: loadedProfile.error,

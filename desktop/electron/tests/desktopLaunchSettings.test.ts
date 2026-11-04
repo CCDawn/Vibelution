@@ -265,4 +265,50 @@ describe("desktop launch settings", () => {
 
     expect(settings.pythonPath.replace(/\\/g, "/")).toBe(venvPython.replace(/\\/g, "/"));
   });
+
+  it("prefers the workspace venv over a bare inherited system PYTHON", () => {
+    const workspaceRoot = "C:/Users/17533/Desktop/Vibelution";
+    const venvPython = join(workspaceRoot, ".venv", "Scripts", "python.exe");
+
+    const settings = resolveWithFiles({
+      argv: ["--workspace", workspaceRoot],
+      env: { PYTHON: "C:/Windows/system-python/python.exe" },
+      existingFiles: [venvPython]
+    });
+
+    expect(settings.pythonPath.replace(/\\/g, "/")).toBe(venvPython.replace(/\\/g, "/"));
+  });
+
+  it("keeps the inherited PYTHON ahead of the launch profile when no workspace venv exists", () => {
+    const resourcesRoot = "C:/package/resources";
+    const profilePath = join(resourcesRoot, DESKTOP_LAUNCH_PROFILE_FILE);
+
+    const settings = resolveWithFiles({
+      argv: ["--workspace", "C:/no/venv/project"],
+      env: { PYTHON: "C:/Windows/system-python/python.exe" },
+      resourcesRoot,
+      files: {
+        [profilePath]: JSON.stringify({
+          schemaVersion: 1,
+          workspaceRoot: "C:/no/venv/project",
+          pythonPath: "C:/profile/python.exe"
+        })
+      }
+    });
+
+    expect(settings.pythonPath).toBe("C:/Windows/system-python/python.exe");
+  });
+
+  it("still lets an explicit VIBELUTION_PYTHON_PATH override the workspace venv", () => {
+    const workspaceRoot = "C:/Users/17533/Desktop/Vibelution";
+    const venvPython = join(workspaceRoot, ".venv", "Scripts", "python.exe");
+
+    const settings = resolveWithFiles({
+      argv: ["--workspace", workspaceRoot],
+      env: { VIBELUTION_PYTHON_PATH: "C:/explicit/python.exe", PYTHON: "C:/Windows/system-python/python.exe" },
+      existingFiles: [venvPython]
+    });
+
+    expect(settings.pythonPath).toBe("C:/explicit/python.exe");
+  });
 });

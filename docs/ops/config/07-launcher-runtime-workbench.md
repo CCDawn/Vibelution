@@ -28,6 +28,11 @@ C# shim 在 packaged Electron 存在时把命令转发给 Electron（second-inst
 - 轮询间隔
 - 能力开关
 
+### 解释器解析契约
+
+- 桌面壳侧解析顺序：`VIBELUTION_PYTHON_PATH`（显式覆盖）→ 项目 `.venv` 探测 → 裸 `PYTHON` env → launch profile；`require_venv = true` 语义是"要求使用项目 .venv 解释器"。
+- assistant runtime payload 打包（desktop shell refresh/prebuild）固定优先用项目 `.venv` 解释器执行；`.venv` 缺失时回退 helper 解释器（无 venv 场景保持可用）。系统 Python 打包 venv 布局 payload 会触发 RECORD 安全校验失败。
+
 ## `[workbench]`
 
 ```toml
