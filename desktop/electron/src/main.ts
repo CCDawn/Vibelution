@@ -4390,11 +4390,25 @@ async function requestDesktopShellExit(
                   // retaining their original owners until both drains finish.
                   assistantStop = stopLauncherAssistant().finally(recordAssistantStop);
                   void assistantStop.catch(() => undefined);
+                  recordSupervisorEventFallbackLocally({
+                    eventCode: "electron.desktop_shell.assistant_overlap",
+                    message: "Assistant retirement overlap decision settled.",
+                    fields: { mode: "parallel", reason: "barrier_committed", probeMs: Date.now() - assistantStopStartedAt }
+                  });
                 } finally {
                   if (!assistantStop) void lease.release().catch(() => undefined);
                 }
-              } catch {
+              } catch (error) {
                 // Busy or unavailable barriers keep the established serial stop.
+                const message = error instanceof Error ? error.message : "";
+                const reason = ["ASSISTANT_LIFECYCLE_BUSY", "ASSISTANT_LIFECYCLE_UNAVAILABLE", "ASSISTANT_NOT_READY",
+                  "ASSISTANT_REQUEST_TIMEOUT", "ASSISTANT_MIGRATION_BUSY"].includes(message) ? message
+                  : message.startsWith("prepare idle assistant shutdown timed out after ") ? "probe_timeout" : "unclassified";
+                recordSupervisorEventFallbackLocally({
+                  eventCode: "electron.desktop_shell.assistant_overlap",
+                  message: "Assistant retirement overlap decision settled.",
+                  fields: { mode: "serial", reason, probeMs: Date.now() - assistantStopStartedAt }
+                });
                 signal.throwIfAborted();
               }
             }

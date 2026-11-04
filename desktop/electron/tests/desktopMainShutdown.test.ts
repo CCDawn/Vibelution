@@ -36,7 +36,7 @@ function harness() {
   const dialog = vi.fn(async () => ({ response: 0 }));
   const quit = vi.fn();
   const context = {
-    AbortSignal, Date, Promise, setTimeout, clearTimeout,
+    AbortSignal, Date, Error, Promise, setTimeout, clearTimeout,
     console: { warn: vi.fn() },
     DESKTOP_QUIT_TOTAL_BUDGET_MS: 30_000,
     QUIT_ACTIVE_WORK_STATUS_TIMEOUT_MS: 8_000,
@@ -318,6 +318,10 @@ describe("actual Electron main shutdown functions", () => {
     expect(h.quit).toHaveBeenCalledOnce();
     expect(h.commit).toHaveBeenCalledOnce();
     expect(h.release).not.toHaveBeenCalled();
+    expect(h.context.recordSupervisorEventFallbackLocally).toHaveBeenCalledWith(expect.objectContaining({
+      eventCode: "electron.desktop_shell.assistant_overlap",
+      fields: { mode: "parallel", reason: "barrier_committed", probeMs: 0 }
+    }));
   });
 
   it("joins the assistant when the main runtime is already stopped", async () => {
@@ -365,6 +369,10 @@ describe("actual Electron main shutdown functions", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(h.release).toHaveBeenCalledOnce();
     expect(h.commit).not.toHaveBeenCalled();
+    expect(h.context.recordSupervisorEventFallbackLocally).toHaveBeenCalledWith(expect.objectContaining({
+      eventCode: "electron.desktop_shell.assistant_overlap",
+      fields: { mode: "serial", reason: "probe_timeout", probeMs: 500 }
+    }));
   });
 
   it("keeps serial retirement when only degraded idle observations are available", async () => {
@@ -479,6 +487,23 @@ describe("actual Electron main shutdown functions", () => {
     expect(h.stopMain).toHaveBeenCalledOnce();
     expect(h.quit).toHaveBeenCalledOnce();
     if (stage === "commit") expect(h.release).toHaveBeenCalledOnce();
+    expect(h.context.recordSupervisorEventFallbackLocally).toHaveBeenCalledWith(expect.objectContaining({
+      eventCode: "electron.desktop_shell.assistant_overlap",
+      fields: expect.objectContaining({ mode: "serial", reason: stage === "acquire"
+        ? "ASSISTANT_LIFECYCLE_BUSY" : "ASSISTANT_LIFECYCLE_UNAVAILABLE" })
+    }));
+  });
+
+  it("does not copy unexpected barrier failures into runtime diagnostics", async () => {
+    const h = harness();
+    h.acquire.mockRejectedValue(new Error("Unexpected private request data"));
+    await h.exit();
+    const decisions = h.context.recordSupervisorEventFallbackLocally.mock.calls.map(([event]) => event)
+      .filter(event => event.eventCode === "electron.desktop_shell.assistant_overlap");
+    expect(decisions).toEqual([expect.objectContaining({
+      fields: expect.objectContaining({ mode: "serial", reason: "unclassified" })
+    })]);
+    expect(JSON.stringify(decisions)).not.toContain("Unexpected private request data");
   });
 
   it("joins assistant retirement after a main stop failure without approving quit", async () => {
