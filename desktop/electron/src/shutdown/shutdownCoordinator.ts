@@ -17,8 +17,8 @@ export type ActiveWorkStatus = {
 };
 
 export type ShutdownDecision =
-  | { allowed: true; reason: "no_active_work" | "no_active_work_observation_degraded"; stopPythonLauncher: boolean }
-  | { allowed: false; reason: "active_work_running" | "active_work_status_unavailable"; message: string };
+  | { allowed: true; reason: "no_active_work" | "no_active_work_observation_degraded" | "operator_confirmed"; stopPythonLauncher: boolean }
+  | { allowed: false; reason: "active_work_running" | "active_work_status_unavailable" | "operator_cancelled"; message: string };
 
 type ApprovedShutdownDecision = Extract<ShutdownDecision, { allowed: true }>;
 type DeniedShutdownDecision = Extract<ShutdownDecision, { allowed: false }>;
@@ -121,11 +121,19 @@ async function probeLocalActiveWorkStatus(
 
 export async function executeShutdownAuthorizationBoundary(input: {
   authorize: () => Promise<ShutdownDecision>;
+  /** Main-owned user action only; automatic exits retain the existing refusal. */
+  confirmStopActiveWork?: (decision: DeniedShutdownDecision) => Promise<boolean>;
   onDenied: (decision: DeniedShutdownDecision) => void | Promise<void>;
   runApproved: (decision: ApprovedShutdownDecision) => Promise<void>;
   onApprovedFailure: (decision: ApprovedShutdownDecision, error: unknown) => Promise<void>;
 }): Promise<ShutdownDecision> {
-  const decision = await input.authorize();
+  let decision = await input.authorize();
+  if (!decision.allowed && decision.reason !== "operator_cancelled" && input.confirmStopActiveWork) {
+    if (!await input.confirmStopActiveWork(decision)) {
+      return { allowed: false, reason: "operator_cancelled", message: "" };
+    }
+    decision = { allowed: true, reason: "operator_confirmed", stopPythonLauncher: true };
+  }
   if (!decision.allowed) {
     await input.onDenied(decision);
     return decision;

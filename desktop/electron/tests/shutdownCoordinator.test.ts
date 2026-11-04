@@ -10,6 +10,70 @@ import {
   resolveQuitActiveWorkStatus
 } from "../src/shutdown/shutdownCoordinator.js";
 
+describe("operator shutdown confirmation", () => {
+  it("exits an idle desktop without asking for confirmation", async () => {
+    const confirmStopActiveWork = vi.fn();
+    const runApproved = vi.fn(async () => undefined);
+    const decision = { allowed: true, reason: "no_active_work", stopPythonLauncher: true } as const;
+    await expect(executeShutdownAuthorizationBoundary({
+      authorize: async () => decision,
+      confirmStopActiveWork,
+      onDenied: vi.fn(), runApproved, onApprovedFailure: vi.fn(),
+    })).resolves.toEqual(decision);
+    expect(confirmStopActiveWork).not.toHaveBeenCalled();
+    expect(runApproved).toHaveBeenCalledExactlyOnceWith(decision);
+  });
+
+  it("lets the operator read the confirmation before starting the shutdown budget", async () => {
+    vi.useFakeTimers();
+    try {
+      const runApproved = vi.fn(async () => {
+        const deadline = createDesktopShellExitDeadline();
+        expect(deadline.remainingMs()).toBe(15_000);
+        expect(deadline.signal.aborted).toBe(false);
+        deadline.dispose();
+      });
+      const pending = executeShutdownAuthorizationBoundary({
+        authorize: async () => ({ allowed: false, reason: "active_work_running", message: "running" }),
+        confirmStopActiveWork: async () => {
+          await new Promise(resolve => setTimeout(resolve, 60_000));
+          return true;
+        },
+        onDenied: vi.fn(), runApproved, onApprovedFailure: vi.fn(),
+      });
+      await vi.advanceTimersByTimeAsync(59_000);
+      expect(runApproved).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(pending).resolves.toEqual({ allowed: true, reason: "operator_confirmed", stopPythonLauncher: true });
+      expect(runApproved).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("cancels without stopping anything or showing a second notification", async () => {
+    const runApproved = vi.fn(), onDenied = vi.fn(), onApprovedFailure = vi.fn();
+    await expect(executeShutdownAuthorizationBoundary({
+      authorize: async () => ({ allowed: false, reason: "active_work_running", message: "running" }),
+      confirmStopActiveWork: async () => false,
+      onDenied, runApproved, onApprovedFailure,
+    })).resolves.toMatchObject({ allowed: false, reason: "operator_cancelled" });
+    expect(runApproved).not.toHaveBeenCalled();
+    expect(onDenied).not.toHaveBeenCalled();
+    expect(onApprovedFailure).not.toHaveBeenCalled();
+  });
+
+  it("requires explicit confirmation to stop when observation is unavailable", async () => {
+    const runApproved = vi.fn(async () => undefined);
+    const decision = { allowed: false, reason: "active_work_status_unavailable", message: "unavailable" } as const;
+    const confirmStopActiveWork = vi.fn(async () => true);
+    await executeShutdownAuthorizationBoundary({
+      authorize: async () => decision, confirmStopActiveWork,
+      onDenied: vi.fn(), runApproved, onApprovedFailure: vi.fn(),
+    });
+    expect(confirmStopActiveWork).toHaveBeenCalledExactlyOnceWith(decision);
+    expect(runApproved).toHaveBeenCalledExactlyOnceWith({ allowed: true, reason: "operator_confirmed", stopPythonLauncher: true });
+  });
+});
+
 describe("decideShutdown", () => {
   it("blocks shutdown while active work exists", async () => {
     await expect(

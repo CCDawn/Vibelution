@@ -101,13 +101,14 @@ def _record_image_input_feedback_quietly(
     *,
     ok: bool,
     error: Any = None,
+    response: Any = None,
 ) -> None:
     """Learn image-input capability from a real invoke without ever breaking it."""
 
     try:
         from .image_input_feedback import record_image_input_turn_feedback
 
-        record_image_input_turn_feedback(client, messages, ok=ok, error=error)
+        record_image_input_turn_feedback(client, messages, ok=ok, error=error, response=response)
     except Exception:  # noqa: BLE001 - capability learning must never break a real invoke
         return
 
@@ -137,7 +138,7 @@ def invoke_llm(
         except Exception as exc:
             _record_image_input_feedback_quietly(client, messages, ok=False, error=exc)
             raise
-        _record_image_input_feedback_quietly(client, messages, ok=True)
+        _record_image_input_feedback_quietly(client, messages, ok=True, response=result)
         return result
 
 
@@ -170,7 +171,7 @@ def invoke_llm_outcome(
         except Exception as exc:
             _record_image_input_feedback_quietly(client, messages, ok=False, error=exc)
             raise
-        _record_image_input_feedback_quietly(client, messages, ok=True)
+        _record_image_input_feedback_quietly(client, messages, ok=True, response=outcome)
     if not isinstance(outcome, TurnOutcome):
         raise TypeError("LLM client did not return canonical TurnOutcome")
     return outcome
@@ -201,6 +202,8 @@ def stream_llm(
         except Exception as exc:
             _record_image_input_feedback_quietly(client, messages, ok=False, error=exc)
             raise
+        # stream_llm never accumulates reply text, so ok-only evidence stays
+        # accepted-only and cannot confirm image support.
         _record_image_input_feedback_quietly(client, messages, ok=True)
 
 
@@ -243,7 +246,7 @@ def run_streaming_llm_outcome(
         except Exception as exc:
             _record_image_input_feedback_quietly(client, messages, ok=False, error=exc)
             raise
-        _record_image_input_feedback_quietly(client, messages, ok=True)
+        _record_image_input_feedback_quietly(client, messages, ok=True, response=outcome)
     if not isinstance(outcome, TurnOutcome):
         raise TypeError("LLM stream did not return canonical TurnOutcome")
     if not outcome.terminal_event_seen:

@@ -7,6 +7,7 @@ import pytest
 from config.model_catalog import load_model_catalog_state
 from config.runtime_capabilities import (
     apply_model_capability_overrides,
+    get_model_image_input_capability,
     record_model_image_input_capability,
     upgrade_legacy_capability_cache_if_needed,
 )
@@ -37,6 +38,7 @@ def test_runtime_image_capability_cache_fills_unknown_model(tmp_path):
         {
             "supports_image_input": True,
             "capability_status": "supported",
+            "capability_confirmed": True,
             "capability_checked_at": "2026-06-13T18:30:58Z",
         },
         cache_path=cache_path,
@@ -153,6 +155,131 @@ def test_runtime_image_capability_cache_can_refine_preset_support(tmp_path):
     assert model["supports_image_input"] is False
     assert model["capability_status"] == "unsupported"
     assert model["capability_source"] == "runtime_probe"
+
+
+def _catalog_image_input_record(cache_path) -> dict:
+    state = load_model_catalog_state(cache_path)
+    return state["providers"]["relay"]["models"]["vision-model"]["capabilities"]["image_input"]
+
+
+def test_runtime_probe_ok_only_does_not_flip_preset_false(tmp_path):
+    cache_path = tmp_path / "model-catalog-state.json"
+    public_config = _public_config(
+        {
+            "supports_image_input": False,
+            "capability_status": "unsupported",
+            "capability_source": "preset",
+        }
+    )
+    record_model_image_input_capability(
+        MODEL_REF,
+        {"capability_status": "unknown", "capability_checked_at": "2026-06-13T18:30:58Z"},
+        cache_path=cache_path,
+    )
+
+    updated = apply_model_capability_overrides(public_config, cache_path=cache_path)
+
+    model = updated["llm"]["model_library"][MODEL_REF]
+    # Accepted-only evidence never flips a preset's explicit declaration.
+    assert model["supports_image_input"] is False
+    assert model["capability_status"] == "unknown"
+    assert model["capability_source"] == "runtime_probe"
+
+
+def test_runtime_probe_confirmed_reply_refines_preset_false(tmp_path):
+    cache_path = tmp_path / "model-catalog-state.json"
+    public_config = _public_config(
+        {
+            "supports_image_input": False,
+            "capability_status": "unsupported",
+            "capability_source": "preset",
+        }
+    )
+    record_model_image_input_capability(
+        MODEL_REF,
+        {
+            "supports_image_input": True,
+            "capability_status": "supported",
+            "capability_confirmed": True,
+            "capability_checked_at": "2026-06-13T18:30:58Z",
+        },
+        cache_path=cache_path,
+    )
+
+    updated = apply_model_capability_overrides(public_config, cache_path=cache_path)
+
+    model = updated["llm"]["model_library"][MODEL_REF]
+    # Content-level confirmation is strong enough to refine a preset.
+    assert model["supports_image_input"] is True
+    assert model["capability_status"] == "supported"
+    assert model["capability_source"] == "runtime_probe"
+
+
+def test_non_confirming_probe_does_not_downgrade_explicit_catalog_record(tmp_path):
+    cache_path = tmp_path / "model-catalog-state.json"
+    record_model_image_input_capability(
+        MODEL_REF,
+        {
+            "supports_image_input": False,
+            "capability_status": "unsupported",
+            "capability_error": "image input is not supported by this model route",
+            "capability_checked_at": "2026-06-13T18:30:58Z",
+        },
+        cache_path=cache_path,
+    )
+
+    result = record_model_image_input_capability(
+        MODEL_REF,
+        {"capability_status": "unknown", "capability_checked_at": "2026-06-13T19:00:00Z"},
+        cache_path=cache_path,
+    )
+
+    record = _catalog_image_input_record(cache_path)
+    assert record["value"] == "unsupported"
+    assert record["checked_at"] == "2026-06-13T18:30:58Z"
+    assert result["capability_status"] == "unsupported"
+
+
+def test_legacy_runtime_supported_without_confirmation_degrades_on_read(tmp_path):
+    cache_path = tmp_path / "model-catalog-state.json"
+    # Lenient-era writers recorded ok-only success as supported with no
+    # confirmation marker; reads degrade instead of asserting support.
+    record_model_image_input_capability(
+        MODEL_REF,
+        {
+            "supports_image_input": True,
+            "capability_status": "supported",
+            "capability_checked_at": "2026-06-13T18:30:58Z",
+        },
+        cache_path=cache_path,
+    )
+
+    details = get_model_image_input_capability(MODEL_REF, cache_path=cache_path)
+    assert details["capability_status"] == "unknown"
+    assert "supports_image_input" not in details
+
+    updated = apply_model_capability_overrides(_public_config({}), cache_path=cache_path)
+    model = updated["llm"]["model_library"][MODEL_REF]
+    assert "supports_image_input" not in model
+    assert model["capability_status"] == "unknown"
+
+
+def test_confirmed_runtime_supported_survives_read(tmp_path):
+    cache_path = tmp_path / "model-catalog-state.json"
+    record_model_image_input_capability(
+        MODEL_REF,
+        {
+            "supports_image_input": True,
+            "capability_status": "supported",
+            "capability_confirmed": True,
+            "capability_checked_at": "2026-06-13T18:30:58Z",
+        },
+        cache_path=cache_path,
+    )
+
+    details = get_model_image_input_capability(MODEL_REF, cache_path=cache_path)
+    assert details["capability_status"] == "supported"
+    assert details["supports_image_input"] is True
 
 
 def test_runtime_capability_live_write_rejects_flat_model_id(tmp_path):

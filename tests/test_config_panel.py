@@ -1589,6 +1589,7 @@ def test_build_effective_config_applies_runtime_capability_cache(monkeypatch, tm
         {
             "supports_image_input": True,
             "capability_status": "supported",
+            "capability_confirmed": True,
             "capability_checked_at": "2026-06-11T03:00:00Z",
         },
     )
@@ -1597,6 +1598,60 @@ def test_build_effective_config_applies_runtime_capability_cache(monkeypatch, tm
     profile = effective.llm.get_profile(profile_id="primary")
     assert profile.supports_image_input is True
     assert "supports_image_input" not in public_config["llm"]["model_library"][model_ref]
+
+
+def test_image_input_probe_success_result_requires_reply_confirmation():
+    from core.web.services.config_service import _image_input_probe_success_result
+
+    confirmed = _image_input_probe_success_result(
+        {"content": "The image shows a small grey square."}
+    )
+    assert confirmed["ok"] is True
+    assert confirmed["capability_status"] == "supported"
+    assert confirmed["supports_image_input"] is True
+    assert confirmed["capability_reason"] == "runtime_probe_reply_confirmed"
+
+    accepted = _image_input_probe_success_result({"content": "ok"})
+    assert accepted["ok"] is True
+    # Bare success is accepted-only evidence and never asserts support.
+    assert accepted["capability_status"] == "unknown"
+    assert accepted["supports_image_input"] is None
+    assert accepted["capability_reason"] == "runtime_probe_accepted"
+
+    refused = _image_input_probe_success_result({"content": "I cannot see images."})
+    assert refused["capability_status"] == "unknown"
+    assert refused["supports_image_input"] is None
+
+
+def test_image_input_probe_result_details_carry_confirmation_marker():
+    from core.web.services.config_service import _image_input_capability_result_details
+
+    confirmed = _image_input_capability_result_details(
+        {
+            "ok": True,
+            "capability_status": "supported",
+            "supports_image_input": True,
+            "message": "image input is supported",
+        }
+    )
+    assert confirmed["capability_status"] == "supported"
+    assert confirmed["supports_image_input"] is True
+    assert confirmed["capability_confirmed"] is True
+
+    accepted_only = _image_input_capability_result_details(
+        {
+            "ok": True,
+            "capability_status": "unknown",
+            "supports_image_input": None,
+            "message": (
+                "request succeeded but the reply did not reference the image; "
+                "image input remains unconfirmed"
+            ),
+        }
+    )
+    assert accepted_only["capability_status"] == "unknown"
+    assert "supports_image_input" not in accepted_only
+    assert "capability_confirmed" not in accepted_only
 
 
 def test_delete_generated_profile_model_leaves_matching_profiles_unchanged():
