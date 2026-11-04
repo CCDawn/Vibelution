@@ -354,7 +354,34 @@ def test_config():
 3. 导入被测模块
 4. 运行 `pytest tests/test_<模块名>.py -v` 验证
 
+### 4.4 隔离测试收尾（硬性要求）
+
+任何隔离测试——无论由本仓库脚本、验收工具还是外部 harness 发起——结束时（含失败退出、超时中断）**必须主动关闭自己启动的全部隔离 Electron 实例，并释放临时环境**。测试收尾不杀进程，会在任务栏残留独立 Launcher 实例（隔离实例与产品锁按 userData 目录隔离是设计行为，问题只在收尾不干净）。
+
+**关闭顺序**：
+1. 先优雅关闭：对测试自有进程窗口调用 `CloseMainWindow`（或应用自身退出路径），等待其退出；
+2. 超时（默认 10 秒）仍存活的，才对测试自有进程 `Stop-Process -Force` 兜底；**禁止 `taskkill.exe`**（无控制台红线）。
+
+**验收标准**：测试结束后任务栏/进程列表无残留 Vibelution 窗口，无 TEMP 路径下的 electron 进程（产品本体在仓库检出或 LOCALAPPDATA，不在 TEMP）。
+
+**自检与收尾命令**：
+
+```bash
+# 自检：只列出 TEMP 隔离残留实例，不关闭任何进程
+.\.venv\Scripts\python.exe scripts/cleanup_isolated_test_instances.py --dry-run
+
+# 收尾：先优雅关闭，超时后强杀；exit code 0 表示无残留或全部关闭
+.\.venv\Scripts\python.exe scripts/cleanup_isolated_test_instances.py --apply
+
+# 自定义优雅等待上限（秒）
+.\.venv\Scripts\python.exe scripts/cleanup_isolated_test_instances.py --apply --timeout 20
+```
+
+**证据要求**：测试报告应附收尾证据（`--dry-run` 输出为空或 `--apply` 汇总全关闭），证明本次测试没有留下 TEMP 隔离实例。
+
 ---
+
+
 
 ## 五、测试框架组件
 
