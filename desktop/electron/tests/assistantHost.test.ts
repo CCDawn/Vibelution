@@ -187,6 +187,22 @@ describe("AssistantHost", () => {
     await host.stop();
   });
 
+  it.each([
+    ["native session conflict", 409, { detail: { code: "SESSION_CONFLICT" } }, "ASSISTANT_SESSION_CONFLICT"],
+    ["retryable quiescing state", 503, { detail: { code: "ASSISTANT_QUIESCING" } }, "ASSISTANT_QUIESCING"],
+    ["unrecognized migration wait", 503, { error: { code: "assistant_migration_wait" } }, "ASSISTANT_HTTP_FAILED"],
+  ])("maps message submission failure %s from the structured error body", async (_label, status, body, expectedError) => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const request = { operation: "send" as const, message: "failure probe", requestId: "failure-probe-1" };
+    fetchImpl.mockResolvedValueOnce(Response.json(body, { status }));
+    // The submission stays a single delivery; retrying the idempotent requestId
+    // is the renderer's decision, never an automatic host replay.
+    await expect(host.request(request)).rejects.toThrow(expectedError);
+    expect(fetchImpl.mock.calls.filter(([url]) => String(url).endsWith("/api/assistant/messages"))).toHaveLength(1);
+    await host.stop();
+  });
+
   it.each(["idle", "active", "unknown"] as const)("observes native %s privately and closes lifecycle admission before its final proof", async state => {
     const { host, fetchImpl } = fixture({ graceful: true });
     expect(await host.lifecycleStatus()).toBe("idle");
@@ -200,8 +216,55 @@ describe("AssistantHost", () => {
     expect(() => host.beginLifecycleAdmission()).toThrow("ASSISTANT_MIGRATION_BUSY");
     admission.release();
     fetchImpl.mockResolvedValueOnce(Response.json({ schemaVersion: 1, state: "idle", extra: true }));
+    // An unparsable payload is a lost observation, not producer ambiguity.
+    expect(await host.lifecycleStatus()).toBe("unobservable");
+    await host.stop();
+  });
+
+  it.each([
+    ["rpc timeout", () => new Error("ASSISTANT_REQUEST_TIMEOUT") as unknown],
+    ["invalid payload", () => Response.json({ schemaVersion: 2, state: "active" }) as unknown],
+    ["non-json body", () => new Response("not json", { status: 200, headers: { "content-type": "application/json" } }) as unknown]
+  ])("classifies a lost observation (%s) as unobservable while the ready generation keeps serving", async (_label, failure) => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const response = failure() as Response | Error;
+    if (response instanceof Response) fetchImpl.mockResolvedValueOnce(response);
+    else fetchImpl.mockRejectedValueOnce(response);
+    expect(await host.lifecycleStatus()).toBe("unobservable");
+    // A later healthy poll recovers the idle proof instead of staying poisoned.
+    fetchImpl.mockResolvedValueOnce(Response.json({ schemaVersion: 1, state: "idle" }));
+    expect(await host.lifecycleStatus()).toBe("idle");
+    await host.stop();
+  });
+
+  it("keeps producer ambiguity unknown even when the observation itself failed", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    fetchImpl.mockResolvedValueOnce(Response.json({ schemaVersion: 1, state: "idle" }));
+    expect(await host.lifecycleStatus()).toBe("idle");
+    // A renderer request left in flight is a real producer: the held request
+    // must keep the status unknown, never downgraded to unobservable.
+    let release: ((response: Response) => void) | undefined;
+    fetchImpl.mockImplementationOnce(() => new Promise<Response>((resolve) => { release = resolve; }));
+    const pending = host.request({ operation: "status" });
+    expect(await host.lifecycleStatus()).toBe("unknown");
+    release!(Response.json({ assistant: { agentId: "a", directSessionId: "s", displayName: "Assistant" },
+      settings: { managementPermission: { preset: "auto_review", revision: 0 } } }));
+    await pending.catch(() => undefined);
+    // The native side reporting its own uncertainty is producer ambiguity too.
+    fetchImpl.mockResolvedValueOnce(Response.json({ schemaVersion: 1, state: "unknown" }));
     expect(await host.lifecycleStatus()).toBe("unknown");
     await host.stop();
+  });
+
+  it("classifies an observation failure caused by the host leaving its ready generation as unknown", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    fetchImpl.mockRejectedValueOnce(new Error("ASSISTANT_REQUEST_TIMEOUT"));
+    const observation = host.lifecycleStatus();
+    await host.stop();
+    expect(await observation).toBe("unknown");
   });
 
   it("binds read-only team pages to the current identity and a fixed endpoint", async () => {

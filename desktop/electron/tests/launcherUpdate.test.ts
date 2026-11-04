@@ -402,6 +402,24 @@ describe("guarded local Launcher update", () => {
     expect(input.scheduleReplacement).toHaveBeenCalledOnce();
   });
 
+  it("lets an operator update continue when the task observation is lost", async () => {
+    // A pure observation failure carries no active-work claim; the operator
+    // already authorized the interrupt and stopWorkspaces still saves first.
+    const input = { ...updateInputs({ state: "unobservable", message: "assistant lifecycle status rpc timed out" }), interruptActiveWork: true };
+    expect(await executeLauncherUpdate(input)).toMatchObject({ accepted: true });
+    expect(input.prepare).toHaveBeenCalledOnce();
+    expect(input.stopWorkspaces).toHaveBeenCalledOnce();
+    expect(input.scheduleReplacement).toHaveBeenCalledOnce();
+  });
+
+  it("keeps rejecting a lost observation for an update that lacks operator interrupt authorization", async () => {
+    const input = updateInputs({ state: "unobservable", message: "assistant lifecycle status rpc timed out" });
+    expect(await executeLauncherUpdate(input)).toMatchObject({ accepted: false, code: "active_work_status_unavailable" });
+    expect(input.prepare).not.toHaveBeenCalled();
+    expect(input.stopWorkspaces).not.toHaveBeenCalled();
+    expect(input.scheduleReplacement).not.toHaveBeenCalled();
+  });
+
   it("lets an operator update continue when the task probe rejects", async () => {
     const input = { ...updateInputs(), interruptActiveWork: true };
     input.activeWork.mockRejectedValue(new Error("offline"));

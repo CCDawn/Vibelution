@@ -1754,11 +1754,37 @@ async function exitDesktopShellProcess(): Promise<void> {
   app.exit(0);
 }
 
+/** A freshly opened assistant must not hold quit hostage forever, but a start
+ * that has not settled could still receive a live turn once its host surfaces:
+ * wait this bounded window for the start promise before judging. */
+const ASSISTANT_START_SETTLE_WAIT_MS = 5_000;
+
+function residentAssistantStatus(state: "idle" | "active" | "unknown" | "unobservable"): ActiveWorkStatus {
+  if (state === "idle") return { state, message: "" };
+  if (state === "active") return { state, message: "个人助理仍有对话、排队消息或待确认操作。",
+    count: 1, items: [{ kind: "launcher_assistant" }] };
+  // "unobservable" is a pure observation failure and carries no active-work
+  // claim; "unknown" is producer ambiguity and stays worded as a possible
+  // live conversation so the fail-closed denial stays honest.
+  return { state, message: state === "unobservable" ? "个人助理运行状态暂时无法观测。" : "个人助理仍有对话、排队消息或待确认操作。" };
+}
+
 async function residentAssistantActiveWork(): Promise<ActiveWorkStatus> {
-  const state = launcherAssistantHost ? await launcherAssistantHost.lifecycleStatus()
-    : launcherAssistantStarting ? "unknown" : "idle";
-  return { state, message: state === "idle" ? "" : "个人助理仍有对话、排队消息或待确认操作。",
-    ...(state === "active" ? { count: 1, items: [{ kind: "launcher_assistant" }] } : {}) };
+  if (launcherAssistantStarting) {
+    await Promise.race([
+      launcherAssistantStarting.catch(() => undefined),
+      new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, ASSISTANT_START_SETTLE_WAIT_MS);
+        timer.unref?.();
+      })
+    ]);
+  }
+  const host = launcherAssistantHost;
+  if (host) return residentAssistantStatus(await host.lifecycleStatus());
+  // A still-pending start keeps the producer-unknown: never let a local idle
+  // scan pass a host that may surface with work. A settled start without a
+  // host left nothing resident that could run a conversation turn.
+  return residentAssistantStatus(launcherAssistantStarting ? "unknown" : "idle");
 }
 
 async function acquireResidentAssistantShutdownGuard(): Promise<AssistantLifecycleLease> {
@@ -4257,7 +4283,17 @@ async function requestDesktopShellExit(
           // is dead or wedged the probe times out and quit used to fail with
           // "无法确认是否有进行中的任务" forever; the same file-based scan the
           // main-line stop command trusts keeps quit possible instead.
-          localActiveWorkStatus: async () => combineAssistantActiveWork(localQuitActiveWorkStatus(), await residentAssistantActiveWork())
+          localActiveWorkStatus: async () => combineAssistantActiveWork(localQuitActiveWorkStatus(), await residentAssistantActiveWork()),
+          onDegradedObservationAllow: (detail) => {
+            void recordDesktopExitEvent(deadline, {
+              eventCode: "electron.desktop_shell.exit_allowed_observation_degraded",
+              message: "Desktop shell exit was allowed with no active work while a probe stayed unobservable.",
+              fields: {
+                probeMessage: detail.probeMessage.slice(0, 300),
+                localMessage: detail.localMessage.slice(0, 300)
+              }
+            });
+          }
         }),
         onDenied: (decision) => {
           notifyDesktopTray("Vibelution", decision.message || "有进行中的任务，暂时无法退出。可先用托盘“退出壳并停止全部任务”。", "warning");

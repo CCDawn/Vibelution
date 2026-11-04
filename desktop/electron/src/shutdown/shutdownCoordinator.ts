@@ -1,6 +1,13 @@
 export type BootstrapOwnershipMode = "attached" | "started";
 
-export type ActiveWorkProbeState = "active" | "idle" | "unknown";
+/**
+ * "unknown" is producer ambiguity: something may genuinely be running (a
+ * request in flight, an admission held, the host leaving its ready state), so
+ * it always fails closed. "unobservable" is a pure observation failure (the
+ * probe timed out or returned an unparsable payload while nothing suggests a
+ * producer): it never poisons another source's conclusion on its own.
+ */
+export type ActiveWorkProbeState = "active" | "idle" | "unknown" | "unobservable";
 
 export type ActiveWorkStatus = {
   state: ActiveWorkProbeState;
@@ -10,7 +17,7 @@ export type ActiveWorkStatus = {
 };
 
 export type ShutdownDecision =
-  | { allowed: true; reason: "no_active_work"; stopPythonLauncher: boolean }
+  | { allowed: true; reason: "no_active_work" | "no_active_work_observation_degraded"; stopPythonLauncher: boolean }
   | { allowed: false; reason: "active_work_running" | "active_work_status_unavailable"; message: string };
 
 type ApprovedShutdownDecision = Extract<ShutdownDecision, { allowed: true }>;
@@ -29,6 +36,13 @@ export async function decideShutdown(input: {
    * the decision denied with "状态无法确认" even when nothing was running.
    */
   localActiveWorkStatus?: () => ActiveWorkStatus | Promise<ActiveWorkStatus>;
+  /**
+   * Audit hook for the one fail-open path: every source reported either idle
+   * or a pure observation failure ("unobservable"), no source reported active
+   * work, and no producer ambiguity ("unknown") remains. Quit is allowed with
+   * a degraded reason; this callback records the evidence.
+   */
+  onDegradedObservationAllow?: (detail: { probeMessage: string; localMessage: string }) => void;
 }): Promise<ShutdownDecision> {
   let activeWork: ActiveWorkStatus | null = null;
   try {
@@ -36,12 +50,28 @@ export async function decideShutdown(input: {
   } catch {
     activeWork = null;
   }
-  if (activeWork === null || activeWork.state === "unknown") {
+  if (activeWork === null || activeWork.state === "unknown" || activeWork.state === "unobservable") {
     const local = await probeLocalActiveWorkStatus(input.localActiveWorkStatus);
     if (local !== null && local.state === "idle") {
       return {
         allowed: true,
         reason: "no_active_work",
+        stopPythonLauncher: true
+      };
+    }
+    if (local !== null && local.state === "unobservable" && activeWork?.state !== "unknown") {
+      // Only pure observation failures remain: nothing observed is active and
+      // no in-flight producer forced "unknown" at either observation. A probe
+      // that reported producer "unknown" keeps failing closed even when the
+      // later observation itself is lost. Allow, but audit the degraded
+      // evidence so the fail-open decision stays traceable.
+      input.onDegradedObservationAllow?.({
+        probeMessage: activeWork?.message ?? "",
+        localMessage: local.message
+      });
+      return {
+        allowed: true,
+        reason: "no_active_work_observation_degraded",
         stopPythonLauncher: true
       };
     }

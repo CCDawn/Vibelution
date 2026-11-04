@@ -239,6 +239,95 @@ describe("decideShutdown", () => {
     });
     expect(fallbackCalls).toEqual([]);
   });
+
+  it("allows quit with an audited degraded reason when only observation failures remain", async () => {
+    const audits: Array<{ probeMessage: string; localMessage: string }> = [];
+    await expect(
+      decideShutdown({
+        ownershipMode: "started",
+        activeWorkStatus: async () => ({
+          state: "unobservable",
+          message: "assistant lifecycle status rpc timed out"
+        }),
+        localActiveWorkStatus: () => ({
+          state: "unobservable",
+          message: "assistant lifecycle status rpc timed out"
+        }),
+        onDegradedObservationAllow: (detail) => audits.push(detail)
+      })
+    ).resolves.toEqual({
+      allowed: true,
+      reason: "no_active_work_observation_degraded",
+      stopPythonLauncher: true
+    });
+    expect(audits).toEqual([{
+      probeMessage: "assistant lifecycle status rpc timed out",
+      localMessage: "assistant lifecycle status rpc timed out"
+    }]);
+  });
+
+  it("still fails closed when producer ambiguity stays unknown while the local scan is unobservable", async () => {
+    const audits: Array<{ probeMessage: string; localMessage: string }> = [];
+    await expect(
+      decideShutdown({
+        ownershipMode: "started",
+        activeWorkStatus: async () => ({
+          state: "unknown",
+          message: "assistant has a renderer request in flight"
+        }),
+        localActiveWorkStatus: () => ({
+          state: "unobservable",
+          message: "assistant lifecycle status rpc timed out"
+        }),
+        onDegradedObservationAllow: (detail) => audits.push(detail)
+      })
+    ).resolves.toEqual({
+      allowed: false,
+      reason: "active_work_status_unavailable",
+      message: "assistant has a renderer request in flight"
+    });
+    expect(audits).toEqual([]);
+  });
+
+  it("keeps the active-work block when the probe is unobservable but the local scan finds runs", async () => {
+    const audits: Array<{ probeMessage: string; localMessage: string }> = [];
+    await expect(
+      decideShutdown({
+        ownershipMode: "started",
+        activeWorkStatus: async () => ({
+          state: "unobservable",
+          message: "assistant lifecycle status rpc timed out"
+        }),
+        localActiveWorkStatus: () => ({
+          state: "active",
+          message: "1 active work item(s) block lifecycle commands.",
+          count: 1
+        }),
+        onDegradedObservationAllow: (detail) => audits.push(detail)
+      })
+    ).resolves.toEqual({
+      allowed: false,
+      reason: "active_work_running",
+      message: "有进行中的任务，无法退出 Vibelution。请等待任务完成或先停止任务。"
+    });
+    expect(audits).toEqual([]);
+  });
+
+  it("fails closed when the probe is unobservable and no local scan exists", async () => {
+    await expect(
+      decideShutdown({
+        ownershipMode: "started",
+        activeWorkStatus: async () => ({
+          state: "unobservable",
+          message: "assistant lifecycle status rpc timed out"
+        })
+      })
+    ).resolves.toEqual({
+      allowed: false,
+      reason: "active_work_status_unavailable",
+      message: "assistant lifecycle status rpc timed out"
+    });
+  });
 });
 
 describe("resolveQuitActiveWorkStatus", () => {

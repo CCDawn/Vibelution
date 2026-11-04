@@ -23,8 +23,12 @@ export async function executeLauncherUpdate(input: {
     }
     // An explicit operator update already authorized the interrupt. Unknown is
     // not a reason to cancel: stopWorkspaces still saves records first.
+    // "unobservable" is a pure observation failure (lost probe/payload) with no
+    // active-work claim, so it belongs in the same operator bypass; the
+    // non-operator quit path keeps rejecting it and defers to decideShutdown.
     const operatorUpdate = input.interruptActiveWork === true;
-    if (status.state === "idle" || (operatorUpdate && (status.state === "active" || status.state === "unknown"))) return null;
+    if (status.state === "idle" || (operatorUpdate
+      && (status.state === "active" || status.state === "unknown" || status.state === "unobservable"))) return null;
     return {
       schemaVersion: 1,
       accepted: false,

@@ -17,6 +17,9 @@ const REQUEST_MS = 15_000;
 const STATUS_READ_MS = 5_000;
 const READ_MS = 8_000;
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+/** Error responses only need to carry a short structured code; larger failure
+ * bodies are cancelled unread and fall back to the status-only mapping. */
+const MAX_ERROR_BODY_BYTES = 4096;
 const MAX_LOG_BYTES = 4 * 1024 * 1024;
 const READY_MAX_BYTES = 4_096;
 /** The native Job binding exposes no exit event; poll alive-ness at a low rate. */
@@ -826,19 +829,31 @@ export class AssistantHost {
     this.projectsSuspended = projectsSuspended;
   }
 
-  /** Read-only native observation; this is not a held shutdown proof. */
-  async lifecycleStatus(): Promise<"idle" | "active" | "unknown"> {
+  /** Read-only native observation; this is not a held shutdown proof.
+   * Producer ambiguity (a request in flight, an admission held, the host
+   * leaving its ready generation, or the native side itself reporting
+   * "unknown") stays "unknown" and always fails closed. A lost observation
+   * (rpc timeout, unparsable payload) while this exact generation is still
+   * ready is "unobservable": nothing suggests a producer, so it must not
+   * poison another source's idle conclusion. */
+  async lifecycleStatus(): Promise<"idle" | "active" | "unknown" | "unobservable"> {
     const generation = this.current;
     if (!generation && this.view.state === "stopped" && !this.starting) return "idle";
     if (!generation || generation.closed || generation.abort.signal.aborted || this.view.state !== "ready"
       || this.migrationAdmission || this.mainControlUncertain || this.rendererRequests || this.mainControlRequests) return "unknown";
+    const leftReadyGeneration = () => this.current !== generation || generation.closed
+      || generation.abort.signal.aborted || this.view.state !== "ready";
     try {
       const result = await this.rpc(generation, "/api/assistant/lifecycle-status", "GET", undefined, 2_000, false, 8192);
-      if (this.current !== generation || generation.abort.signal.aborted || this.view.state !== "ready") return "unknown";
+      if (leftReadyGeneration()) return "unknown";
       if (!object(result) || Object.keys(result).length !== 2 || result.schemaVersion !== 1
-        || !["idle", "active", "unknown"].includes(String(result.state))) return "unknown";
+        || !["idle", "active", "unknown"].includes(String(result.state))) return "unobservable";
       return result.state as "idle" | "active" | "unknown";
-    } catch { return "unknown"; }
+    } catch {
+      // A failure caused by the host leaving its ready generation is a
+      // producer event, not a lost observation.
+      return leftReadyGeneration() ? "unknown" : "unobservable";
+    }
   }
 
   /** Refuse an in-flight producer instead of waiting while an automatic exit is armed. */
@@ -1767,7 +1782,39 @@ export class AssistantHost {
         ...(body ? { body: JSON.stringify(body) } : {}),
       });
       if (!response.ok) {
-        await response.body?.cancel().catch(() => undefined);
+        // Backend failures carry a structured code that separates retryable
+        // states from hard failures: host.py's session error handler responds
+        // {"detail":{"code":...}} and its migration middleware responds with an
+        // "error" key. Read a bounded error-body prefix; any read or parse
+        // failure keeps the legacy status-only mapping below unchanged.
+        const failureCode = await (async (): Promise<string | null> => {
+          try {
+            const reader = response.body?.getReader();
+            if (!reader) return null;
+            const chunks: Uint8Array[] = [];
+            let size = 0;
+            try {
+              while (true) {
+                const part = await reader.read();
+                if (part.done) break;
+                size += part.value.byteLength;
+                if (size > MAX_ERROR_BODY_BYTES) return null;
+                chunks.push(part.value);
+              }
+            } finally { await reader.cancel().catch(() => undefined); reader.releaseLock(); }
+            const payload: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+            const code = (value: unknown) => object(value) && typeof value.code === "string" ? value.code : null;
+            return object(payload) ? code(payload.detail) ?? code(payload.error) : null;
+          } catch { return null; }
+        })();
+        if (failureCode === "SESSION_CONFLICT") {
+          // host.py reports a changed native session as 409 SESSION_CONFLICT on
+          // session commands. Message submission is idempotent by requestId, so
+          // the renderer may safely retry after refreshing; the ASSISTANT_
+          // prefix lets the code cross assistantBridge's renderer allowlist.
+          throw new HostError("ASSISTANT_SESSION_CONFLICT");
+        }
+        if (failureCode !== null && /^ASSISTANT_[A-Z_]+$/.test(failureCode)) throw new HostError(failureCode);
         if (path === "/api/assistant/management-permission") {
           if (response.status === 409) throw new HostError("ASSISTANT_PERMISSION_CONFLICT");
           if (response.status === 422) throw new HostError("ASSISTANT_PERMISSION_INVALID");

@@ -3,11 +3,18 @@ import type { AssistantReminderPump } from "./reminderPump.js";
 import type { AssistantProjectRegistryConnection } from "./projectRegistryConnection.js";
 import type { ActiveWorkStatus } from "../shutdown/shutdownCoordinator.js";
 
+/** Precedence: active > producer-unknown > unobservable > idle. A pure
+ * observation failure never poisons the other source's conclusion on its own;
+ * only in-flight-producer "unknown" can override an idle reading. */
 export function combineAssistantActiveWork(workspace: ActiveWorkStatus, assistant: ActiveWorkStatus): ActiveWorkStatus {
   const active = [workspace, assistant].filter(row => row.state === "active");
   if (active.length) return { state: "active", message: active[0].message,
     count: active.reduce((sum, row) => sum + (row.count ?? 1), 0), items: active.flatMap(row => row.items ?? []) };
-  return workspace.state === "unknown" ? workspace : assistant.state === "unknown" ? assistant : workspace;
+  const ambiguous = [workspace, assistant].find(row => row.state === "unknown");
+  if (ambiguous) return ambiguous;
+  const unobservable = [workspace, assistant].find(row => row.state === "unobservable");
+  if (unobservable) return unobservable;
+  return workspace;
 }
 
 export type AssistantLifecycleLease = { release(): Promise<void>; commit(): void };

@@ -25,6 +25,20 @@ describe("resident assistant lifecycle admission", () => {
     expect(combineAssistantActiveWork({ state: "idle", message: "fallback" }, { state, message: "native" }).state).toBe(state);
   });
 
+  it("never lets an unobservable observation poison the other source's conclusion", () => {
+    // An idle reading beside a lost observation degrades to unobservable, so
+    // the coordinator can still consult the local file scan.
+    expect(combineAssistantActiveWork({ state: "idle", message: "" }, { state: "unobservable", message: "lost observation" }).state).toBe("unobservable");
+    expect(combineAssistantActiveWork({ state: "unobservable", message: "lost observation" }, { state: "idle", message: "" }).state).toBe("unobservable");
+    // An active reading still blocks; a lost observation cannot erase it.
+    expect(combineAssistantActiveWork({ state: "active", message: "native" }, { state: "unobservable", message: "lost" }).state).toBe("active");
+    expect(combineAssistantActiveWork({ state: "unobservable", message: "lost" }, { state: "active", message: "native" }).state).toBe("active");
+    // Producer ambiguity outranks an unobservable reading: the fail-closed
+    // unknown survives and no local idle scan may pass it.
+    expect(combineAssistantActiveWork({ state: "unobservable", message: "lost" }, { state: "unknown", message: "producer" }).state).toBe("unknown");
+    expect(combineAssistantActiveWork({ state: "unknown", message: "producer" }, { state: "unobservable", message: "lost" }).state).toBe("unknown");
+  });
+
   it("holds every producer and native fence after idle proof until explicitly released", async () => {
     const { input, admission, registry } = fixture();
     const lease = await acquireAssistantLifecycleLease(input);
