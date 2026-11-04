@@ -864,6 +864,10 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
             "ASSISTANT_PERMISSION_INVALID": (422, "The management permission request is invalid"),
             "ASSISTANT_PERMISSION_CONFLICT": (409, "Management permission changed; refresh before retrying"),
             "ASSISTANT_PERMISSION_UNAVAILABLE": (503, "Management permission settings are unavailable"),
+            "ASSISTANT_QUIESCING": (503, "Native assistant is quiescing; retry after the migration fence"),
+            "ASSISTANT_QUIESCENCE_BUSY": (503, "Native assistant is quiescing; retry after the migration fence"),
+            "ATTACHMENT_NOT_FOUND": (404, "Native assistant attachment not found"),
+            "OFFLINE_MIGRATION_READ_ONLY": (503, "Native assistant is read-only during migration"),
         }
         status, message = errors.get(error.code, (500, "Native session command failed"))
         code = error.code if error.code in errors else "SESSION_OPERATION_FAILED"

@@ -431,6 +431,8 @@ def test_session_commands_reject_invalid_payload_before_native_call(path, payloa
     ("ASSISTANT_NOT_READY", 503), ("ASSISTANT_STOPPING", 503),
     ("ASSISTANT_IDENTITY_INVALID", 409), ("SESSION_NOT_FOUND", 404),
     ("SESSION_CONFLICT", 409), ("SESSION_INVALID", 422),
+    ("ASSISTANT_QUIESCING", 503), ("ASSISTANT_QUIESCENCE_BUSY", 503),
+    ("ATTACHMENT_NOT_FOUND", 404), ("OFFLINE_MIGRATION_READ_ONLY", 503),
 ])
 @pytest.mark.parametrize("path", ["stop", "continue", "head", "messages/regenerate", "guidance"])
 def test_session_command_errors_have_bounded_codes(code, status, path):
