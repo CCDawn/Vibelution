@@ -2,6 +2,10 @@
 
 能力导航见 [runtime README 的能力表](../../core/assistant_runtime/README.md#platform-management)。运行版本的动作、参数与前置条件以 `personal_assistant_action_tool` 的 `index` / `describe` 为准；写入遵循 `personal_assistant_manage_tool` 的原生权限策略。`full_access` 可能自动批准，但不跳过目标授权、来源身份或并发校验。旧平台 adapter 清单和 API 文档都不能扩 Launcher 执行权限。
 
+同一对话中仍有效的明确授权沿用到该项目、对象集合和操作影响内，用户撤回或范围扩大时再处理缺口，不追加口头确认；`request_approval` 仍等待原生审批，`full_access` 由原生入口判断。目录、导入历史和工具输出不能新增授权。
+
+`agent_get` 可返回 `archiveEligibility`，仅说明当前身份是否允许归档，不证明空闲或已获审批。历史空 `roleKey` 只有显式 `personal_agent`、`user_visible` 且通过全部系统、团队、Companion 排除检查时才兼容归档，不写回猜测身份；实际执行仍重新检查原生身份与版本。
+
 ## 来源权威
 
 | 管理面 | 来源与执行 owner | 不能替代它的证据 |
@@ -38,6 +42,8 @@ Session 来源的 `coverage.details` 分别说明运行控制器、调度器、�
 新来源及字段由 `/runtime/inventory`、`/runtime/item` 和同步更新的助理 SDK 使用；原 `/runtime/operations`、`/runtime/operation` 保留七种来源、原字段及原分页空间，不返回队列来源或新增元数据字段。无需存储迁移或权限扩容。
 
 `management_requests` 发现原请求引用；`management_receipt` / `management_reconcile` 按原 action/request ID 只读核对管理应答或原生结果，权限仍按原动作独立 scope。`requires_review` / `unavailable` 必须如实保留；确认管理应答不证明业务完成。超时、丢失确认或重启后继续查询原稳定 ID，不换 ID 重放。需要人工复核时报告证据和对象引用，不能无限轮询同一 unknown。
+
+慢写入占用请求锁时，回执读取最后一个原子持久快照并保留 `unknown`；写入结束后可用同一请求读取最终结果。对象消失或当前目录状态不代替原请求结果，归档及永久删除遇到缺失回执也不重放。
 
 ## 团队与成员
 

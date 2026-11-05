@@ -55,6 +55,46 @@ def _forbid(*_args, **_kwargs):
     pytest.fail("inert or unrelated hook attempted assistant/service access")
 
 
+@pytest.mark.parametrize("launcher", [False, True])
+@pytest.mark.parametrize("stored_profile", ["current", "previous", "custom"])
+def test_management_guidance_reaches_existing_direct_session_without_reprovisioning(
+    personal_env, dialogue_service, monkeypatch, launcher, stored_profile
+):
+    from core.infrastructure import native_runtime
+    from core.assistant_runtime import patrol
+
+    row = personal.create_personal_assistant()["assistant"]
+    if stored_profile != "current":
+        profile = (personal._PRE_AUTHORIZATION_CONTINUITY_TASK if stored_profile == "previous"
+                   else {"constraints": "用户自己的范围限制"})
+        directory.update_agent_instance(row["agentId"], task_profile=profile)
+    saved = directory.get_agent(row["agentId"])["taskProfile"]
+    monkeypatch.setattr(native_runtime, "is_launcher_assistant_process", lambda: launcher)
+    monkeypatch.setattr(patrol, "owner", lambda: None)
+    monkeypatch.setattr(personal, "create_personal_assistant", _forbid)
+    monkeypatch.setattr(directory, "update_agent_instance", _forbid)
+
+    segments = runtime_extensions.build_agent_plugin_prompt_segments(
+        row["agentId"], session_id=row["directSessionId"], run_id="existing-turn"
+    )
+
+    assert len(segments) == 1
+    block = segments[0]["block"]
+    assert "仍有效的授权连续办完" in block and "新出现的同类对象也适用" in block
+    assert "授权不跨项目" in block and "撤回时停止受影响操作" in block
+    assert "范围、影响改变时只澄清缺口" in block
+    assert "request_approval按原生入口等待审批" in block
+    assert "full_access由原生入口沿用已有授权" in block
+    assert "不在工具审批之外重复口头确认" in block
+    assert "不凭历史记忆或旧工具说明断言能力" in block
+    assert "只查原请求ID的回执，不换ID" in block
+    assert "不绕过策略或执行任意命令" in block
+    assert directory.get_agent(row["agentId"])["taskProfile"] == saved
+    if stored_profile == "current":
+        assert "仍有效的授权连续办完" in saved["constraints"]
+        assert "删除、重启和权限变更须确认具体对象与影响" not in saved["constraints"]
+
+
 def test_ordinary_agent_never_scans_assistant_directory_or_reads_plugin_store(
     personal_env, dialogue_service, monkeypatch
 ):

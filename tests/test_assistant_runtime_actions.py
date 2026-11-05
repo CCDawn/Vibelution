@@ -112,6 +112,25 @@ def test_schema_title_compaction_preserves_business_keys_and_literal_data():
     assert compact["required"] == ["title"] and schema == before
 
 
+def test_management_navigation_builds_each_source_contract_registry_once_per_call(monkeypatch):
+    from core.assistant_runtime import actions
+    from core.web.services.external_management import contracts as source
+    calls = []
+    for name in ("contracts", "pa_managed_write_contracts"):
+        original = getattr(source, name)
+        def counted(original=original, name=name):
+            calls.append(name)
+            return original()
+        monkeypatch.setattr(source, name, counted)
+
+    first = actions._management_contracts()
+    assert calls == ["contracts", "pa_managed_write_contracts"]
+    calls.clear()
+    second = actions._management_contracts()
+    assert calls == ["contracts", "pa_managed_write_contracts"]
+    assert {name: item[1] for name, item in first.items()} == {name: item[1] for name, item in second.items()}
+
+
 @pytest.mark.anyio
 async def test_launcher_index_remains_complete_json_through_native_budget():
     dispatch = Dispatch()
@@ -394,6 +413,145 @@ async def test_offline_error_stays_a_bounded_tool_receipt():
         assert result == {"ok": False, "code": "BACKEND_UNAVAILABLE", "message": "Native task operation failed"}
     finally:
         unbind_actions(dispatch)
+
+
+@pytest.mark.anyio
+async def test_management_wait_includes_native_write_timeout_and_original_receipt(tmp_path, monkeypatch):
+    from core.assistant_runtime import actions
+    from core.assistant_runtime.dispatch import DispatchService
+    from core.external_agent.backend_client import BackendClientError
+
+    calls, waits = [], []
+
+    class Client:
+        async def diagnostics(self):
+            return {"status": "healthy"}
+
+        async def management_action(self, **values):
+            calls.append(("write", values))
+            error = BackendClientError("slow native write", code="BACKEND_TIMEOUT")
+            error.management_action = values["action"]
+            error.management_request_id = values["request_id"]
+            raise error
+
+        async def management_receipt(self, **values):
+            calls.append(("receipt", values))
+            return {"status": "completed", "action": values["action"], "requestId": values["request_id"],
+                "verified": True, "reused": True, "agent": {"agentId": "agent-a"}}
+
+    submit = asyncio.run_coroutine_threadsafe
+
+    def observe_wait(coroutine, loop):
+        pending = submit(coroutine, loop)
+
+        class Future:
+            def result(self, timeout):
+                waits.append(timeout)
+                assert timeout == 125, "25s POST plus receipt recovery must fit inside the tool wait"
+                return pending.result(timeout=2)
+
+            def cancel(self):
+                return pending.cancel()
+
+        return Future()
+
+    service = DispatchService(tmp_path / "profile", {"p": tmp_path / "project"},
+        client_factory=lambda *_args, **_kwargs: Client())
+    bind_actions(service, asyncio.get_running_loop())
+    monkeypatch.setattr(actions.asyncio, "run_coroutine_threadsafe", observe_wait)
+    try:
+        result = await asyncio.to_thread(execute_action, "agent_archive", {
+            "project_id": "p", "request_id": "slow-1", "agent_id": "agent-a", "expected_config_revision": 3},
+            governed=True)
+    finally:
+        unbind_actions(service)
+    assert result["status"] == "completed" and result["reconciledAfterTimeout"] is True
+    assert waits == [125] and [kind for kind, _ in calls] == ["write", "receipt"]
+    assert calls[1][1] == {"action": "agent_archive", "request_id": "slow-1"}
+
+
+@pytest.mark.anyio
+async def test_expired_management_wait_releases_local_locks_and_preserves_native_writer(tmp_path, monkeypatch):
+    from threading import Event
+    from core.assistant_runtime import actions
+    from core.assistant_runtime.dispatch import DispatchService
+
+    entered, cancelled = Event(), asyncio.Event()
+    finish_native = asyncio.Event()
+    native_writes, lookups, remote_tasks = [], [], []
+
+    async def native_write():
+        native_writes.append("agent-a")
+        entered.set()
+        await finish_native.wait()
+        return {"agentId": "agent-a"}
+
+    class Client:
+        async def diagnostics(self):
+            return {"status": "healthy"}
+
+        async def management_action(self, **values):
+            # An accepted server request outlives its disconnected client.
+            remote = asyncio.create_task(native_write())
+            remote_tasks.append(remote)
+            try:
+                return await asyncio.shield(remote)
+            finally:
+                cancelled.set()
+
+        async def management_receipt(self, **values):
+            lookups.append(values)
+            done = bool(remote_tasks) and remote_tasks[0].done()
+            return {"status": "completed" if done else "unknown", "action": values["action"],
+                "requestId": values["request_id"], "verified": done, "reused": True,
+                **({"agent": remote_tasks[0].result()} if done else {})}
+
+    service = DispatchService(tmp_path / "profile", {"p": tmp_path / "project"},
+        client_factory=lambda *_args, **_kwargs: Client())
+    submit = asyncio.run_coroutine_threadsafe
+    local_futures = []
+
+    def expire_wait(coroutine, loop):
+        pending = submit(coroutine, loop)
+        local_futures.append(pending)
+
+        class Future:
+            def result(self, timeout):
+                assert timeout == 125
+                assert entered.wait(2)
+                return pending.result(timeout=0.03)
+
+            def cancel(self):
+                return pending.cancel()
+
+        return Future()
+
+    parameters = {"project_id": "p", "request_id": "slow-1", "agent_id": "agent-a", "expected_config_revision": 3}
+    bind_actions(service, asyncio.get_running_loop())
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(actions.asyncio, "run_coroutine_threadsafe", expire_wait)
+            with pytest.raises(ValueError, match="原生请求尚未确认"):
+                await asyncio.to_thread(execute_action, "agent_archive", parameters, governed=True)
+        await asyncio.wait_for(cancelled.wait(), timeout=1)
+        assert local_futures[0].cancelled()
+        assert not service._project_locks["p"].locked()
+        assert all(not lock.locked() for lock in service.management._locks.values())
+        assert not remote_tasks[0].done()
+        reference = {"project_id": "p", "action": "agent_archive", "request_id": "slow-1"}
+        progress = await asyncio.wait_for(asyncio.to_thread(execute_action, "management_receipt", reference), timeout=1)
+        assert progress["status"] == "unknown"
+        finish_native.set()
+        await remote_tasks[0]
+        final = await asyncio.to_thread(execute_action, "management_receipt", reference)
+        assert final["status"] == "completed" and final["agent"]["agentId"] == "agent-a"
+        assert await asyncio.to_thread(execute_action, "agent_archive", parameters, governed=True) == final
+        assert native_writes == ["agent-a"] and len(lookups) == 3
+    finally:
+        finish_native.set()
+        if remote_tasks:
+            await asyncio.gather(*remote_tasks)
+        unbind_actions(service)
 
 
 @pytest.mark.anyio

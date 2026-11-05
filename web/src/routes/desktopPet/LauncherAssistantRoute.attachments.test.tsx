@@ -22,7 +22,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 async function settle() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 25)); }); }
-async function setup(enabled: boolean, statusExtra: Record<string, unknown> = {}) {
+async function setup(enabled: boolean, statusExtra: Record<string, unknown> = {}, detailMessages?: unknown[]) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("fetch", vi.fn(() => { throw new Error("HTTP forbidden"); }));
   vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: vi.fn(() => "blob:preview"), revokeObjectURL: vi.fn() }));
@@ -35,7 +35,8 @@ async function setup(enabled: boolean, statusExtra: Record<string, unknown> = {}
       case "status": return { assistant: { agentId: "a", directSessionId: "s", displayName: "助手" },
         ...(enabled ? { attachmentVersion: 1 } : {}), ...statusExtra };
       case "config": return { language: "zh" };
-      case "detail": return secretSent ? { id: "s", agentId: "a", status: "ready", messages: [
+      case "detail": return detailMessages ? { id: "s", agentId: "a", status: "ready", messages: detailMessages }
+        : secretSent ? { id: "s", agentId: "a", status: "ready", messages: [
         { id: "m", role: "user", content: "", attachments: [{ artifactId: "user-image-1.png", filename: "old.png", kind: "user_image", contentType: "image/png", sizeBytes: 2, status: "ready", url: "/api/secret", imageUrl: "/api/secret", downloadUrl: "/api/secret" }] },
         { id: "m2", role: "user", content: "", attachments: [{ artifactId: "sec_test123", filename: "中转站密钥", kind: "user_secret", contentType: "application/octet-stream", sizeBytes: 0, status: "ready", url: "", imageUrl: "", downloadUrl: "" }] },
       ] } : { id: "s", agentId: "a", status: "ready", messages: [{ id: "m", role: "user", content: "", attachments: [{ artifactId: "user-image-1.png", filename: "old.png", kind: "user_image", contentType: "image/png", sizeBytes: 2, status: "ready", url: "/api/secret", imageUrl: "/api/secret", downloadUrl: "/api/secret" }] }] };
@@ -46,9 +47,12 @@ async function setup(enabled: boolean, statusExtra: Record<string, unknown> = {}
       case "uploadAttachment": if (fail) throw new Error("failure"); else return { artifactId: "user-image-2.png", filename: "new.png", contentType: "image/png", sizeBytes: 2, kind: "user_image", status: "ready" };
       case "upload_attachment": {
         if (request.kind !== "user_secret" || typeof request.value !== "string" || !request.value) throw new Error("ASSISTANT_REQUEST_INVALID");
-        if (!["api_key", "token", "password", "secret"].includes(String(request.secretKind))) throw new Error("ASSISTANT_SECRET_KIND_INVALID");
+        // The unified dialog sends no secretKind; the host echoes the label as a third key when one was sent.
+        if ("secretKind" in request) throw new Error("ASSISTANT_REQUEST_INVALID");
         if (secretFail) throw new Error("Launcher 未确认隐私附件暂存。");
-        return { attachmentId: "sec_test123", kind: "user_secret" };
+        return typeof request.label === "string" && request.label
+          ? { attachmentId: "sec_test123", kind: "user_secret", label: request.label }
+          : { attachmentId: "sec_test123", kind: "user_secret" };
       }
       case "send": if (sendFailure !== null) throw new Error(sendFailure); secretSent = true; return { accepted: true, turnId: "turn" };
       default: throw new Error("unexpected");
@@ -264,14 +268,8 @@ it("stages a private attachment through the closed verb, sends only the sec_ ref
   const password = document.querySelector<HTMLInputElement>('input[type="password"]');
   expect(password).not.toBeNull();
   const labelInput = document.querySelector<HTMLInputElement>('input[aria-label="隐私附件显示名"]')!;
-  // Pick the non-default kind so the request must carry it (secretKind).
-  const kindTrigger = document.querySelector('[role="combobox"][aria-label="隐私附件类型"]');
-  expect(kindTrigger).not.toBeNull();
-  await act(async () => kindTrigger!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
-  const kindOption = [...document.querySelectorAll<HTMLElement>('[role="option"]')]
-    .find(item => item.textContent?.trim() === "访问令牌");
-  expect(kindOption).toBeTruthy();
-  await act(async () => kindOption!.click());
+  // One unified path: the dialog has no kind selector at all.
+  expect(document.querySelector('[role="combobox"]')).toBeNull();
   // Failure first: the error surfaces in the dialog and nothing reaches the tray.
   setSecretFailure(true);
   const setInput = (element: HTMLInputElement, value: string) => {
@@ -291,9 +289,11 @@ it("stages a private attachment through the closed verb, sends only the sec_ ref
   await act(async () => submit.click());
   const upload = invoke.mock.calls.filter(([request]) => request.operation === "upload_attachment");
   expect(upload).toHaveLength(2);
-  // The dialog's type choice rides the request as secretKind (token picked above).
+  // The unified request carries value + label, and no secretKind; the host echoed
+  // the label as the third response key.
   expect(upload[1]![0]).toMatchObject({ operation: "upload_attachment", kind: "user_secret",
-    value: PLAINTEXT, label: "中转站密钥", secretKind: "token" });
+    value: PLAINTEXT, label: "中转站密钥" });
+  expect("secretKind" in (upload[1]![0] as Record<string, unknown>)).toBe(false);
   // Success closes the dialog, burns the plaintext and mounts a masked chip.
   expect(document.querySelector('input[type="password"]')).toBeNull();
   expect(document.body.textContent).not.toContain(PLAINTEXT);
@@ -316,4 +316,69 @@ it("stages a private attachment through the closed verb, sends only the sec_ ref
   expect(document.body.textContent).not.toContain(PLAINTEXT);
   // The tray chip cleared after the accepted send.
   expect(conversation.composerAttachments).toHaveLength(0);
+});
+
+// The assistant `secret_request` tool receipt rides the canonical `tool_call`
+// item's `output` JSON; the composer banner asks the operator to attach.
+const SECRET_REQUEST_TURN_ITEMS = [
+  { type: "agent_message", id: "a-item-text", itemId: "a-item-text", version: 3, sessionId: "s",
+    turnId: "t-secret", status: "completed", revision: 1, sequence: 1, phase: "commentary",
+    text: "我需要一个 API 密钥才能继续。" },
+  { type: "tool_call", id: "a-item-tool", itemId: "a-item-tool", version: 3, sessionId: "s",
+    turnId: "t-secret", status: "completed", revision: 2, sequence: 2, callId: "call-secret-1",
+    toolName: "personal_assistant_manage_tool",
+    output: JSON.stringify({ ok: true, action: "secret_request", status: "awaiting_user_attachment",
+      purpose: "连接中转站需要 API 密钥", label: "中转站密钥", hint: "以 sk- 开头" }) },
+];
+function secretRequestMessages(): unknown[] {
+  return [
+    { id: "m-u1", timestamp: "2026-11-05T00:00:00Z", role: "user", content: "帮我配置中转站" },
+    { id: "m-a1", timestamp: "2026-11-05T00:00:01Z", role: "assistant", turnId: "t-secret",
+      status: "completed", content: "", turnItems: SECRET_REQUEST_TURN_ITEMS },
+  ];
+}
+function secretRequestBanner(): Element | null {
+  return document.querySelector('[data-testid="chat-composer-secret-request"]');
+}
+it("surfaces the newest secret_request receipt as a one-click composer banner", async () => {
+  const { invoke } = await setup(true, {}, secretRequestMessages());
+  await settle();
+  const banner = secretRequestBanner();
+  expect(banner).not.toBeNull();
+  expect(banner!.textContent).toContain("助理请求隐私内容：连接中转站需要 API 密钥");
+  expect(banner!.textContent).toContain("建议显示名：中转站密钥");
+  // One click opens the same privacy dialog with the suggestion prefilled.
+  const attach = [...document.querySelectorAll<HTMLButtonElement>("button")]
+    .find(button => button.textContent?.trim() === "立即附加")!;
+  await act(async () => attach.click());
+  expect(document.querySelector<HTMLInputElement>('input[type="password"]')).not.toBeNull();
+  expect(document.querySelector<HTMLInputElement>('input[aria-label="隐私附件显示名"]')!.value).toBe("中转站密钥");
+  // Banner hides while the dialog is open; nothing was uploaded yet.
+  expect(secretRequestBanner()).toBeNull();
+  expect(invoke.mock.calls.some(([request]) => request.operation === "upload_attachment")).toBe(false);
+});
+it("keeps the banner hidden while a secret chip is staged in the tray", async () => {
+  localStorage.setItem("vibelution.launcher-assistant.composer.v1:embedded:s", JSON.stringify({
+    version: 1, sessionId: "s", surface: "embedded",
+    snapshot: { draft: "", outstanding: null, acceptedTurnId: "", queuedAcceptance: null,
+      attachments: [{ id: "sec-chip-1", artifactId: "sec_test123", filename: "隐私 · 中转站密钥",
+        contentType: "application/octet-stream", sizeBytes: 0, kind: "secret" }] },
+  }));
+  await setup(true, {}, secretRequestMessages());
+  await settle();
+  expect(conversation.composerAttachments?.some(item => item.kind === "secret")).toBe(true);
+  expect(secretRequestBanner()).toBeNull();
+});
+it("stays quiet after the operator dismisses the exact receipt", async () => {
+  await setup(true, {}, secretRequestMessages());
+  await settle();
+  expect(secretRequestBanner()).not.toBeNull();
+  const dismiss = [...document.querySelectorAll<HTMLButtonElement>("button")]
+    .find(button => button.textContent?.trim() === "忽略")!;
+  await act(async () => dismiss.click());
+  expect(secretRequestBanner()).toBeNull();
+  // Later detail readbacks re-resolve the same receipt; the keyed dismissal
+  // keeps the banner quiet without re-asking.
+  await settle(); await settle();
+  expect(secretRequestBanner()).toBeNull();
 });

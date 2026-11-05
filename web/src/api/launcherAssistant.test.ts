@@ -9,9 +9,11 @@ import {
   regenerateLauncherAssistantMessage, guideLauncherAssistantTurn,
   getLauncherOperatorAsset, getLauncherAssistantAvatar, openLauncherFromAssistant,
   subscribeLauncherAssistantSessionEvent,
+  uploadLauncherUserSecret,
   setLauncherManagementPermissionPreset,
   getLauncherAssistantBudget, setLauncherAssistantBudget,
   getLauncherAssistantUsageSummary,
+  updateLauncherAssistantQueuedTurn, removeLauncherAssistantQueuedTurn, sendNowLauncherAssistantQueuedTurn,
 } from "./launcherAssistant";
 import type { SessionToolApprovalRequest } from "./types";
 
@@ -61,6 +63,165 @@ describe("Launcher assistant usage snapshot", () => {
       invoke.mockResolvedValueOnce(invalid);
       await expect(getLauncherAssistantUsageSummary()).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
     }
+  });
+});
+
+describe("Launcher assistant native queue API", () => {
+  const assistant = { agentId: "assistant-one", directSessionId: "session-one", displayName: "Assistant" };
+  const row = { id: "queued-one", position: 1, status: "queued", content: "next task", kind: "user",
+    attachments: [{ artifactId: "native-file", filename: "note.txt" }], references: [], nativeExtra: { retained: true } };
+  const commands = [
+    { operation: "updateQueuedTurn", call: (sessionId: string, queuedTurnId: string) =>
+      updateLauncherAssistantQueuedTurn(sessionId, queuedTurnId, { content: "edited" }) },
+    { operation: "removeQueuedTurn", call: removeLauncherAssistantQueuedTurn },
+    { operation: "sendNowQueuedTurn", call: sendNowLauncherAssistantQueuedTurn },
+  ] as const;
+
+  it("keeps old hosts compatible and advertises queue support only at version one", async () => {
+    const invoke = vi.fn().mockResolvedValueOnce({ assistant }).mockResolvedValueOnce({ assistant, followupQueueVersion: 1 });
+    const fetch = vi.fn();
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke }); vi.stubGlobal("fetch", fetch);
+    expect((await getLauncherAssistantStatus()).followupQueueVersion).toBeUndefined();
+    expect((await getLauncherAssistantStatus()).followupQueueVersion).toBe(1);
+    expect(invoke.mock.calls).toEqual([[{ operation: "status" }], [{ operation: "status" }]]);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed or unsupported queue capability versions", async () => {
+    const invoke = vi.fn();
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    for (const followupQueueVersion of [null, true, false, 0, 2, "1", [], {}]) {
+      invoke.mockResolvedValueOnce({ assistant, followupQueueVersion });
+      await expect(getLauncherAssistantStatus()).rejects.toThrow("队列版本不可用");
+    }
+  });
+
+  it("uses only session-scoped IPC and preserves native rows and send-now stop acknowledgements", async () => {
+    const invoke = vi.fn().mockResolvedValue({ queuedTurns: [row] });
+    const fetch = vi.fn();
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke }); vi.stubGlobal("fetch", fetch);
+    const update = { content: "edited", position: 2, status: "paused" } as const;
+    await expect(updateLauncherAssistantQueuedTurn("session-one", "queued-one", update)).resolves.toEqual([row]);
+    expect(invoke).toHaveBeenLastCalledWith({ operation: "updateQueuedTurn", sessionId: "session-one", queuedTurnId: "queued-one", ...update });
+    await expect(removeLauncherAssistantQueuedTurn("session-one", "queued-one")).resolves.toEqual([row]);
+    expect(invoke).toHaveBeenLastCalledWith({ operation: "removeQueuedTurn", sessionId: "session-one", queuedTurnId: "queued-one" });
+    for (const stopRequested of [true, false]) {
+      const receipt = { queuedTurns: [row], stopRequested };
+      invoke.mockResolvedValueOnce(receipt);
+      await expect(sendNowLauncherAssistantQueuedTurn("session-one", "queued-one", { expectedTurnId: "observed-turn" }))
+        .resolves.toEqual(receipt);
+      expect(invoke).toHaveBeenLastCalledWith({ operation: "sendNowQueuedTurn", sessionId: "session-one", queuedTurnId: "queued-one", expectedTurnId: "observed-turn" });
+    }
+    invoke.mockResolvedValueOnce({ queuedTurns: [] });
+    await expect(removeLauncherAssistantQueuedTurn("session-one", "queued-one")).resolves.toEqual([]);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("omits undefined fields and keeps valid content and ID boundaries without coercion", async () => {
+    const invoke = vi.fn().mockResolvedValue({ queuedTurns: [row] });
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    await updateLauncherAssistantQueuedTurn("s", "q", { content: undefined, position: undefined, status: "queued" });
+    expect(invoke).toHaveBeenLastCalledWith({ operation: "updateQueuedTurn", sessionId: "s", queuedTurnId: "q", status: "queued" });
+    for (const content of ["", " ", "x".repeat(64000)]) {
+      await updateLauncherAssistantQueuedTurn("s".repeat(160), "q".repeat(160), { content });
+      expect(invoke).toHaveBeenLastCalledWith({ operation: "updateQueuedTurn", sessionId: "s".repeat(160), queuedTurnId: "q".repeat(160), content });
+    }
+    await updateLauncherAssistantQueuedTurn("s", "q", { position: Number.MAX_SAFE_INTEGER });
+    expect(invoke).toHaveBeenLastCalledWith({ operation: "updateQueuedTurn", sessionId: "s", queuedTurnId: "q", position: Number.MAX_SAFE_INTEGER });
+    invoke.mockResolvedValue({ queuedTurns: [], stopRequested: false });
+    await sendNowLauncherAssistantQueuedTurn("s", "q", { expectedTurnId: undefined });
+    expect(invoke).toHaveBeenLastCalledWith({ operation: "sendNowQueuedTurn", sessionId: "s", queuedTurnId: "q" });
+    await sendNowLauncherAssistantQueuedTurn("s", "q", { expectedTurnId: "t".repeat(160) });
+    expect(invoke).toHaveBeenLastCalledWith({ operation: "sendNowQueuedTurn", sessionId: "s", queuedTurnId: "q", expectedTurnId: "t".repeat(160) });
+  });
+
+  it("rejects invalid Session and queue IDs before invoking any native command", async () => {
+    const invoke = vi.fn();
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    for (const { call } of commands) {
+      for (const invalid of [undefined, null, true, 7, "", "../other", "has space", "id.one", "id:one", "one\n", "one\r", "x".repeat(161)]) {
+        await expect(call(invalid as string, "queued-one")).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+        await expect(call("session-one", invalid as string)).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+      }
+    }
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("rejects empty updates, identity injection and invalid mutation fields before IPC", async () => {
+    const invoke = vi.fn();
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    const invalidPayloads: unknown[] = [undefined, null, [], true, "edit", {}, { content: undefined },
+      { content: undefined, position: undefined, status: undefined }, { content: null }, { content: true },
+      { content: "x".repeat(64001) }, { position: null }, { position: true }, { position: "1" },
+      { position: 0 }, { position: -1 }, { position: 1.5 }, { position: NaN }, { position: Number.MAX_SAFE_INTEGER + 1 },
+      { status: null }, { status: true }, { status: "starting" }, { status: "queued\n" },
+      { content: "edited", sessionId: "foreign" }, { content: "edited", queuedTurnId: "other" },
+      { content: "edited", projectRoot: "private" }, { content: "edited", extra: undefined }];
+    for (const payload of invalidPayloads)
+      await expect(updateLauncherAssistantQueuedTurn("session-one", "queued-one", payload as Parameters<typeof updateLauncherAssistantQueuedTurn>[2]))
+        .rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed expected turn IDs and extra send-now fields before IPC", async () => {
+    const invoke = vi.fn();
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    for (const expectedTurnId of [null, true, false, 7, [], {}, "", "../other", "has space", "id.one", "id:one", "one\n", "t".repeat(161)])
+      await expect(sendNowLauncherAssistantQueuedTurn("session-one", "queued-one", { expectedTurnId: expectedTurnId as string }))
+        .rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    for (const payload of [null, [], true, { sessionId: "foreign" }, { queuedTurnId: "other" }, { content: "injected" }, { expectedTurnId: "turn", extra: undefined }])
+      await expect(sendNowLauncherAssistantQueuedTurn("session-one", "queued-one", payload as Parameters<typeof sendNowLauncherAssistantQueuedTurn>[2]))
+        .rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed native receipts and preserves row extensions only inside valid rows", async () => {
+    const invoke = vi.fn();
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    const invalidReceipts: unknown[] = [undefined, null, [], {}, { queuedTurns: null }, { queuedTurns: {} },
+      { queuedTurns: [null] }, { queuedTurns: [[]] }, { queuedTurns: [{}] },
+      ...[{ id: "" }, { id: "../other" }, { id: "queued-one\n" }, { id: "q".repeat(161) }, { id: true },
+        { position: 0 }, { position: -1 }, { position: 1.5 }, { position: true }, { position: Number.MAX_SAFE_INTEGER + 1 },
+        { status: "" }, { status: false }, { content: null }].map(fields => ({ queuedTurns: [{ ...row, ...fields }] })),
+      { queuedTurns: [row], sessionId: "foreign" }, { queuedTurns: [row], privatePath: "private" }];
+    for (const { operation, call } of commands) {
+      for (const receipt of invalidReceipts) {
+        invoke.mockResolvedValueOnce(operation === "sendNowQueuedTurn" && receipt && typeof receipt === "object" && !Array.isArray(receipt)
+          ? { ...receipt, stopRequested: true } : receipt);
+        await expect(call("session-one", "queued-one")).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
+      }
+    }
+    for (const { operation, call } of commands) {
+      if (operation === "sendNowQueuedTurn") continue;
+      invoke.mockResolvedValueOnce({ queuedTurns: [row], stopRequested: false });
+      await expect(call("session-one", "queued-one")).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
+    }
+  });
+
+  it("requires an actual boolean send-now acknowledgement", async () => {
+    const invoke = vi.fn();
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    for (const stopRequested of [undefined, null, 0, 1, "false", [], {}]) {
+      invoke.mockResolvedValueOnce({ queuedTurns: [row], stopRequested });
+      await expect(sendNowLauncherAssistantQueuedTurn("session-one", "queued-one")).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
+    }
+  });
+
+  it("never falls back to HTTP when the dedicated assistant IPC is unavailable", async () => {
+    vi.stubGlobal("vibelutionLauncherAssistant", undefined);
+    vi.stubGlobal("vibelutionLauncher", { invoke: vi.fn() });
+    const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
+    for (const { call } of commands) await expect(call("session-one", "queued-one")).rejects.toThrow("Launcher");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("propagates a failed native mutation once without replaying or fetching", async () => {
+    const invoke = vi.fn().mockRejectedValue(new Error("ASSISTANT_SESSION_CONFLICT"));
+    const fetch = vi.fn();
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke }); vi.stubGlobal("fetch", fetch);
+    for (const { call } of commands) await expect(call("session-one", "queued-one")).rejects.toThrow("ASSISTANT_SESSION_CONFLICT");
+    expect(invoke).toHaveBeenCalledTimes(3);
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
 
@@ -658,5 +819,48 @@ describe("Launcher session event subscription", () => {
     const throwingUnsubscribe = subscribeLauncherAssistantSessionEvent(() => {});
     expect(() => throwingUnsubscribe?.()).not.toThrow();
     expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Launcher user secret staging", () => {
+  it("sends value plus optional label on the closed verb, never secretKind", async () => {
+    const invoke = vi.fn().mockResolvedValue({ attachmentId: "sec_abc123", kind: "user_secret" });
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    await expect(uploadLauncherUserSecret("sk-live-value", "中转站密钥")).resolves
+      .toEqual({ attachmentId: "sec_abc123", kind: "user_secret" });
+    expect(invoke).toHaveBeenLastCalledWith({ operation: "upload_attachment", kind: "user_secret",
+      value: "sk-live-value", label: "中转站密钥" });
+    await expect(uploadLauncherUserSecret("sk-live-value")).resolves
+      .toEqual({ attachmentId: "sec_abc123", kind: "user_secret" });
+    expect(invoke).toHaveBeenLastCalledWith({ operation: "upload_attachment", kind: "user_secret", value: "sk-live-value" });
+    await expect(uploadLauncherUserSecret("", "label")).rejects.toThrow("请粘贴隐私内容后再提交。");
+    await expect(uploadLauncherUserSecret("value", "x".repeat(161))).rejects.toThrow("显示名无效。");
+    expect(invoke).toHaveBeenCalledTimes(2);
+  });
+
+  it("accepts exactly 2-key or 3-key confirmations and rejects every other shape", async () => {
+    const invoke = vi.fn();
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    for (const confirmed of [
+      { attachmentId: "sec_abc123", kind: "user_secret" },
+      { attachmentId: "sec_abc123", kind: "user_secret", label: "中转站密钥" },
+    ]) {
+      invoke.mockResolvedValueOnce(confirmed);
+      await expect(uploadLauncherUserSecret("sk-live-value", "中转站密钥")).resolves
+        .toEqual({ attachmentId: "sec_abc123", kind: "user_secret" });
+    }
+    for (const invalid of [
+      null,
+      { attachmentId: "sec_abc123" },
+      { attachmentId: "sec_abc123", kind: "user_secret", extra: 1 },
+      { attachmentId: "sec_abc123", kind: "user_secret", label: 7 },
+      { attachmentId: "sec_abc123", kind: "user_secret", label: "x".repeat(161) },
+      { attachmentId: "user-image-1.png", kind: "user_secret" },
+      { attachmentId: "sec_abc123", kind: "user_image" },
+    ]) {
+      invoke.mockResolvedValueOnce(invalid);
+      await expect(uploadLauncherUserSecret("sk-live-value")).rejects.toThrow("Launcher 未确认隐私附件暂存。");
+    }
+    expect(invoke).toHaveBeenCalledTimes(9);
   });
 });

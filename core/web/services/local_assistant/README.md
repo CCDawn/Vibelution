@@ -13,6 +13,14 @@
   团队/Companion/受保护身份边界。任务完成后保留变更供审查，不自动发布。
 - `runtime` 从后端拥有的 task→session→agent 关系解析临时工具与工作目录；消息
   metadata 或 `launcher-assistant:` 请求前缀都不能成为权限依据。
+- `legacy_cleanup` 仅供 Launcher 清理升级前的委派任务。私有
+  `/api/local-assistant/v1/external-agent/legacy-tasks/{task_id}/cleanup[/preview]`
+  同时验证 control token、当前 Launcher 凭据和原 task capability，并要求原请求属于
+  Launcher 委派、任务已终止且 Session 独占。它复用现有清理响应，不迁移传输命名空间，
+  不提供普通外部清理接口，也不从旧记录推断工作区所有权。原 task 路径原子替换为去掉
+  结果和 Session 关联的终态凭据，让原 SDK 的幂等重放仍返回原任务，不再执行。
+  若原生运行记录和同项目目录记录均已不存在，且无活动、共用引用或遗留内容文件，
+  只压缩旧 task 记录并保留并发锁；不再调用 Session 删除，也不据此删除未知归属文件。
 - `policy` 和 `consent` 在现有最终工具执行授权入口放行普通文件编辑及本地测试、
   构建和 Git 操作。对外发布、删除、权限扩张、任意脚本与越界访问仍走原生审批。
   普通命令可用最多 16 段 `&&` 连续执行，每段独立校验。Windows 支持任务目录内的

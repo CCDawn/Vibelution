@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import { type ReactNode, type RefObject } from "react";
 
 import {
   ShadcnPopover,
@@ -15,6 +15,8 @@ export type VPopoverProps = {
   side?: "top" | "right" | "bottom" | "left";
   align?: "start" | "center" | "end";
   sideOffset?: number;
+  /** Anchor a panel to its owning surface while keeping the trigger focusable. */
+  anchorRef?: RefObject<HTMLElement | null>;
   modal?: boolean;
   "aria-label"?: string;
   contentClassName?: string;

@@ -212,11 +212,18 @@ class HistoryHost:
             self._active = False
             self._owner.close()
 
-    def stop_native_turn(self, native_stop, turn_id):
-        """Order a successful native stop against the final archive commit."""
+    def stop_native_turn(self, native_stop, turn_id, *, accepted=None):
+        """Order a native stop against commit; a no-op queue receipt is not a stop.
+
+        Existing stop callers retain their unconditional successful-return
+        acceptance. Queue promotion supplies a predicate because a repeated
+        send-now returns normally without requesting another stop.
+        """
         self._signal_sync(turn_id=turn_id)
         with self._lock:
             result = native_stop(turn_id)
+            if accepted is not None and not accepted(result):
+                return result
             self._preview.stop_turn(turn_id)
             if self._operation_turn == turn_id:
                 self._operation_stopped = True

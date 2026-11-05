@@ -177,6 +177,63 @@ def test_batch_unknown_item_keeps_batch_unknown_without_any_replay(batch_env):
     assert native.read_archive_state("agent-1") is None and native.read_archive_state("agent-3") is None
 
 
+@pytest.mark.parametrize("outcome", ["purged", "rejected", "unknown"])
+def test_batch_receipt_reads_durable_progress_while_native_write_is_running(batch_env, outcome):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    service, native, grant = batch_env
+    entered, release = Event(), Event()
+    original_purge = native.purge
+    if outcome == "rejected":
+        native.fail["agent-2"] = ManagementError("STATE_CONFLICT", 409)
+    elif outcome == "unknown":
+        native.lose.add("agent-2")
+
+    def slow_purge(parameters, marker):
+        if parameters["agent_id"] == "agent-2":
+            entered.set()
+            assert release.wait(5), "test must release the paused native writer"
+        return original_purge(parameters, marker)
+
+    native.purge = slow_purge
+    # A fresh service instance shares only the existing ledger/OS lock. The
+    # receipt must not depend on the writer's in-memory state or native locks.
+    reader = ManagementService(service.root, identity=service.identity, native=native)
+    native_reads = []
+    original_read = native.read_archive_state
+
+    def observe_read(agent_id):
+        native_reads.append(agent_id)
+        return original_read(agent_id)
+
+    native.read_archive_state = observe_read
+    purges = [item("agent-1"), item("agent-2"), item("agent-3")]
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        writer = pool.submit(invoke, batch_env, "slow-1", purges)
+        try:
+            assert entered.wait(2)
+            receipts = [pool.submit(reader.receipt, grant["subject_id"], grant["subject_capability"],
+                "agent_purge_batch", "slow-1") for _ in range(3)]
+            for future in receipts:
+                progress = future.result(timeout=0.5)
+                assert progress["status"] == "unknown" and progress["verified"] is False
+                assert progress["reused"] is True
+                assert [(row["agentId"], row["outcome"]) for row in progress["purgeBatch"]["results"]] == [
+                    ("agent-1", "purged")]
+            assert native_reads == [], "in-flight receipts must not reconcile through busy native owners"
+        finally:
+            release.set()
+        completed = writer.result(timeout=5)
+
+    final = reader.receipt(grant["subject_id"], grant["subject_capability"], "agent_purge_batch", "slow-1")
+    assert final == {**completed, "reused": True}
+    assert final["status"] == ("unknown" if outcome == "unknown" else "completed")
+    assert final["purgeBatch"]["results"][1]["outcome"] == outcome
+    assert invoke(batch_env, "slow-1", purges) == final
+    assert native.calls == ["agent-1", "agent-2", "agent-3"]
+
+
 def test_batch_interrupted_execution_never_resumes_or_claims_completion(tmp_path):
     from core.web.services.external_management.service import ManagementService, TargetIdentity
     native = Native()

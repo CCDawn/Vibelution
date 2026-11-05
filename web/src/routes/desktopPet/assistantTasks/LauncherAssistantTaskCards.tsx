@@ -45,6 +45,15 @@ export function LauncherAssistantTaskCards({onReview,onApproval,onOpenConversati
     activeView.current.mounted = true;
     const update = () => {
       const next = document.visibilityState !== "hidden";
+      if (!next) {
+        // A hidden view discards its reads; that is cancellation, not a source
+        // failure. Cancel before the view guard rejects a successful late IPC.
+        // The native read still drains through readLauncherAssistantTaskSource.
+        const currentIdentity = activeView.current.identity;
+        void queryClient.cancelQueries({ predicate: query => query.queryKey[0] === "launcher-assistant"
+          && (query.queryKey[1] === "task-cards" || query.queryKey[1] === "team-task-cards")
+          && JSON.stringify(query.queryKey.slice(2)) === currentIdentity });
+      }
       setVisible(next);
       if (!next) setConfirmedIdentity("");
     };
@@ -53,7 +62,7 @@ export function LauncherAssistantTaskCards({onReview,onApproval,onOpenConversati
       activeView.current.mounted = false;
       document.removeEventListener("visibilitychange", update);
     };
-  }, []);
+  }, [queryClient]);
   const status = useQuery({
     queryKey: ["launcher-assistant", "status"],
     queryFn: async ({ signal }) => {

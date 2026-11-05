@@ -165,6 +165,9 @@
 
 | 组件 | 设计说明 |
 | --- | --- |
+| `ConversationModelControlTrigger` | [product/conversation.md](./product/conversation.md#conversationmodelcontroltrigger) |
+| `ConversationComposerMetrics` | [product/conversation.md](./product/conversation.md#conversationcomposermetrics) |
+| Codex 共享对话表面 | [product/conversation.md](./product/conversation.md#codex-共享对话表面) |
 | `VComposerApprovalCard` | [product/conversation.md](./product/conversation.md#vcomposerapprovalcard) |
 | `ConversationToolActivity` | [product/conversation-process.md](./product/conversation-process.md#conversationtoolactivity) |
 | `ConversationActiveTurnStatusNote` | [product/conversation.md](./product/conversation.md#conversationactiveturnstatusnote) |

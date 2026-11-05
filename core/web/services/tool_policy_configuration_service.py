@@ -288,11 +288,16 @@ def _tool_available(item: dict[str, Any]) -> bool:
 
 def _policy_with_known_tools(policy: dict[str, Any], registry_by_name: dict[str, dict[str, Any]]) -> dict[str, Any]:
     known_names = set(registry_by_name)
+    effective_allowed = set(policy.get("allowedTools") or []) - set(policy.get("blockedTools") or [])
     return {
         **policy,
         "allowedTools": [name for name in policy.get("allowedTools") or [] if name in known_names],
         "blockedTools": [name for name in policy.get("blockedTools") or [] if name in known_names],
-        "preferredTools": [name for name in policy.get("preferredTools") or [] if name in known_names],
+        # Invalid proposals must return their validation errors rather than
+        # fail in the strict runtime evaluator. This changes only its preview;
+        # the proposed policy and write admission retain the original errors.
+        "preferredTools": [name for name in policy.get("preferredTools") or []
+                           if name in known_names and name in effective_allowed],
     }
 
 

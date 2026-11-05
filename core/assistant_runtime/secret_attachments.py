@@ -24,14 +24,6 @@ SECRET_ATTACHMENT_ID_PREFIX = "sec_"
 # tiny and an unbounded dict would let one request pin process memory.
 SECRET_MAX_VALUE_CHARS = 8192
 SECRET_MAX_LABEL_CHARS = 120
-# Chinese display labels for the model-facing presence marker and upload
-# metadata. Values are never rendered anywhere.
-SECRET_KIND_LABELS = {
-    "api_key": "API 密钥",
-    "token": "访问令牌",
-    "password": "密码",
-    "secret": "隐私数据",
-}
 
 _STORE_LOCK = threading.Lock()
 # token -> (value, kind, created_monotonic, label)
@@ -99,6 +91,39 @@ def resolve_secret_attachment(token: str) -> tuple[str, str] | None:
     if record is None or now - record[2] >= SECRET_ATTACHMENT_TTL_SECONDS:
         return None
     return record[0], record[1]
+
+
+class SecretCredentialError(ValueError):
+    """Credential-consumption failure carrying a stable message prefix.
+
+    ``prefix`` is ``invalid_secret_reference`` (unknown, expired, or already
+    consumed token) or ``kind_mismatch`` (live token whose stored kind differs
+    from ``expected_kind``); consumers map failures to their own error codes
+    by prefix instead of parsing secret-bearing messages.
+    """
+
+    def __init__(self, prefix: str) -> None:
+        super().__init__(prefix)
+        self.prefix = prefix
+
+
+def consume_secret_credential(token: str, *, expected_kind: str | None = None) -> str:
+    """One-shot consumer primitive: trade a ``sec_`` token for its value.
+
+    Wraps resolve_secret_attachment, so pop-on-read, TTL and lazy-sweep
+    semantics are unchanged. Unknown, expired, or already-consumed tokens
+    raise SecretCredentialError with the ``invalid_secret_reference`` prefix
+    (a failed consume never leaves the entry behind); when ``expected_kind``
+    is given and the stored kind differs, the prefix is ``kind_mismatch`` —
+    the pop has still consumed the entry.
+    """
+    resolved = resolve_secret_attachment(token)
+    if resolved is None:
+        raise SecretCredentialError("invalid_secret_reference")
+    value, kind = resolved
+    if expected_kind is not None and kind != expected_kind:
+        raise SecretCredentialError("kind_mismatch")
+    return value
 
 
 def peek_secret_attachment(token: str) -> str | None:

@@ -23,13 +23,17 @@ rules:
       - "core/assistant_runtime/task_card_metadata.py"
       - "core/assistant_runtime/task_cleanup.py"
       - "core/web/services/local_assistant/task_cleanup.py"
+      - "core/web/services/local_assistant/legacy_cleanup.py"
+      - "core/assistant_runtime/local_project_client.py"
       - "core/web/routes/local_assistant_tasks.py"
       - "tests/test_assistant_task_card_metadata.py"
       - "tests/test_assistant_task_cleanup.py"
       - "tests/test_local_assistant_task_cleanup.py"
+      - "tests/test_local_assistant_legacy_cleanup.py"
+      - "tests/test_local_assistant_client.py"
       - "tests/test_launcher_dispatch_write_actions.py"
     commands:
-      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_assistant_task_card_metadata.py tests/test_assistant_task_cleanup.py tests/test_local_assistant_task_cleanup.py tests/test_launcher_dispatch_write_actions.py -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_assistant_task_card_metadata.py tests/test_assistant_task_cleanup.py tests/test_local_assistant_task_cleanup.py tests/test_local_assistant_legacy_cleanup.py tests/test_local_assistant_client.py tests/test_launcher_dispatch_write_actions.py -q"
   - id: cli-task-completion
     description: "Explicit CLI capability, task completion authority, result delivery, and parent continuation."
     executionLayers:

@@ -4,6 +4,7 @@ import {
   type ConversationPatchRowSummary,
 } from "./conversationPatchModel";
 import { stripAnsiArtifacts } from "./conversationAnsiSanitize";
+import { assistantActionLabel } from "./assistantActionLabels";
 
 export type ConversationToolPresentationLanguage = "zh" | "en";
 
@@ -835,7 +836,11 @@ function buildToolActivityPillsForStatus(options: {
   const language = options.language;
   const toolName = String(options.toolName || "").trim().toLowerCase();
   const status = normalizeToolActivityStatus(options.status);
-  const actionLabel = conversationToolPresentationLabel(toolName, language);
+  const actionLabel = (
+    (toolName === "personal_assistant_action_tool" || toolName === "personal_assistant_manage_tool")
+      ? assistantActionLabel(options.toolArguments?.action, language)
+      : null
+  ) || conversationToolPresentationLabel(toolName, language);
   // Prefer payload timeout signal over generic status text.
   const payloadTimedOut = [options.toolSummary, options.cellSummary, options.resultPreview]
     .some((value) => {

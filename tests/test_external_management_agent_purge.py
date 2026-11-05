@@ -135,6 +135,41 @@ def test_purge_partial_native_failure_is_unknown_not_a_retryable_write(purge_env
     assert invoke(purge_env)["status"] == "unknown" and native.calls == 1
 
 
+def test_slow_purge_receipt_preserves_late_failure_and_authorization(purge_env, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    service, native, grant = purge_env
+    entered, release = Event(), Event()
+
+    def fail_late(_parameters, _marker):
+        native.calls += 1
+        entered.set()
+        assert release.wait(5)
+        raise ManagementError("STATE_CONFLICT", 409)
+
+    monkeypatch.setattr(native, "purge", fail_late)
+    reader = ManagementService(service.root, identity=service.identity, native=native)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        writer = pool.submit(invoke, purge_env)
+        try:
+            assert entered.wait(2)
+            with pytest.raises(ManagementError, match="SUBJECT_DENIED"):
+                reader.receipt(grant["subject_id"], "x" * 48, "agent_purge", "purge-1")
+            progress = pool.submit(reader.receipt, grant["subject_id"], grant["subject_capability"],
+                "agent_purge", "purge-1").result(timeout=0.5)
+            assert progress["status"] == "unknown" and progress["verified"] is False and "purge" not in progress
+        finally:
+            release.set()
+        with pytest.raises(ManagementError, match="STATE_CONFLICT"):
+            writer.result(timeout=5)
+    for request in (lambda: reader.receipt(grant["subject_id"], grant["subject_capability"], "agent_purge", "purge-1"),
+                    lambda: invoke(purge_env)):
+        with pytest.raises(ManagementError, match="STATE_CONFLICT"):
+            request()
+    assert native.calls == 1 and native.agent["status"] == "archived"
+
+
 @pytest.mark.parametrize("extra", [{"force": True}, {"allow_active": True}, {"actor": "operator"},
     {"expected_config_revision": True}, {"expected_config_revision": "3"}, {"expected_config_revision": -1}])
 def test_purge_closed_parameters_before_native(purge_env, extra):

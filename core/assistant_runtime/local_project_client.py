@@ -90,7 +90,7 @@ class LocalAssistantBackendClient(ManagedAgentBackendClient):
                 pass
             raise
 
-    async def _cleanup_capability(self, task_id: str) -> str:
+    async def _cleanup_capability(self, task_id: str) -> tuple[str, str]:
         try:
             state = await self._task_state(task_id)
         except BackendClientError as error:
@@ -105,23 +105,25 @@ class LocalAssistantBackendClient(ManagedAgentBackendClient):
         async with self._state_lock:
             namespace = self._state.get("transportNamespaces", {}).get(
                 hashlib.sha256(capability.encode()).hexdigest(), "external")
-        if namespace != "local":
-            raise BackendClientError("Only Launcher-local tasks support cleanup.", code="TASK_CLEANUP_UNAVAILABLE")
         if not self._launcher_capability:
             raise BackendClientError("Launcher authority is unavailable.", code="LAUNCHER_AUTHORITY_REQUIRED")
-        return capability
+        return capability, namespace
+
+    async def _request_cleanup(self, task_id: str, suffix: str, payload: dict[str, Any]) -> dict[str, Any]:
+        capability, namespace = await self._cleanup_capability(task_id)
+        # Old capabilities keep their original external transport for every
+        # ordinary task operation. Only operator cleanup uses this explicit,
+        # authenticated compatibility endpoint; no namespace migration occurs.
+        prefix = _EXTERNAL_PREFIX + "tasks" if namespace == "local" else _LOCAL_PREFIX + "legacy-tasks"
+        return await self._request_json("POST", f"{prefix}/{quote(task_id, safe='')}/{suffix}",
+            task_capability=capability, management_auth=("launcher-local", self._launcher_capability),
+            json_payload=payload)
 
     async def preview_task_cleanup(self, task_id: str) -> dict[str, Any]:
-        capability = await self._cleanup_capability(task_id)
-        return await self._request_json("POST",
-            f"{_EXTERNAL_PREFIX}tasks/{quote(task_id, safe='')}/cleanup/preview",
-            task_capability=capability, json_payload={})
+        return await self._request_cleanup(task_id, "cleanup/preview", {})
 
     async def cleanup_task(self, task_id: str, revision: str, fingerprint: str) -> dict[str, Any]:
-        capability = await self._cleanup_capability(task_id)
-        return await self._request_json("POST",
-            f"{_EXTERNAL_PREFIX}tasks/{quote(task_id, safe='')}/cleanup",
-            task_capability=capability, json_payload={"revision": revision, "fingerprint": fingerprint})
+        return await self._request_cleanup(task_id, "cleanup", {"revision": revision, "fingerprint": fingerprint})
 
     async def _request_json(
         self,

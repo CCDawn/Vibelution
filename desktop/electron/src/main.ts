@@ -245,6 +245,7 @@ import { assertTrustedIpcSender } from "./security/ipcSenderValidation.js";
 import { isExternalOpenableUrl, normalizeAbsoluteOpenPath } from "./security/externalOpenPolicy.js";
 import { isLiveWorkbenchWindowUrl } from "./security/urlPolicy.js";
 import { createDesktopShellExitDeadline, executeApprovedDesktopShellShutdown, reapManagedRuntimeOnDesktopStart, DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS, withDesktopShellExitTimeout, type DesktopShellExitDeadline } from "./shutdown/desktopShellExit.js";
+import { hideDesktopShellWindowsForExit } from "./shutdown/exitWindowPresentation.js";
 import {
   decideShutdown,
   executeShutdownAuthorizationBoundary,
@@ -4432,6 +4433,7 @@ async function requestDesktopShellExit(
         notifyDesktopTray("Vibelution", decision.message || "有任务正在进行，可从托盘选择退出并保存记录。", "info");
       },
       runApproved: async (decision) => {
+        const presentation = hideDesktopShellWindowsForExit(BrowserWindow.getAllWindows());
         // Human confirmation spends no part of the bounded execution budget.
         const deadline = createDesktopShellExitDeadline(DESKTOP_QUIT_TOTAL_BUDGET_MS);
         const interruptActiveWork = decision.reason === "operator_confirmed";
@@ -4591,6 +4593,7 @@ async function requestDesktopShellExit(
             await withDesktopShellExitTimeout(assistantStop, deadline, "stop personal assistant").catch(() => undefined);
           }
           deadline.dispose();
+          if (!shutdownApproved) presentation.restore();
           // A cancelled exit releases only leases whose host is still live;
           // once the assistant stop ran, the committed gates belong to the
           // recovery below, not to a blocked release replay.

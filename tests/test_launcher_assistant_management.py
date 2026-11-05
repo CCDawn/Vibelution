@@ -298,6 +298,7 @@ def test_contracts_are_closed_and_do_not_add_daily_action_approval():
         "research_command", "team_update", "agent_tool_policy_update", "agent_dispatch_access_set",
         "knowledge_acl_grant", "knowledge_acl_revoke", "flow_save", "flow_start", "team_create",
         "team_member_add", "team_member_remove", "team_archive"}
+    governed |= {"agent_parameters_update", "agent_prompt_update"}
     # The expanded management surface uses native governance. Ordinary Agent
     # create/update/avatar remain daily actions; this does not add approvals.
     assert set(ACTION_MODELS) == governed | {"agent_create", "agent_update", "agent_avatar"}

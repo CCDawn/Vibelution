@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Window } from "happy-dom";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
@@ -54,6 +55,27 @@ function renderConversation(
       />
     </QueryClientProvider>,
   );
+}
+
+function transcriptDom(html: string) {
+  const parsedDocument = new Window().document;
+  parsedDocument.body.innerHTML = html;
+  return parsedDocument.body;
+}
+
+function expectCollapsedThoughts(html: string, itemIds: string[]) {
+  const body = transcriptDom(html);
+  expect(body.querySelector('[data-codex-process-presentation="flow"]')?.getAttribute("data-codex-process-expanded")).toBe("false");
+  const toggle = [...body.querySelectorAll("button")].find(button => button.textContent === "显示思考");
+  expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+  const thoughts = [...body.querySelectorAll("[data-thought-section]")];
+  expect(thoughts).toHaveLength(itemIds.length);
+  for (const itemId of itemIds) {
+    const thought = thoughts.find(section => section.getAttribute("data-conversation-part-key") === itemId);
+    expect(thought, `Thought unit remains mounted: ${itemId}`).toBeTruthy();
+    expect(thought?.closest('[hidden], [inert], [aria-hidden="true"]'), `Thought is hidden: ${itemId}`).toBeTruthy();
+  }
+  return thoughts;
 }
 
 describe("ConversationView native Codex transcript surface", () => {
@@ -344,11 +366,12 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain('data-codex-transcript-cell-kind="reasoning_summary"');
 
     const ordinary = renderConversation([first], "trace", false);
-    expect(ordinary).toContain("这段内部推理不能出现在虚拟人的聊天里。");
+    expectCollapsedThoughts(ordinary, ["companion-reason"]);
     expect(ordinary).toContain("先在心里过一遍。");
+    expect(html).not.toContain("显示思考");
   });
 
-  it("leaves the native process transcript unchanged for ordinary Agent sessions", () => {
+  it("keeps ordinary Agent thoughts available behind their toggle without companion typing UI", () => {
     const html = renderConversation([
       {
         id: "assistant-agent-thinking",
@@ -372,7 +395,7 @@ describe("ConversationView native Codex transcript surface", () => {
       },
     ]);
 
-    expect(html).toContain("普通 Agent 的原生思考轨迹仍然可见。");
+    expectCollapsedThoughts(html, ["agent-reasoning"]);
     expect(html).not.toContain('data-companion-typing-status="true"');
     expect(html).not.toContain('data-companion-typing-rail="assistant"');
   });
@@ -464,8 +487,7 @@ describe("ConversationView native Codex transcript surface", () => {
             version: 3,
             sessionId: "session-1",
             turnId: "turn-thought-lifecycle",
-            type: "agent_message",
-            phase: "commentary",
+            type: "reasoning",
             status: "completed",
             revision: 1,
             sequence: 1,
@@ -489,20 +511,13 @@ describe("ConversationView native Codex transcript surface", () => {
       },
     ]);
 
-    const completedText = html.indexOf("已经完成的历史思考。");
-    const runningText = html.indexOf("当前仍在进行的思考。");
-    const completedStart = html.lastIndexOf("<section", completedText);
-    const completedEnd = html.indexOf("</section>", completedText);
-    const runningStart = html.lastIndexOf("<section", runningText);
-    const runningEnd = html.indexOf("</section>", runningText);
-    expect(completedText).toBeGreaterThan(-1);
-    expect(runningText).toBeGreaterThan(-1);
-    expect(completedStart).toBeGreaterThan(-1);
-    expect(completedEnd).toBeGreaterThan(completedStart);
-    expect(runningStart).toBeGreaterThan(-1);
-    expect(runningEnd).toBeGreaterThan(runningStart);
-    expect(html.slice(completedStart, completedEnd)).not.toContain(styles.statusSpinner);
-    expect(html.slice(runningStart, runningEnd)).toContain(styles.statusSpinner);
+    const thoughts = expectCollapsedThoughts(html, ["thought-completed", "thought-running"]);
+    expect(thoughts).toHaveLength(2);
+    expect(thoughts[0].getAttribute("data-codex-transcript-cell-status")).toBe("completed");
+    expect(thoughts[0].textContent).toContain("已思考");
+    expect(thoughts[0].textContent).not.toContain("思考中");
+    expect(thoughts[1].getAttribute("data-codex-transcript-cell-status")).toBe("running");
+    expect(thoughts[1].textContent).toContain("思考中");
   });
 
   it("ends stale thinking and keeps accumulated progress out of the final response", () => {
@@ -522,6 +537,9 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html.match(/data-codex-progress-cell="true"/g)).toHaveLength(2);
     expect(html).not.toContain("思考中");
     expect(html).toContain("已思考");
+    expectCollapsedThoughts(html, ["thought"]);
+    expect(html.indexOf(texts[0])).toBeLessThan(html.indexOf('data-conversation-part-key="tool"'));
+    expect(html.indexOf('data-conversation-part-key="tool"')).toBeLessThan(html.indexOf(texts[1]));
   });
 
   it("does not derive individual thought streaming from the whole assistant turn", () => {
@@ -533,7 +551,7 @@ describe("ConversationView native Codex transcript surface", () => {
     );
   });
 
-  it("labels commentary as progress while keeping reasoning labeled as thinking", () => {
+  it("keeps commentary visible without a progress heading while thoughts start hidden", () => {
     const html = renderConversation([
       {
         id: "assistant-commentary-reasoning-labels",
@@ -573,18 +591,14 @@ describe("ConversationView native Codex transcript surface", () => {
       },
     ]);
 
-    const reasoningText = html.indexOf("这是模型推理摘要。");
-    const commentaryText = html.indexOf("这是对用户可见的进展说明。");
-    const reasoningStart = html.lastIndexOf("<section", reasoningText);
-    const commentaryStart = html.lastIndexOf("<section", commentaryText);
-    const reasoningEnd = html.indexOf("</section>", reasoningText);
-    const commentaryEnd = html.indexOf("</section>", commentaryText);
-    expect(html.slice(reasoningStart, reasoningEnd)).toContain("思考");
-    expect(html.slice(commentaryStart, commentaryEnd)).toContain("进展");
-    expect(html.slice(commentaryStart, commentaryEnd)).not.toContain("思考");
+    expectCollapsedThoughts(html, ["reasoning-label"]);
+    const commentary = transcriptDom(html).querySelector('[data-codex-progress-cell="true"]')!;
+    expect(commentary.textContent).toBe("这是对用户可见的进展说明。");
+    expect(commentary.closest('[hidden], [inert], [aria-hidden="true"]')).toBeNull();
+    expect(commentary.querySelector("button, summary, h1, h2, h3")).toBeNull();
   });
 
-  it("renders commentary in a clamped progress lane and drops the copy the answer repeats", () => {
+  it("renders full commentary in the flow and drops the copy the answer repeats", () => {
     const repeated = "我已经定位到问题并完成修复，接下来运行定向测试验证没有回归。";
     const html = renderConversation([
       {
@@ -655,14 +669,14 @@ describe("ConversationView native Codex transcript surface", () => {
 
     expect(html).toContain('data-codex-progress-cell="true"');
     expect(html).toContain("先检查配置，再运行回归测试。");
-    expect(html).toContain('data-codex-progress-clamped="true"');
-    expect(html).toContain("line-clamp-3");
+    expect(html).toContain('data-codex-progress-clamped="false"');
+    expect(html).not.toContain("line-clamp-3");
     // The progress copy that repeats the final answer must paint once.
     expect(html.split(repeated).length - 1).toBe(1);
-    expect(html).toContain("思考");
+    expectCollapsedThoughts(html, ["reasoning-lane"]);
   });
 
-  it("keeps short progress commentary static and only toggles progress beyond the clamp", () => {
+  it("keeps short and long commentary fully visible without requiring a second toggle", () => {
     const shortText = "先检查配置，再运行回归测试。";
     const longText = "先检查本地配置与缓存，再运行定向回归测试，确认没有新的回归，并补齐证据。".repeat(7);
     const html = renderConversation([
@@ -711,7 +725,8 @@ describe("ConversationView native Codex transcript surface", () => {
       html.indexOf("</section>", shortTextIndex),
     );
     expect(shortSection).toContain('data-codex-progress-expandable="false"');
-    expect(shortSection).toContain('data-codex-progress-static="true"');
+    expect(shortSection).toContain('data-codex-progress-body="true"');
+    expect(shortSection).toContain('data-codex-progress-clamped="false"');
     expect(shortSection).not.toContain("aria-expanded");
 
     const longTextIndex = html.indexOf(longText);
@@ -719,12 +734,14 @@ describe("ConversationView native Codex transcript surface", () => {
       html.lastIndexOf("<section", longTextIndex),
       html.indexOf("</section>", longTextIndex),
     );
-    expect(longSection).toContain('data-codex-progress-expandable="true"');
-    expect(longSection).toContain("aria-expanded");
-    expect(longSection).not.toContain('data-codex-progress-static="true"');
+    expect(longSection).toContain('data-codex-progress-expandable="false"');
+    expect(longSection).toContain('data-codex-progress-clamped="false"');
+    expect(longSection).not.toContain("aria-expanded");
+    expect(longSection).not.toContain("line-clamp");
+    expect(longTextIndex).toBeGreaterThan(shortTextIndex);
   });
 
-  it("starts long live progress commentary at the three-line preview", () => {
+  it("shows long live commentary in full with its live status and no progress heading", () => {
     const longText = "先检查本地配置与缓存，再运行定向回归测试，确认没有新的回归，并补齐证据。".repeat(7);
     const html = renderConversation([
       {
@@ -757,10 +774,14 @@ describe("ConversationView native Codex transcript surface", () => {
       html.lastIndexOf("<section", textIndex),
       html.indexOf("</section>", textIndex),
     );
-    expect(progressSection).toContain('data-progress-expanded="false"');
-    expect(progressSection).toContain('data-codex-progress-clamped="true"');
-    expect(progressSection).toContain("line-clamp-3");
-    expect(progressSection).not.toContain('data-codex-progress-body="true"');
+    expect(progressSection).toContain('data-codex-transcript-cell-status="running"');
+    expect(progressSection).toContain('role="status"');
+    expect(progressSection).toContain('data-codex-progress-clamped="false"');
+    expect(progressSection).not.toContain("line-clamp");
+    expect(progressSection).toContain('data-codex-progress-body="true"');
+    const commentary = transcriptDom(html).querySelector('[data-codex-progress-cell="true"]')!;
+    expect(commentary.textContent).toBe(longText);
+    expect(commentary.closest('[hidden], [inert], [aria-hidden="true"]')).toBeNull();
   });
 
   it("renders context compression outcomes in their canonical event order", () => {
@@ -979,7 +1000,7 @@ describe("ConversationView native Codex transcript surface", () => {
     });
   });
 
-  it("keeps reasoning cells collapsed while streaming and after settle, with a rolling summary", () => {
+  it("keeps reasoning units mounted but hidden until requested while streaming and after settle", () => {
     const reasoning = (status: "running" | "completed"): ConversationMessage => ({
       id: `assistant-reasoning-${status}`,
       role: "assistant",
@@ -1002,27 +1023,18 @@ describe("ConversationView native Codex transcript surface", () => {
       }],
     });
 
-    // ZCode parity: live reasoning stays collapsed too, only the running title
-    // and the latest-sentence summary roll in the header.
+    // Collapsing hides thought content without discarding its live clock.
     const live = renderConversation([reasoning("running")]);
-    expect(live).toContain('data-thought-expanded="false"');
-    expect(live).toContain("思考中");
-    expect(live.match(/思考中/g)).toHaveLength(1);
+    expectCollapsedThoughts(live, ["reasoning-running"]);
     expect(live).toContain("工作中");
     expect(live.match(/data-codex-process-disclosure=/g)).toHaveLength(1);
-    expect(live).toContain('data-thought-streaming-summary="true"');
-    expect(live).toContain("先确认这个函数的两条来源路径");
-    expect(live).not.toContain('data-thought-scroll-body="true"');
+    expect(live).not.toContain('data-thought-streaming-summary="true"');
 
     const settled = renderConversation([reasoning("completed")]);
-    expect(settled).toContain('data-thought-expanded="false"');
-    expect(settled).toContain("已思考");
-    // Collapsed means the long body is not mounted at all: the finished thought
-    // stops re-rendering its text on every transcript update.
-    expect(settled).not.toContain('data-thought-scroll-body="true"');
-    // The latest-sentence summary keeps the collapsed lane scannable.
-    expect(settled).toContain('data-thought-streaming-summary="true"');
-    expect(settled).toContain("先确认这个函数的两条来源路径");
+    const settledThoughts = expectCollapsedThoughts(settled, ["reasoning-completed"]);
+    expect(settledThoughts[0].textContent).toContain("已思考");
+    expect(settledThoughts[0].textContent).not.toContain("思考中");
+    expect(settled).not.toContain('data-thought-streaming-summary="true"');
   });
 
   it("keeps a retry turn item out of the settled transcript", () => {
@@ -1103,8 +1115,9 @@ describe("ConversationView native Codex transcript surface", () => {
     const withWork = renderConversation([base]);
     expect(withWork).toContain('data-codex-process-disclosure="true"');
     expect(withWork).toContain("已工作 2 分 1 秒");
-    // Collapsed by default: no open attribute (hiding is UA behavior for
-    // details, so the body markup exists but starts collapsed).
+    // Tool work remains in the flow, independent of thought visibility.
+    expect(withWork).toContain('data-codex-process-presentation="flow"');
+    expect(withWork).toContain('data-conversation-part-key="tool-1"');
     expect(withWork).not.toMatch(/<details[^>]*\sopen[=\s>]/);
 
     // Short turns report their real time instead of hiding behind a noise floor.

@@ -129,6 +129,7 @@ describe("thought duration client-clock label", () => {
     });
     queryClient.setQueryData(queryKeys.configPublic(), { language: "zh" });
     queryClient.setQueryData(["i18n", "dictionary-domains", "core,chat"], dictionary);
+    queryClient.setQueryData(queryKeys.sessionMessageCuration("session-thought-duration"), { items: [] });
 
     function Harness() {
       const [messages, setMessagesState] = useState(initial);
@@ -168,15 +169,49 @@ describe("thought duration client-clock label", () => {
       root?.render(<Harness />);
       await vi.advanceTimersByTimeAsync(0);
     });
-    return container.querySelector<HTMLButtonElement>(
-      'section[data-thought-section] button[aria-expanded="false"]',
-    );
+    return thoughtToggle();
+  }
+
+  function thoughtToggle() {
+    return [...(container?.querySelectorAll<HTMLButtonElement>("button") ?? [])]
+      .find(button => button.textContent === "显示思考" || button.textContent === "收起思考");
+  }
+
+  async function expandThoughts() {
+    const toggle = thoughtToggle();
+    expect(toggle).toBeTruthy();
+    if (toggle?.getAttribute("aria-expanded") === "false") {
+      await act(async () => toggle.click());
+      await act(async () => new Promise<void>(resolve => window.requestAnimationFrame(() => resolve())));
+    }
+    expect(thoughtToggle()?.getAttribute("aria-expanded")).toBe("true");
+    for (const thought of container?.querySelectorAll('[data-thought-section]') ?? []) {
+      expect(thought.closest('[hidden], [inert], [aria-hidden="true"]')).toBeNull();
+    }
+  }
+
+  function expectThoughtsHidden() {
+    const thoughts = container?.querySelectorAll('[data-thought-section]');
+    expect(thoughts?.length).toBeGreaterThan(0);
+    for (const thought of thoughts ?? []) {
+      expect(thought.closest('[hidden], [inert], [aria-hidden="true"]')).toBeTruthy();
+    }
+  }
+
+  async function showThoughts() {
+    await expandThoughts();
+    const thoughts = container?.querySelectorAll('[data-thought-section]');
+    expect(thoughts).toHaveLength(1);
+    expect(thoughts?.[0].querySelector('[data-thought-scroll-body="true"]')?.textContent)
+      .toBe("先确认这个函数的两条来源路径，再看函数体。");
   }
 
   it("ticks per second only while expanded and live, then freezes when the unit settles", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const header = await mountThought([reasoningMessage("running")]);
-    expect(header).not.toBeNull();
+    expect(header).toBeTruthy();
+    expect(header?.getAttribute("aria-expanded")).toBe("false");
+    expectThoughtsHidden();
 
     // Collapsed live thought: the clock runs from the first live render, but
     // no ticking label mounts until the unit is expanded.
@@ -187,9 +222,7 @@ describe("thought duration client-clock label", () => {
 
     // Expanding opens the per-second tick; the reading covers the whole live
     // window, not just the expanded one.
-    await act(async () => {
-      header?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
+    await showThoughts();
     await act(async () => {
       vi.advanceTimersByTime(3200);
     });
@@ -203,14 +236,14 @@ describe("thought duration client-clock label", () => {
     const settledLabel = container?.querySelector('[data-thought-duration="settled"]');
     expect(settledLabel?.textContent).toContain("8s");
     expect(container?.textContent).toContain("已思考");
+    await act(async () => vi.advanceTimersByTime(10000));
+    expect(container?.querySelector('[data-thought-duration="settled"]')?.textContent).toContain("8s");
   });
 
   it("shows the moments label when the live window was shorter than a second", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
-    const header = await mountThought([reasoningMessage("running")]);
-    await act(async () => {
-      header?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
+    await mountThought([reasoningMessage("running")]);
+    await showThoughts();
     await act(async () => {
       vi.advanceTimersByTime(400);
     });
@@ -227,14 +260,9 @@ describe("thought duration client-clock label", () => {
     await act(async () => {
       vi.advanceTimersByTime(10000);
     });
-    // History units collapse into the process disclosure in the browser;
-    // open it to reveal the settled thought cell.
-    const disclosure = container?.querySelector<HTMLButtonElement>(
-      "details[data-codex-process-disclosure] summary",
-    );
-    await act(async () => {
-      disclosure?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
+    // The flow hides thoughts until the user asks for them.
+    expectThoughtsHidden();
+    await showThoughts();
     expect(container?.textContent).toContain("已思考");
     // History loads without canonical stamps have no honest duration: nothing
     // renders — not even a whole-turn number from usageStats.
@@ -250,22 +278,15 @@ describe("thought duration client-clock label", () => {
     await act(async () => {
       vi.advanceTimersByTime(10000);
     });
-    const disclosure = container?.querySelector<HTMLButtonElement>(
-      "details[data-codex-process-disclosure] summary",
-    );
-    await act(async () => {
-      disclosure?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
+    await showThoughts();
     const settledLabel = container?.querySelector('[data-thought-duration="settled"]');
     expect(settledLabel?.textContent).toContain("12s");
   });
 
   it("prefers canonical stamps over the client clock once the unit settles", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
-    const header = await mountThought([reasoningMessage("running")]);
-    await act(async () => {
-      header?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
+    await mountThought([reasoningMessage("running")]);
+    await showThoughts();
     await act(async () => {
       vi.advanceTimersByTime(5000);
     });
@@ -276,14 +297,8 @@ describe("thought duration client-clock label", () => {
         "2026-09-11T05:00:30Z",
       )]);
     });
-    // A fully settled message joins the history rendering; open the process
-    // disclosure to reveal the settled thought cell.
-    const disclosure = container?.querySelector<HTMLButtonElement>(
-      "details[data-codex-process-disclosure] summary",
-    );
-    await act(async () => {
-      disclosure?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
+    // The user's choice survives the same message moving into history.
+    await showThoughts();
     const settledLabel = container?.querySelector('[data-thought-duration="settled"]');
     expect(settledLabel?.textContent).toContain("30s");
   });
@@ -297,12 +312,69 @@ describe("thought duration client-clock label", () => {
     await act(async () => {
       vi.advanceTimersByTime(10000);
     });
-    const disclosure = container?.querySelector<HTMLButtonElement>(
-      "details[data-codex-process-disclosure] summary",
-    );
-    await act(async () => {
-      disclosure?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
+    await showThoughts();
     expect(container?.querySelector("[data-thought-duration]")).toBeNull();
+  });
+
+  it("reveals complete thoughts in order while narration and tools stay visible through toggle and settle", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const base = reasoningMessage("running");
+    const thought = base.turnItems![0];
+    const completedText = "已经完成的第一段完整思考。";
+    const narrationText = "先读取配置。";
+    const answerText = "配置已经核对完成。";
+    const mixed: ConversationMessage = { ...base, turnItems: [
+      { ...thought, id: "duration-completed-r1", itemId: "duration-completed", sequence: 1,
+        status: "completed", terminal: true, text: completedText },
+      { ...thought, id: "duration-narration-r1", itemId: "duration-narration", sequence: 2,
+        type: "agent_message", phase: "commentary", status: "completed", terminal: true, text: narrationText },
+      { ...thought, id: "duration-tool-r1", itemId: "duration-tool", sequence: 3,
+        type: "tool_call", callId: "call-duration-tool", toolName: "read_file_tool",
+        input: JSON.stringify({ file_path: "configuration.toml" }), output: "已读取配置。",
+        status: "completed", terminal: true, text: undefined },
+      { ...thought, sequence: 4 },
+    ] };
+    await mountThought([mixed]);
+    const narration = () => container?.querySelector('[data-codex-progress-cell="true"]');
+    const tool = () => container?.querySelector('[data-conversation-part-key="duration-tool"]');
+    const expectVisibleNarrationAndTool = () => {
+      expect(narration()?.textContent).toBe(narrationText);
+      expect(narration()?.closest('[hidden], [inert], [aria-hidden="true"]')).toBeNull();
+      expect(tool()).toBeTruthy();
+      expect(tool()?.closest('[hidden], [inert], [aria-hidden="true"]')).toBeNull();
+      expect(tool()?.textContent).toContain("已读取配置。");
+    };
+    expectThoughtsHidden();
+    expectVisibleNarrationAndTool();
+    await expandThoughts();
+    const thoughts = [...(container?.querySelectorAll('[data-thought-section]') ?? [])];
+    expect(thoughts.map(section => section.getAttribute("data-codex-transcript-cell-status"))).toEqual(["completed", "running"]);
+    expect(thoughts[0].textContent).toContain("已思考");
+    expect(thoughts[0].textContent).not.toContain("思考中");
+    expect(thoughts[1].textContent).toContain("思考中");
+    expect(thoughts.map(section => section.querySelector('[data-thought-scroll-body="true"]')?.textContent))
+      .toEqual([completedText, "先确认这个函数的两条来源路径，再看函数体。"]);
+    expect(thoughts[0].compareDocumentPosition(narration()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(narration()!.compareDocumentPosition(tool()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(tool()!.compareDocumentPosition(thoughts[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await act(async () => thoughtToggle()!.click());
+    await act(async () => new Promise<void>(resolve => window.requestAnimationFrame(() => resolve())));
+    expectThoughtsHidden();
+    expectVisibleNarrationAndTool();
+
+    await act(async () => setMessages?.([{ ...mixed, status: "completed", turnItems: [
+      ...mixed.turnItems!.map(item => ({ ...item, status: "completed" as const, terminal: true })),
+      { ...thought, id: "duration-answer-r1", itemId: "duration-answer", sequence: 5,
+        type: "agent_message", phase: "final_answer", status: "completed", terminal: true, text: answerText },
+    ] }]));
+    expectThoughtsHidden();
+    expectVisibleNarrationAndTool();
+    expect(container?.querySelector('[data-codex-final-response="true"]')?.textContent).toBe(answerText);
+    await expandThoughts();
+    expect(container?.querySelectorAll('[data-thought-section]')).toHaveLength(2);
+    expect(container?.textContent?.split(completedText).length).toBe(2);
+    expect(container?.textContent?.split(narrationText).length).toBe(2);
+    expect(container?.textContent?.split(answerText).length).toBe(2);
+    expect(container?.querySelector('[data-thought-section][data-codex-transcript-cell-status="running"]')).toBeNull();
   });
 });

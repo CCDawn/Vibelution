@@ -217,6 +217,33 @@ class StopTurn(BaseModel):
     turnId: str = Field(min_length=1, max_length=160, pattern=r"\S", strict=True)
 
 
+class QueuedTurn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    queuedTurnId: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+class UpdateQueuedTurn(QueuedTurn):
+    content: str | None = Field(default=None, max_length=64000)
+    position: int | None = Field(default=None, ge=1, le=2**53 - 1)
+    status: Literal["paused", "queued"] | None = None
+
+    @model_validator(mode="after")
+    def reject_null_fields(self):
+        if any(getattr(self, key) is None for key in self.model_fields_set):
+            raise ValueError("Queue update fields cannot be null")
+        return self
+
+
+class SendNowQueuedTurn(QueuedTurn):
+    expectedTurnId: str | None = Field(default=None, min_length=1, max_length=160, pattern=r"^[A-Za-z0-9_-]+$")
+
+    @model_validator(mode="after")
+    def reject_null_turn(self):
+        if "expectedTurnId" in self.model_fields_set and self.expectedTurnId is None:
+            raise ValueError("Expected turn cannot be null")
+        return self
+
+
 class SwitchHead(BaseModel):
     model_config = ConfigDict(extra="forbid")
     nodeId: str = Field(min_length=1, max_length=200, pattern=r"\S", strict=True)
@@ -624,6 +651,18 @@ class NativeFacade:
     def stop(self, turn_id):
         from . import native
         return native.stop(turn_id)
+
+    def update_queued_turn(self, queued_turn_id, *, content=None, position=None, status=None):
+        from . import native
+        return native.update_queued_turn(queued_turn_id, content=content, position=position, status=status)
+
+    def remove_queued_turn(self, queued_turn_id):
+        from . import native
+        return native.remove_queued_turn(queued_turn_id)
+
+    def send_now_queued_turn(self, queued_turn_id, *, expected_turn_id=""):
+        from . import native
+        return native.send_now_queued_turn(queued_turn_id, expected_turn_id=expected_turn_id)
 
     def continue_turn(self, request_id, continuation):
         from . import native
@@ -1504,7 +1543,10 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
         patrol_status = getattr(app.state, "patrol_status", None)
         if isinstance(result, dict):
             supported = callable(getattr(getattr(dispatch, "management", None), "list_requests", None))
+            queue_supported = all(callable(getattr(native, operation, None)) for operation in (
+                "update_queued_turn", "remove_queued_turn", "send_now_queued_turn"))
             return {**result, **({"teamRunsVersion": 1} if supported else {}),
+                    **({"followupQueueVersion": 1} if queue_supported else {}),
                     **({"patrol": patrol_status} if patrol_status is not None else {})}
         return result
 
@@ -1752,6 +1794,61 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
             cancel_history = getattr(main_control, "cancel_history_imports", None)
             if callable(cancel_history):
                 cancel_history(payload.turnId.strip())
+            return result
+
+    @app.post("/api/assistant/queued-turns/update")
+    def update_queued_turn(payload: UpdateQueuedTurn, request: Request):
+        if request.query_params:
+            raise HTTPException(422, detail="Invalid queued turn request")
+        return native.update_queued_turn(payload.queuedTurnId, content=payload.content,
+                                         position=payload.position, status=payload.status)
+
+    @app.post("/api/assistant/queued-turns/remove")
+    def remove_queued_turn(payload: QueuedTurn, request: Request):
+        if request.query_params:
+            raise HTTPException(422, detail="Invalid queued turn request")
+        return native.remove_queued_turn(payload.queuedTurnId)
+
+    @app.post("/api/assistant/queued-turns/send-now", status_code=202)
+    async def send_now_queued_turn(payload: SendNowQueuedTurn, request: Request):
+        if request.query_params:
+            raise HTTPException(422, detail="Invalid queued turn request")
+        turn_id = payload.expectedTurnId
+        if turn_id is None:
+            detail = await asyncio.to_thread(native.get_detail)
+            if not isinstance(detail, dict):
+                raise AssistantSessionError("ASSISTANT_IDENTITY_INVALID")
+            active_turn_id = detail.get("activeTurnId")
+            turn_id = "" if active_turn_id is None else active_turn_id
+            if (not isinstance(turn_id, str) or len(turn_id) > 160
+                    or any(not ch.isascii() or not (ch.isalnum() or ch in "_-") for ch in turn_id)):
+                raise AssistantSessionError("SESSION_INVALID")
+        if not turn_id:
+            # An idle snapshot has no Turn-scoped PA work to revoke. The
+            # per-request non-Turn ID lets native stop remain a no-op while
+            # still idle, but reject a Turn that starts after this read.
+            idle_fence = "assistant-idle-" + secrets.token_hex(16)
+            return await asyncio.to_thread(native.send_now_queued_turn, payload.queuedTurnId, expected_turn_id=idle_fence)
+
+        def promote(expected_turn_id):
+            # Keep the native helper's pin -> stop -> rollback transaction;
+            # native.stop would freeze the queue and invalidate the promotion.
+            return native.send_now_queued_turn(payload.queuedTurnId, expected_turn_id=expected_turn_id)
+
+        def accepted(result):
+            return isinstance(result, dict) and result.get("stopRequested") is True
+
+        async with initial_fence(turn_id):
+            if history_control is not None:
+                result = await asyncio.to_thread(history_control.stop_native_turn, promote, turn_id, accepted=accepted)
+            else:
+                result = await asyncio.to_thread(promote, turn_id)
+            if accepted(result):
+                if main_control is not None and getattr(main_control, "appearance_enabled", False):
+                    main_control.cancel_image_imports(turn_id)
+                cancel_history = getattr(main_control, "cancel_history_imports", None)
+                if callable(cancel_history):
+                    cancel_history(turn_id)
             return result
 
     @app.post("/api/assistant/continue", status_code=202)

@@ -408,7 +408,7 @@ export const ConversationView = React.memo(function ConversationView({
   // Composer auto-height (ZCode parity): the codex composer grows with the
   // draft and only scrolls internally once the CSS max-height clamp is hit —
   // same auto→scrollHeight trick as the inline edit editor. min/max stay in
-  // the inputCodex style (48px/240px), the inline height never exceeds them.
+  // the inputCodex style (40px/240px), the inline height never exceeds them.
   // Stays here, ahead of the virtualizer, so a draft resize lands before
   // timeline measurement in the same commit.
   useLayoutEffect(() => {
@@ -1189,7 +1189,10 @@ export const ConversationView = React.memo(function ConversationView({
     codexTranscriptCellIcon,
     codexTranscriptCellTitle,
     codexTranscriptCellMeta,
-  } = createCodexTranscriptCellRenderers({ lang, t, getExpansionState, toggleSection });
+  } = createCodexTranscriptCellRenderers({
+    lang, t, getExpansionState, toggleSection,
+    renderProgressText: (text, streaming) => renderAssistantTranscriptResponseText(text, streaming),
+  });
 
   const {
     codexTranscriptToolDetailRows,
@@ -1482,6 +1485,7 @@ export const ConversationView = React.memo(function ConversationView({
     answerOnlyProcessMode,
     showMentalSnapshots,
     companionMode,
+    minimalIdentity: composerVariant === "codex",
     lang,
     t,
     phase,

@@ -1501,6 +1501,169 @@ def test_fixed_session_submit_carries_reference_chips_to_the_journal(assistant_c
     assert isinstance(carried, list) and carried and carried[0]["referenceId"] == f"message:{quoted['id']}"
 
 
+def _seed_assistant_native_queue(sessions, root, session_id):
+    state = sessions.load_session_chat_state(root, session_id)
+    state["queued_turns"] = [{"id": f"queued-{name}", "content": name, "status": "queued",
+                              "attachments": [], "references": []} for name in ("one", "two", "three")]
+    sessions.save_session_chat_state(root, session_id, state)
+
+
+def test_fixed_session_queue_edits_use_the_native_persisted_rows(assistant_command_session, tmp_path, monkeypatch):
+    from core.web.services.session.queued_turns import list_session_queued_turns
+
+    native, sessions, sid, _, scheduled, _ = assistant_command_session
+    monkeypatch.setattr(sessions, "_schedule_session_queued_turn_drain", lambda _: None)
+    _seed_assistant_native_queue(sessions, tmp_path, sid)
+    edited = native.update_queued_turn("queued-two", content="updated", position=1)["queuedTurns"]
+    assert [row["id"] for row in edited] == ["queued-two", "queued-one", "queued-three"]
+    assert edited[0]["content"] == "updated"
+    assert edited == list_session_queued_turns(sid)
+    paused = native.update_queued_turn("queued-two", status="paused")["queuedTurns"]
+    assert paused[0]["status"] == "paused"
+    resumed = native.update_queued_turn("queued-two", status="queued")["queuedTurns"]
+    assert [row["id"] for row in resumed] == ["queued-one", "queued-three", "queued-two"]
+    remaining = native.remove_queued_turn("queued-three")["queuedTurns"]
+    assert [row["id"] for row in remaining] == ["queued-one", "queued-two"]
+    assert remaining == list_session_queued_turns(sid)
+    # The native owner refuses a repeat withdrawal rather than inventing a receipt.
+    with pytest.raises(native.AssistantSessionError, match="SESSION_INVALID"):
+        native.remove_queued_turn("queued-three")
+    assert not scheduled
+
+
+def test_fixed_session_send_now_preserves_native_idempotency_and_stale_stop_rollback(
+        assistant_command_session, tmp_path, monkeypatch):
+    from core.web.services.session.queued_turns import list_session_queued_turns
+
+    native, sessions, sid, _, scheduled, _ = assistant_command_session
+    monkeypatch.setattr(sessions, "_schedule_session_queued_turn_drain", lambda _: None)
+    _seed_assistant_native_queue(sessions, tmp_path, sid)
+    stops = []
+
+    def stop(session_id, **kwargs):
+        stops.append((session_id, kwargs))
+        if kwargs["expected_turn_id"] != "running-turn":
+            raise sessions.SessionBusyError("The observed turn changed")
+        return {"stopRequested": True}
+
+    monkeypatch.setattr(sessions, "request_stop_session_turn", stop)
+    result = native.send_now_queued_turn("queued-two", expected_turn_id="running-turn")
+    assert result["stopRequested"] is True
+    assert result["queuedTurns"][0]["id"] == "queued-two"
+    assert result["queuedTurns"][0]["sendNow"] is True
+    repeat = native.send_now_queued_turn("queued-two", expected_turn_id="running-turn")
+    assert repeat["stopRequested"] is False
+    assert repeat["queuedTurns"] == result["queuedTurns"]
+    assert stops == [(sid, {"expected_turn_id": "running-turn", "fast_ack": True})]
+    before = list_session_queued_turns(sid)
+    with pytest.raises(native.AssistantSessionError, match="SESSION_CONFLICT"):
+        native.send_now_queued_turn("queued-three", expected_turn_id="stale-turn")
+    after = list_session_queued_turns(sid)
+    assert [row["id"] for row in after] == [row["id"] for row in before]
+    assert not next(row for row in after if row["id"] == "queued-three").get("sendNow")
+    assert not scheduled
+
+
+@pytest.mark.parametrize("snapshot_running,new_turn_starts", [(True, True), (False, True), (False, False)])
+def test_host_send_now_snapshot_fence_preserves_native_queue_transaction(
+        assistant_command_session, tmp_path, monkeypatch, snapshot_running, new_turn_starts):
+    from fastapi.testclient import TestClient
+    from core.assistant_runtime.host import create_app
+    from core.web.services.session.queued_turns import list_session_queued_turns
+
+    native, sessions, sid, _, _, identity = assistant_command_session
+    monkeypatch.setattr(sessions, "_schedule_session_queued_turn_drain", lambda _: None)
+    _seed_assistant_native_queue(sessions, tmp_path, sid)
+    observed = sessions.SessionTurnControl(session_id=sid, turn_id="observed-turn")
+    newer = sessions.SessionTurnControl(session_id=sid, turn_id="newer-turn")
+    current_controller = observed if snapshot_running else None
+    expectations = []
+    monkeypatch.setattr(sessions, "_is_session_running", lambda _: current_controller is not None)
+    monkeypatch.setattr(sessions, "_get_session_turn_control", lambda _: current_controller)
+    monkeypatch.setattr(newer, "request_stop", lambda *_: pytest.fail("a stale send-now must not stop the new turn"))
+
+    class Owner:
+        def bootstrap(self):
+            return {"assistant": identity}
+
+        def get_detail(self):
+            nonlocal current_controller
+            detail = {"id": sid, "activeTurnId": current_controller.turn_id if current_controller else None}
+            if new_turn_starts:
+                current_controller = newer
+            return detail
+
+        def send_now_queued_turn(self, queued_turn_id, *, expected_turn_id):
+            expectations.append(expected_turn_id)
+            return native.send_now_queued_turn(queued_turn_id, expected_turn_id=expected_turn_id)
+
+        def shutdown(self):
+            pass
+
+    with TestClient(create_app(native=Owner(), token="private-test-token"), base_url="http://127.0.0.1",
+                    headers={"Authorization": "Bearer private-test-token"}) as client:
+        response = client.post("/api/assistant/queued-turns/send-now", json={"queuedTurnId": "queued-two"})
+        if new_turn_starts:
+            assert response.status_code == 409 and response.json()["detail"]["code"] == "SESSION_CONFLICT"
+        else:
+            assert response.status_code == 202 and response.json()["stopRequested"] is True
+    assert len(expectations) == 1
+    if snapshot_running:
+        assert expectations == ["observed-turn"]
+    else:
+        assert expectations[0].startswith("assistant-idle-")
+    assert not newer.snapshot().get("stopRequested")
+    rows = list_session_queued_turns(sid)
+    if new_turn_starts:
+        assert current_controller is newer
+        assert [row["id"] for row in rows] == ["queued-one", "queued-two", "queued-three"]
+        assert not any(row.get("sendNow") for row in rows)
+    else:
+        assert current_controller is None
+        assert [row["id"] for row in rows] == ["queued-two", "queued-one", "queued-three"]
+        assert rows[0]["sendNow"] is True
+
+
+@pytest.mark.parametrize("operation", ["update_queued_turn", "remove_queued_turn", "send_now_queued_turn"])
+@pytest.mark.parametrize("changed", ["directSessionId", "agentId"])
+def test_fixed_session_queue_commands_refuse_rebinding(assistant_command_session, monkeypatch, operation, changed):
+    from core.web.services.session import queued_turns
+
+    native, _, _, _, _, identity = assistant_command_session
+    identity[changed] = "replacement"
+    native_owner = operation.replace("_queued_turn", "_session_queued_turn")
+    monkeypatch.setattr(queued_turns, native_owner, lambda *_, **__: pytest.fail("rebound queue command admitted"))
+    with pytest.raises(native.AssistantSessionError, match="ASSISTANT_IDENTITY_INVALID"):
+        getattr(native, operation)("queued-one")
+
+
+@pytest.mark.parametrize("operation,kwargs", [
+    ("update_queued_turn", {"content": 7}), ("update_queued_turn", {"content": "x" * 64001}),
+    ("update_queued_turn", {"position": True}), ("update_queued_turn", {"position": 0}),
+    ("update_queued_turn", {"position": 1.5}), ("update_queued_turn", {"position": 2**53}),
+    ("update_queued_turn", {"status": "starting"}), ("update_queued_turn", {"status": []}),
+    ("send_now_queued_turn", {"expected_turn_id": "../foreign"}),
+    ("send_now_queued_turn", {"expected_turn_id": None}),
+    ("send_now_queued_turn", {"expected_turn_id": "running-turn\n"}),
+])
+def test_queue_invalid_fields_never_open_native_services(monkeypatch, operation, kwargs):
+    from core.assistant_runtime import native
+
+    monkeypatch.setattr(native, "_services", lambda: pytest.fail("invalid queue request reached native services"))
+    with pytest.raises(native.AssistantSessionError, match="SESSION_INVALID"):
+        getattr(native, operation)("queued-one", **kwargs)
+
+
+@pytest.mark.parametrize("operation", ["update_queued_turn", "remove_queued_turn", "send_now_queued_turn"])
+@pytest.mark.parametrize("row_id", [None, "", "../foreign", "queued-one\n", "q" * 161])
+def test_queue_invalid_ids_never_open_native_services(monkeypatch, operation, row_id):
+    from core.assistant_runtime import native
+
+    monkeypatch.setattr(native, "_services", lambda: pytest.fail("invalid queue ID reached native services"))
+    with pytest.raises(native.AssistantSessionError, match="SESSION_INVALID"):
+        getattr(native, operation)(row_id)
+
+
 def test_fixed_session_guidance_records_safe_and_interrupt_modes(assistant_command_session, tmp_path, monkeypatch):
     from core.chat.conversation_ledger import load_conversation_events
 

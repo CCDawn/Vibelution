@@ -78,8 +78,8 @@ _CONTRACTS = {
 
 
 def extension_modules() -> tuple:
-    from tools import pa_assistant_actions, pa_config_actions, pa_workspace_actions
-    return (pa_assistant_actions, pa_config_actions, pa_workspace_actions)
+    from tools import pa_assistant_actions, pa_config_actions, pa_workspace_actions, pa_provider_onboarding
+    return (pa_assistant_actions, pa_config_actions, pa_workspace_actions, pa_provider_onboarding)
 
 
 def extension_contracts() -> dict:

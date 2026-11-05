@@ -14,6 +14,7 @@ import base64
 import binascii
 import hashlib
 import json
+import uuid
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager, nullcontext
 from typing import Any
@@ -40,6 +41,11 @@ from .continuation import (
     validate_continuation,
 )
 from .turn_model_parameters import capture_model_parameters, pin_agent_model_parameters
+from .accepted_prompt_config import (
+    capture_accepted_prompt_config,
+    load_accepted_prompt_config,
+    recovered_prompt_config_reference,
+)
 from .admission import (
     DevelopmentSubmissionAdmissionConfigurationError,
     get_development_submission_admission_runtime,
@@ -1468,22 +1474,19 @@ def _secret_attachment_prompt_block(rows: list[dict[str, Any]]) -> str:
 
     Mirrors the document prompt block shape (a data marker, never content):
     one line per attachment, naming the one-shot token so configuration tools
-    can consume it, and stating that the model cannot see the value.
+    can consume it, and stating that the model cannot see the value. The
+    display label (bubble name) is echoed when present, otherwise「未命名」;
+    the attachment kind is no longer part of the marker.
     """
-
-    from core.assistant_runtime import secret_attachments
 
     lines: list[str] = []
     for row in rows:
         token = str(row.get("attachmentId") or "").strip()
         if not token:
             continue
-        kind = secret_attachments.peek_secret_attachment(token) or "secret"
-        label = secret_attachments.SECRET_KIND_LABELS.get(
-            kind, secret_attachments.SECRET_KIND_LABELS["secret"],
-        )
+        label = str(row.get("label") or "").strip() or "未命名"
         lines.append(
-            f'[隐私附件] {token}（类型：{label}）已附加，模型不可见其内容；'
+            f'[隐私附件] {token}（{label}）已附加，模型不可见其内容；'
             f'可在配置类工具（如 provider_add）中用 credential_token="{token}" 引用'
         )
     return "\n".join(lines)
@@ -1523,6 +1526,9 @@ def submit_session_message(
     _client_submission_fingerprint: str = "",
     _client_submission_fingerprint_base: str = "",
     _model_parameters_snapshot: dict[str, Any] | None = None,
+    _accepted_prompt_config_ref: dict[str, Any] | None = None,
+    _accepted_prompt_submission_id: str = "",
+    _accepted_prompt_config_source: str = "admission",
     _continuation_expected: dict[str, Any] | None = None,
 ) -> dict:
     """Persist a user message and start a single web chat turn.
@@ -1630,6 +1636,9 @@ def submit_session_message(
     prepared_agent_id = ""
     prepared_context_limit_ok = False
     accepted_model_parameters = dict(_model_parameters_snapshot) if _model_parameters_snapshot else None
+    accepted_prompt_reference = _accepted_prompt_config_ref
+    accepted_prompt_submission_id = str(_accepted_prompt_submission_id or "")
+    accepted_prompt_source = _accepted_prompt_config_source
     try:
         from core.web.services.external_agent.approval_binding import ApprovalBindingError, validate_external_session_submit
         try:
@@ -1967,6 +1976,25 @@ def submit_session_message(
         secret_attachment_rows = _resolve_secret_attachment_rows(secret_attachment_ids, agent=agent)
         if not secret_attachment_rows and secret_attachment_ids and not message and not attachments and not all_references:
             raise _empty_session_submit_error(s, lang)
+        if normalized_message_source == "hot_restart_resume" and accepted_prompt_reference is None:
+            recovered_turn_id = str((message_metadata or {}).get("recoveredTurnId") or "").strip()
+            if recovered_turn_id:
+                accepted_prompt_reference, accepted_prompt_submission_id = recovered_prompt_config_reference(
+                    s, conversation_id, recovered_turn_id,
+                )
+                accepted_prompt_source = "legacy_restart_resume"
+        if accepted_prompt_reference is None:
+            accepted_prompt_submission_id = normalized_client_submission_id or f"accepted-{uuid.uuid4().hex}"
+            accepted_prompt_reference = capture_accepted_prompt_config(
+                s, conversation_id, conversation,
+                submission_id=accepted_prompt_submission_id,
+                source=accepted_prompt_source,
+            )
+        if accepted_prompt_reference is not None:
+            load_accepted_prompt_config(
+                s, conversation_id, accepted_prompt_reference,
+                agent_id=agent_id, submission_id=accepted_prompt_submission_id,
+            )
         if knowledge_file_reference_rows:
             # Resolve content after the turn agent is known: KB retrieval is
             # governed per agent and file references read session artifacts.
@@ -2020,6 +2048,8 @@ def submit_session_message(
             persisted_message_metadata["modelSelection"] = dict(normalized_model_selection)
         if accepted_model_parameters:
             persisted_message_metadata["modelParameters"] = dict(accepted_model_parameters)
+        if accepted_prompt_reference is not None:
+            persisted_message_metadata["acceptedPromptConfig"] = dict(accepted_prompt_reference)
         # Kernel bridge is audit/traceOnly: never hold CHAT_STATE_LOCK or block
         # Prefer: respond-async accept on its latency (measured cold path ~5s).
         deferred_kernel_trace = {
@@ -2421,6 +2451,8 @@ def submit_session_message(
             "active_task": active_task,
             "agent_id": agent_id,
             "agent_snapshot": dict(agent) if isinstance(agent, dict) else {},
+            "accepted_prompt_config_ref": accepted_prompt_reference,
+            "accepted_prompt_submission_id": accepted_prompt_submission_id,
             "agent_prompt_snapshot": dict(conversation.get("agentPromptSnapshot") or {})
             if isinstance(conversation.get("agentPromptSnapshot"), dict)
             else {},
@@ -2888,6 +2920,10 @@ def _resubmit_session_user_message(
             s._ensure_conversation_agent_metadata(conversation)
             agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
             rerun_agent = s._resolve_active_agent_for_turn(conversation_id, agent_id, lang=lang)
+            accepted_prompt_submission_id = normalized_client_submission_id or f"accepted-{uuid.uuid4().hex}"
+            accepted_prompt_reference = capture_accepted_prompt_config(
+                s, conversation_id, conversation, submission_id=accepted_prompt_submission_id,
+            )
             accepted_model_parameters = capture_model_parameters(s, conversation, agent=rerun_agent)
             rerun_agent = pin_agent_model_parameters(rerun_agent, accepted_model_parameters)
             original_entry = dict(previous_messages[target_index])
@@ -2911,6 +2947,8 @@ def _resubmit_session_user_message(
             user_metadata["rerunRequestFingerprint"] = rerun_request_fingerprint
             if accepted_model_parameters:
                 user_metadata["modelParameters"] = dict(accepted_model_parameters)
+            if accepted_prompt_reference is not None:
+                user_metadata["acceptedPromptConfig"] = dict(accepted_prompt_reference)
             if normalized_client_submission_id:
                 user_metadata["clientSubmissionId"] = normalized_client_submission_id
             if skill_invocation:
@@ -3114,6 +3152,8 @@ def _resubmit_session_user_message(
             "history_messages": history_before_target,
             "model_parameters": accepted_model_parameters,
             "agent_snapshot": rerun_agent,
+            "accepted_prompt_config_ref": accepted_prompt_reference,
+            "accepted_prompt_submission_id": accepted_prompt_submission_id,
             "mental_model_enabled": mental_model_enabled,
             "runtime_status_enabled": runtime_status_enabled,
             "turn_status_tail": dict(turn_status_tail) if isinstance(turn_status_tail, dict) else None,

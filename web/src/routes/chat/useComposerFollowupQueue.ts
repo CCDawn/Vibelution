@@ -3,7 +3,7 @@
  * Called from the composer submit actions at the original hook position.
  */
 import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
-import type { QueryClient } from "@tanstack/react-query";
+import type { QueryClient, QueryKey } from "@tanstack/react-query";
 
 import {
   removeSessionQueuedTurn,
@@ -18,6 +18,21 @@ import { resolveSessionStopTurnId } from "./chatStopTurnModel";
 type QueuedTurnWithdrawSnapshot = {
   row: SessionQueuedTurn;
   index: number;
+};
+
+/** Scoped hosts reuse the same queue intents with their own transport/cache. */
+export type ComposerFollowupQueueRuntime = {
+  detailQueryKey: (sessionId: string) => QueryKey;
+  updateSessionQueuedTurn: typeof updateSessionQueuedTurn;
+  removeSessionQueuedTurn: typeof removeSessionQueuedTurn;
+  sendNowSessionQueuedTurn: typeof sendNowSessionQueuedTurn;
+};
+
+const DEFAULT_QUEUE_RUNTIME: ComposerFollowupQueueRuntime = {
+  detailQueryKey: queryKeys.session,
+  updateSessionQueuedTurn: (...args) => updateSessionQueuedTurn(...args),
+  removeSessionQueuedTurn: (...args) => removeSessionQueuedTurn(...args),
+  sendNowSessionQueuedTurn: (...args) => sendNowSessionQueuedTurn(...args),
 };
 
 /**
@@ -58,6 +73,7 @@ function restoreQueuedTurnOrder(previousRows: SessionQueuedTurn[], currentRows: 
 
 
 export type UseComposerFollowupQueueInput = {
+  runtime?: ComposerFollowupQueueRuntime;
   queryClient: QueryClient;
   activeSessionId: string | null | undefined;
   activeTurnId: string | undefined;
@@ -80,6 +96,7 @@ export type UseComposerFollowupQueueInput = {
 };
 
 export function useComposerFollowupQueue({
+  runtime = DEFAULT_QUEUE_RUNTIME,
   queryClient,
   activeSessionId,
   activeTurnId,
@@ -94,10 +111,10 @@ export function useComposerFollowupQueue({
   pendingQueueStatusRef,
 }: UseComposerFollowupQueueInput) {
   const syncQueuedTurnsIntoDetail = useCallback((sessionId: string, rows: SessionQueuedTurn[]) => {
-    queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
+    queryClient.setQueryData<SessionDetail>(runtime.detailQueryKey(sessionId), (detailState) =>
       detailState ? { ...detailState, queuedTurns: rows } : detailState,
     );
-  }, [queryClient]);
+  }, [runtime, queryClient]);
 
   const reportQueuedTurnError = useCallback((sessionId: string, error: unknown, fallback: string) => {
     setSessionComposerErrors((current) => ({
@@ -116,11 +133,11 @@ export function useComposerFollowupQueue({
     // paints at save time while status/pause metadata stay untouched; the
     // PATCH response rebases the authoritative rows and a failure restores
     // the pre-edit text without clobbering fields that moved meanwhile.
-    const rowsAtIntent = queryClient.getQueryData<SessionDetail>(queryKeys.session(sessionId))?.queuedTurns ?? [];
+    const rowsAtIntent = queryClient.getQueryData<SessionDetail>(runtime.detailQueryKey(sessionId))?.queuedTurns ?? [];
     const snapshotRow = rowsAtIntent.find((row) => row.id === id);
     if (!content && !snapshotRow?.attachments?.length) return;
     if (snapshotRow) {
-      queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
+      queryClient.setQueryData<SessionDetail>(runtime.detailQueryKey(sessionId), (detailState) =>
         detailState
           ? {
             ...detailState,
@@ -131,11 +148,11 @@ export function useComposerFollowupQueue({
           : detailState,
       );
     }
-    void updateSessionQueuedTurn(sessionId, id, { content })
+    void runtime.updateSessionQueuedTurn(sessionId, id, { content })
       .then((rows) => syncQueuedTurnsIntoDetail(sessionId, rows))
       .catch((error) => {
         if (snapshotRow) {
-          queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) => {
+          queryClient.setQueryData<SessionDetail>(runtime.detailQueryKey(sessionId), (detailState) => {
             if (!detailState) {
               return detailState;
             }
@@ -158,7 +175,7 @@ export function useComposerFollowupQueue({
           lang === "zh" ? "修改排队消息失败" : "Failed to update the queued message",
         );
       });
-  }, [activeSessionId, isModelParametersSavePendingNow, lang, queryClient, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
+  }, [runtime, activeSessionId, isModelParametersSavePendingNow, lang, queryClient, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
 
   const handleFollowupQueueRemove = useCallback((id: string) => {
     const sessionId = activeSessionId;
@@ -167,23 +184,23 @@ export function useComposerFollowupQueue({
     }
     // Optimistic withdraw (ZCode pending-intent style): the row leaves the bar
     // at click time; the DELETE response only rebases the authoritative rows.
-    const rowsAtIntent = queryClient.getQueryData<SessionDetail>(queryKeys.session(sessionId))?.queuedTurns ?? [];
+    const rowsAtIntent = queryClient.getQueryData<SessionDetail>(runtime.detailQueryKey(sessionId))?.queuedTurns ?? [];
     const snapshotIndex = rowsAtIntent.findIndex((row) => row.id === id);
     const snapshotRow = snapshotIndex >= 0 ? rowsAtIntent[snapshotIndex] : undefined;
     if (!snapshotRow) {
       return;
     }
     pendingQueueWithdrawalIdsRef.current.add(id);
-    queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
+    queryClient.setQueryData<SessionDetail>(runtime.detailQueryKey(sessionId), (detailState) =>
       detailState
         ? { ...detailState, queuedTurns: (detailState.queuedTurns ?? []).filter((row) => row.id !== id) }
         : detailState,
     );
-    void removeSessionQueuedTurn(sessionId, id)
+    void runtime.removeSessionQueuedTurn(sessionId, id)
       .then((rows) => syncQueuedTurnsIntoDetail(sessionId, rows))
       .catch((error) => {
         // Roll back only this intent; authoritative rows that landed meanwhile stay.
-        queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
+        queryClient.setQueryData<SessionDetail>(runtime.detailQueryKey(sessionId), (detailState) =>
           detailState
             ? {
               ...detailState,
@@ -200,7 +217,7 @@ export function useComposerFollowupQueue({
       .finally(() => {
         pendingQueueWithdrawalIdsRef.current.delete(id);
       });
-  }, [activeSessionId, lang, queryClient, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
+  }, [runtime, activeSessionId, lang, queryClient, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
 
   // Steering sends one queued item into the running turn as safe guidance and
   // then withdraws it from the server queue; items carrying attachments or
@@ -228,14 +245,14 @@ export function useComposerFollowupQueue({
     // and either failure rolls the row back into its pre-intent slot. The
     // shared pending set also drops a second click while this steer is still
     // in flight.
-    const rowsAtIntent = queryClient.getQueryData<SessionDetail>(queryKeys.session(sessionId))?.queuedTurns ?? [];
+    const rowsAtIntent = queryClient.getQueryData<SessionDetail>(runtime.detailQueryKey(sessionId))?.queuedTurns ?? [];
     const snapshotIndex = rowsAtIntent.findIndex((row) => row.id === id);
     const snapshotRow = snapshotIndex >= 0 ? rowsAtIntent[snapshotIndex] : undefined;
     const restoreSteeredRow = () => {
       if (!snapshotRow) {
         return;
       }
-      queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
+      queryClient.setQueryData<SessionDetail>(runtime.detailQueryKey(sessionId), (detailState) =>
         detailState
           ? {
             ...detailState,
@@ -246,7 +263,7 @@ export function useComposerFollowupQueue({
     };
     pendingQueueWithdrawalIdsRef.current.add(id);
     if (snapshotRow) {
-      queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
+      queryClient.setQueryData<SessionDetail>(runtime.detailQueryKey(sessionId), (detailState) =>
         detailState
           ? { ...detailState, queuedTurns: (detailState.queuedTurns ?? []).filter((row) => row.id !== id) }
           : detailState,
@@ -257,7 +274,7 @@ export function useComposerFollowupQueue({
       .mutateAsync({ sessionId, content: item.text, mode: "safe", steeredQueuedTurnId: id })
       .then(() => {
         guidanceAccepted = true;
-        return removeSessionQueuedTurn(sessionId, id);
+        return runtime.removeSessionQueuedTurn(sessionId, id);
       })
       .then((rows) => syncQueuedTurnsIntoDetail(sessionId, rows))
       .catch((error) => {
@@ -276,7 +293,7 @@ export function useComposerFollowupQueue({
       .finally(() => {
         pendingQueueWithdrawalIdsRef.current.delete(id);
       });
-  }, [
+  }, [runtime,
     activeSessionId,
     isModelParametersSavePendingNow,
     lang,
@@ -303,13 +320,13 @@ export function useComposerFollowupQueue({
     const optimisticRows = [...rowsAtIntent];
     optimisticRows.splice(fromIndex, 1);
     optimisticRows.splice(toIndex, 0, from);
-    queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
+    queryClient.setQueryData<SessionDetail>(runtime.detailQueryKey(sessionId), (detailState) =>
       detailState ? { ...detailState, queuedTurns: optimisticRows } : detailState,
     );
-    void updateSessionQueuedTurn(sessionId, from.id, { position: target.position })
+    void runtime.updateSessionQueuedTurn(sessionId, from.id, { position: target.position })
       .then((next) => syncQueuedTurnsIntoDetail(sessionId, next))
       .catch((error) => {
-        queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
+        queryClient.setQueryData<SessionDetail>(runtime.detailQueryKey(sessionId), (detailState) =>
           detailState
             ? { ...detailState, queuedTurns: restoreQueuedTurnOrder(rowsAtIntent, detailState.queuedTurns ?? []) }
             : detailState,
@@ -320,7 +337,7 @@ export function useComposerFollowupQueue({
           lang === "zh" ? "调整排队顺序失败" : "Failed to reorder the queue",
         );
       });
-  }, [activeSessionId, detail?.queuedTurns, lang, queryClient, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
+  }, [runtime, activeSessionId, detail?.queuedTurns, lang, queryClient, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
 
   // Pausing holds one row out of draining (the server skips paused rows);
   // resuming re-queues it at the tail, mirroring the server semantics.
@@ -330,7 +347,7 @@ export function useComposerFollowupQueue({
     if (!sessionId || pendingQueueStatusRef.current.has(statusKey)) {
       return;
     }
-    const saving = updateSessionQueuedTurn(sessionId, id, { status: paused ? "paused" : "queued" })
+    const saving = runtime.updateSessionQueuedTurn(sessionId, id, { status: paused ? "paused" : "queued" })
       .then((rows) => { syncQueuedTurnsIntoDetail(sessionId, rows); return true; })
       .catch((error) => {
         reportQueuedTurnError(sessionId, error, paused
@@ -340,7 +357,7 @@ export function useComposerFollowupQueue({
       })
       .finally(() => { pendingQueueStatusRef.current.delete(statusKey); });
     pendingQueueStatusRef.current.set(statusKey, saving);
-  }, [activeSessionId, lang, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
+  }, [runtime, activeSessionId, lang, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
 
   // Send-now (Codex sendQueuedNow parity): pin one queued row at the head and
   // stop the running turn; the server keeps the row persisted in the queue so
@@ -354,7 +371,7 @@ export function useComposerFollowupQueue({
     const expectedTurnId = resolveSessionStopTurnId(detail, activeTurnId);
     const promote = () => {
       if (pendingQueueWithdrawalIdsRef.current.has(id)) return;
-      const rowsAtIntent = queryClient.getQueryData<SessionDetail>(queryKeys.session(sessionId))?.queuedTurns ?? [];
+      const rowsAtIntent = queryClient.getQueryData<SessionDetail>(runtime.detailQueryKey(sessionId))?.queuedTurns ?? [];
       if (!rowsAtIntent.some((row) => row.id === id)) {
         return;
       }
@@ -370,16 +387,16 @@ export function useComposerFollowupQueue({
         optimisticRows.unshift({ ...snapshotRow, sendNow: true });
       }
       pendingQueueWithdrawalIdsRef.current.add(id);
-      queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
+      queryClient.setQueryData<SessionDetail>(runtime.detailQueryKey(sessionId), (detailState) =>
         detailState ? { ...detailState, queuedTurns: optimisticRows } : detailState,
       );
-      const pinnedRows = queryClient.getQueryData<SessionDetail>(queryKeys.session(sessionId))?.queuedTurns;
-      void sendNowSessionQueuedTurn(sessionId, id, { expectedTurnId: expectedTurnId || undefined })
+      const pinnedRows = queryClient.getQueryData<SessionDetail>(runtime.detailQueryKey(sessionId))?.queuedTurns;
+      void runtime.sendNowSessionQueuedTurn(sessionId, id, { expectedTurnId: expectedTurnId || undefined })
         .then((result) => syncQueuedTurnsIntoDetail(sessionId, result.queuedTurns))
         .catch((error) => {
         // Restore our order only while the exact optimistic cache still owns it.
         // A later snapshot owns its own order and fields; only our target pin is removed.
-          queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
+          queryClient.setQueryData<SessionDetail>(runtime.detailQueryKey(sessionId), (detailState) =>
             detailState
               ? {
                 ...detailState,
@@ -409,7 +426,7 @@ export function useComposerFollowupQueue({
     } else {
       promote();
     }
-  }, [activeSessionId, activeTurnId, detail, lang, queryClient, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
+  }, [runtime, activeSessionId, activeTurnId, detail, lang, queryClient, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
 
 
   return {

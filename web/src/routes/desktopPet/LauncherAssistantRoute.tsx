@@ -11,7 +11,7 @@ import {
   stopLauncherAssistantTurn, continueLauncherAssistantTurn, switchLauncherAssistantHead,
   regenerateLauncherAssistantMessage, guideLauncherAssistantTurn,
   getLauncherOperatorAsset, getLauncherAssistantAvatar, openLauncherFromAssistant, uploadLauncherAttachment,
-  uploadLauncherUserSecret, launcherUserSecretKindLabel,
+  uploadLauncherUserSecret,
   readLauncherAttachment, subscribeLauncherAssistantSessionEvent,
   launcherAssistantBudgetQueryKey,
 } from "../../api/launcherAssistant";
@@ -21,6 +21,8 @@ import type { SessionContinuationExpectation } from "../../api/chat";
 import { queryKeys } from "../../api/queryKeys";
 import type { SessionToolApprovalRequest } from "../../api/types";
 import { LazyConversationView } from "../../components/conversation/LazyConversationView";
+import { FollowupQueueTogglePauseContext } from "../../components/conversation/ConversationFollowupQueueBar";
+import { useLauncherAssistantFollowupQueue } from "./useLauncherAssistantFollowupQueue";
 import { LauncherAssistantWelcome } from "./LauncherAssistantWelcome";
 import { LauncherAssistantQuestionCard } from "./LauncherAssistantQuestionCard";
 import { VButton, VDenseOpsPage, VNativeButton, VStateSurface } from "../../components/vui";
@@ -41,6 +43,8 @@ import { DEFAULT_PET_PREFERENCES } from "./desktopPetPreferences";
 import { ChatToolApprovalDialog } from "../chat/ChatToolApprovalDialog";
 import { toolApprovalRiskLabel } from "../chat/toolApprovalLabels";
 import { agentArchivePreviewIsValid, agentPurgePreviewIsValid, autonomyActionIsKnown, autonomyApprovalPreviewIsValid, authorizationUpgradePreviewIsValid, browserInteractPreviewIsValid, dispatchWritePreviewIsValid, launcherAgentCreatePreviewIsValid, operatorImageUploadPreviewIsValid, preferenceProposalPreviewIsValid, projectLifecyclePreviewIsValid, recoveryPreviewIsValid, managementApprovalActionIsKnown, platformManagementActionIsKnown, platformManagementPreviewIsValid, toolApprovalActionPreview, toolApprovalDisplayName } from "../chat/toolApprovalPreview";
+import { providerModelApprovalPreviewIsValid } from "../chat/providerApprovalPreview";
+import { agentConfigurationApprovalActionIsKnown, agentConfigurationApprovalPreviewIsValid } from "../chat/agentConfigurationApprovalPreview";
 import { launcherTeamActionIsKnown, launcherTeamPreviewIsValid, launcherTeamActionPreview, launcherTeamActionTitle } from "./teamManagementApprovalPreview";
 import { useLauncherThemeControl } from "./useLauncherThemeControl";
 import { readStoredWorkbenchTheme, requestWorkbenchTheme, subscribeWorkbenchThemeSync, useAuthorityTheme } from "../../app/themePreference";
@@ -54,7 +58,7 @@ import {
   launcherAssistantActivity, launcherAssistantMessageOverLimit, launcherAssistantPollInterval, launcherAssistantSubmission,
   launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
   launcherAssistantLifecycleClosing, launcherAssistantSendBusyCode, launcherAssistantSendDefinitelyRejected, launcherAssistantSendRetryableBusy,
-  launcherAssistantSessionEventRefreshesDetail, launcherAssistantSseHealthy,
+  launcherAssistantSseHealthy,
   launcherAssistantStatusDegradeTone, launcherAssistantWaitInterval, launcherAssistantContextRing, launcherAssistantModelDisplay,
   launcherAssistantEditBackfillDraft,
   type LauncherAssistantSubmission, type LauncherAssistantQueuedAcceptance, type LauncherAssistantQuestionDraft,
@@ -123,6 +127,8 @@ function approvalAcceptDisabled(request: SessionToolApprovalRequest): boolean {
   return request.toolName === "personal_assistant_manage_tool" && (!(managementApprovalActionIsKnown(summary?.assistantAction) || launcherTeamActionIsKnown(summary?.assistantAction) || summary?.assistantAction === "agent_purge_batch") || Boolean(summary.assistantArgumentsInvalid)
     || (autonomyActionIsKnown(summary?.assistantAction) || Object.hasOwn(summary || {}, "assistantAutonomyPreviewVersion")) && !autonomyApprovalPreviewIsValid(summary)
     || platformManagementActionIsKnown(summary?.assistantAction) && !platformManagementPreviewIsValid(summary)
+    || (summary?.assistantAction === "provider_model_resolve" || Object.hasOwn(summary || {}, "assistantProviderPreviewVersion")) && !providerModelApprovalPreviewIsValid(summary)
+    || agentConfigurationApprovalActionIsKnown(summary?.assistantAction) && !agentConfigurationApprovalPreviewIsValid(summary)
     || launcherTeamActionIsKnown(summary?.assistantAction) && !launcherTeamPreviewIsValid(summary)
     || summary?.assistantAction === "agent_create" && !launcherAgentCreatePreviewIsValid(summary)
     || summary?.assistantAction === "agent_purge" && !agentPurgePreviewIsValid(summary)
@@ -146,6 +152,45 @@ function readableApprovalJson(source: string): string {
 
 type ContinueAttempt = { requestId: string; expected: SessionContinuationExpectation; accepted: boolean };
 type ComposerSnapshot = { draft: string; outstanding: LauncherAssistantSubmission | null; acceptedTurnId: string; queuedAcceptance: LauncherAssistantQueuedAcceptance | null; continuation?: ContinueAttempt; attachments?: ComposerImageAttachment[]; references?: SessionReferenceAttachment[]; questionDraft?: LauncherAssistantQuestionDraft | null };
+
+/** One assistant tool receipt asking the operator to attach a private
+ * credential (a `secret_request` action result). */
+export type AssistantSecretRequest = { purpose: string; label?: string; key: string };
+
+/** The latest assistant turn's newest tool receipt decides whether the composer
+ * should surface a private-attachment request. Receipt JSON rides the canonical
+ * `tool_call` item's `output` string; anything else — no assistant turn yet, a
+ * newer user reply, a different action, or an unparseable/truncated output —
+ * means no request, never a partial banner. `key` is the turn+item identity, so
+ * ignoring one exact receipt stays quiet while a newer request re-arms. */
+export function resolveAssistantSecretRequest(detail: SessionDetail | undefined): AssistantSecretRequest | null {
+  const messages = detail?.messages || [];
+  let latestAssistantIndex = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === "assistant") { latestAssistantIndex = index; break; }
+  }
+  if (latestAssistantIndex < 0) return null;
+  const latestAssistant = messages[latestAssistantIndex]!;
+  if (latestAssistant.role !== "assistant") return null;
+  // A user message after the request means the conversation moved on: the
+  // composer tray (or a plain reply) already answered it, so never resurrect.
+  if (messages.slice(latestAssistantIndex + 1).some(message => message.role === "user")) return null;
+  const items = latestAssistant.turnItems || [];
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index]!;
+    if (item.type !== "tool_call") continue;
+    let receipt: unknown;
+    try { receipt = JSON.parse(String(item.output ?? "")); } catch { return null; }
+    if (!receipt || typeof receipt !== "object") return null;
+    const record = receipt as Record<string, unknown>;
+    if (record.action !== "secret_request" || record.status !== "awaiting_user_attachment") return null;
+    const purpose = typeof record.purpose === "string" ? record.purpose.trim() : "";
+    if (!purpose) return null;
+    const label = typeof record.label === "string" && record.label.trim() ? record.label.trim() : undefined;
+    return { purpose, label, key: `${latestAssistant.turnId}:${item.itemId || item.id}` };
+  }
+  return null;
+}
 
 export function LauncherAssistantRoute({ embedded = false, navigationOwned = false, computerRequested = false, entryIntent }: {
   embedded?: boolean; navigationOwned?: boolean; computerRequested?: boolean;
@@ -432,6 +477,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   useEffect(() => {
     if (!observingOwnSession) return;
     let active = true;
+    let refreshEpoch = 0;
     // Capability-detected: an older shell yields null and nothing changes. Any
     // frame proves the channel alive; only this session's authoritative snapshot
     // (or a delta that explicitly finished) invalidates detail, after which the
@@ -440,10 +486,25 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     const unsubscribe = subscribeLauncherAssistantSessionEvent(event => {
       if (!active) return;
       sseAliveAt.current = Date.now();
+      if (event.sessionId !== sessionId) return;
+      const incomingEpoch = event.connectionEpoch ?? 0;
+      const changedEpoch = incomingEpoch > refreshEpoch;
+      refreshEpoch = Math.max(refreshEpoch, incomingEpoch);
       const result = sessionStream.apply(event, latestDetail.current);
       setActiveLayer(result.layer);
-      if (!result.needsRefresh && !launcherAssistantSessionEventRefreshesDetail(event, sessionId)) return;
-      void client.invalidateQueries({ queryKey: ["launcher-assistant", "detail", sessionId] });
+      // The stream owns stale/retired-epoch rejection as well as refresh needs.
+      if (!result.needsRefresh) return;
+      const filter = { queryKey: ["launcher-assistant", "detail", sessionId], exact: true };
+      const refresh = () => client.invalidateQueries(filter, { cancelRefetch: false });
+      if (changedEpoch) {
+        // Even the initial no-cache read predates this connection. Discard its
+        // result before starting a new read; same-epoch bursts reuse that read.
+        void client.cancelQueries(filter).then(() => {
+          if (active && refreshEpoch === incomingEpoch) return refresh();
+        });
+      } else {
+        void refresh();
+      }
     });
     if (!unsubscribe) return;
     return () => { active = false; unsubscribe(); };
@@ -806,6 +867,23 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   // masked display name and that reference — never the value — and is already
   // "uploaded", so submit includes sec_x in attachmentIds without any re-upload.
   const MAX_SECRET_ATTACHMENTS = 4;
+  // Assistant `secret_request` receipts surface as a one-click banner near the
+  // composer. Suppressed three ways: the operator dismissed that exact receipt,
+  // a secret chip is already staged, or the receipt aged out of the newest
+  // conversational position (resolveAssistantSecretRequest). A successful
+  // attach retires the current request even if the chip is removed later.
+  const resolvedSecretRequest = useMemo(() => resolveAssistantSecretRequest(detail.data), [detail.data]);
+  const [dismissedSecretRequestKeys, setDismissedSecretRequestKeys] = useState<string[]>([]);
+  useEffect(() => { setDismissedSecretRequestKeys([]); }, [sessionId]);
+  const secretRequest = resolvedSecretRequest
+    && !dismissedSecretRequestKeys.includes(resolvedSecretRequest.key)
+    && !attachments.some(item => item.kind === "secret")
+    ? resolvedSecretRequest : null;
+  function dismissSecretRequest() {
+    if (!resolvedSecretRequest) return;
+    setDismissedSecretRequestKeys(current => current.includes(resolvedSecretRequest.key)
+      ? current : [...current, resolvedSecretRequest.key]);
+  }
   async function addSecretAttachment(input: ChatComposerSecretAttachmentInput): Promise<void> {
     if (status.data?.attachmentVersion !== 1 || sendPending || sendUnconfirmed || uploadGate.current) {
       throw new Error(lang === "zh" ? "当前不能添加隐私附件，请稍后再试。" : "A private attachment cannot be added right now.");
@@ -813,8 +891,13 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     if (attachmentsRef.current.filter(item => item.kind === "secret").length >= MAX_SECRET_ATTACHMENTS) {
       throw new Error(lang === "zh" ? `隐私附件最多 ${MAX_SECRET_ATTACHMENTS} 个，请先移除一个再添加。` : `Up to ${MAX_SECRET_ATTACHMENTS} private attachments; remove one first.`);
     }
-    const { attachmentId } = await uploadLauncherUserSecret(input.value, input.secretType, input.label);
-    const displayName = (input.label || "").trim() || launcherUserSecretKindLabel(input.secretType, lang);
+    const { attachmentId } = await uploadLauncherUserSecret(input.value, input.label);
+    // Staged: retire the request banner too, durably (the chip alone would
+    // resurrect the banner if the operator removed it before sending).
+    dismissSecretRequest();
+    // No display name falls back to the same generic mask label the history
+    // bubble side uses for a label-less user_secret attachment.
+    const displayName = (input.label || "").trim() || (lang === "zh" ? "隐私附件" : "Private attachment");
     const chipLabel = lang === "zh" ? `隐私 · ${displayName}` : `Private · ${displayName}`;
     updateAttachments([...attachmentsRef.current, {
       id: crypto.randomUUID(),
@@ -1198,6 +1281,11 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   const stopping = Boolean(detail.data?.stopRequested);
   const canContinue = !draft.trim() && !attachments.length && !sendUnconfirmed && Boolean(resolveConversationContinuation(detail.data, sessionId));
   const actionMode = busy || stopping ? "stop" : canContinue ? "continue" : "send";
+  const queueEnabled = status.data?.followupQueueVersion === 1;
+  const followupQueue = useLauncherAssistantFollowupQueue({
+    sessionId, activeTurnId: acceptedTurnId || undefined, detail: detail.data, enabled: queueEnabled, lang,
+    blocked: sendPending || sendUnconfirmed || controlPending || stopping || modelConfigPending || Boolean(guidancePendingMode),
+  });
   // "待你回答" banner above the composer. Same gates as the chat page: a
   // running turn (execution ownership) or an unfinished send hides the banner,
   // and only the question written by the last terminal turn stays fresh.
@@ -1437,7 +1525,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       actions={<VButton onClick={() => void status.refetch()}>{copy.retry}</VButton>}>{status.error.message}</VStateSurface>
       : !notificationsHosted && statusDegradeTone === "soft" ? <VStateSurface density="compact" tone="unavailable" title={copy.statusDelayed} /> : null}
     {showWelcome ? <LauncherAssistantWelcome lang={lang} onPrompt={changeDraft}/> : null}
-    {detail.data ? <LazyConversationView
+    {detail.data ? <FollowupQueueTogglePauseContext.Provider value={queueEnabled ? followupQueue.handleFollowupQueueTogglePause : null}>
+    <LazyConversationView
       runtimeApi={launcherConversationApi}
       sessionId={detail.data.id} title={detail.data.title || identity?.displayName || copy.title}
       phase={resolveSessionActivity(detail.data).execution} messages={historyAttachments.messages}
@@ -1461,6 +1550,13 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       // its own pending source so queueing never borrows the stopping copy.
       composerStopPending={controlPending || stopping} composerQueueSendPending={sendPending}
       queueSendPendingLabel={copy.queueSendPending}
+      followupQueue={followupQueue.followupQueue}
+      onFollowupQueueUpdate={queueEnabled ? followupQueue.handleFollowupQueueUpdate : undefined}
+      onFollowupQueueRemove={queueEnabled ? followupQueue.handleFollowupQueueRemove : undefined}
+      onFollowupQueueMove={queueEnabled ? followupQueue.handleFollowupQueueMove : undefined}
+      onFollowupQueueSteer={queueEnabled ? followupQueue.handleFollowupQueueSteer : undefined}
+      onFollowupQueueSendNow={queueEnabled ? followupQueue.handleFollowupQueueSendNow : undefined}
+      followupQueueSteerLabel={copy.safeGuidance}
       composerAttachmentInputDisabled={status.data?.attachmentVersion !== 1 || sendPending || sendUnconfirmed || controlPending}
       composerAttachments={attachments}
       composerReferences={composerReferences}
@@ -1471,10 +1567,10 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       onRetryComposerAttachment={id => void uploadAttachments(id)} onRetryComposerAttachmentUploads={() => void uploadAttachments()}
       composerError={sendUnconfirmed ? copy.unknownSend
         : attachments.some(item => item.kind === "image") && status.data?.settings?.supportsImageInput === false ? copy.imageUnsupported
-        : attachments.some(item => item.uploadStatus === "failed") ? (lang === "zh" ? "附件上传失败，请重试。" : "Attachment upload failed; retry.") : ""}
+        : attachments.some(item => item.uploadStatus === "failed") ? (lang === "zh" ? "附件上传失败，请重试。" : "Attachment upload failed; retry.") : followupQueue.error}
       submitLabel={sendUnconfirmed ? copy.retry : copy.send} submitPendingLabel={copy.sending}
       composerActionDisabled={sendPending || controlPending || (attachments.length > 0 && status.data?.attachmentVersion !== 1) || (actionMode === "stop" ? stopping || !resolveSessionStopTurnId(detail.data, acceptedTurnId) : actionMode === "send" && !sendUnconfirmed && !draft.trim() && !attachments.length)}
-      onComposerChange={changeDraft} onSubmit={() => void submit()}
+      onComposerChange={value => { followupQueue.clearError(); changeDraft(value); }} onSubmit={() => void submit()}
       onStop={() => void stopTurn()} onContinueTurn={() => void continueTurn()}
       composerContextRing={composerContextRing}
       composerCacheUsage={composerCacheUsage}
@@ -1491,12 +1587,13 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       onInterruptGuidance={() => void submitGuidance("interrupt")}
       safeGuidanceLabel={copy.safeGuidance} safeGuidancePendingLabel={copy.safeGuidancePending}
       interruptGuidanceLabel={copy.interruptGuidance} interruptGuidancePendingLabel={copy.interruptGuidancePending}
-      composerSafeGuidancePending={guidancePendingMode === "safe"}
+      composerSafeGuidancePending={guidancePendingMode === "safe" || followupQueue.guidancePending}
       composerInterruptGuidancePending={guidancePendingMode === "interrupt"}
       composerLeadingControl={<><ChatComposerPlusMenu lang={lang} showCapabilities={false} showReferences={false}
         budget={budget}
         sessionReferences={[]} onAddAttachments={addAttachments}
         onAttachSecret={input => addSecretAttachment(input)}
+        secretRequest={secretRequest} onSecretRequestDismiss={dismissSecretRequest}
         attachmentDisabled={status.data?.attachmentVersion !== 1 || sendPending || sendUnconfirmed || controlPending} />
         <LauncherManagementPermissionControl state={managementPermission} lang={lang} /></>}
       composerModelControl={status.data ? <LauncherAssistantModelControl key={sessionId} lang={lang}
@@ -1523,7 +1620,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       {computerAccess.notice ? <p className={petStyles.computerNotice} role="status">{computerAccess.notice}</p> : null}
       {approvalPrompt}</>}
       fallback={<VStateSurface fill tone="loading" title={copy.loading} />}
-    /> : <VStateSurface fill tone={detail.isError ? notificationsHosted ? "unavailable" : "error" : "loading"} title={detail.isError ? notificationsHosted ? copy.conversationUnavailable : copy.unavailable : copy.loading}
+    />
+    </FollowupQueueTogglePauseContext.Provider> : <VStateSurface fill tone={detail.isError ? notificationsHosted ? "unavailable" : "error" : "loading"} title={detail.isError ? notificationsHosted ? copy.conversationUnavailable : copy.unavailable : copy.loading}
       actions={detail.isError && !notificationsHosted ? <VButton onClick={() => void detail.refetch()}>{copy.retry}</VButton> : undefined}>{notificationsHosted ? null : detail.error?.message}</VStateSurface>}
     {!detail.data ? approvalPrompt : null}
     {!notificationsHosted && historyAttachments.missingGenerated ? <VStateSurface tone="error" title={lang === "zh" ? "历史图片缺少附件标识，暂不可查看" : "Historical image has no artifact ID"}
@@ -1539,7 +1637,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       actions={<VButton onClick={() => { setPreviewAttempt(value => value + 1); void dispatches.refetch(); }}>{copy.retry}</VButton>} /> : null}
     {approvalError || !notificationsHosted && approvals.isError ? <VStateSurface tone="error" title={approvalError || (lang === "zh" ? "待授权查询暂不可用" : "Pending approvals unavailable")}
       actions={<VButton onClick={() => { setApprovalError(""); setDecidedDispatchKey(""); setPreviewAttempt(value => value + 1); void approvals.refetch(); void dispatches.refetch(); }}>{copy.retry}</VButton>}>{notificationsHosted ? null : approvals.error?.message}</VStateSurface> : null}
-    {detail.data?.queuedTurns?.length || queuedAcceptance ? <section data-launcher-assistant-queue
+    {(!queueEnabled && detail.data?.queuedTurns?.length) || detail.data?.queueHold
+      || (queuedAcceptance && !queuedAcceptance.observed) || queueReadback.removed ? <section data-launcher-assistant-queue
       className={petStyles.receiptPanel}
       aria-label={lang === "zh" ? "原生消息队列" : "Native message queue"}>
       {/* An explicit stop freezes the queue until a new message unfreezes it;
@@ -1548,7 +1647,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
         {lang === "zh" ? "队列已暂停：停止后排队消息保持冻结，发送新消息即可恢复。" : "Queue paused: queued messages stay frozen after a stop; send a new message to resume."}
       </p> : null}
       {queuedAcceptance && !queuedAcceptance.observed ? <p role="status">{waitingQueueText}</p> : null}
-      {detail.data?.queuedTurns?.map(row => <p key={row.id} role="status">{launcherAssistantQueueLabel(row.status, lang)}{row.lastError ? ` · ${row.lastError}` : ""}</p>)}
+      {!queueEnabled ? detail.data?.queuedTurns?.map(row => <p key={row.id} role="status">{launcherAssistantQueueLabel(row.status, lang)}{row.lastError ? ` · ${row.lastError}` : ""}</p>) : null}
       {queueReadback.removed ? <p role="status">{removedQueueText}</p> : null}
     </section> : null}
     {sendUnconfirmed && !outstanding.current?.answerQuestion ? <VStateSurface tone="error" title={copy.unknownSend}

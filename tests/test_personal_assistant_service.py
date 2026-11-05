@@ -934,6 +934,27 @@ def test_pre_messages_task_upgrades_to_current_generation_task(personal_env, cus
     assert after["toolPolicy"]["allowedTools"] == list(service.TOOLS)
 
 
+@pytest.mark.parametrize("custom_task", [False, True])
+def test_pre_secret_request_task_upgrades_to_current_generation_task(
+    personal_env, custom_task
+):
+    row = service.create_personal_assistant()["assistant"]
+    legacy_task = dict(service._PRE_SECRET_REQUEST_TASK)
+    if custom_task:
+        legacy_task["mission"] = "用户自己的任务"
+    directory.update_agent_instance(row["agentId"], task_profile=legacy_task)
+    stored_task = directory.get_agent(row["agentId"])["taskProfile"]
+    service.create_personal_assistant()
+    after = directory.get_agent(row["agentId"])
+    assert after["taskProfile"] == (
+        stored_task if custom_task else directory.normalize_task_profile(service.TASK)
+    )
+    # The refreshed identity carries the secret_request guidance.
+    if not custom_task:
+        assert "secret_request" in after["taskProfile"]["responsibilities"]
+        assert "[隐私附件]" in after["taskProfile"]["responsibilities"]
+
+
 def test_default_persona_upgrades_on_reprovision_and_user_persona_stays(personal_env):
     row = service.create_personal_assistant()["assistant"]
     directory.update_agent_instance(

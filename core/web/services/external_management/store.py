@@ -20,8 +20,8 @@ class Store:
     def path(self, kind: str, key: str) -> Path:
         return self.root / kind / (digest(key) + ".json")
 
-    def lock(self, kind: str, key: str):
-        return cross_process_file_lock(self.path(kind, key).with_suffix(".lock"), timeout=5)
+    def lock(self, kind: str, key: str, *, timeout: float = 5):
+        return cross_process_file_lock(self.path(kind, key).with_suffix(".lock"), timeout=timeout)
 
     def read(self, path: Path) -> dict | None:
         try:

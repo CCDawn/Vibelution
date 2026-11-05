@@ -129,6 +129,23 @@ def test_deleted_request_is_fenced_across_store_reload_without_affecting_externa
     assert execute(task, completed)["releasedBytes"] == 0
 
 
+def test_cleanup_receipt_keeps_admitted_authority_when_native_delete_rotates_it(task):
+    original_delete = task.native.delete_chat_session_lightweight
+    def rotate_after_delete(*args, **kwargs):
+        result = original_delete(*args, **kwargs)
+        task.service.authority_fingerprint = lambda: "b" * 64
+        return result
+    task.native.delete_chat_session_lightweight = rotate_after_delete
+
+    assert execute(task)["status"] == "deleted"
+    receipt = task.service.store._read_path(task.service.store.tombstone_path(task.record["taskId"]))
+    assert receipt["localAuthorityFingerprint"] == "a" * 64
+    with pytest.raises(ExternalAgentAccessError):
+        preview(task)
+    task.service.authority_fingerprint = lambda: "a" * 64
+    assert preview(task)["alreadyDeleted"] is True
+
+
 @pytest.mark.parametrize("change", ["owner", "authority", "running", "stop_unconfirmed"])
 def test_rejects_foreign_revoked_or_nonterminal_task(task, change):
     record = task.service.store.get_task(task.record["taskId"])

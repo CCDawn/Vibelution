@@ -157,7 +157,7 @@ ConversationView 的运行中引导（普通 Chat 与 Launcher 个人助理共�
 ### 功能
 运行中回合的紧凑状态行：一条心跳文案（阶段 + 秒数/重试进度），并叠加流连通性提示——连接断开重连、长时间无输出可停止、备用模型路由切换。让 SSE 断流与输出停滞从"无限累加的秒数"升级为可读的轻量提示。断流提示附一个「重新连接」小 ghost 按钮：自动重连卡住（keep-warm 租约异常、浏览器挂起恢复）时用户可手动触发硬重连。
 
-普通对话已有可见原生过程记录时，由现有 `ConversationProcessDisclosure` 的同一个展开入口承载「工作中 / 已工作」、工作耗时与步骤数，不再叠加常规阶段心跳。运行时的工作耗时从服务端 `turnStartedAt`（缺省为消息 timestamp）计算，跨思考与工具阶段连续增长；没有有效起点时只显示「工作中」，不拿工具耗时之和冒充总时长。落定后继续使用现有权威 work summary。`advisoriesOnly` 只抑制常规心跳，停止、可见重试、断线重连、停滞和备用路由提示仍保留。思考片段继续使用自身的展开入口与片段耗时；commentary 是用户可见进展，最终回答仍在过程记录之外。
+普通对话已有原生过程记录时，由共享 `ConversationProcessDisclosure` 的 flow 状态行承载「工作中 / 已工作」与工作耗时，不显示步骤数，不再叠加常规阶段心跳。状态行位于完整进展流之前，只提供思考摘要的独立开关；正文与工具不随思考收起。运行时的工作耗时从服务端 `turnStartedAt`（缺省为消息 timestamp）计算，跨思考与工具阶段连续增长；没有有效起点时只显示「工作中」，不拿工具耗时之和冒充总时长。落定后继续使用现有权威 work summary。`advisoriesOnly` 只抑制常规心跳，停止、可见重试、断线重连、停滞和备用路由提示仍保留。思考默认隐藏但计量生命周期保留，展开直接显示各片段正文与耗时；最终回答沿用原独立呈现。
 
 ### 适用范围
 - **适用**：直连会话活跃回合的状态占位（`ConversationView` 时间线内）；需要流连通性可见性的位置。
@@ -209,22 +209,22 @@ ConversationView 的运行中引导（普通 Chat 与 Launcher 个人助理共�
 ## ConversationProgressCommentary
 
 ### 功能
-按时间顺序呈现 assistant 的用户可见进展。长内容在运行中和结束后都默认收成三行预览；需要时可手动展开或收起。短内容保持静态，不显示多余开关。
+按时间顺序完整呈现 assistant 的用户可见进展。运行中和结束后均与最终回复复用同一 Markdown 渲染，不截断、不添加「进展」标题或独立展开开关。
 
 ### 适用范围
 - **适用**：直连会话 transcript 中 `phase=commentary` 的进展单元。
 - **不适用**：内部 reasoning、最终回答、群聊消息；这些沿用各自的呈现契约。
 
 ### 状态与边界
-- 长进展用现有 `VButton` 作为展开控制，保留运行 spinner 与 live `status` 语义。
-- 展开后的 live 文本在内部滚动区跟随流末尾，最大高度为 `min(24rem, 50vh)`；默认折叠态只展示三行。
+- 保留 live `status` 语义，正文随时间线流动，不创建局部限高滚动区。
+- 工具活动继续保留自己的紧凑详情展开；思考开关不隐藏进展或工具结果。
 - 只改变显示，不改写 transcript 原文、顺序、去重、错误或最终回答。
-- 通过稳定 `sourceItemId` 保留流式更新期间的用户选择；默认值变化不能覆盖显式展开/折叠。
+- 思考显式展开/折叠选择沿用会话展开存储，跨流式更新与结束态保留；无关进展更新不重置它。
 
 ### 实现落点
-- 渲染：`web/src/components/conversation/ConversationView.tsx` 的 `renderCodexProgressCell`
-- 样式：`ConversationView.styles.ts` 的 `codexTranscriptProgress*`
-- 默认展开策略：`conversationExpansionDefaults.ts`
+- 渲染：`conversationCodexTranscriptCells.tsx` 的 `renderCodexProgressCell`，通过 `ConversationView` 注入已有 Markdown renderer。
+- 样式：`ConversationProcessDisclosure.styles.ts` 的 `progress` / `progressBody`。
+- 宿主：`conversationCodexSurface.tsx` 与共享 flow 状态行。
 
 ## ChatToolApprovalDialog 文案密度
 
@@ -432,7 +432,7 @@ import { ConversationFollowupQueueBar } from "../../conversation/ConversationFol
 ## ChatComposerPlusMenu
 
 ### 功能
-桌面端 Chat composer 的统一扩展入口。单栏纵向分组菜单：每个分组带小节标题，动作行单行紧凑，能力开关行以内联勾选态直接展示；不出现二级面板或第三级菜单。打开后焦点落在首个可用项，↑/↓/Home/End 在可用项间循环，Escape 关闭。
+桌面端 Chat composer 的统一扩展入口。从整个输入区上沿向上打开，并与输入区等宽，最大宽度受窗口安全边距约束；独立使用时回退到 320px。两端共用 Radix 锚点和单栏纵向分组菜单：每个分组带小节标题，动作行单行紧凑，能力开关行以内联勾选态直接展示；不出现二级面板或第三级菜单。打开后焦点落在首个可用项，↑/↓/Home/End 在可用项间循环，Escape 关闭。
 
 ### 适用范围
 - **适用**：直连 Agent 会话与群聊房间的 composer 左下角扩展入口（群聊仅保留分组资料动作，能力开关整体禁用）。
@@ -1307,3 +1307,32 @@ React Virtual 限制挂载数量；当前位置变化和容器恢复时滚动到
 浏览、侧栏和更多菜单组成同一操作组。布局按钮保留 tooltip 与 `aria-pressed` / `aria-expanded`，打开态用中性浅底；侧栏的名称说明展开或收起动作。导出菜单前用细分隔线区分视图与会话操作，标签仍可独立横向滚动。桌面操作按钮为 28px；不足 700px 或粗指针时至少 44×44px，沿用已确认的标题栏与面板形状。
 
 导出复用 `ConversationShareExportButton` 的 `presentation="menu"` 和现有 Dialog，传入同一 `conversationModel.sessionId/messages`。关闭时通过 `VDialog.onCloseAutoFocus` 回到入口，切换会话由既有 key 关闭旧对话框；空消息禁用导出，CLI、文件页及不可用会话不新增导出。Finance、Companion 保留原有入口，普通 Chat 移除独立导出行；不改变导出 API、Session 或 ConversationView。
+
+
+## ConversationModelControlTrigger
+
+### 功能
+共用一个无图标、文字与下拉箭头组成的安静模型触发器。长模型名截断并保留完整 title，窄屏可收缩，键盘焦点及 aria-expanded 保留。
+
+### 适用范围
+普通 Chat 与 Launcher 的真实模型入口。
+
+### 使用方式
+组合 VButton；两个 host 只提供真实模型名称、打开状态和动作。普通 Agent 保留绑定模型参数弹层，Launcher 保留原生模型选择；不存在的推理参数不补造。不得新增 host 专属 trigger 样式。
+
+## ConversationComposerMetrics
+
+### 功能
+工具栏的单一用量图标。无可用用量时隐藏；点击向上打开详情，复用 ComposerContextRingPanel 展示上下文分组、最近调用缓存与速度，另保留本会话缓存和上报覆盖率。不同统计范围不混算。
+
+### 适用范围
+普通 Chat 与 Launcher 共用的 composer；只显示 host 注入的实际数据。
+
+### 使用方式
+组合 VButton 与 VPopover；Escape、关闭按钮返回触发器，切换会话关闭浮层。数据由原 host 注入，不新增普通 Session HTTP 请求；原生 Launcher 不借用 Chat mutation、预算或会话客户端。错误、部分上报和统计中状态按原数据明示。
+
+## Codex 共享对话表面
+
+普通单会话使用无头像及重复姓名/时间的正文流，消息身份保留在无障碍名称；复制、编辑和时间移至正文下方的悬停/键盘聚焦动作行。群聊、Inbox 与 Companion 保留其身份布局。Chat 和 Launcher 的阅读宽度、字体、输入框、菜单与模型入口均由同一组件和样式拥有；Launcher 的 route CSS 仅拥有外部窗口结构、背景与审批区约束，不覆盖对话组件的密度和几何。
+
+输入框保持原发送、停止、排队、引导、中文输入法、附件与错误处理链路；主发送/停止按钮采用正文色实心圆形，焦点边界保持轻量。菜单只列出各 host 实际支持的能力，隐私附件继续使用专用安全接口。

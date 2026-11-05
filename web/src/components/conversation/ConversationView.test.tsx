@@ -90,6 +90,7 @@ function renderConversation(
     editUserMessageDisabled?: boolean;
     composerValue?: string;
     density?: "default" | "compact";
+    composerVariant?: "compact" | "codex";
     nextStateSignals?: ChatNextStateSignalSummary[];
     userAvatarPreset?: string;
     userAvatarImageUrl?: string;
@@ -190,6 +191,7 @@ function renderConversation(
         sessionId="session-1"
         title="Session"
         phase="ready"
+        composerVariant={options.composerVariant}
         messages={messages}
         activeTurnMessage={options.activeTurnMessage}
         sessionWorkspacePath={options.sessionWorkspacePath}
@@ -932,13 +934,11 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(styles.composerRoundButton).toContain("border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)]");
     expect(styles.composerRoundButton).toContain("hover:bg-[color-mix(in_srgb,var(--vui-surface-workspace)_14%,var(--vui-control-muted-hover))]");
     expect(styles.composerRoundButton).toContain("active:border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint),var(--vui-border-subtle))]");
-    expect(styles.composerRoundButtonPrimary).toContain("!border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line-strong),transparent)]");
-    expect(styles.composerRoundButtonPrimary).toContain("hover:!bg-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-control-muted-hover))]");
-    expect(styles.composerRoundButtonPrimary).toContain("active:!bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint),var(--vui-surface-row))]");
+    expect(styles.composerRoundButtonPrimary).toContain("!bg-[var(--fg-primary)]");
+    expect(styles.composerRoundButtonPrimary).toContain("!text-[var(--vui-surface-workspace)]");
     expect(styles.sendButton).toContain("focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)]");
-    expect(styles.stopButton).toContain("!border-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line),transparent)]");
-    expect(styles.stopButton).toContain("hover:!bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash-strong),var(--vui-control-muted-hover))]");
-    expect(styles.stopButton).toContain("active:!bg-[color-mix(in_srgb,var(--state-error)_18%,var(--vui-surface-row))]");
+    expect(styles.stopButton).toContain("!bg-[var(--fg-primary)]");
+    expect(styles.stopButton).toContain("!text-[var(--vui-surface-workspace)]");
     expect(styles.composerAttachmentTray).toContain("flex flex-wrap");
     expect(styles.composerAttachmentTray).toContain("gap-2");
     expect(styles.composerAttachmentChip).toContain("overflow-hidden");
@@ -953,7 +953,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(styles.composerFieldCodex).toContain("[@media(max-height:520px)]:min-h-[84px]");
     expect(styles.composerFieldCodex).toContain("[@media(max-height:520px)]:[&_textarea]:!min-h-[44px]");
     expect(styles.composerFieldCodex).toContain("!flex !flex-col");
-    expect(styles.composerFieldCodex).toContain("[&_textarea]:!min-h-[48px]");
+    expect(styles.composerFieldCodex).toContain("[&_textarea]:!min-h-[40px]");
     expect(styles.composerFieldCodex).not.toContain("grid-rows-");
     expect(styles.inputCodex).toContain("![background:transparent]");
     expect(styles.inputCodex).toContain("!shadow-none");
@@ -971,7 +971,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(conversationComposerSource).toContain("className={styles.attachButton}");
     expect(conversationComposerSource).toContain("<ConversationTurnModelControl {...turnModelControl} />");
     expect(conversationComposerSource).toContain("<ConversationInferenceControl {...llmControl} />");
-    expect(conversationComposerSource).toContain("<ComposerContextRing");
+    expect(conversationComposerSource).toContain("<ConversationComposerMetrics");
     // Ring internals are owned by ComposerContextRing.test.tsx; keep only the
     // regressions that would silently slip back in at this call site.
     expect(ringSource).toContain('role="progressbar"');
@@ -1738,7 +1738,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(errorHtml).toContain("技能目录加载失败");
   });
 
-  it("uses the configured user avatar preset for user turns", () => {
+  it("keeps the configured user identity accessible without a repeated avatar rail", () => {
     const html = renderConversation(
       [
         {
@@ -1748,10 +1748,11 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
           timestamp: "2026-05-22T00:00:00Z",
         },
       ],
-      { userAvatarPreset: "codex", userDisplayName: "Vibe Owner" },
+      { userAvatarPreset: "codex", userDisplayName: "Vibe Owner", composerVariant: "codex" },
     );
 
-    expect(html).toContain(">C</div>");
+    expect(html).not.toContain(">C</div>");
+    expect(html).toContain('data-conversation-identity="minimal"');
     expect(html).toContain("Vibe Owner");
     expect(styles.turnAvatar).toContain("ring-[var(--vui-border-strong)]");
     expect(styles.turnAvatar).toContain("text-[var(--fg-primary)]");
@@ -1860,7 +1861,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(styles.operationText_success).toContain("!text-[var(--fg-secondary)]");
     expect(styles.operationText_failed).toContain("!text-[var(--state-error)]");
     expect(styles.operationText_warning).toContain("!text-[var(--state-warning)]");
-  });it("prefers the configured user avatar image for user turns", () => {
+  });it("preserves configured avatars on legacy conversation surfaces", () => {
     const html = renderConversation(
       [
         {
@@ -1878,6 +1879,8 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     );
 
     expect(html).toContain('src="/api/config/avatar-image/avatar-test.png"');
+    expect(html).toContain('data-conversation-identity="speaker"');
+    expect(html).toContain("Use my local avatar");
     expect(html).not.toContain(">C</div>");
   });
   it("keeps the composer writable while a running turn shows a labeled queue action and stop", () => {

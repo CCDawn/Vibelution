@@ -47,9 +47,9 @@ const conversationComposerShell = cv(
 );
 const conversationComposerCodexShell = cv(
   "composerCodex",
-  "mx-auto mb-[18px] grid w-full max-w-[760px] min-w-0 flex-none overflow-hidden rounded-[16px] border border-[color-mix(in_srgb,var(--fg-primary)_13%,transparent)] bg-[var(--vui-surface-panel)] shadow-none focus-within:border-[color-mix(in_srgb,var(--accent-cool)_60%,var(--vui-border-subtle))] focus-within:ring-2 focus-within:ring-[color-mix(in_srgb,var(--accent-cool)_18%,transparent)]",
+  "mx-auto mb-[18px] grid w-full max-w-[760px] min-w-0 flex-none overflow-hidden rounded-[16px] border border-[color-mix(in_srgb,var(--fg-primary)_13%,transparent)] bg-[var(--vui-surface-panel)] shadow-none focus-within:border-[color-mix(in_srgb,var(--fg-primary)_24%,transparent)] focus-within:ring-1 focus-within:ring-[color-mix(in_srgb,var(--fg-primary)_4%,transparent)]",
   "[[data-theme=dark]_&]:bg-[var(--vui-surface-raised)] [[data-theme=dark]_&]:border-[color-mix(in_srgb,var(--fg-primary)_16%,transparent)] [[data-theme=dark]_&]:shadow-none",
-  "[[data-theme=dark]_&]:focus-within:border-[color-mix(in_srgb,var(--accent-cool)_60%,var(--vui-border-subtle))] [[data-theme=dark]_&]:focus-within:ring-2 [[data-theme=dark]_&]:focus-within:ring-[color-mix(in_srgb,var(--accent-cool)_18%,transparent)]",
+  "[[data-theme=dark]_&]:focus-within:border-[color-mix(in_srgb,var(--fg-primary)_24%,transparent)]",
   "max-[719px]:mb-[10px] max-[719px]:rounded-[14px]",
 );
 const composerNativeFieldTargets =
@@ -59,7 +59,7 @@ const composerFieldShell = cv("composerField", composerFieldBase);
 const composerFieldCodexShell = cv(
   "composerFieldCodex",
   composerFieldBase,
-  "!flex !flex-col min-h-[104px] min-w-0 !gap-1.5 px-3.5 py-2.5 [&_textarea]:!min-h-[48px] max-[719px]:min-h-[96px] max-[719px]:px-3 max-[719px]:py-2.5 [@media(max-height:520px)]:min-h-[84px] [@media(max-height:520px)]:[&_textarea]:!min-h-[44px] [@media(max-height:520px)]:py-2",
+  "!flex !flex-col min-h-[96px] min-w-0 !gap-1.5 px-3.5 py-2.5 [&_textarea]:!min-h-[40px] max-[719px]:min-h-[96px] max-[719px]:px-3 max-[719px]:py-2.5 [@media(max-height:520px)]:min-h-[84px] [@media(max-height:520px)]:[&_textarea]:!min-h-[44px] [@media(max-height:520px)]:py-2",
 );
 const composerToolbarShell = cv("composerToolbar", "flex min-w-0 items-center gap-1 pt-0.5");
 const composerToolbarCodexShell = cv(
@@ -82,7 +82,7 @@ const composerRoundActionButton = cv(
   "composerRoundButton",
   "min-w-0 inline-grid",
   compactIconButtonSize,
-  "place-items-center rounded-full border p-0",
+  "place-items-center !rounded-full border p-0",
   composerIconOnlySlot,
   composerQuietActionState,
 );
@@ -91,12 +91,12 @@ const composerPrimaryActionButton = cv(
   compactIconButtonSize,
   "p-0",
   composerIconOnlySlot,
-  "!border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line-strong),transparent)] !bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-strong),var(--vui-surface-row))] !text-[var(--accent-cool)] hover:!border-[color-mix(in_srgb,var(--accent-cool)_56%,transparent)] hover:!bg-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-control-muted-hover))] hover:!text-[var(--accent-cool)] focus-visible:!ring-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line-strong),transparent)] active:!border-[color-mix(in_srgb,var(--accent-cool)_62%,transparent)] active:!bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint),var(--vui-surface-row))] disabled:hover:!border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] disabled:hover:!bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] disabled:hover:!text-[var(--fg-tertiary)]",
+  "!border-[var(--fg-primary)] !bg-[var(--fg-primary)] !text-[var(--vui-surface-workspace)] shadow-none hover:!bg-[color-mix(in_srgb,var(--fg-primary)_85%,var(--vui-surface-workspace))] disabled:!border-transparent disabled:!bg-[var(--vui-control-muted)] disabled:!text-[var(--fg-tertiary)]",
 );
 const composerSendActionButton = cv(
   "sendButton",
   compactIconButtonSize,
-  "inline-grid place-items-center rounded-full border p-0",
+  "inline-grid place-items-center !rounded-full border p-0",
   composerIconOnlySlot,
   "!border-[var(--fg-primary)] !bg-[var(--fg-primary)] !text-[var(--vui-surface-workspace)] shadow-none transition-colors duration-150 hover:translate-y-0 hover:!border-[color-mix(in_srgb,var(--fg-primary)_82%,var(--accent-cool))] hover:!bg-[color-mix(in_srgb,var(--fg-primary)_82%,var(--accent-cool))] hover:!text-[var(--vui-surface-workspace)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--vui-surface-panel)] active:!bg-[color-mix(in_srgb,var(--fg-primary)_72%,var(--accent-cool))] disabled:!border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] disabled:!bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] disabled:!text-[var(--fg-tertiary)] disabled:hover:!border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] disabled:hover:!bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] disabled:hover:!text-[var(--fg-tertiary)]",
 );
@@ -202,6 +202,8 @@ const styles: Record<string, string> = {
     `vui-components-conversationview assistantTurn ${assistantTranscriptGrid} [&_.turnAvatar]:col-start-1 [&_.turnAvatar]:row-start-1 [&_.turnContent]:col-start-2 [&_.turnContent]:row-start-1 [&_.turnContent]:w-full [&_.turnContent]:p-0 [&_.turnContent]:border-l-0`,
   assistantTurnContinuation:
     "vui-components-conversationview assistantTurnContinuation min-w-0 [&_.turnContent]:w-full [&_.turnContent]:gap-1",
+  turnWithoutIdentity:
+    "vui-components-conversationview turnWithoutIdentity !grid-cols-[minmax(0,1fr)] !gap-x-0 [&_.turnContent]:!col-start-1 [&_.turnContent]:!row-start-1 [&_.turnFooter]:justify-start [&.userTurn_.turnFooter]:justify-end",
   companionTypingTurn:
     `vui-components-conversationview companionTypingTurn ${assistantTranscriptGrid}`,
   companionTypingAvatar:
@@ -1165,7 +1167,8 @@ backToBottomButton:
   composerToolbarStart: "vui-components-conversationview composerToolbarStart flex min-w-0 items-center gap-1.5",
   // End cluster: inference control may shrink; send/stop stays shrink-0 and fully visible.
   composerToolbarEnd: "vui-components-conversationview composerToolbarEnd ml-auto flex min-w-0 max-w-full items-center justify-end gap-1.5 [&_[data-testid=conversation-inference-control]]:min-w-0 [&_[data-testid=conversation-inference-control]]:max-w-full",
-  inputCodex: `vui-components-conversationview inputCodex min-h-[48px] max-h-[240px] w-full flex-1 resize-none overflow-y-auto !border-0 !p-0 [font-size:var(--vui-type-chat-size)] font-[var(--vui-weight-regular)] leading-[var(--vui-type-chat-line)] text-[var(--fg-primary)] placeholder:text-[var(--fg-tertiary)] focus:!ring-0 ${composerFlatTextarea}`,
+  // The composer shell owns focus chrome; a zero-width ring still paints its offset.
+  inputCodex: `vui-components-conversationview inputCodex min-h-[40px] !max-h-[240px] w-full flex-none !resize-none overflow-y-auto !border-0 !p-0 ![font-size:var(--vui-font-xs)] font-[var(--vui-weight-regular)] !leading-[1.8] text-[var(--fg-primary)] placeholder:text-[var(--fg-tertiary)] focus:!ring-0 focus:!ring-offset-0 ${composerFlatTextarea}`,
   sessionMeta:
     "vui-components-conversationview sessionMeta min-w-0 flex flex-wrap items-center gap-1.5",
   statPill:
@@ -1200,7 +1203,7 @@ backToBottomButton:
   statusSpinner:
     "vui-components-conversationview statusSpinner min-w-0 animate-spin",
   stopButton:
-    "vui-components-conversationview stopButton min-w-0 !border-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line),transparent)] !bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash),var(--vui-surface-row))] !text-[var(--state-error)] hover:!border-[color-mix(in_srgb,var(--state-error)_48%,transparent)] hover:!bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash-strong),var(--vui-control-muted-hover))] hover:!text-[var(--state-error)] focus-visible:!ring-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line),transparent)] active:!border-[color-mix(in_srgb,var(--state-error)_58%,transparent)] active:!bg-[color-mix(in_srgb,var(--state-error)_18%,var(--vui-surface-row))] disabled:hover:!border-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-line),transparent)] disabled:hover:!bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash),var(--vui-surface-row))] disabled:hover:!text-[var(--state-error)]",
+    "vui-components-conversationview stopButton min-w-0 !border-[var(--fg-primary)] !bg-[var(--fg-primary)] !text-[var(--vui-surface-workspace)] shadow-none hover:!bg-[color-mix(in_srgb,var(--fg-primary)_85%,var(--vui-surface-workspace))] focus-visible:!ring-[var(--fg-primary)] disabled:opacity-45",
   streamingCodeBlock:
     "vui-components-conversationview streamingCodeBlock min-w-0 font-mono text-vui-xs",
   streamingResponseText:

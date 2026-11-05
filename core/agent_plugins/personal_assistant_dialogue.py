@@ -74,7 +74,7 @@ class PersonalAssistantDialogueRuntimeExtension:
             instructions = [
                 _SPEAKING[settings["speakingInitiative"]],
                 _QUESTIONS[settings["questionInitiative"]],
-                "高风险操作仍须按现有规则取得确认，不得因提问偏好跳过确认。",
+                *personal.PLATFORM_OPERATION_GUIDANCE,
                 _PROPOSALS[settings["preferenceProposalMode"]],
             ]
         except Exception:  # noqa: BLE001 - optional prompt provider fails closed

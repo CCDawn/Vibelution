@@ -4,6 +4,7 @@ import ts from "typescript";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { acquireAssistantLifecycleLease, combineAssistantActiveWork } from "../src/assistant/lifecycleGuard.js";
 import { DesktopLifecycleCoordinator } from "../src/lifecycle/desktopLifecycleCoordinator.js";
+import { hideDesktopShellWindowsForExit } from "../src/shutdown/exitWindowPresentation.js";
 import { createDesktopShellExitDeadline, executeApprovedDesktopShellShutdown, withDesktopShellExitTimeout } from "../src/shutdown/desktopShellExit.js";
 import { decideShutdown, executeShutdownAuthorizationBoundary, resolveQuitActiveWorkStatus, type ActiveWorkStatus, type ShutdownDecision } from "../src/shutdown/shutdownCoordinator.js";
 import { projectBranchInstanceStates } from "../src/state/launcherStateStore.js";
@@ -22,6 +23,18 @@ const declarations = names.map(name => {
 
 function harness() {
   const workspace: ActiveWorkStatus = { state: "idle", message: "" };
+  const shellWindows = [true, true, false].map(visible => {
+    const state = { visible, destroyed: false };
+    return {
+      state,
+      isDestroyed: () => state.destroyed,
+      isVisible: () => state.visible,
+      isMinimized: () => false,
+      hide: vi.fn(() => { state.visible = false; }),
+      showInactive: vi.fn(() => { state.visible = true; }),
+      minimize: vi.fn(),
+    };
+  });
   let hostState = "ready";
   const release = vi.fn(async () => undefined);
   const commit = vi.fn();
@@ -65,6 +78,8 @@ function harness() {
     createDesktopShellExitDeadline, withDesktopShellExitTimeout,
     executeShutdownAuthorizationBoundary, decideShutdown, resolveQuitActiveWorkStatus,
     combineAssistantActiveWork, executeApprovedDesktopShellShutdown,
+    hideDesktopShellWindowsForExit,
+    BrowserWindow: { getAllWindows: () => shellWindows },
     resolveDesktopActionLoopContext: async () => ({}),
     fetchLauncherActiveWorkStatus: async () => workspace,
     localQuitActiveWorkStatus: () => workspace,
@@ -100,7 +115,7 @@ function harness() {
     runTrayStopAll: () => Promise<void>;
     captureShutdownIsolatedInstanceIds: (deadline: ReturnType<typeof createDesktopShellExitDeadline>) => Promise<string[]>;
   };
-  return { context, workspace, release, commit, acquire, stopMain, stopIsolated, closeSession, closeWindow, dialog, quit,
+  return { context, workspace, shellWindows, release, commit, acquire, stopMain, stopIsolated, closeSession, closeWindow, dialog, quit,
     exit: (operatorRequested = true) => actions.requestDesktopShellExit("desktop_shell_quit", operatorRequested),
     capture: async () => {
       const deadline = createDesktopShellExitDeadline();
@@ -185,6 +200,81 @@ describe("actual native reminder notification", () => {
 });
 
 describe("actual Electron main shutdown functions", () => {
+  it("hides the shell before preparing shutdown and keeps it hidden while backend work drains", async () => {
+    const h = harness();
+    let finishIsolated!: () => void;
+    h.acquire.mockImplementation(async () => {
+      expect(h.shellWindows.map(window => window.state.visible)).toEqual([false, false, false]);
+      return { release: h.release, commit: h.commit };
+    });
+    h.stopIsolated.mockImplementation(() => new Promise(resolve => { finishIsolated = resolve; }));
+    const exiting = h.exit();
+    await vi.waitFor(() => expect(h.stopIsolated).toHaveBeenCalledOnce());
+    expect(h.shellWindows.slice(0, 2).every(window => window.hide.mock.calls.length === 1)).toBe(true);
+    expect(h.shellWindows[2].hide).not.toHaveBeenCalled();
+    expect(h.quit).not.toHaveBeenCalled();
+    finishIsolated();
+    await exiting;
+    expect(h.quit).toHaveBeenCalledOnce();
+    expect(h.shellWindows.every(window => window.showInactive.mock.calls.length === 0)).toBe(true);
+  });
+
+  it("keeps windows visible while authorization is pending and when the operator cancels", async () => {
+    const h = harness();
+    let finishProbe!: (status: ActiveWorkStatus) => void;
+    h.context.fetchLauncherActiveWorkStatus = () => new Promise(resolve => { finishProbe = resolve; });
+    const exiting = h.exit();
+    await vi.waitFor(() => expect(finishProbe).toBeTypeOf("function"));
+    expect(h.shellWindows.every(window => window.hide.mock.calls.length === 0)).toBe(true);
+    finishProbe({ state: "active", count: 1, message: "active task" });
+    expect((await exiting).reason).toBe("operator_cancelled");
+    expect(h.shellWindows.map(window => window.state.visible)).toEqual([true, true, false]);
+    expect(h.shellWindows.every(window => window.hide.mock.calls.length === 0)).toBe(true);
+    expect(h.quit).not.toHaveBeenCalled();
+  });
+
+  it("does not hide windows for an automatic exit refused by active work", async () => {
+    const h = harness();
+    h.workspace.state = "active";
+    expect((await h.exit(false)).allowed).toBe(false);
+    expect(h.shellWindows.every(window => window.hide.mock.calls.length === 0)).toBe(true);
+    expect(h.dialog).not.toHaveBeenCalled();
+  });
+
+  it("restores surviving originally visible windows after shutdown fails", async () => {
+    const h = harness();
+    h.stopIsolated.mockImplementation(async () => {
+      expect(h.shellWindows[0].state.visible).toBe(false);
+      h.shellWindows[1].state.destroyed = true;
+      throw new Error("isolated runtime did not stop");
+    });
+    await h.exit();
+    expect(h.shellWindows[0].state.visible).toBe(true);
+    expect(h.shellWindows[0].showInactive).toHaveBeenCalledOnce();
+    expect(h.shellWindows[1].showInactive).not.toHaveBeenCalled();
+    expect(h.shellWindows[2].showInactive).not.toHaveBeenCalled();
+    expect(h.quit).not.toHaveBeenCalled();
+  });
+
+  it("restores windows at the exit deadline even if an assistant stop has not settled", async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    h.acquire.mockRejectedValue(new Error("ASSISTANT_LIFECYCLE_BUSY"));
+    let finishStop!: () => void;
+    h.context.stopLauncherAssistant.mockImplementation(() => new Promise(resolve => { finishStop = resolve; }));
+    const exiting = h.exit();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(h.shellWindows.map(window => window.state.visible)).toEqual([false, false, false]);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await exiting;
+    expect(h.shellWindows.map(window => window.state.visible)).toEqual([true, true, false]);
+    expect(h.quit).not.toHaveBeenCalled();
+    finishStop();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.shellWindows[0].showInactive).toHaveBeenCalledOnce();
+    expect(h.shellWindows[0].state.visible).toBe(true);
+  });
+
   it("skips full workspace and cleanup refresh when fresh inventories prove every isolated row closed", async () => {
     const h = harness();
     h.context.orchestrateLauncherApi.mockResolvedValue({ items: [

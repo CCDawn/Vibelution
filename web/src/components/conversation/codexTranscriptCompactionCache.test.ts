@@ -35,6 +35,27 @@ function userCell(messageId: string) {
 }
 
 describe("codex transcript compaction cache", () => {
+  it("clears a populated timeline and then builds a different history without stale cells", () => {
+    const populated = compactCodexTranscriptCellsIncrementally(null, [
+      group("old-user", [userCell("old-user")], true),
+      group("old-assistant", [cell("old-answer", "old-assistant")]),
+    ]);
+
+    const cleared = compactCodexTranscriptCellsIncrementally(populated, []);
+    expect(cleared.groups).toEqual([]);
+    expect(cleared.cellsByMessageId.size).toBe(0);
+    expect(compactCodexTranscriptCellsIncrementally(cleared, [])).toBe(cleared);
+
+    const newGroups = [
+      group("new-user", [userCell("new-user")], true),
+      group("new-assistant", [cell("new-answer", "new-assistant")]),
+    ];
+    const next = compactCodexTranscriptCellsIncrementally(cleared, newGroups);
+    expect([...next.cellsByMessageId.keys()]).toEqual(["new-user", "new-assistant"]);
+    expect(next.cellsByMessageId).toEqual(compactCodexTranscriptCellsAcrossMessages(newGroups));
+    expect(next.cellsByMessageId.has("old-assistant")).toBe(false);
+  });
+
   it("runs a full pass for the first frame", () => {
     const groups = [
       group("u1", [userCell("u1")], true),

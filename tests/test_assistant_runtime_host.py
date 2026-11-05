@@ -53,6 +53,149 @@ class Native:
         return {"sessionId": "native-session", "requestId": request_id, "decision": decision}
 
 
+class QueuedNative(Native):
+    def __init__(self):
+        self.calls = []
+        self.rows = [{"id": "queued-one", "content": "next", "status": "paused", "kind": "user",
+                      "attachments": [{"artifactId": "native-file"}], "references": [], "nativeExtra": {"kept": True}}]
+
+    def update_queued_turn(self, queued_turn_id, **kwargs):
+        self.calls.append(("update", queued_turn_id, kwargs))
+        return {"queuedTurns": self.rows}
+
+    def remove_queued_turn(self, queued_turn_id):
+        self.calls.append(("remove", queued_turn_id))
+        return {"queuedTurns": self.rows}
+
+    def send_now_queued_turn(self, queued_turn_id, **kwargs):
+        self.calls.append(("send-now", queued_turn_id, kwargs))
+        return {"queuedTurns": self.rows, "stopRequested": True}
+
+
+def test_host_queue_commands_forward_only_to_the_fixed_native_owner_and_advertise_support():
+    native = QueuedNative()
+    with TestClient(create_app(native=native, token="private-test-token"), base_url="http://127.0.0.1",
+                    headers={"Authorization": "Bearer private-test-token"}) as client:
+        assert client.get("/api/assistant").json()["followupQueueVersion"] == 1
+        result = client.post("/api/assistant/queued-turns/update", json={"queuedTurnId": "queued-one",
+                             "content": "edited", "position": 2, "status": "paused"})
+        assert result.status_code == 200 and result.json() == {"queuedTurns": native.rows}
+        result = client.post("/api/assistant/queued-turns/remove", json={"queuedTurnId": "queued-one"})
+        assert result.status_code == 200 and result.json() == {"queuedTurns": native.rows}
+        result = client.post("/api/assistant/queued-turns/send-now", json={"queuedTurnId": "queued-one",
+                                                                                    "expectedTurnId": "observed-turn"})
+        assert result.status_code == 202 and result.json() == {"queuedTurns": native.rows, "stopRequested": True}
+        client.post("/api/assistant/queued-turns/send-now", json={"queuedTurnId": "queued-one"})
+    assert native.calls[:3] == [("update", "queued-one", {"content": "edited", "position": 2, "status": "paused"}),
+                                ("remove", "queued-one"),
+                                ("send-now", "queued-one", {"expected_turn_id": "observed-turn"})]
+    assert native.calls[3][:2] == ("send-now", "queued-one")
+    assert native.calls[3][2]["expected_turn_id"].startswith("assistant-idle-")
+
+
+def test_host_does_not_advertise_queue_writes_when_any_native_operation_is_missing():
+    native = QueuedNative()
+    native.send_now_queued_turn = None
+    with TestClient(create_app(native=native, token="private-test-token"), base_url="http://127.0.0.1",
+                    headers={"Authorization": "Bearer private-test-token"}) as client:
+        assert "followupQueueVersion" not in client.get("/api/assistant").json()
+
+
+@pytest.mark.parametrize("path", ["update", "remove", "send-now"])
+def test_host_queue_commands_keep_private_authority_and_reject_extra_identity(path):
+    native = QueuedNative()
+    body = {"queuedTurnId": "queued-one"}
+    url = f"/api/assistant/queued-turns/{path}"
+    headers = {"Authorization": "Bearer private-test-token"}
+    with TestClient(create_app(native=native, token="private-test-token"), base_url="http://127.0.0.1") as client:
+        assert client.post(url, json=body).status_code == 401
+        assert client.post(url, json=body, headers={**headers, "Origin": "https://evil.invalid"}).status_code == 403
+        for identity in ["sessionId", "agentId", "projectRoot", "scope", "url"]:
+            assert client.post(url, json={**body, identity: "foreign"}, headers=headers).status_code == 422
+        assert client.post(url + "?sessionId=foreign", json=body, headers=headers).status_code == 422
+        for invalid in [None, "", "../foreign", "queued-one\n", "q" * 161, 7]:
+            assert client.post(url, json={"queuedTurnId": invalid}, headers=headers).status_code == 422
+    assert not native.calls
+
+
+@pytest.mark.parametrize("path,fields", [
+    ("update", {"content": None}), ("update", {"content": 3}), ("update", {"content": "x" * 64001}),
+    ("update", {"position": True}), ("update", {"position": "1"}), ("update", {"position": 0}),
+    ("update", {"position": 1.5}), ("update", {"position": 2**53}), ("update", {"position": None}),
+    ("update", {"status": "starting"}), ("update", {"status": None}),
+    ("send-now", {"expectedTurnId": None}), ("send-now", {"expectedTurnId": ""}),
+    ("send-now", {"expectedTurnId": 3}), ("send-now", {"expectedTurnId": "../foreign"}),
+    ("send-now", {"expectedTurnId": "turn\n"}), ("send-now", {"expectedTurnId": "t" * 161}),
+    ("remove", {"content": "injected"}), ("send-now", {"status": "queued"}),
+])
+def test_host_queue_field_validation_happens_before_native_calls(path, fields):
+    native = QueuedNative()
+    with TestClient(create_app(native=native, token="private-test-token"), base_url="http://127.0.0.1",
+                    headers={"Authorization": "Bearer private-test-token"}) as client:
+        result = client.post(f"/api/assistant/queued-turns/{path}", json={"queuedTurnId": "queued-one", **fields})
+        assert result.status_code == 422
+    assert not native.calls
+
+
+def test_queue_native_conflict_is_bounded_without_leaking_private_error():
+    from core.assistant_runtime.native import AssistantSessionError
+
+    class ConflictNative(QueuedNative):
+        def send_now_queued_turn(self, *args, **kwargs):
+            raise AssistantSessionError("SESSION_CONFLICT")
+
+    with TestClient(create_app(native=ConflictNative(), token="private-test-token"), base_url="http://127.0.0.1",
+                    headers={"Authorization": "Bearer private-test-token"}) as client:
+        result = client.post("/api/assistant/queued-turns/send-now", json={"queuedTurnId": "queued-one"})
+        assert result.status_code == 409 and result.json()["detail"]["code"] == "SESSION_CONFLICT"
+
+
+def test_idle_send_now_has_no_turn_scoped_cancellation_or_history_stop_boundary():
+    class Owner(QueuedNative):
+        def get_detail(self):
+            return {"id": "native-session", "activeTurnId": None}
+
+    class HistoryControl:
+        def stop_native_turn(self, *args, **kwargs):
+            pytest.fail("idle send-now has no exact Turn to stop in the history boundary")
+
+        def close(self):
+            pass
+
+    class MainControl:
+        appearance_enabled = True
+        initial_migration_enabled = True
+
+        def begin_initial_fence(self, *args):
+            pytest.fail("idle send-now must not fence an unspecified Turn")
+
+        def cancel_image_imports(self, *args):
+            pytest.fail("idle send-now must not cancel unrelated image waiters")
+
+        def cancel_history_imports(self, *args):
+            pytest.fail("idle send-now must not cancel unrelated history waiters")
+
+        def close(self):
+            pass
+
+    native = Owner()
+    with TestClient(create_app(native=native, token="private-test-token", main_control=MainControl(),
+                              history_control=HistoryControl()), base_url="http://127.0.0.1",
+                    headers={"Authorization": "Bearer private-test-token"}) as client:
+        for _ in range(2):
+            result = client.post("/api/assistant/queued-turns/send-now", json={"queuedTurnId": "queued-one"})
+            assert result.status_code == 202 and result.json()["stopRequested"] is True
+    fences = []
+    for operation, queued_turn_id, kwargs in native.calls:
+        assert operation == "send-now" and queued_turn_id == "queued-one"
+        fence = kwargs["expected_turn_id"]
+        assert fence.startswith("assistant-idle-")
+        suffix = fence.removeprefix("assistant-idle-")
+        assert len(suffix) == 32 and all(ch in "0123456789abcdef" for ch in suffix)
+        fences.append(fence)
+    assert len(fences) == 2 and fences[0] != fences[1]
+
+
 def test_host_denies_missing_credentials_origins_and_wrong_host():
     app = create_app(native=Native(), token="private-test-token")
     with TestClient(app, base_url="http://127.0.0.1") as client:

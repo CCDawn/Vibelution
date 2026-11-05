@@ -126,6 +126,85 @@ def test_native_archive_real_transaction_seals_direct_and_child(configured_env):
         assert detail["readOnly"] is True and detail["archiveState"]["source"] == "agent_archive"
 
 
+def test_archive_eligibility_does_not_invert_team_agent_lock_order(configured_env, monkeypatch):
+    import threading
+    from core.web.services.external_management.archive_state import ArchiveState
+    from core.web.services.external_management.native import NativeAgentGateway
+    from core.web.services.team import team_store
+    current, _ = _ordinary_with_child(configured_env)
+    directory = configured_env["directory"]
+    team_service = team_store._service()
+    team_locked, reading_roster = threading.Event(), threading.Event()
+    acquired = []
+    original = ArchiveState.team_member_ids
+
+    def read_roster(state):
+        reading_roster.set()
+        return original(state)
+
+    def team_writer():
+        with team_service._TEAM_LOCK:
+            team_locked.set()
+            if reading_roster.wait(3):
+                owned = directory._STATE_LOCK.acquire(timeout=1)
+                acquired.append(owned)
+                if owned:
+                    directory._STATE_LOCK.release()
+
+    monkeypatch.setattr(ArchiveState, "team_member_ids", read_roster)
+    writer = threading.Thread(target=team_writer)
+    writer.start()
+    assert team_locked.wait(3)
+    result = NativeAgentGateway(configured_env["root"]).read_archive_eligibility(current["agentId"])
+    writer.join(timeout=3)
+    assert not writer.is_alive() and acquired == [True]
+    assert result == {"eligible": True, "reason": "ordinary_agent"}
+
+
+@pytest.mark.parametrize("source", ["user", "session_repair", "deployment_bootstrap", "api_agents"])
+def test_legacy_public_agent_empty_role_is_archivable_without_identity_repair(configured_env, source):
+    import json
+    from core.web.services.external_management.native import NativeAgentGateway
+    current, child = _ordinary_with_child(configured_env)
+    directory, sessions = configured_env["directory"], configured_env["sessions"]
+    state = directory.load_state()
+    raw = directory._find_agent(state, current["agentId"])
+    raw.update(roleKey="", createdBy=source)
+    raw["metadata"].update(conversationIndexKind="personal_agent", conversationIndexVisibility="user_visible")
+    registry = directory.registry_path()
+    registry.write_text(json.dumps(state), encoding="utf-8")
+    before = registry.read_bytes()
+    gateway = NativeAgentGateway(configured_env["root"])
+    assert gateway.read_archive_eligibility(current["agentId"]) == {"eligible": True, "reason": "ordinary_agent"}
+    assert registry.read_bytes() == before
+    result = gateway.archive({"agent_id": current["agentId"], "expected_config_revision": current["configRevision"]}, {})
+    assert result["status"] == "archived"
+    assert directory._find_agent(directory.load_state(), current["agentId"])["roleKey"] == ""
+    for session_id in (current["directSessionId"], child["id"]):
+        assert sessions.get_session_detail(session_id)["readOnly"] is True
+
+
+@pytest.mark.parametrize("marker", [{"protected": True}, {"teamId": "team"}, {"virtualHumanCompanion": True},
+    {"systemRole": "internal"}, {"conversationIndexKind": "hidden"}, {"conversationIndexVisibility": ""}])
+def test_legacy_empty_role_does_not_bypass_private_identity(configured_env, marker):
+    import json
+    from core.web.services.external_management.native import NativeAgentGateway
+    current, _child = _ordinary_with_child(configured_env)
+    directory = configured_env["directory"]
+    state = directory.load_state()
+    raw = directory._find_agent(state, current["agentId"])
+    raw["roleKey"] = ""
+    raw["metadata"].update(conversationIndexKind="personal_agent", conversationIndexVisibility="user_visible")
+    raw["metadata"].update(marker)
+    directory.registry_path().write_text(json.dumps(state), encoding="utf-8")
+    gateway = NativeAgentGateway(configured_env["root"])
+    assert gateway.read_archive_eligibility(current["agentId"])["eligible"] is False
+    with pytest.raises(ManagementError) as rejected:
+        gateway.archive({"agent_id": current["agentId"], "expected_config_revision": current["configRevision"]}, {})
+    assert rejected.value.code == "AGENT_PROTECTED"
+    assert directory._find_agent(directory.load_state(), current["agentId"])["status"] == "active"
+
+
 @pytest.mark.parametrize("denial", ["stale", "protected", "busy"])
 def test_native_archive_rejections_preserve_agent_and_sessions(configured_env, denial):
     from core.web.services import agent_directory_service as directory, session_service as sessions
@@ -146,7 +225,7 @@ def test_native_archive_rejections_preserve_agent_and_sessions(configured_env, d
         assert not sessions.get_session_detail(session_id).get("readOnly")
 
 
-@pytest.mark.parametrize("patch", [{"roleKey": "personal_assistant"}, {"roleKey": ""}, {"kind": "ephemeral"},
+@pytest.mark.parametrize("patch", [{"roleKey": "personal_assistant"}, {"roleKey": 42}, {"roleKey": None}, {"kind": "ephemeral"},
     {"configRevision": True}, {"conversationIndexKind": "hidden"}, {"conversationIndexKind": 42},
     {"metadata": {"virtualHumanCompanion": True}}, {"metadata": {"teamId": "team"}},
     {"metadata": {"systemRole": "internal"}}, {"metadata": {"hiddenFromIndex": True}}])

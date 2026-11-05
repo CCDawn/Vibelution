@@ -14,6 +14,29 @@ from core.external_agent.backend_client import (
 )
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize("eligibility", [None, {"eligible": True, "reason": "ordinary_agent"},
+    {"eligible": False, "reason": "protected_agent"}, {"eligible": "yes", "reason": "ordinary_agent"}])
+async def test_management_agent_archive_eligibility_is_optional_and_validated(tmp_path, monkeypatch, eligibility):
+    client = ManagedAgentBackendClient(tmp_path)
+    agent = {"agentId": "legacy-agent", "directSessionId": "session", "displayName": "Legacy",
+             "configRevision": 3, "updatedAt": "now", "modelId": "model", "avatarImagePath": ""}
+    async def grant(**_kwargs):
+        return {"subjectId": "subject", "capability": "private-capability"}
+    async def request(*_args, **_kwargs):
+        return {"agent": agent, **({"archiveEligibility": eligibility} if eligibility is not None else {})}
+    monkeypatch.setattr(client, "_management_grant", grant)
+    monkeypatch.setattr(client, "_request_json", request)
+    if eligibility is not None and eligibility["eligible"] == "yes":
+        with pytest.raises(BackendClientError) as invalid:
+            await client.management_agent(agent_id="legacy-agent")
+        assert invalid.value.code == "BACKEND_PROTOCOL_ERROR"
+    else:
+        result = await client.management_agent(agent_id="legacy-agent")
+        assert result["agent"]["agentId"] == "legacy-agent"
+        assert result.get("archiveEligibility") == eligibility
+
+
 @pytest.fixture
 def default_httpx_transport(tmp_path, monkeypatch):
     """Exercise real HTTPX construction while replacing only network I/O."""

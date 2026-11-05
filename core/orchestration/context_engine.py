@@ -61,7 +61,7 @@ _STATIC_CONTEXT_FREEZE_MAX_ENTRIES = 512
 # 0 = freeze for the whole session lifetime. A positive value would refresh a
 # segment after the TTL elapses (one extra provider cache rebuild per refresh).
 _STATIC_CONTEXT_FREEZE_TTL_SECONDS = 0.0
-_STATIC_CONTEXT_FREEZE_CACHE: "OrderedDict[tuple[str, str, str], dict[str, Any]]" = OrderedDict()
+_STATIC_CONTEXT_FREEZE_CACHE: "OrderedDict[tuple[str, ...], dict[str, Any]]" = OrderedDict()
 
 
 class AgentContextInterrupted(RuntimeError):
@@ -283,6 +283,7 @@ def _session_frozen_context_block(
     session_id: str,
     produce: Any,
     ttl_seconds: float | None = None,
+    version: str = "",
 ) -> tuple[str, bool]:
     """Return session-frozen bytes for a cache-prefix context segment.
 
@@ -302,6 +303,8 @@ def _session_frozen_context_block(
         _STATIC_CONTEXT_FREEZE_TTL_SECONDS if ttl_seconds is None else float(ttl_seconds)
     )
     cache_key = (normalized_session, normalized_agent, normalized_key)
+    if version:
+        cache_key += (str(version),)
     now = time.perf_counter()
     with _STATIC_CONTEXT_FREEZE_LOCK:
         cached = _STATIC_CONTEXT_FREEZE_CACHE.get(cache_key)
@@ -521,6 +524,7 @@ def build_agent_context(
         agent_id=normalized_agent_id,
         session_id=session_id,
         produce=_produce_agent_static_block,
+        version=str(agent.get("_acceptedPromptConfigHash") or ""),
     )
     timings["agentRuntimeStaticFrozen"] = bool(agent_static_frozen)
     # The dynamic half (episodes / group events / inbox / roster) stays

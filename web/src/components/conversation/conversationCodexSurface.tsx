@@ -27,7 +27,7 @@ import {
   conversationToolPresentationLabel,
 } from "./conversationToolPresentation";
 import { ConversationToolActivity } from "./ConversationToolActivity";
-import { ConversationProcessDisclosure, processState } from "./ConversationProcessDisclosure";
+import { ConversationProcessDisclosure } from "./ConversationProcessDisclosure";
 import { ConversationFileDeliveries } from "./ConversationFileDeliveries";
 import type { ConversationToolApprovalSurface } from "./conversationViewTypes";
 import type { AgentMessageTimelineRowIdentity } from "./agentMessageTimelineRows";
@@ -129,7 +129,7 @@ export function createConversationCodexSurface({
   function renderCodexTranscriptCell(
     message: ConversationMessage,
     cell: CodexTranscriptCell,
-    options?: { attachToolApproval?: boolean },
+    options?: { attachToolApproval?: boolean; reasoningPresentation?: "flow"; reasoningExpanded?: boolean },
   ) {
     if (cell.kind === "assistant_markdown") {
       const text = cell.text?.trim() ?? "";
@@ -162,7 +162,10 @@ export function createConversationCodexSurface({
       );
     }
     if (cell.kind === "reasoning_summary") {
-      return renderCodexReasoningSummaryCell(message, cell);
+      return renderCodexReasoningSummaryCell(message, cell, {
+        presentation: options?.reasoningPresentation,
+        expanded: options?.reasoningExpanded,
+      });
     }
     if (cell.kind === "error_notice") {
       const iterationLimitNotice = !cell.operationIds?.length ? resolveIterationLimitNotice(cell.diagnosticSummary, lang) : "";
@@ -398,7 +401,7 @@ export function createConversationCodexSurface({
     }
     const renderTimelineNodes = (
       timelineCells: CodexTranscriptCell[],
-      options?: { attachToolApproval?: boolean },
+      options?: { attachToolApproval?: boolean; reasoningPresentation?: "flow"; reasoningExpanded?: boolean },
     ) => {
       const nodes = buildCodexTranscriptTimelineNodes(timelineCells);
       const canAttach = Boolean(options?.attachToolApproval && toolApproval && !toolApprovalConsumedRef.current);
@@ -423,7 +426,25 @@ export function createConversationCodexSurface({
         : "";
       return nodes.map((node) => {
         if (node.kind !== "tool_activity") {
-          return renderCodexTranscriptCell(message, node.cell, { attachToolApproval: false });
+          if (node.cell.kind === "reasoning_summary" && options?.reasoningPresentation === "flow") {
+            // Keep the first-live thought clock mounted while hidden. Expansion
+            // controls visibility and ticking, never its measurement window.
+            return (
+              <div
+                key={`reasoning:${node.cell.sourceItemId || node.cell.id}`}
+                data-codex-flow-thought="true"
+                hidden={!options.reasoningExpanded}
+                inert={!options.reasoningExpanded}
+                aria-hidden={!options.reasoningExpanded}
+              >
+                {renderCodexTranscriptCell(message, node.cell, options)}
+              </div>
+            );
+          }
+          return renderCodexTranscriptCell(message, node.cell, {
+            attachToolApproval: false,
+            reasoningPresentation: options?.reasoningPresentation,
+          });
         }
         const attachApproval = Boolean(canAttach && node.activity.id === matchedId);
         if (attachApproval) {
@@ -443,9 +464,7 @@ export function createConversationCodexSurface({
         );
       });
     };
-    // ZCode AssistantHistoryStatus parity: one status trigger per settled
-    // assistant turn, placed ahead of the transcript it summarizes, so a turn
-    // never splits its worked time across two places.
+    // One quiet work summary precedes the process flow for each settled turn.
     const transcriptWorkSummary = message.role === "assistant"
       && message.metadata?.guidanceSegmentIsLast !== false
       && !isCompanionMode
@@ -463,25 +482,23 @@ export function createConversationCodexSurface({
       >
         {hasWorkDisclosure ? (
           <ConversationProcessDisclosure
+            presentation="flow"
             cells={processCells}
             language={lang === "en" ? "en" : "zh"}
             messageOrder={activeTimelineMessageOrder}
             onUserToggle={handleProcessDisclosureUserToggle}
-            expanded={getExpansionState(message.id, "process", processState(
-              processCells,
-              activeTimelineMessageOrder,
-              assistantTurnIsStreaming(message),
-            ) === "running")}
+            expanded={getExpansionState(message.id, "process", false)}
             onExpandedChange={(expanded) => setExpansionState(message.id, "process", expanded)}
             turnStreaming={assistantTurnIsStreaming(message)}
             turnStartedAt={(message as ConversationMessage & { turnStartedAt?: string }).turnStartedAt || message.timestamp}
             activeStage={phase === "stopping" ? "stopping" : resolveActiveTurnProgressStage(message)}
             workSummary={transcriptWorkSummary}
           >
-            {/* Approvals stay composer-adjacent only (toolApprovalFallback); never re-attach into process rows. */}
-            {processCells.length > 0
-              ? renderTimelineNodes(processCells, { attachToolApproval: false })
-              : null}
+            {(showThoughts) => renderTimelineNodes(
+              processCells,
+              // Approvals stay composer-adjacent only (toolApprovalFallback).
+              { attachToolApproval: false, reasoningPresentation: "flow", reasoningExpanded: showThoughts },
+            )}
           </ConversationProcessDisclosure>
         ) : null}
         {finalCells.length > 0 ? (

@@ -243,7 +243,7 @@ class ManagementAdapter:
 
     async def invoke(self, project_id: str, *, action: str, request_id: str, parameters: dict):
         from core.web.services.external_management.platform_actions import PLATFORM_ACTIONS
-        never_replay = action in PLATFORM_ACTIONS or action in {"agent_purge", "agent_purge_batch"}
+        never_replay = action in PLATFORM_ACTIONS or action in {"agent_archive", "agent_purge", "agent_purge_batch"}
         key = self._key(project_id, action, request_id)
         fingerprint = hashlib.sha256(json.dumps(parameters, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
         path = self._root / (key + ".json")
@@ -421,7 +421,8 @@ class ManagementAdapter:
             if key in ManagementAssetView.model_fields})
         result = await self._bound_read(project_id, lambda client: client.management_asset(operation, **parameters))
         result = {key: value for key, value in result.items() if key != "projectId"}
-        action = {"team": "team_asset_get", "team-archive": "team_archive_preview", "tool-policy": "agent_tool_policy_get", "knowledge-acl": "knowledge_acl_get"}[operation]
+        action = {"team": "team_asset_get", "team-archive": "team_archive_preview", "tool-policy": "agent_tool_policy_get", "knowledge-acl": "knowledge_acl_get",
+                  "agent-config": "agent_config_get", "agent-prompt": "agent_prompt_get", "tool-policy-inspect": "agent_tool_policy_inspect"}[operation]
         return project_management_asset(action, result, project_id, view.model_dump())
 
     async def flow(self, project_id: str, operation: str, **parameters):

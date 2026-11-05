@@ -13,6 +13,7 @@ import {
 } from "./ConversationTurnModelControl";
 import controlSource from "./ConversationTurnModelControl.tsx?raw";
 import styles from "./ConversationTurnModelControl.styles";
+import triggerStyles from "./ConversationModelControlTrigger.styles";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
@@ -255,11 +256,11 @@ describe("ConversationTurnModelControl", () => {
   });
 
   it("keeps the toolbar trigger compact and the popover within the viewport", () => {
-    expect(styles.label).toContain("truncate");
-    expect(styles.label).toContain("max-w-32");
+    expect(triggerStyles.label).toContain("truncate");
+    expect(triggerStyles.label).toContain("max-w-[min(16rem,38vw)]");
     expect(styles.fullName).toContain("whitespace-normal");
     expect(styles.fullName).not.toContain("truncate");
-    expect(styles.trigger).toContain("h-7");
+    expect(triggerStyles.trigger).toContain("h-7");
     expect(styles.popover).toContain("w-[min(272px,calc(100vw-16px))]");
     expect(styles.saveButton).toContain("!h-7");
   });

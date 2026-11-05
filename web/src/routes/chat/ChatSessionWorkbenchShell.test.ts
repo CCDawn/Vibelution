@@ -47,6 +47,9 @@ describe("ChatSessionWorkbenchShell geometry host", () => {
     expect(centerPaneBlock).not.toContain("[grid-column:3]");
     expect(styles).toContain("centerPaneDocked [grid-column:3] [grid-row:1]");
     expect(styles).toContain("centerPaneOverlay [grid-column:1] [grid-row:1]");
+    // The mobile center lives on track one; its single-track declaration must
+    // outrank the base desktop template, whose first track collapses to zero.
+    expect(styles).toContain("layoutOverlay relative w-full grid min-w-0 !grid-cols-[minmax(0,1fr)]");
     expect(styles).toContain("sessionRowHost !grid-rows-[44px_minmax(0,1fr)]");
     expect(styles).toContain("sessionRowSpan");
     expect(layout).toContain("sessionRowSpansRail");

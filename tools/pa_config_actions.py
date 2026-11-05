@@ -76,6 +76,11 @@ class ProviderModels(Catalog):
     provider_id: str = Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_-]{0,63}$")
 
 
+class SecretRequest(Arguments):
+    purpose: str = Field(min_length=1, max_length=200, description="面向用户的用途说明：需要什么隐私信息、用于哪个任务或操作。")
+    label: str = Field(default="", max_length=120, description="建议的附件显示名；可省略。")
+
+
 class ModelEdits(Arguments):
     # Omission leaves a field unchanged. Only context_window explicitly accepts
     # null, which removes that persisted override and restores native fallback.
@@ -92,6 +97,7 @@ class ModelEdits(Arguments):
 
 _CONTRACTS = {
     "provider_catalog": (Catalog, False, "分页查看已有连接标识、origin、状态和模型；不返回完整URL、凭据或环境变量名。"),
+    "secret_request": (SecretRequest, False, "任务需要用户提供隐私信息时（如 API key、token、密码、证件号、住址、私人文件内容），调用本动作向用户说明用途并发起请求，请其以隐私附件提供，不要求用户把明文写进消息文本；用户附加后其消息会带 [隐私附件] sec_ 开头的引用标记，由对应工具参数引用消费（如 provider_add 的 credential_token）；本动作不读取、不存储、不回显任何隐私内容。"),
     "provider_add": (ProviderAdd, True, "添加连接。可沿用已有连接的凭据（仅限同一发送 origin），或提供一次性隐私附件引用 credential_token 直接配置 API 密钥凭据，两者互斥；无来源时建立无凭据连接。重复连接返回 existing，此时附件凭据保持未消费。"),
     "provider_update": (ProviderUpdate, True, "修改连接名称、启用状态或地址。跨 origin 必须清除凭据或选择新 origin 的已有连接。"),
     "provider_remove": (ProviderRemove, True, "移除无模型、无活动引用的连接；需原生审批。"),
@@ -454,6 +460,14 @@ def execute(action: str, parameters: dict, runtime: dict, governed: bool = False
         if not isinstance(parameters, dict) or len(json.dumps(parameters, allow_nan=False)) > 16000:
             return _failure("invalid_input")
         args = contract[0].model_validate(json.loads(json.dumps(parameters)))
+        if action == "secret_request":
+            # Pure receipt: no config read, no storage, no credential access.
+            receipt = {"ok": True, "action": "secret_request", "status": "awaiting_user_attachment",
+                       "purpose": args.purpose,
+                       "hint": "等待用户附加隐私附件；附加后在下一条用户消息会出现 sec_ 引用标记，届时由对应工具参数引用（如 provider_add 的 credential_token）"}
+            if args.label:
+                receipt["label"] = args.label
+            return receipt
         path = _path()
         before = _read(path)
         _providers(before)
@@ -559,7 +573,10 @@ def execute(action: str, parameters: dict, runtime: dict, governed: bool = False
             if args.credential_token:
                 from config.llm_security import validate_llm_api_key_env
                 from config.public_config import _delete_user_env_var, _set_user_env_var
-                from core.assistant_runtime.secret_attachments import resolve_secret_attachment
+                from core.assistant_runtime.secret_attachments import (
+                    SecretCredentialError,
+                    consume_secret_credential,
+                )
                 # Validate the derived name before the one-shot pop so a naming
                 # failure never burns the user's attachment.
                 try:
@@ -567,14 +584,12 @@ def execute(action: str, parameters: dict, runtime: dict, governed: bool = False
                         f"VIBELUTION_LLM_{args.provider_id.upper().replace('-', '_')}_API_KEY", required=True)
                 except ValueError:
                     return _failure("credential_env_name_invalid")
-                secret = resolve_secret_attachment(args.credential_token)
-                if secret is None:
+                try:
+                    value = consume_secret_credential(args.credential_token)
+                except SecretCredentialError:
+                    # The pop already consumed an unknown/expired reference;
+                    # retrying requires the user to attach the secret again.
                     return _failure("credential_token_invalid")
-                value, kind = secret
-                if kind != "api_key":
-                    # The pop already consumed this attachment; retrying
-                    # requires the user to attach the secret again.
-                    return _failure("credential_token_kind")
                 _set_user_env_var(env_name, value)
                 provider.update(auth_kind="api_key", credential_ref=f"env:{env_name}", requires_credential=True)
             candidate = add_llm_provider(before, args.provider_id, provider)

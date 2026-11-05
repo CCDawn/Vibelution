@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from .team_management_approval import TEAM_MANAGEMENT_ACTIONS, team_management_approval_summary
 
 PLATFORM_MANAGEMENT_ACTIONS = frozenset({"dispatch_cancel", "runtime_command", "team_update",
+    "agent_parameters_update", "agent_prompt_update",
     "agent_tool_policy_update", "knowledge_acl_grant", "knowledge_acl_revoke", "flow_save", "flow_start", "agent_dispatch_access_set", *TEAM_MANAGEMENT_ACTIONS})
 
 
@@ -61,7 +62,8 @@ def platform_management_approval_summary(action, parameters):
         "kind", "resource_id", "session_id", "knowledge_base_id", "target_agent_id", "expected_revision",
         "expected_config_revision", "expected_agent_updated_at", "expected_policy_fingerprint",
         "expected_registry_version", "expected_registry_fingerprint", "expected_team_fingerprint",
-        "expected_acl_fingerprint", "expectedRevision", "expected_public_config_hash", "expected_eligibility_fingerprint"}
+        "expected_acl_fingerprint", "expectedRevision", "expected_public_config_hash", "expected_eligibility_fingerprint",
+        "expected_template_id", "expected_content_hash"}
     targets = {key: str(value) for key, value in values.items() if key in target_keys and value not in (None, "")}
     for key, value in targets.items():
         if not _displayable(value):
@@ -76,6 +78,14 @@ def platform_management_approval_summary(action, parameters):
         changed, delta = ["command"], {"command": values["command"]}
     elif action == "agent_dispatch_access_set":
         changed, delta = ["enabled"], {"enabled": values["enabled"]}
+    elif action == "agent_parameters_update":
+        changed = [values["kind"]]
+        delta = _decimal_values(values["parameters"])
+    elif action == "agent_prompt_update":
+        changed = sorted(["promptTemplateId", "promptContent"])
+        delta = {"scope": "single_agent_copy_on_write", "contentChars": str(len(values["content"])),
+                 "contentDigest": _digest(values["content"]), "activation": "next_submission"}
+        content_omitted = True
     elif action.startswith("knowledge_acl_"):
         changed, delta = ["permissions"], {"permissions": values["permissions"]}
     elif action == "agent_tool_policy_update":

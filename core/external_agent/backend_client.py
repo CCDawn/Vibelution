@@ -470,7 +470,15 @@ class ManagedAgentBackendClient:
         agent = result.get("agent")
         if not isinstance(agent, dict) or agent.get("agentId") != agent_id:
             raise BackendClientError("Invalid Agent projection.", code="BACKEND_PROTOCOL_ERROR")
-        return {"agent": self._management_agent_view(agent)}
+        public = {"agent": self._management_agent_view(agent)}
+        if result.get("archiveEligibility") is not None:
+            from pydantic import ValidationError
+            from core.web.services.external_management.contracts import ArchiveEligibility
+            try:
+                public["archiveEligibility"] = ArchiveEligibility.model_validate(result["archiveEligibility"]).model_dump()
+            except ValidationError as exc:
+                raise BackendClientError("Invalid Agent archive eligibility.", code="BACKEND_PROTOCOL_ERROR") from exc
+        return public
 
     async def management_agent_purge_preview(self, *, agent_id: str) -> dict[str, Any]:
         from pydantic import ValidationError
@@ -617,12 +625,18 @@ class ManagedAgentBackendClient:
         return result
 
     async def management_asset(self, operation: str, **parameters) -> dict[str, Any]:
+        from core.web.services.external_management.agent_configuration_contracts import AgentConfigurationQuery, AgentConfigurationResponse
+        from core.web.services.external_management.configuration_discovery_contracts import (AgentPromptQuery, AgentPromptResponse,
+            ToolPolicyInspectQuery, ToolPolicyInspectResponse)
         from pydantic import ValidationError
         from core.web.services.external_management.asset_contracts import (
             TeamAssetQuery, TeamAssetResponse, ToolPolicyQuery, ToolPolicyResponse, KnowledgeACLQuery, KnowledgeACLResponse,
             DispatchAccessQuery, DispatchAccessResponse)
         from core.web.services.external_management.team_lifecycle_contracts import TeamArchivePreviewResponse
         choices = {"team": (TeamAssetQuery, TeamAssetResponse, "team_id", "teamId"),
+            "agent-config": (AgentConfigurationQuery, AgentConfigurationResponse, "agent_id", "agentId"),
+            "agent-prompt": (AgentPromptQuery, AgentPromptResponse, "agent_id", "agentId"),
+            "tool-policy-inspect": (ToolPolicyInspectQuery, ToolPolicyInspectResponse, "agent_id", "agentId"),
             "team-archive": (TeamAssetQuery, TeamArchivePreviewResponse, "team_id", "teamId"),
             "tool-policy": (ToolPolicyQuery, ToolPolicyResponse, "agent_id", "agentId"),
             "knowledge-acl": (KnowledgeACLQuery, KnowledgeACLResponse, "knowledge_base_id", "knowledgeBaseId"),

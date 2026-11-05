@@ -3,9 +3,9 @@ import {
   CheckCircle2,
   CircleDot,
   LoaderCircle,
-  MessageSquareText,
   TerminalSquare,
 } from "lucide-react";
+import type { ReactNode } from "react";
 
 import { VButton } from "../vui";
 import type { TranslationKey } from "../../i18n/dictionaryTypes";
@@ -20,14 +20,13 @@ import {
   conversationToolPresentationLabel,
 } from "./conversationToolPresentation";
 import {
-  ProgressScrollBody,
   ThoughtDurationLabel,
   ThoughtScrollBody,
   ThoughtStreamingSummary,
-  progressTextExceedsClamp,
 } from "./conversationThoughtUnits";
 import { stripAnsiArtifacts } from "./conversationAnsiSanitize";
 import styles from "./ConversationView.styles";
+import processStyles from "./ConversationProcessDisclosure.styles";
 
 export function reasoningExpansionSectionId(cell: Pick<CodexTranscriptCell, "id" | "sourceItemId">) {
   // Prefer sourceItemId so stream updates that rewrite cell.id keep the same open/closed choice.
@@ -40,18 +39,21 @@ export type CodexTranscriptCellRenderersDeps = {
   t: (key: TranslationKey) => string;
   getExpansionState: (messageId: string, section: string, defaultExpanded: boolean) => boolean;
   toggleSection: (messageId: string, section: string, defaultExpanded: boolean) => void;
+  /** Reuse the owning conversation's Markdown renderer for public narration. */
+  renderProgressText?: (text: string, streaming: boolean) => ReactNode;
 };
 
 /**
  * Codex transcript cell presentation and the thought/progress lanes, bound to
- * the conversation's expansion store. Extracted from ConversationView with
- * identical render output; identities still rebuild per render as before.
+ * the conversation's expansion store. Public narration stays in the flow;
+ * reasoning can use the standalone disclosure or the flow's shared toggle.
  */
 export function createCodexTranscriptCellRenderers({
   lang,
   t,
   getExpansionState,
   toggleSection,
+  renderProgressText,
 }: CodexTranscriptCellRenderersDeps) {
   /**
    * Collapsible thinking lane (ZCode reasoning parity): streaming and settled
@@ -72,6 +74,8 @@ export function createCodexTranscriptCellRenderers({
       channel?: string;
       kind?: CodexTranscriptCell["kind"];
       settledDurationSeconds?: number;
+      presentation?: "flow";
+      expanded?: boolean;
     },
   ) {
     // Narration lanes render plain text only: terminal SGR artifacts from
@@ -87,14 +91,16 @@ export function createCodexTranscriptCellRenderers({
     // section id comes from `reasoningExpansionSectionId`, which prefers
     // sourceItemId so stream updates that rewrite cell.id keep the choice.
     const defaultExpanded = false;
-    const expanded = getExpansionState(messageId, input.sectionId, defaultExpanded);
+    const expanded = input.presentation === "flow"
+      ? input.expanded ?? false
+      : getExpansionState(messageId, input.sectionId, defaultExpanded);
     const thoughtTitle = isLive
       ? (lang === "zh" ? "思考中" : "Thinking…")
       : (lang === "zh" ? "已思考" : "Thought");
     const toneClassName = styles[`codexTranscriptCell_${input.tone}` as keyof typeof styles] ?? "";
     return (
       <section
-        key={input.cellId}
+        key={input.presentation === "flow" ? input.sectionId : input.cellId}
         className={[
           styles.codexTranscriptCell,
           styles.codexTranscriptReasoningCell,
@@ -111,7 +117,19 @@ export function createCodexTranscriptCellRenderers({
         role={isLive ? "status" : undefined}
         aria-live={isLive ? "polite" : undefined}
       >
-        <VButton
+        {input.presentation === "flow" ? (
+          <div className={styles.codexTranscriptReasoningHeader}>
+            <span className={styles.codexTranscriptCellIcon} aria-hidden="true"><BrainCircuit size={14} /></span>
+            <span className={styles.codexTranscriptReasoningTitle}>{thoughtTitle}</span>
+            <ThoughtDurationLabel
+              live={isLive}
+              expanded={expanded}
+              settledDurationSeconds={input.settledDurationSeconds}
+              settledSecondsTemplate={t("thoughtDurationSettledSeconds")}
+              settledMomentsLabel={t("thoughtDurationSettledMoments")}
+            />
+          </div>
+        ) : <VButton
           type="button"
           contentLayout="plain"
           className={styles.codexTranscriptReasoningHeader}
@@ -140,7 +158,7 @@ export function createCodexTranscriptCellRenderers({
               {!expanded ? <ThoughtStreamingSummary text={fullText} /> : null}
             </span>
           </span>
-        </VButton>
+        </VButton>}
         {expanded ? <ThoughtScrollBody text={fullText} streaming={isLive} /> : null}
       </section>
     );
@@ -148,79 +166,33 @@ export function createCodexTranscriptCellRenderers({
 
   /**
    * Progress narration lane (commentary): user-facing updates stay visible in
-   * chronological order. Long updates start at the three-line preview while
-   * live and settled; users can expand them when they need the full text.
+   * chronological order, with the same full text while live and settled.
    */
   function renderCodexProgressCell(
-    messageId: string,
+    _messageId: string,
     cell: CodexTranscriptCell,
     text: string,
   ) {
     const cleanText = stripAnsiArtifacts(text);
-    const sectionId = reasoningExpansionSectionId(cell);
     const isLive = cell.status === "running" || cell.status === "pending";
-    const defaultExpanded = false;
-    const expanded = getExpansionState(messageId, sectionId, defaultExpanded);
-    const canExpand = progressTextExceedsClamp(cleanText);
-    const toneClassName = styles[`codexTranscriptCell_${cell.tone}` as keyof typeof styles] ?? "";
-    const headerContent = (
-      <>
-        <span className={styles.codexTranscriptCellIcon} aria-hidden="true">
-          {isLive
-            ? <LoaderCircle className={styles.statusSpinner} size={14} />
-            : <MessageSquareText size={14} />}
-        </span>
-        <span className={styles.codexTranscriptReasoningHeaderBody}>
-          <span className={styles.codexTranscriptReasoningTitleRow}>
-            <span className={styles.codexTranscriptCellTitle}>{lang === "zh" ? "进展" : "Progress"}</span>
-          </span>
-        </span>
-      </>
-    );
     return (
       <section
         key={cell.id}
-        className={[
-          styles.codexTranscriptCell,
-          styles.codexTranscriptProgressCell,
-          toneClassName,
-        ].filter(Boolean).join(" ")}
+        className={processStyles.progress}
         data-codex-transcript-cell-kind={cell.kind}
         data-codex-transcript-cell-status={cell.status}
         data-codex-transcript-cell-tone={cell.tone}
         data-codex-transcript-cell-channel={cell.channel || undefined}
         data-codex-transcript-cell-phase={cell.phase ?? ""}
         data-codex-progress-cell="true"
-        data-codex-progress-expandable={canExpand ? "true" : "false"}
+        data-codex-progress-expandable="false"
         data-conversation-part-key={cell.id}
-        data-progress-section={sectionId}
-        data-progress-expanded={expanded ? "true" : "false"}
         role={isLive ? "status" : undefined}
         aria-live={isLive ? "polite" : undefined}
       >
-        {canExpand ? (
-          <VButton
-            type="button"
-            contentLayout="plain"
-            className={styles.codexTranscriptProgressHeader}
-            aria-expanded={expanded}
-            aria-label={expanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden")}
-            onClick={(event) => {
-              event.stopPropagation();
-              toggleSection(messageId, sectionId, defaultExpanded);
-            }}
-          >
-            {headerContent}
-          </VButton>
-        ) : (
-          <div
-            className={styles.codexTranscriptProgressHeader}
-            data-codex-progress-static="true"
-          >
-            {headerContent}
-          </div>
-        )}
-        <ProgressScrollBody text={cleanText} streaming={isLive} clamped={!expanded} />
+        <div className={processStyles.progressBody} data-codex-progress-body="true" data-codex-progress-clamped="false">
+          {renderProgressText ? renderProgressText(cleanText, isLive) : <span className={processStyles.progressPlainText}>{cleanText}</span>}
+        </div>
       </section>
     );
   }
@@ -228,6 +200,7 @@ export function createCodexTranscriptCellRenderers({
   function renderCodexReasoningSummaryCell(
     message: ConversationMessage,
     cell: CodexTranscriptCell,
+    options?: { presentation?: "flow"; expanded?: boolean },
   ) {
     const fullText = String(cell.text || cell.summary || "").trim();
     if (!fullText) {
@@ -243,6 +216,8 @@ export function createCodexTranscriptCellRenderers({
       channel: cell.channel,
       kind: cell.kind,
       settledDurationSeconds: cell.settledDurationSeconds,
+      presentation: options?.presentation,
+      expanded: options?.expanded,
     });
   }
 

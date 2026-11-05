@@ -140,19 +140,22 @@ def list_env(env, monkeypatch):
     from core.chat.conversation_store import ConversationStore
 
     agents = []
+    # Fixture writes are not latency assertions. Parallel selector batches can
+    # delay SQLite flushes on Windows; keep the read-only checks below intact.
+    setup_timeout_seconds = 15
     with ConversationStore(env.root / "list.sqlite3") as store:
         for index, label in enumerate(["ordinary"] * 8 + ["pa", "team", "companion", "hidden"]):
             aid, sid = f"agent-{index:02d}", f"session-{index:02d}"
             revision = store.repository.create_agent(agent_id=aid, display_name=aid, kind="persistent",
-                config={}, source="test").result(timeout=3)["configRevisionId"]
+                config={}, source="test").result(timeout=setup_timeout_seconds)["configRevisionId"]
             store.repository.create_session(session_id=sid, agent_id=aid, agent_config_revision_id=revision,
                 title=("😀" * 60 if index == 0 else f"Visible {index}"),
                 conversation_index_kind="personal_agent", conversation_index_visibility="user_visible",
-                hidden_from_index=label == "hidden").result(timeout=3)
+                hidden_from_index=label == "hidden").result(timeout=setup_timeout_seconds)
             runtime = {"conversation_id": sid, "agent_id": aid, "session_kind": "main",
                 "conversation_index_kind": "personal_agent", "last_turn_status": "ready",
                 "messages": ["PREVIEW_SECRET_SENTINEL"], "last_preview": "PREVIEW_SECRET_SENTINEL"}
-            store.repository.upsert_session_runtime_state(sid, runtime, activate=index == 1).result(timeout=3)
+            store.repository.upsert_session_runtime_state(sid, runtime, activate=index == 1).result(timeout=setup_timeout_seconds)
             agent = {**env.agent, "agentId": aid, "directSessionId": sid, "metadata": {}}
             if label == "pa":
                 agent["roleKey"] = "personal_assistant"

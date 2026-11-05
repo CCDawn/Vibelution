@@ -408,6 +408,38 @@ describe("normalizeToolActivityStatus / extractToolDisplayCommand", () => {
 });
 
 describe("buildCodexToolActivityPills", () => {
+  it.each(["personal_assistant_action_tool", "personal_assistant_manage_tool"])(
+    "names the specific assistant action for %s while preserving status and target",
+    (toolName) => {
+      expect(buildCodexToolActivityPills({
+        toolName,
+        status: "running",
+        language: "zh",
+        toolArguments: { action: "source_read", path: "README.md" },
+      })).toMatchObject({ actionLabel: "读取源码", statusKind: "running", subject: "README.md" });
+      expect(buildCodexToolActivityPills({
+        toolName,
+        status: "failed",
+        language: "en",
+        toolArguments: { action: "session_create" },
+      })).toMatchObject({ actionLabel: "Create session", statusKind: "failed" });
+    },
+  );
+
+  it("keeps unknown assistant actions and unrelated tool actions on their generic fallback", () => {
+    expect(buildCodexToolActivityPills({
+      toolName: "personal_assistant_action_tool", status: "completed", language: "zh",
+      toolArguments: { action: "future_unknown_action" },
+    }).actionLabel).toBe("处理助理请求");
+    expect(buildCodexToolActivityPills({
+      toolName: "personal_assistant_manage_tool", status: "completed", language: "en",
+    }).actionLabel).toBe("Run assistant action");
+    expect(buildCodexToolActivityPills({
+      toolName: "read_file_tool", status: "completed", language: "zh",
+      toolArguments: { action: "session_create" },
+    }).actionLabel).toBe("读取文件");
+  });
+
   it("builds shell action/status pills with muted subject and duration", () => {
     expect(buildCodexToolActivityPills({
       toolName: "cli_tool",

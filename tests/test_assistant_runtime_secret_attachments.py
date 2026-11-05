@@ -37,6 +37,50 @@ def test_issue_tokens_are_unique() -> None:
     assert first != second
 
 
+def test_consume_secret_credential_returns_value_then_invalid_reference() -> None:
+    token = secret_attachments.issue_secret_attachment("sk-consume-1", "api_key")
+    assert secret_attachments.consume_secret_credential(token) == "sk-consume-1"
+    # Pop-on-read: the second consume fails with the stable invalid prefix.
+    with pytest.raises(secret_attachments.SecretCredentialError) as second:
+        secret_attachments.consume_secret_credential(token)
+    assert str(second.value).startswith("invalid_secret_reference")
+    assert second.value.prefix == "invalid_secret_reference"
+
+
+def test_consume_secret_credential_rejects_unknown_token() -> None:
+    with pytest.raises(secret_attachments.SecretCredentialError) as raised:
+        secret_attachments.consume_secret_credential("sec_unknown_or_expired")
+    assert str(raised.value).startswith("invalid_secret_reference")
+
+
+def test_consume_secret_credential_expected_kind_match_passes() -> None:
+    token = secret_attachments.issue_secret_attachment("match-value", "token")
+    assert secret_attachments.consume_secret_credential(token, expected_kind="token") == "match-value"
+
+
+def test_consume_secret_credential_expected_kind_mismatch_consumes_entry() -> None:
+    token = secret_attachments.issue_secret_attachment("not-an-api-key", "password")
+    with pytest.raises(secret_attachments.SecretCredentialError) as raised:
+        secret_attachments.consume_secret_credential(token, expected_kind="api_key")
+    assert str(raised.value).startswith("kind_mismatch")
+    assert raised.value.prefix == "kind_mismatch"
+    # The pop already happened; retrying fails as an invalid reference.
+    with pytest.raises(secret_attachments.SecretCredentialError) as second:
+        secret_attachments.consume_secret_credential(token)
+    assert str(second.value).startswith("invalid_secret_reference")
+
+
+def test_consume_secret_credential_expired_token_is_invalid(monkeypatch) -> None:
+    clock = {"now": 0.0}
+    monkeypatch.setattr(secret_attachments.time, "monotonic", lambda: clock["now"])
+    token = secret_attachments.issue_secret_attachment("soon-dead", "secret")
+    clock["now"] += secret_attachments.SECRET_ATTACHMENT_TTL_SECONDS + 1
+    with pytest.raises(secret_attachments.SecretCredentialError) as raised:
+        secret_attachments.consume_secret_credential(token)
+    assert str(raised.value).startswith("invalid_secret_reference")
+    assert secret_attachments._STORE == {}
+
+
 def test_peek_reports_kind_without_popping_or_returning_value() -> None:
     token = secret_attachments.issue_secret_attachment("peeked-value", "password", label="邮箱密码")
     for _ in range(3):

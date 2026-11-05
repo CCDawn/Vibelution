@@ -6,6 +6,21 @@ import { AgentMessageTurnView } from "./AgentMessageTurnView";
 import styles from "./AgentMessageTurnView.styles";
 
 describe("AgentMessageTurnView", () => {
+  it("keeps single-speaker identity accessible and moves actions after the body", () => {
+    const html = renderToStaticMarkup(
+      <AgentMessageTurnView rowKey="row" messageKey="msg" agentMessageId="agent"
+        sectionCount={1} className="assistant-turn" compactHeader={false} minimalIdentity
+        avatar={<span>hidden-avatar</span>} speakerLabel="Assistant" turnLabel="Message"
+        metaActions={<button type="button">Copy response</button>}>
+        <p>visible answer</p>
+      </AgentMessageTurnView>,
+    );
+    expect(html).toContain('aria-label="Message · Assistant"');
+    expect(html).toContain('data-conversation-identity="minimal"');
+    expect(html).not.toContain("hidden-avatar");
+    expect(html).not.toContain("turnMeta");
+    expect(html.indexOf("visible answer")).toBeLessThan(html.indexOf("Copy response"));
+  });
   it("renders the turn shell with stable AgentMessage metadata and header slots", () => {
     const html = renderToStaticMarkup(
       <AgentMessageTurnView

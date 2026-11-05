@@ -19,7 +19,8 @@ import { LauncherNotificationProvider } from "./LauncherNotifications";
 import { LauncherNavigation } from "./LauncherNavigation";
 import {LauncherAssistantTaskCards} from "../routes/desktopPet/assistantTasks/LauncherAssistantTaskCards";
 import {LauncherTaskNavigationSlot} from "../routes/desktopPet/assistantTasks/LauncherTaskNavigationSlot";
-import { VDialog, VSplitWorkspace, VSurface } from "../components/vui";
+import { VDialog, VSplitWorkspace, VWorkbenchFrame } from "../components/vui";
+import { isElectronDesktopShell } from "./projectCloseGuard";
 import styles from "./LauncherShell.styles";
 import { applyWorkbenchDocumentTheme, readStoredWorkbenchTheme, subscribeStoredWorkbenchTheme } from "./themePreference";
 import { applyUiFontBasePx, readStoredUiFontBasePx } from "./uiFontPreference";
@@ -42,6 +43,7 @@ export function LauncherShell() {
   const updateAttempts = useMutationState({ filters: { mutationKey: LAUNCHER_UPDATE_MUTATION_KEY }, select: (mutation) => mutation.state });
   const updateFailed = Boolean(freshnessQuery.data?.refreshError || updateAttempts.at(-1)?.status === "error");
   const stateBridgeAvailable = hasLauncherStateBridge();
+  const desktopShell = isElectronDesktopShell();
   const branchInstancesQuery = useQuery({
     queryKey: queryKeys.launcherBranchInstances(),
     queryFn: () => getLauncherBranchInstances(),
@@ -111,15 +113,19 @@ export function LauncherShell() {
       data-theme={theme}
       data-vui-app="launcher"
       data-shell="launcher"
+      data-desktop-shell={desktopShell ? "electron" : "browser"}
       data-browser-role="launcher_control_surface"
     >
-      <LauncherTitlebar lang={lang} desktop={stateBridgeAvailable} onOpenNavigation={() => setNavigationOpen(true)} />
-      <VSplitWorkspace
-        className={styles.workspace}
-        columnsClassName={styles.columns}
-        sidebar={<div className={styles.navigation}><LauncherNavigation lang={lang} items={branchInstancesQuery.data?.items ?? []} updateAvailable={updateAvailable} updateFailed={updateFailed} taskContent={<LauncherTaskNavigationSlot lang={lang}/>}/></div>}
-        main={<VSurface as="div" tone="panel" padding="none" className={styles.main}>{routeContent}</VSurface>}
-      />
+      <LauncherTitlebar lang={lang} desktop={desktopShell} onOpenNavigation={() => setNavigationOpen(true)} />
+      <VWorkbenchFrame>
+        <VSplitWorkspace
+          chrome="workbench"
+          className={styles.workspace}
+          columnsClassName={styles.columns}
+          sidebar={<div className={styles.navigation}><LauncherNavigation lang={lang} items={branchInstancesQuery.data?.items ?? []} updateAvailable={updateAvailable} updateFailed={updateFailed} taskContent={<LauncherTaskNavigationSlot lang={lang}/>}/></div>}
+          main={routeContent}
+        />
+      </VWorkbenchFrame>
       <VDialog open={navigationOpen} onOpenChange={setNavigationOpen} title={lang === "zh" ? "功能导航" : "Navigation"} size="sm">
         <div className={styles.mobileNavigation}><LauncherNavigation lang={lang} items={branchInstancesQuery.data?.items ?? []} onNavigate={() => setNavigationOpen(false)} updateAvailable={updateAvailable} updateFailed={updateFailed} taskContent={<LauncherTaskNavigationSlot lang={lang} onNavigate={()=>setNavigationOpen(false)}/>}/></div>
       </VDialog>

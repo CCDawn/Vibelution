@@ -1,4 +1,4 @@
-import type { AgentPermissionPreset, ConfigBootstrap, SessionBudgetParameters, SessionDetail, SessionMessageCurationAction, SessionMessageCurationMutationResponse, SessionMessageCurationResponse, SessionReferenceAttachment, SessionToolApprovalRequest, TokenUsageRollup, TokenUsageSample } from "./types";
+import type { AgentPermissionPreset, ConfigBootstrap, SessionBudgetParameters, SessionDetail, SessionMessageCurationAction, SessionMessageCurationMutationResponse, SessionMessageCurationResponse, SessionQueuedTurn, SessionReferenceAttachment, SessionToolApprovalRequest, TokenUsageRollup, TokenUsageSample } from "./types";
 import type { DesktopPetPreferences } from "../routes/desktopPet/desktopPetPreferences";
 import type { SessionContinuationExpectation } from "./chat";
 
@@ -15,6 +15,7 @@ export type LauncherAssistantModelChoice = {
 export type LauncherManagementPermission = { preset: AgentPermissionPreset; revision: number };
 
 export type LauncherAssistantStatus = {
+  followupQueueVersion?: 1;
   teamRunsVersion?: 1;
   assistantAvatarVersion?: 1;
   assistantAvatarRevision?: string | null;
@@ -95,15 +96,17 @@ export type LauncherAssistantRequest =
   | { operation: "uploadAttachment"; filename: string; contentType: string; dataBase64: string }
   /** Privacy attachments ride their own closed verb: plaintext never becomes a
    * base64 body, a URL, or any persisted renderer state — the response carries
-   * only the staged `sec_` reference. `secretKind` carries the dialog's type
-   * choice; the host defaults it to "secret" when absent. */
-  | { operation: "upload_attachment"; kind: "user_secret"; value: string; label?: string; secretKind: LauncherUserSecretKind }
+   * only the staged `sec_` reference (plus the echoed label when one was sent). */
+  | { operation: "upload_attachment"; kind: "user_secret"; value: string; label?: string }
   | { operation: "readAttachment"; artifactId: string }
   | { operation: "stop"; turnId: string }
   | { operation: "continue"; requestId: string; continuation: SessionContinuationExpectation }
   | { operation: "switchHead"; nodeId: string }
   | { operation: "regenerate"; messageId: string; requestId: string }
   | { operation: "guidance"; content: string; mode: "safe" | "interrupt" }
+  | { operation: "updateQueuedTurn"; sessionId: string; queuedTurnId: string; content?: string; position?: number; status?: "paused" | "queued" }
+  | { operation: "removeQueuedTurn"; sessionId: string; queuedTurnId: string }
+  | { operation: "sendNowQueuedTurn"; sessionId: string; queuedTurnId: string; expectedTurnId?: string }
   | { operation: "config" }
   | { operation: "operatorAsset"; kind: LauncherOperatorAssetKind }
   | { operation: "computerState" | "computerWindows" }
@@ -371,6 +374,7 @@ export async function getLauncherAssistantStatus(): Promise<LauncherAssistantSta
     }
   }
   if (result.attachmentVersion !== undefined && result.attachmentVersion !== 1) throw new Error("Launcher 附件版本不可用。");
+  if (result.followupQueueVersion !== undefined && result.followupQueueVersion !== 1) throw new Error("Launcher 队列版本不可用。");
   if (result.settings !== undefined) {
     const settings = result.settings;
     if (!record(settings) || typeof settings.ok !== "boolean" || !record(settings.preferences)
@@ -511,39 +515,27 @@ export async function uploadLauncherAttachment(file: File): Promise<string> {
   return result.artifactId as string;
 }
 
-/** Privacy attachment kind chosen in the composer dialog; labels below are the
- * only renderer-visible copy — the plaintext value itself never leaves this
- * call's argument position and is never stored, logged or re-read. */
-export type LauncherUserSecretKind = "api_key" | "token" | "password" | "secret";
-
-export function launcherUserSecretKindLabel(kind: LauncherUserSecretKind, lang: "zh" | "en"): string {
-  const labels: Record<LauncherUserSecretKind, readonly [string, string]> = {
-    api_key: ["API 密钥", "API key"],
-    token: ["访问令牌", "Access token"],
-    password: ["密码", "Password"],
-    secret: ["其他隐私", "Other secret"],
-  };
-  return labels[kind]?.[lang === "zh" ? 0 : 1] || kind;
-}
-
+/** The dialog's optional display name is the only renderer-visible copy — the
+ * plaintext value itself never leaves this call's argument position and is
+ * never stored, logged or re-read. */
 function validSecretReference(id: string): boolean {
   return validArtifactId(id) && /^sec_/.test(id);
 }
 
 /** Stages a user secret through its dedicated IPC verb and returns only the
  * opaque `sec_` reference. The response shape is exact-checked so a value can
- * never ride back into the renderer. */
-export async function uploadLauncherUserSecret(value: string, kind: LauncherUserSecretKind = "api_key",
+ * never ride back into the renderer; the host echoes the label as a third key
+ * when one was sent, and both shapes are accepted. */
+export async function uploadLauncherUserSecret(value: string,
                                               label?: string): Promise<{ attachmentId: string; kind: "user_secret" }> {
   const normalizedValue = String(value ?? "");
   const normalizedLabel = String(label ?? "").trim();
   if (!normalizedValue) throw new Error("请粘贴隐私内容后再提交。");
   if (normalizedLabel.length > 160 || /[\u0000-\u001f\u007f]/.test(normalizedLabel)) throw new Error("显示名无效。");
-  if (!["api_key", "token", "password", "secret"].includes(kind)) throw new Error("隐私附件类型无效。");
   let result: unknown;
   try {
     result = await launcherAssistantBridge().invoke({
-      operation: "upload_attachment", kind: "user_secret", value: normalizedValue, secretKind: kind,
+      operation: "upload_attachment", kind: "user_secret", value: normalizedValue,
       ...(normalizedLabel ? { label: normalizedLabel } : {}),
     });
   } catch (error) {
@@ -551,8 +543,12 @@ export async function uploadLauncherUserSecret(value: string, kind: LauncherUser
     if (message.includes("ASSISTANT_SECRET_")) throw new Error(message);
     throw new Error("隐私附件暂存失败，请重试。");
   }
-  if (!exactFields(result, ["attachmentId", "kind"]) || result.kind !== "user_secret"
-    || typeof result.attachmentId !== "string" || !validSecretReference(result.attachmentId)) {
+  if (!record(result) || Array.isArray(result) || result.kind !== "user_secret"
+    || typeof result.attachmentId !== "string" || !validSecretReference(result.attachmentId)
+    || ![["attachmentId", "kind"], ["attachmentId", "kind", "label"]].some(fields =>
+      Object.keys(result).length === fields.length
+      && fields.every(field => Object.prototype.hasOwnProperty.call(result, field))
+      && (fields.length === 2 || typeof result.label === "string" && result.label.length <= 160))) {
     throw new Error("Launcher 未确认隐私附件暂存。");
   }
   return { attachmentId: result.attachmentId, kind: "user_secret" };
@@ -620,6 +616,54 @@ export async function guideLauncherAssistantTurn(sessionId: string, content: str
   const result = await launcherAssistantBridge().invoke({ operation: "guidance", content: normalized, mode });
   if (!record(result) || result.id !== sessionId) throw new Error("Launcher 未确认引导所属会话。");
   return result as SessionDetail;
+}
+
+function assertQueuedTurnIdentity(sessionId: string, queuedTurnId: string): void {
+  if (![sessionId, queuedTurnId].every(value => typeof value === "string"
+    && /^[A-Za-z0-9_-]{1,160}(?![\s\S])/.test(value))) throw new Error("ASSISTANT_REQUEST_INVALID");
+}
+
+function readLauncherQueuedTurns(result: unknown, sendNow = false): SessionQueuedTurn[] {
+  if (!record(result) || Array.isArray(result) || !Array.isArray(result.queuedTurns)
+    || Object.keys(result).some(key => key !== "queuedTurns" && !(sendNow && key === "stopRequested"))
+    || !result.queuedTurns.every(row => record(row) && !Array.isArray(row)
+      && typeof row.id === "string" && /^[A-Za-z0-9_-]{1,160}(?![\s\S])/.test(row.id)
+      && Number.isSafeInteger(row.position) && Number(row.position) >= 1 && typeof row.status === "string" && Boolean(row.status)
+      && typeof row.content === "string")) throw new Error("ASSISTANT_RESPONSE_INVALID");
+  return result.queuedTurns as SessionQueuedTurn[];
+}
+
+/** Native queue writes stay behind the Launcher-owned, session-scoped IPC. */
+export async function updateLauncherAssistantQueuedTurn(sessionId: string, queuedTurnId: string,
+  payload: { content?: string; position?: number; status?: "paused" | "queued" }): Promise<SessionQueuedTurn[]> {
+  assertQueuedTurnIdentity(sessionId, queuedTurnId);
+  if (!record(payload) || Array.isArray(payload) || !Object.values(payload).some(value => value !== undefined)
+    || Object.keys(payload).some(key => !["content", "position", "status"].includes(key))
+    || (payload.content !== undefined && (typeof payload.content !== "string" || payload.content.length > 64_000))
+    || (payload.position !== undefined && (!Number.isSafeInteger(payload.position) || payload.position < 1))
+    || (payload.status !== undefined && !["paused", "queued"].includes(payload.status))) throw new Error("ASSISTANT_REQUEST_INVALID");
+  const fields = Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
+  const result = await launcherAssistantBridge().invoke({ operation: "updateQueuedTurn", sessionId, queuedTurnId, ...fields });
+  return readLauncherQueuedTurns(result);
+}
+
+export async function removeLauncherAssistantQueuedTurn(sessionId: string, queuedTurnId: string): Promise<SessionQueuedTurn[]> {
+  assertQueuedTurnIdentity(sessionId, queuedTurnId);
+  return readLauncherQueuedTurns(await launcherAssistantBridge().invoke({ operation: "removeQueuedTurn", sessionId, queuedTurnId }));
+}
+
+export async function sendNowLauncherAssistantQueuedTurn(sessionId: string, queuedTurnId: string,
+  payload: { expectedTurnId?: string } = {}): Promise<{ queuedTurns: SessionQueuedTurn[]; stopRequested: boolean }> {
+  assertQueuedTurnIdentity(sessionId, queuedTurnId);
+  if (!record(payload) || Array.isArray(payload) || Object.keys(payload).some(key => key !== "expectedTurnId")
+    || (payload.expectedTurnId !== undefined && (typeof payload.expectedTurnId !== "string"
+      || !/^[A-Za-z0-9_-]{1,160}(?![\s\S])/.test(payload.expectedTurnId))))
+    throw new Error("ASSISTANT_REQUEST_INVALID");
+  const result = await launcherAssistantBridge().invoke({ operation: "sendNowQueuedTurn", sessionId, queuedTurnId,
+    ...(payload.expectedTurnId === undefined ? {} : { expectedTurnId: payload.expectedTurnId }) });
+  const queuedTurns = readLauncherQueuedTurns(result, true);
+  if (!record(result) || typeof result.stopRequested !== "boolean") throw new Error("ASSISTANT_RESPONSE_INVALID");
+  return { queuedTurns, stopRequested: result.stopRequested };
 }
 
 function isApproval(value: unknown, sessionId: string): value is SessionToolApprovalRequest {

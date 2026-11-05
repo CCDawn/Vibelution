@@ -94,13 +94,13 @@ Launcher 的新建团队、添加/移除成员和归档团队继续复用同一�
 ## LauncherAssistantSecretAttachment（隐私附件）
 
 ### 功能
-个人助理 composer 的隐私附件入口：+号菜单「隐私附件」项打开弹层（类型/可选显示名/明文输入），提交经封闭 `upload_attachment` IPC 直接暂存，composer 拿到 `sec_` 引用挂为遮罩 chip；发送时 `sec_` 引用随 `attachmentIds` 提交，消息气泡渲染遮罩卡。
+个人助理 composer 的隐私附件入口：+号菜单「隐私附件」项打开弹层（可选显示名/明文输入两栏，无类型选择），提交经封闭 `upload_attachment` IPC 直接暂存，composer 拿到 `sec_` 引用挂为遮罩 chip；发送时 `sec_` 引用随 `attachmentIds` 提交，消息气泡渲染遮罩卡。
 
 ### 使用方式
-入口仅由 `LauncherAssistantRoute` 通过 `ChatComposerPlusMenu` 新 prop `onAttachSecret` 传入启用；弹层复用 `VDialog` + `VStringSelect`（API 密钥/访问令牌/密码/其他隐私，默认 API 密钥）+ `VInput(type=password)` + 可选显示名。确认时 Route 调 `uploadLauncherUserSecret`，成功把 `{attachmentId: sec_x, kind: "user_secret"}` 之外仅携带遮罩显示名的 chip 加入托盘（每轮上限 4，可移除）；失败在弹层内显示错误、值保留可修正。托盘 chip 与历史气泡共用 `attachmentPresentation` 分类：`user_secret`/`secret` kind 永不进入图片、预览、下载或复制分支，气泡侧由 `AgentContextSectionsView` 投影为「隐私 · 显示名 ····」遮罩卡（KeyRound 图标，无任何内容交互）；`useLauncherAttachmentHistory` 不为 `user_secret` 发起读取。
+入口仅由 `LauncherAssistantRoute` 通过 `ChatComposerPlusMenu` 新 prop `onAttachSecret` 传入启用；弹层复用 `VDialog` + 可选显示名 + `VInput(type=password)`，只有两栏；内容性质由模型从对话上下文判断，通道不区分类型。确认时 Route 调 `uploadLauncherUserSecret`，成功把 `{attachmentId: sec_x, kind: "user_secret"}` 之外仅携带遮罩显示名的 chip 加入托盘（每轮上限 4，可移除）；失败在弹层内显示错误、值保留可修正。托盘 chip 与历史气泡共用 `attachmentPresentation` 分类：`user_secret`/`secret` kind 永不进入图片、预览、下载或复制分支，气泡侧由 `AgentContextSectionsView` 投影为「隐私 · 显示名 ····」遮罩卡（KeyRound 图标，无任何内容交互）；`useLauncherAttachmentHistory` 不为 `user_secret` 发起读取。
 
 ### 边界
-明文 write-only：仅存在于弹层受控输入的内存 state，成功、取消、关闭或卸载即焚，不进草稿、composer 快照或任何持久化；存储层只持久化 secret 引用条目（id + `sec_` artifactId + 遮罩名），明文永不落盘。响应字段精确校验（attachmentId + kind），明文不可能随响应回流 renderer。普通聊天 surface（`useChatConversationSurfaceModel`）不传该 prop，加号菜单不渲染隐私入口、零差异。不做密钥回显或编辑，填错移除附件重贴。
+明文 write-only：仅存在于弹层受控输入的内存 state，成功、取消、关闭或卸载即焚，不进草稿、composer 快照或任何持久化；存储层只持久化 secret 引用条目（id + `sec_` artifactId + 遮罩名），明文永不落盘。响应字段精确校验（attachmentId + kind，带显示名时额外回显 label 一键），明文不可能随响应回流 renderer。普通聊天 surface（`useChatConversationSurfaceModel`）不传该 prop，加号菜单不渲染隐私入口、零差异。不做隐私内容回显或编辑，填错移除附件重贴。
 
 ### 反冗余
 复用 ChatComposerPlusMenu 弹层骨架、composer 附件托盘与遮罩 chip 渲染、`attachmentPresentation` 单一分类；不新增 V* 公共导出、不建第二套附件状态或持久化通道。

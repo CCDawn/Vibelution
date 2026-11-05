@@ -17,3 +17,9 @@
 ### 思考行与验证
 
 原生 reasoning header 与旧 timeline thought header 继续复用 VButton，显式清除默认及 hover 的背景图片，避免按钮渐变残留为灰色横条。保留焦点轮廓、原有展开行为和耗时摘要。用工具交互测试、过程样式契约、VUI 合约和桌面/窄屏浏览器验证。
+
+### 共享 Codex flow
+
+Chat 和 Launcher 共用同一 flow：状态与权威耗时置于流开头，进展 Markdown 与工具活动按原顺序始终可见，思考默认以 hidden/inert 隐藏，显式展开后直接显示正文及片段耗时。隐藏时仍保留计量生命周期，避免展开后重置起始时间；展开选择和滚动锚点继续使用已有会话状态。旧 disclosure 调用保持兼容，失败、超时和审批 fallback 继续可诊断，不移动到猜测匹配的工具行。
+
+助理动作行优先根据真实 `arguments.action` 使用共享动作标签，未知动作保留原通用工具名。前端投影和显示不改变 Session Journal、worker、SSE 或原生 IPC 的权威。

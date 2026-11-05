@@ -12,7 +12,7 @@ const HOST_REQUEST_OPERATIONS: readonly AssistantHostRequest["operation"][] = [
   "previewTaskCleanup", "executeTaskCleanup", "teamRuns", "setModel", "setManagementPermissionPreset", "budgetParameters", "setBudgetParameters", "usageSummary",
   "detail", "status", "dispatches", "config", "approvals", "assistantAvatar",
   "resolveApproval", "previewDispatchApproval", "declineDispatchApproval", "decideDispatchApproval",
-  "send", "uploadAttachment", "readAttachment", "stop", "continue", "switchHead", "regenerate", "guidance",
+  "send", "uploadAttachment", "upload_attachment", "readAttachment", "stop", "updateQueuedTurn", "removeQueuedTurn", "sendNowQueuedTurn", "continue", "switchHead", "regenerate", "guidance",
   "curation", "curate", "operatorAsset",
   "computerState", "computerWindows", "computerGrant", "computerControl", "computerConfirm",
 ];
@@ -27,6 +27,44 @@ function setup() {
 
 describe("Launcher assistant private bridge", () => {
   afterEach(() => { vi.useRealTimers(); });
+
+  it("admits only closed queue mutations from the owned frame before starting the host", async () => {
+    const { owner, event } = setup();
+    const requests = [
+      { operation: "updateQueuedTurn", sessionId: "s", queuedTurnId: "queued-one", content: "edited", position: 1, status: "paused" },
+      { operation: "removeQueuedTurn", sessionId: "s", queuedTurnId: "queued-one" },
+      { operation: "sendNowQueuedTurn", sessionId: "s", queuedTurnId: "queued-one", expectedTurnId: "running-turn" },
+    ] as const;
+    for (const request of requests) {
+      await expect(invokeAssistant({ ...event, sender: {} }, request, owner)).rejects.toThrow("ASSISTANT_SENDER_FORBIDDEN");
+      for (const fields of [{ sessionId: "s\n" }, { queuedTurnId: "../foreign" }, { queuedTurnId: "q".repeat(161) },
+        { agentId: "foreign" }, { url: "http://example.test" }])
+        await expect(invokeAssistant(event, { ...request, ...fields }, owner)).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    }
+    for (const fields of [{ content: null }, { content: "x".repeat(64001) }, { position: true }, { position: 0 },
+      { position: 1.5 }, { status: "starting" }, { status: undefined }])
+      await expect(invokeAssistant(event, { ...requests[0], ...fields }, owner)).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    for (const expectedTurnId of [undefined, null, "", "turn\n", "../foreign", "t".repeat(161)])
+      await expect(invokeAssistant(event, { ...requests[2], expectedTurnId }, owner)).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    expect(owner.host.start).not.toHaveBeenCalled();
+    expect(owner.host.request).not.toHaveBeenCalled();
+    for (const request of requests) await invokeAssistant(event, request, owner);
+    expect(owner.host.request.mock.calls.map(([request]) => request)).toEqual(requests);
+  });
+
+  it.each(["updateQueuedTurn", "removeQueuedTurn", "sendNowQueuedTurn"])("waits for full host start for %s writes", async operation => {
+    vi.useFakeTimers();
+    const { owner, event } = setup();
+    let release!: (value: unknown) => void;
+    owner.host.start.mockImplementation(() => new Promise(resolve => { release = resolve; }));
+    const request = { operation, sessionId: "s", queuedTurnId: "queued-one" };
+    const pending = invokeAssistant(event, request, owner);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(owner.host.request).not.toHaveBeenCalled();
+    release({});
+    await pending;
+    expect(owner.host.request).toHaveBeenCalledExactlyOnceWith(request);
+  });
 
   it("rejects usage identity, scope and path injection before host start", async () => {
     const { owner, event } = setup();

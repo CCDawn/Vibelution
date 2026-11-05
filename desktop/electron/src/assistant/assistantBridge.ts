@@ -1,4 +1,4 @@
-import type { AssistantHostRequest } from "./assistantHost.js";
+import { isAssistantQueuedTurnRequest, type AssistantHostRequest } from "./assistantHost.js";
 
 export const LAUNCHER_ASSISTANT_URL = "vibelution-launcher://launcher/launcher-assistant";
 
@@ -35,7 +35,7 @@ const READ_OPERATIONS = new Set(["status", "detail", "dispatches", "teamRuns", "
  * Every member is dispatched after a full host.start() recovery except the
  * READ_OPERATIONS subset, which gets a bounded grace instead.
  */
-export const ASSISTANT_BRIDGE_OPERATIONS = ["status", "detail", "dispatches", "teamRuns", "setModel", "setManagementPermissionPreset", "budgetParameters", "setBudgetParameters", "usageSummary", "previewTaskCleanup", "executeTaskCleanup", "config", "send", "uploadAttachment", "readAttachment", "stop", "continue", "switchHead", "regenerate", "guidance", "curation", "curate", "approvals", "resolveApproval", "previewDispatchApproval", "decideDispatchApproval", "declineDispatchApproval", "operatorAsset", "assistantAvatar", "computerState", "computerWindows", "computerGrant", "computerControl", "computerConfirm"];
+export const ASSISTANT_BRIDGE_OPERATIONS = ["status", "detail", "dispatches", "teamRuns", "setModel", "setManagementPermissionPreset", "budgetParameters", "setBudgetParameters", "usageSummary", "previewTaskCleanup", "executeTaskCleanup", "config", "send", "uploadAttachment", "upload_attachment", "readAttachment", "stop", "updateQueuedTurn", "removeQueuedTurn", "sendNowQueuedTurn", "continue", "switchHead", "regenerate", "guidance", "curation", "curate", "approvals", "resolveApproval", "previewDispatchApproval", "decideDispatchApproval", "declineDispatchApproval", "operatorAsset", "assistantAvatar", "computerState", "computerWindows", "computerGrant", "computerControl", "computerConfirm"];
 
 function delay(ms: number): Promise<void> {
   return new Promise(done => {
@@ -101,6 +101,8 @@ export async function invokeAssistant(event: Sender, payload: unknown, owner: As
   if (request.operation === "setModel" && (Object.keys(request).length !== 2
     || typeof request.modelId !== "string" || !/^[^\s\x00-\x1f\x7f]{1,200}(?![\s\S])/.test(request.modelId)))
     throw new Error("ASSISTANT_REQUEST_INVALID");
+  if (["updateQueuedTurn", "removeQueuedTurn", "sendNowQueuedTurn"].includes(String(request.operation))
+    && !isAssistantQueuedTurnRequest(request)) throw new Error("ASSISTANT_REQUEST_INVALID");
   if (!ASSISTANT_BRIDGE_OPERATIONS.includes(String(request.operation))) {
     throw new Error("ASSISTANT_REQUEST_INVALID");
   }

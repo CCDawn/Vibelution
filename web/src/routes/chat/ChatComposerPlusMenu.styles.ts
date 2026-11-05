@@ -1,5 +1,8 @@
 const styles: Record<string, string> = {
-  popoverContent: "vui-routes-chatcomposerplusmenu popoverContent !w-80 !max-w-[calc(100vw-1.5rem)] !p-0",
+  trigger: "vui-routes-chatcomposerplusmenu trigger !size-7 !min-h-7 !min-w-7 !rounded-full !border-0 !bg-transparent !p-0 !text-[var(--fg-secondary)] !shadow-none hover:!bg-[var(--vui-control-muted)] hover:!text-[var(--fg-primary)] focus-visible:!ring-2 focus-visible:!ring-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] data-[state=open]:!bg-[var(--vui-control-muted)]",
+  popoverContent: "vui-routes-chatcomposerplusmenu popoverContent !min-w-0 !max-w-[calc(100vw-1.5rem)] !rounded-2xl !p-0",
+  composerWidth: "vui-routes-chatcomposerplusmenu composerWidth !w-[var(--radix-popover-trigger-width)]",
+  standaloneWidth: "vui-routes-chatcomposerplusmenu standaloneWidth !w-80",
   menu: "vui-routes-chatcomposerplusmenu menu grid w-full content-start gap-0 p-1.5 max-h-[min(70vh,32rem)] overflow-y-auto overscroll-contain outline-none",
   section: "vui-routes-chatcomposerplusmenu section grid gap-0.5 border-t border-[var(--vui-border-subtle)] px-0 pt-1.5 first:border-t-0 first:pt-0",
   sectionTitle: "vui-routes-chatcomposerplusmenu sectionTitle px-2.5 pb-0.5 pt-1 text-vui-micro-11 font-semibold tracking-wide text-[var(--fg-tertiary)]",
@@ -22,6 +25,7 @@ const styles: Record<string, string> = {
   secretField: "vui-routes-chatcomposerplusmenu secretField grid gap-1.5 text-vui-xs font-medium text-[var(--fg-secondary)]",
   secretError: "vui-routes-chatcomposerplusmenu secretError min-w-0 text-vui-xs leading-[var(--vui-line-readable)] text-[var(--tone-danger, var(--fg-primary))]",
   secretActions: "vui-routes-chatcomposerplusmenu secretActions flex items-center justify-end gap-2 pt-1",
+  secretRequestBar: "vui-routes-chatcomposerplusmenu secretRequestBar min-w-0 flex-1",
 };
 
 export default styles;

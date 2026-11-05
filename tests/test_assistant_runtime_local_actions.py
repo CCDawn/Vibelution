@@ -18,6 +18,7 @@ def test_catalog_reuses_native_schema_and_governance_without_project_actions():
         "affairs_conflict_sets", "affairs_conflict_list", "affairs_conflict_read", "affairs_sync_receipt",
         "episodic_conflict_review", "episodic_sync_receipt", "personal_memory_list",
         "legacy_memory_list", "legacy_memory_read",
+        "provider_prepare", "provider_model_resolve",
         "preference_proposals", "preference_proposal_accept", "preference_proposal_reject", "dispatch_list", "management_requests",
     }
     assert set(contracts) == expected
@@ -28,6 +29,10 @@ def test_catalog_reuses_native_schema_and_governance_without_project_actions():
             }
             if name == "assistant_settings_update":
                 assert contracts[name]["description"] == native["description"] + " 当前轮结束后自动刷新生效，不要求用户手动刷新或重启。"
+            elif name == "provider_add":
+                assert contracts[name]["description"].startswith(native["description"])
+                assert "provider_prepare" in contracts[name]["description"]
+                assert "provider_model_resolve" in contracts[name]["description"]
             else:
                 assert contracts[name]["description"] == native["description"]
     for name in ("settings_update", "model_add", "model_options"):

@@ -58,7 +58,12 @@ export type AssistantHostSnapshot = {
   state: "stopped" | "starting" | "ready" | "stopping" | "failed";
   errorCode: string | null;
 };
+export type AssistantQueuedTurnRequest =
+  | { operation: "updateQueuedTurn"; sessionId: string; queuedTurnId: string; content?: string; position?: number; status?: "paused" | "queued" }
+  | { operation: "removeQueuedTurn"; sessionId: string; queuedTurnId: string }
+  | { operation: "sendNowQueuedTurn"; sessionId: string; queuedTurnId: string; expectedTurnId?: string };
 export type AssistantHostRequest =
+  | AssistantQueuedTurnRequest
   | { operation: "previewTaskCleanup" | "executeTaskCleanup"; agentId: string; directSessionId: string; targets: unknown[]; fingerprint?: string }
   | { operation: "teamRuns"; cursor?: string }
   | { operation: "setModel"; modelId: string }
@@ -74,6 +79,7 @@ export type AssistantHostRequest =
   | { operation: "decideDispatchApproval"; dispatchId: string; taskId: string; approvalId: string; revision: string; decision: "accept" | "decline" }
   | { operation: "send"; message: string; requestId: string; attachmentIds?: string[]; references?: unknown[] }
   | { operation: "uploadAttachment"; filename: string; contentType: string; dataBase64: string }
+  | { operation: "upload_attachment"; kind: "user_secret"; value: string; secretKind?: "api_key" | "token" | "password" | "secret"; label?: string }
   | { operation: "readAttachment"; artifactId: string }
   | { operation: "stop"; turnId: string }
   | { operation: "continue"; requestId: string; continuation: { turnId: string; headId: string; ledgerSeq: number; agentId: string } }
@@ -179,6 +185,21 @@ function object(value: unknown): value is Record<string, unknown> {
 }
 function ownKeys(value: Record<string, unknown>, allowed: string[]): boolean {
   return Object.keys(value).every(key => allowed.includes(key));
+}
+/** Shared transport validation; fixed Session identity is checked by the host generation. */
+export function isAssistantQueuedTurnRequest(value: unknown): value is AssistantQueuedTurnRequest {
+  if (!object(value)) return false;
+  const fields = value.operation === "updateQueuedTurn" ? ["content", "position", "status"]
+    : value.operation === "sendNowQueuedTurn" ? ["expectedTurnId"]
+    : value.operation === "removeQueuedTurn" ? [] : null;
+  const id = (item: unknown): item is string => typeof item === "string" && /^[A-Za-z0-9_-]{1,160}(?![\s\S])/.test(item);
+  if (fields === null || !ownKeys(value, ["operation", "sessionId", "queuedTurnId", ...fields])
+    || !id(value.sessionId) || !id(value.queuedTurnId)) return false;
+  if ("content" in value && (typeof value.content !== "string" || value.content.length > 64000)
+    || "position" in value && (!Number.isSafeInteger(value.position) || (value.position as number) < 1)
+    || "status" in value && value.status !== "paused" && value.status !== "queued"
+    || "expectedTurnId" in value && !id(value.expectedTurnId)) return false;
+  return true;
 }
 const USAGE_NUMBER_FIELDS = ["inputTokens", "cachedInputTokens", "cacheReadInputTokens", "cacheCreationInputTokens",
   "uncachedInputTokens", "outputTokens", "reasoningOutputTokens", "totalTokens", "latencyMs"];
@@ -1275,6 +1296,40 @@ export class AssistantHost {
           throw new HostError("ASSISTANT_RESPONSE_INVALID");
         return result;
       }
+      case "upload_attachment": {
+        // Privacy attachment staging: the secret value crosses only this
+        // main-process dispatch and the host's closed HTTP link, is never
+        // logged, and only the opaque sec_ reference comes back. secretKind
+        // is optional: absent stays absent in the forwarded body and the
+        // host defaults it to "secret".
+        const requestKeys = Object.keys(payload);
+        if (!(requestKeys.length === 3 && ownKeys(payload, ["operation", "kind", "value"]))
+          && !(requestKeys.length === 4 && (ownKeys(payload, ["operation", "kind", "value", "secretKind"])
+            || ownKeys(payload, ["operation", "kind", "value", "label"])))
+          && !(requestKeys.length === 5 && ownKeys(payload, ["operation", "kind", "value", "secretKind", "label"])))
+          throw new HostError("ASSISTANT_REQUEST_INVALID");
+        if (payload.kind !== "user_secret"
+          || typeof payload.value !== "string" || !payload.value.trim() || payload.value.length > 8192
+          || (payload.secretKind !== undefined
+            && !["api_key", "token", "password", "secret"].includes(String(payload.secretKind)))
+          || (payload.label !== undefined
+            && (typeof payload.label !== "string" || payload.label.length > 160 || /[\u0000-\u001f\u007f]/.test(payload.label))))
+          throw new HostError("ASSISTANT_REQUEST_INVALID");
+        const result = await this.rpc(generation, "/api/assistant/attachments/upload", "POST",
+          { kind: "user_secret", value: payload.value,
+            ...(payload.secretKind !== undefined ? { secretKind: payload.secretKind } : {}),
+            ...(payload.label !== undefined && payload.label !== "" ? { label: payload.label } : {}) });
+        const resultKeys = object(result) ? Object.keys(result) : [];
+        if (!object(result) || (resultKeys.length !== 2 && resultKeys.length !== 3)
+          || (resultKeys.length === 2 && !ownKeys(result, ["attachmentId", "kind"]))
+          || (resultKeys.length === 3 && !ownKeys(result, ["attachmentId", "kind", "label"]))
+          || result.kind !== "user_secret"
+          || typeof result.attachmentId !== "string" || !/^sec_[A-Za-z0-9_-]{16,64}$/.test(result.attachmentId)
+          || (resultKeys.length === 3
+            && (typeof result.label !== "string" || result.label.length > 160 || /[\u0000-\u001f\u007f]/.test(result.label))))
+          throw new HostError("ASSISTANT_RESPONSE_INVALID");
+        return result;
+      }
       case "readAttachment": {
         if (!ownKeys(payload, ["operation", "artifactId"]) || typeof payload.artifactId !== "string"
           || !/^[A-Za-z0-9_.-]{1,255}$/.test(payload.artifactId) || payload.artifactId === "." || payload.artifactId === "..")
@@ -1296,6 +1351,23 @@ export class AssistantHost {
         if (!ownKeys(payload, ["operation", "turnId"]) || typeof payload.turnId !== "string"
           || !payload.turnId.trim() || payload.turnId.length > 160) throw new HostError("ASSISTANT_REQUEST_INVALID");
         return await this.rpc(generation, "/api/assistant/stop", "POST", { turnId: payload.turnId });
+      case "updateQueuedTurn":
+      case "removeQueuedTurn":
+      case "sendNowQueuedTurn": {
+        if (!isAssistantQueuedTurnRequest(payload)) throw new HostError("ASSISTANT_REQUEST_INVALID");
+        if (payload.sessionId !== generation.sessionId) throw new HostError("ASSISTANT_SESSION_FORBIDDEN");
+        const path = payload.operation === "updateQueuedTurn" ? "update"
+          : payload.operation === "removeQueuedTurn" ? "remove" : "send-now";
+        const { operation: _operation, sessionId: _sessionId, ...body } = payload;
+        const result = await this.rpc(generation, `/api/assistant/queued-turns/${path}`, "POST", body);
+        const sendNow = payload.operation === "sendNowQueuedTurn";
+        if (!object(result) || Object.keys(result).length !== (sendNow ? 2 : 1)
+          || !ownKeys(result, sendNow ? ["queuedTurns", "stopRequested"] : ["queuedTurns"])
+          || !Array.isArray(result.queuedTurns) || result.queuedTurns.some(row => !object(row)
+            || typeof row.id !== "string" || !row.id)
+          || sendNow && typeof result.stopRequested !== "boolean") throw new HostError("ASSISTANT_RESPONSE_INVALID");
+        return result;
+      }
       case "continue": {
         const expected = payload.continuation;
         if (!ownKeys(payload, ["operation", "requestId", "continuation"])

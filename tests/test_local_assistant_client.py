@@ -16,6 +16,41 @@ EXTERNAL = "/api/v1/external-agent"
 LOCAL = "/api/local-assistant/v1/external-agent"
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize("namespace", [None, "external", "local"])
+async def test_cleanup_uses_explicit_legacy_route_without_retagging_old_capabilities(tmp_path, monkeypatch, namespace):
+    client, _, business = _client(tmp_path, monkeypatch)
+    client._state["tasks"] = {"eat-legacy": {"taskCapability": "original-task-capability"}}
+    if namespace:
+        client._state["transportNamespaces"] = {_digest("original-task-capability"): namespace}
+    before = json.loads(json.dumps(client._state))
+    await client.preview_task_cleanup("eat-legacy")
+    await client.cleanup_task("eat-legacy", 7, "a" * 64)
+    task_prefix = LOCAL + ("/tasks/" if namespace == "local" else "/legacy-tasks/") + "eat-legacy"
+    assert [request.url.path for request in business] == [task_prefix + "/cleanup/preview", task_prefix + "/cleanup"]
+    assert client._state == before
+    for request in business:
+        assert request.headers["X-Vibelution-Management-Capability"] == TOKEN
+        assert request.headers[sdk.TASK_CAPABILITY_HEADER] == "original-task-capability"
+    assert json.loads(business[-1].content) == {"revision": 7, "fingerprint": "a" * 64}
+    # Cleanup is the only compatibility operation; ordinary reads stay external.
+    await client._request_json("GET", EXTERNAL + "/tasks/eat-legacy", task_capability="original-task-capability")
+    assert business[-1].url.path == (LOCAL if namespace == "local" else EXTERNAL) + "/tasks/eat-legacy"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("has_task,authority_token,code", [
+    (False, TOKEN, "TASK_CAPABILITY_UNAVAILABLE"), (True, "", "LAUNCHER_AUTHORITY_REQUIRED")])
+async def test_legacy_cleanup_never_recovers_missing_credentials_or_bypasses_launcher_authority(
+        tmp_path, monkeypatch, has_task, authority_token, code):
+    client, calls, _ = _client(tmp_path, monkeypatch, capability=authority_token)
+    if has_task:
+        client._state["tasks"] = {"eat-legacy": {"taskCapability": "original-task-capability"}}
+    with pytest.raises(sdk.BackendClientError) as exc:
+        await client.preview_task_cleanup("eat-legacy")
+    assert exc.value.code == code and calls == []
+
+
 @pytest.fixture(autouse=True)
 def process_authority():
     authority.install_launcher_authority(None)

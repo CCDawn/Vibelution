@@ -165,7 +165,12 @@ class ManagementService:
         agent = self.native.read(agent_id)
         if not agent:
             raise ManagementError("AGENT_UNAVAILABLE", 404)
-        return {"agent": _agent_view(agent)}
+        result = {"agent": _agent_view(agent)}
+        eligibility = getattr(self.native, "read_archive_eligibility", None)
+        if callable(eligibility):
+            from .contracts import ArchiveEligibility
+            result["archiveEligibility"] = ArchiveEligibility.model_validate(eligibility(agent_id)).model_dump()
+        return result
 
     def read_purge_preview(self, subject: str, capability: str, agent_id: str) -> dict:
         from .contracts import AgentPurgePreviewResponse
@@ -296,6 +301,11 @@ class ManagementService:
         return result
 
     def read_asset(self, subject, capability, operation, parameters):
+        from .agent_configuration_contracts import AgentConfigurationQuery, AgentConfigurationResponse
+        from .agent_configuration import AgentConfigurationControl
+        from .configuration_discovery_contracts import (AgentPromptQuery, AgentPromptResponse,
+            ToolPolicyInspectQuery, ToolPolicyInspectResponse)
+        from .configuration_discovery import ConfigurationDiscovery
         from .asset_contracts import (TeamAssetQuery, TeamAssetResponse, ToolPolicyQuery, ToolPolicyResponse,
             KnowledgeACLQuery, KnowledgeACLResponse, DispatchAccessQuery, DispatchAccessResponse)
         from .asset_control import AssetControl
@@ -304,6 +314,12 @@ class ManagementService:
         from .dispatch_access import DispatchAccessControl
         control = AssetControl(self.native)
         scope, query_type, response_type, reader = {
+            "agent-config": ("agents:configuration:read", AgentConfigurationQuery, AgentConfigurationResponse,
+                             AgentConfigurationControl(self.native).read_configuration),
+            "agent-prompt": ("agents:configuration:read", AgentPromptQuery, AgentPromptResponse,
+                             ConfigurationDiscovery(self.native).read_prompt),
+            "tool-policy-inspect": ("agents:tool-policy:read", ToolPolicyInspectQuery, ToolPolicyInspectResponse,
+                             ConfigurationDiscovery(self.native).inspect_policy),
             "team": ("teams:manage:read", TeamAssetQuery, TeamAssetResponse, control.read_team),
             "team-archive": ("teams:manage:read", TeamAssetQuery, TeamArchivePreviewResponse, TeamLifecycleControl(self.native).read_archive_preview),
             "tool-policy": ("agents:tool-policy:read", ToolPolicyQuery, ToolPolicyResponse, control.read_tool_policy),
@@ -720,7 +736,8 @@ class ManagementService:
         self._authorize(subject, capability, ACTION_SCOPES[action])
         key = self._request_key(subject, action, request_id)
         path = self.store.path("requests", key)
-        with self.store.lock("requests", key):
+
+        def read_record():
             record = self.store.read(path)
             if record is None:
                 raise ManagementError("REQUEST_UNAVAILABLE", 404)
@@ -728,9 +745,21 @@ class ManagementService:
                 self._authorize(subject, capability, "agents:create:files")
             if record.get("failure"):
                 raise ManagementError(record["failure"]["code"], record["failure"]["status_code"])
-            if not record.get("receipt") and self._confirm(record):
-                self.store.write(path, record)
-            return self._receipt(record, reused=True)
+            return record
+
+        try:
+            with self.store.lock("requests", key, timeout=0):
+                record = read_record()
+                if not record.get("receipt") and self._confirm(record):
+                    self.store.write(path, record)
+                return self._receipt(record, reused=True)
+        except TimeoutError:
+            # Native writes retain the admission lock until their final ACK is
+            # durable. Store.write uses strict atomic replacement, so readers
+            # can return the last complete snapshot without waiting for that
+            # writer or entering its busy native owner. Recovery still uses
+            # the same lock once execution has ended; no write is replayed.
+            return self._receipt(read_record(), reused=True)
 
     def team_receipt(self, subject: str, capability: str, request_id: str) -> dict:
         grant = self._authorize(subject, capability, "teams:read")

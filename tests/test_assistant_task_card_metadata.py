@@ -475,7 +475,8 @@ def cleanup_client(namespace="local", authority="authority"):
     return client
 
 
-def test_cleanup_uses_original_local_task_capability_and_adapter_routing(monkeypatch):
+@pytest.mark.parametrize("namespace", ["local", "external", ""])
+def test_cleanup_uses_original_task_capability_and_private_adapter_routing(monkeypatch, namespace):
     calls = []
 
     async def request(self, method, path, **kwargs):
@@ -483,34 +484,33 @@ def test_cleanup_uses_original_local_task_capability_and_adapter_routing(monkeyp
         return {"ok": True}
 
     monkeypatch.setattr(ManagedAgentBackendClient, "_request_json", request)
-    client = cleanup_client()
+    client = cleanup_client(namespace)
 
     async def scenario():
         assert await client.preview_task_cleanup("task/1") == {"ok": True}
         assert await client.cleanup_task("task/1", "revision-1", "a" * 64) == {"ok": True}
 
     anyio.run(scenario)
+    prefix = "/api/local-assistant/v1/external-agent/" + ("tasks" if namespace == "local" else "legacy-tasks")
     assert [row[:2] for row in calls] == [
-        ("POST", "/api/local-assistant/v1/external-agent/tasks/task%2F1/cleanup/preview"),
-        ("POST", "/api/local-assistant/v1/external-agent/tasks/task%2F1/cleanup")]
+        ("POST", prefix + "/task%2F1/cleanup/preview"), ("POST", prefix + "/task%2F1/cleanup")]
     assert all(row[2]["task_capability"] == "task-capability" and
                row[2]["management_auth"] == ("launcher-local", "authority") for row in calls)
     assert calls[0][2]["json_payload"] == {}
     assert calls[1][2]["json_payload"] == {"revision": "revision-1", "fingerprint": "a" * 64}
 
 
-@pytest.mark.parametrize("namespace,authority,code", [("external", "authority", "TASK_CLEANUP_UNAVAILABLE"),
-    ("", "authority", "TASK_CLEANUP_UNAVAILABLE"), ("local", "", "LAUNCHER_AUTHORITY_REQUIRED")])
-def test_cleanup_rejects_external_legacy_and_missing_authority_without_network(monkeypatch, namespace, authority, code):
+@pytest.mark.parametrize("namespace", ["local", "external", ""])
+def test_cleanup_rejects_missing_authority_without_network(monkeypatch, namespace):
     async def forbidden(*args, **kwargs):
         pytest.fail("cleanup must not fall back to ordinary external routes")
 
     monkeypatch.setattr(ManagedAgentBackendClient, "_request_json", forbidden)
-    client = cleanup_client(namespace, authority)
+    client = cleanup_client(namespace, "")
     for operation in (client.preview_task_cleanup, lambda task: client.cleanup_task(task, "r", "f")):
         with pytest.raises(BackendClientError) as error:
             anyio.run(operation, "task/1")
-        assert error.value.code == code
+        assert error.value.code == "LAUNCHER_AUTHORITY_REQUIRED"
 
 
 def test_cleanup_translates_a_lost_local_capability_without_calling_the_source(monkeypatch):

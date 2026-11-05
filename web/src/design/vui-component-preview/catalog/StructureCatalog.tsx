@@ -27,6 +27,7 @@ import { ConversationTodoChecklist } from "../../../components/conversation/Conv
 import { ConversationTodoProgressButton } from "../../../components/conversation/ConversationTodoProgressButton";
 import { ConversationTokenSpeedIndicator } from "../../../components/conversation/ConversationTokenSpeedIndicator";
 import { ComposerCacheIndicator } from "../../../components/conversation/ComposerCacheIndicator";
+import { ConversationComposerMetrics } from "../../../components/conversation/ConversationComposerMetrics";
 import { ConversationFileDeliveries } from "../../../components/conversation/ConversationFileDeliveries";
 import { ConversationMarkdownCodeBlock } from "../../../components/conversation/ConversationMarkdownRenderer";
 import conversationViewStyles from "../../../components/conversation/ConversationView.styles";
@@ -251,6 +252,15 @@ export function StructureCatalog() {
       <VuiPreviewCard name="ComposerCacheIndicator" className="min-h-0">
         <ComposerCacheIndicator sessionId="preview-session" lang="zh" model={{ state: "ready",
           sessionPercent: 78, lastCallPercent: 92, observedCalls: 10, totalCalls: 10, updating: false }} />
+      </VuiPreviewCard>
+      <VuiPreviewCard name="ConversationComposerMetrics" className="min-h-0">
+        <ConversationComposerMetrics
+          sessionId="preview-session"
+          lang="zh"
+          contextModel={composerContextRingPreviewModel}
+          cacheUsage={{ state: "partial", sessionPercent: 78, lastCallPercent: 92,
+            observedCalls: 10, totalCalls: 12, updating: true }}
+        />
       </VuiPreviewCard>
       <VuiPreviewCard name="ComposerContextRing" className="col-span-full min-h-0">
         <div className="grid w-full justify-items-start gap-3 rounded-xl border border-vui-border-subtle bg-vui-surface-panel p-3">

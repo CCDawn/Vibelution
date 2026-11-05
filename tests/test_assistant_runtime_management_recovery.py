@@ -54,6 +54,45 @@ async def test_restart_discovers_lost_acknowledgement_and_reads_original_receipt
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("initial_error", ["BACKEND_TIMEOUT", "SCOPE_DENIED"])
+async def test_archive_missing_receipt_never_replays_an_ambiguous_write(tmp_path, initial_error):
+    writes, reads = [], []
+
+    class Client:
+        async def management_action(self, **values):
+            writes.append(values)
+            if len(writes) == 1:
+                raise DispatchError("First request did not return a receipt.", code=initial_error)
+            return {"status": "unknown", "action": values["action"], "requestId": values["request_id"]}
+
+        async def management_receipt(self, **values):
+            reads.append(values)
+            raise DispatchError("Original target receipt is unavailable.", code="REQUEST_UNAVAILABLE")
+
+    async def call(_project_id, operation):
+        return await operation(Client())
+
+    projects = {"p": tmp_path / "project"}
+    adapter = ManagementAdapter(tmp_path, projects, call)
+    arguments = {"action": "agent_archive", "request_id": "original",
+        "parameters": {"agent_id": "agent-a", "expected_config_revision": 3}}
+    with pytest.raises(DispatchError) as initial:
+        await adapter.invoke("p", **arguments)
+    assert initial.value.code == initial_error
+    restarted = ManagementAdapter(tmp_path, projects, call)
+    if initial_error == "SCOPE_DENIED":
+        # Only the persisted, authenticated pre-admission denial permits the
+        # original envelope after authorization is explicitly supplied.
+        assert (await restarted.invoke("p", **arguments))["status"] == "unknown"
+        assert len(writes) == 2 and writes[1]["require_existing_subject"] is True
+    with pytest.raises(DispatchError) as ambiguous:
+        await restarted.invoke("p", **arguments)
+    assert ambiguous.value.code == "OPERATION_UNCONFIRMED"
+    assert len(writes) == (2 if initial_error == "SCOPE_DENIED" else 1)
+    assert all(row == {"action": "agent_archive", "request_id": "original"} for row in reads)
+
+
+@pytest.mark.anyio
 async def test_legacy_fingerprint_stays_readable_but_directory_exposes_gap(tmp_path):
     probe = Probe()
     adapter = ManagementAdapter(tmp_path, {"p": tmp_path / "project"}, probe.call)

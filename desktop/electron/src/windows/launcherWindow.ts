@@ -53,7 +53,7 @@ export function createLauncherWindow(url: string, paths: DesktopPaths): BrowserW
     titleBarStyle: "hidden",
     titleBarOverlay: {
       color: "#00000000",
-      height: 44
+      height: 40
     },
     skipTaskbar: false,
     autoHideMenuBar: true,

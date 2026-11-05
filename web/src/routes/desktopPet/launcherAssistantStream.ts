@@ -10,7 +10,7 @@ import { sessionStreamAppendBaseline } from "../chat/sessionStreamAppendBaseline
 import { createSessionStreamAppendReassembler } from "../chatSessionStreamProtocol";
 import { mergeSessionDetailMessageWindowWithOutcome } from "../chatSessionState";
 import { createAssistantDeltaSeqGate } from "../chatStreamProjectionGate";
-import { hasTerminalCanonicalTurnOutcome } from "../chatTurnProtocol";
+import { hasTerminalCanonicalTurnOutcome, hasTerminalTurnOutcomeItems } from "../chatTurnProtocol";
 
 export { activeTurnLayerToConversationMessage } from "../chatActiveTurnLayer";
 
@@ -28,6 +28,34 @@ function detailItems(detail: SessionDetail | undefined, turnId: string): Session
     ? message.turnItems ?? [] : []);
 }
 
+function nativeCharacterLength(text: string): number {
+  let length = 0;
+  for (const _character of text) length++;
+  return length;
+}
+
+/** Native offsets count Unicode characters; the shared decoder counts UTF-16
+ * units. Translate only verified offsets at this Launcher boundary. The map is
+ * derived from the existing projection, never an additional transcript. */
+function decoderPayload(payload: SessionAssistantDeltaStreamEvent, baseline: SessionTurnItem[]) {
+  if (!payload.turnItemAppends?.length) return payload;
+  const appendable = (item: SessionTurnItem) => item.type === "agent_message" || item.type === "reasoning";
+  const items = new Map(baseline.filter(appendable).map(item => [item.itemId, item]));
+  const fullIds = new Set(payload.turnItems.filter(appendable).map(item => item.itemId));
+  const appends = [];
+  for (const entry of payload.turnItemAppends) {
+    // The decoder gives a full row precedence over redundant same-frame appends.
+    if (fullIds.has(entry.itemId)) continue;
+    const item = items.get(entry.itemId);
+    if (!item || item.type !== entry.itemType || !("text" in item) || typeof item.text !== "string"
+      || nativeCharacterLength(item.text) !== entry.baseLength
+      || nativeCharacterLength(entry.appendedText) !== entry.appendedLength) return undefined;
+    appends.push({ ...entry, baseLength: item.text.length, appendedLength: entry.appendedText.length });
+    items.set(entry.itemId, { ...item, text: item.text + entry.appendedText });
+  }
+  return { ...payload, turnItemAppends: appends };
+}
+
 /** Assistant-window adapter of the ordinary chat stream. This owns only the
  * temporary active layer and decoder cursors; detail/Journal own the transcript.
  * Create one controller per leased assistant session, replacing it on identity
@@ -43,10 +71,12 @@ export function createLauncherAssistantStream(sessionId: string) {
   let recovering = false;
   let lastDeltaTurn = "";
   let lastDeltaSeq = 0;
+  let latestLayerDeltaSeq = 0;
   let ledgerWatermark = 0;
   let recoveryWatermark = 0;
   let connectionEpoch = 0;
   let epochRecovery = false;
+  let snapshotRecoveryAllowed = true;
   const retiredTurns = new Set<string>();
 
   function retire(turnId: string) {
@@ -73,6 +103,13 @@ export function createLauncherAssistantStream(sessionId: string) {
     } else {
       layer = reconcileActiveTurnLayerItemsWithMessages(layer, authority.messages);
     }
+    if (epochRecovery && coversLayer && detailSeq >= recoveryWatermark) {
+      // This completed read is the new connection's projection. Old transport
+      // rows may share IDs/revisions yet contain a different body; none may
+      // seed the new decoder or survive into a later partial-row merge.
+      layer = undefined;
+      latestLayerDeltaSeq = 0;
+    }
     const baselineTurn = layer?.turnId || nextTurn;
     decoder.rebase(sessionId, baselineTurn, sessionStreamAppendBaseline(
       sessionId, baselineTurn, detailItems(authority, baselineTurn), epochRecovery ? undefined : layer?.turnItems,
@@ -83,6 +120,7 @@ export function createLauncherAssistantStream(sessionId: string) {
       recovering = false;
       epochRecovery = false;
       recoveryWatermark = 0;
+      snapshotRecoveryAllowed = true;
       gate.noteAuthoritative(detailSeq);
     }
     return layer;
@@ -97,6 +135,7 @@ export function createLauncherAssistantStream(sessionId: string) {
       connectionEpoch = incomingEpoch;
       lastDeltaTurn = "";
       lastDeltaSeq = 0;
+      latestLayerDeltaSeq = 0;
       gate.noteStreamReopened();
       decoder.rebase(sessionId, "", []);
       recovering = true;
@@ -109,11 +148,15 @@ export function createLauncherAssistantStream(sessionId: string) {
     }
     if (detail && detail !== lastDetailInput) reconcile(detail);
     if (event.type !== "assistant_delta") {
+      if (recovering) recoveryWatermark = Math.max(recoveryWatermark, sequence(event.ledgerSeq));
       return { layer, needsRefresh: recovering || event.needsRefresh === true
         || ["session_detail", "session_initial", "session_journal_event", "stream_resume"].includes(event.type) };
     }
     if (event.needsRefresh || !event.turnId || !event.turnItems) {
       recovering = true;
+      // Capped/identity-only frames omit sequence coverage at the IPC boundary.
+      // Only canonical detail can prove recovery from that unknown loss.
+      snapshotRecoveryAllowed = false;
       recoveryWatermark = Math.max(recoveryWatermark, sequence(event.ledgerSeq));
       return { layer, needsRefresh: true };
     }
@@ -129,7 +172,27 @@ export function createLauncherAssistantStream(sessionId: string) {
         && message.metadata?.kind !== "session_active_turn_layer" && hasTerminalCanonicalTurnOutcome(message))) {
       return { layer, needsRefresh: false };
     }
-    if (recovering) return { layer, needsRefresh: true };
+    if (layer?.turnId === payload.turnId) {
+      latestLayerDeltaSeq = Math.max(latestLayerDeltaSeq, deltaSeq);
+    }
+    // Native done frames contain a complete turn projection. A same-connection,
+    // same-turn snapshot can restore presentation while canonical detail is
+    // still in flight; connection changes and partial rows still require detail.
+    if (!epochRecovery && snapshotRecoveryAllowed && payload.done && layer?.turnId === payload.turnId
+      && !payload.turnItemAppends?.length && incomingLedger > 0
+      && deltaSeq > 0 && deltaSeq >= latestLayerDeltaSeq
+      && incomingLedger >= recoveryWatermark
+      && hasTerminalTurnOutcomeItems(payload.turnItems)
+      && layer.turnItems.every(known => payload.turnItems.some(item => item.itemId === known.itemId))) {
+      decoder.rebase(sessionId, payload.turnId, payload.turnItems, false);
+      gate.noteAuthoritative(incomingLedger);
+      recovering = false;
+      recoveryWatermark = 0;
+    }
+    if (recovering) {
+      recoveryWatermark = Math.max(recoveryWatermark, incomingLedger);
+      return { layer, needsRefresh: true };
+    }
     const decision = gate.decide(payload);
     if (decision.action === "drop-stale") return { layer, needsRefresh: false };
     if (decision.action === "hold-gap") {
@@ -141,13 +204,19 @@ export function createLauncherAssistantStream(sessionId: string) {
     if (lastDeltaTurn !== payload.turnId) {
       decoder.rebase(sessionId, payload.turnId, detailItems(authority, payload.turnId));
     }
-    const expanded = decoder.expand(payload);
-    if (expanded.gaps.length) {
+    const normalized = decoderPayload(payload, sessionStreamAppendBaseline(
+      sessionId, payload.turnId, detailItems(authority, payload.turnId),
+      lastDeltaTurn === payload.turnId && layer?.turnId === payload.turnId ? layer.turnItems : undefined,
+    ));
+    const expanded = normalized && decoder.expand(normalized);
+    if (!expanded || expanded.gaps.length) {
       recovering = true;
       recoveryWatermark = Math.max(recoveryWatermark, incomingLedger);
       return { layer, needsRefresh: true };
     }
     if (layer && layer.turnId !== payload.turnId) retire(layer.turnId);
+    latestLayerDeltaSeq = layer?.turnId === payload.turnId
+      ? Math.max(latestLayerDeltaSeq, deltaSeq) : deltaSeq;
     layer = mergeAssistantDeltaIntoActiveTurnLayer(layer, expanded.payload);
     layer = reconcileActiveTurnLayerItemsWithMessages(layer, authority?.messages);
     lastDeltaTurn = payload.turnId;

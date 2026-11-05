@@ -71,6 +71,31 @@ def _control(native):
     return AssetControl(native)
 
 
+def test_policy_inspect_uses_native_validation_and_never_writes(configured_agent, monkeypatch):
+    from core.web.services.external_management.configuration_discovery import ConfigurationDiscovery
+    native = Native(configured_agent["agentId"])
+    control = ConfigurationDiscovery(native)
+    monkeypatch.setattr(control, "_agent", lambda agent_id: {"agentId": agent_id, "compiledMatches": True})
+    # The existing fixture supplies the canonical Agent/registry authority.
+    from core.web.services.external_management.agent_configuration import AgentConfigurationControl
+    from contextlib import contextmanager
+    @contextmanager
+    def locked(_self):
+        with directory._STATE_LOCK:
+            yield directory
+    monkeypatch.setattr(AgentConfigurationControl, "_locked", locked)
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("Policy inspection invoked a writer")
+    from core.web.services import tool_policy_configuration_service as policies
+    monkeypatch.setattr(policies, "update_tool_policy_configuration", forbidden)
+    monkeypatch.setattr(native, "publish", forbidden)
+    result = control.inspect_policy(configured_agent["agentId"], '{"allowedTools":["missing_tool"]}')
+    assert result["validation"]["valid"] is False
+    assert result["preview"]["unknownTools"] == ["missing_tool"]
+    assert result["candidates"] and result["current"]["compiledMatches"]
+    assert "approvalGrants" not in str(result)
+
+
 def _policy_parameters(snapshot, **updates):
     return {"agent_id": snapshot["agentId"], "expected_config_revision": snapshot["configRevision"],
             "expected_agent_updated_at": snapshot["agentUpdatedAt"],

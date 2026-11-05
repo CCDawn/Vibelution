@@ -106,3 +106,34 @@ def cleanup_local_task(task_id: str, payload: CleanupTaskPayload, response: Resp
                             revision=payload.revision, fingerprint=payload.fingerprint)
     except Exception as exc:
         raise external_agent._handle_service_error(exc) from exc
+
+
+@router.post("/local-assistant/v1/external-agent/legacy-tasks/{task_id}/cleanup/preview",
+             dependencies=[Depends(_local_principal)], response_model=CleanupPreviewResponse,
+             response_model_exclude_none=True)
+def preview_legacy_task_cleanup(task_id: str, response: Response,
+    task_capability: Annotated[str, Header(alias=external_agent.TASK_CAPABILITY_HEADER)] = ""):
+    from core.web.services.local_assistant.legacy_cleanup import build_legacy_cleanup_service
+    from core.web.services.local_assistant.task_cleanup import preview_task_cleanup
+    owner_id = external_agent._require_header(task_capability, "external Agent task capability")
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return preview_task_cleanup(build_legacy_cleanup_service(route_service.get()), owner_id=owner_id, task_id=task_id)
+    except Exception as exc:
+        raise external_agent._handle_service_error(exc) from exc
+
+
+@router.post("/local-assistant/v1/external-agent/legacy-tasks/{task_id}/cleanup",
+             dependencies=[Depends(_local_principal)], response_model=CleanupTaskResponse,
+             response_model_exclude_none=True)
+def cleanup_legacy_task(task_id: str, payload: CleanupTaskPayload, response: Response,
+    task_capability: Annotated[str, Header(alias=external_agent.TASK_CAPABILITY_HEADER)] = ""):
+    from core.web.services.local_assistant.legacy_cleanup import build_legacy_cleanup_service
+    from core.web.services.local_assistant.task_cleanup import cleanup_task
+    owner_id = external_agent._require_header(task_capability, "external Agent task capability")
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return cleanup_task(build_legacy_cleanup_service(route_service.get()), owner_id=owner_id, task_id=task_id,
+                            revision=payload.revision, fingerprint=payload.fingerprint)
+    except Exception as exc:
+        raise external_agent._handle_service_error(exc) from exc

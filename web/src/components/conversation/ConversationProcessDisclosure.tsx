@@ -10,6 +10,7 @@ import React, {
 } from "react";
 
 import type { CodexTranscriptCell } from "./codexTranscriptCells";
+import { VButton } from "../vui";
 import { conversationToolPresentationLabel } from "./conversationToolPresentation";
 import { activeTurnElapsedSeconds } from "./conversationActiveTurnStatusPresentation";
 import {
@@ -31,7 +32,9 @@ import {
 type ConversationProcessDisclosureProps = {
   cells: readonly CodexTranscriptCell[];
   language: "zh" | "en";
-  children: ReactNode;
+  children: ReactNode | ((expanded: boolean) => ReactNode);
+  /** Flow keeps narration and tools visible; expansion reveals only thoughts. */
+  presentation?: "disclosure" | "flow";
   messageOrder?: ReadonlyMap<string, number>;
   onUserToggle?: ConversationProcessUserToggle;
   /** Session-owned user choice survives row identity changes and remounts. */
@@ -160,6 +163,7 @@ export function processLabel(
   turnStreaming = false,
   workSummary?: ConversationTurnWorkSummary | null,
   liveElapsedSeconds?: number | null,
+  showTrailHints = true,
 ) {
   const state = processState(cells, messageOrder, turnStreaming);
   const labels = language === "zh"
@@ -208,10 +212,10 @@ export function processLabel(
         ? conversationToolPresentationLabel(toolIdentity, language)
         : toolIdentity;
       parts.push(`· ${label}`);
-    } else {
+    } else if (showTrailHints) {
       parts.push(language === "zh" ? "· 展开查看原因" : "· expand for details");
     }
-  } else if (traceLength >= 3) {
+  } else if (showTrailHints && traceLength >= 3) {
     // Hint that the disclosure holds a multi-step tool trail (including mid-turn).
     parts.push(language === "zh" ? `· ${traceLength} 步` : `· ${traceLength} steps`);
   }
@@ -264,6 +268,7 @@ export function ConversationProcessDisclosure({
   cells,
   language,
   children,
+  presentation = "disclosure",
   messageOrder,
   onUserToggle,
   expanded: controlledExpanded,
@@ -290,7 +295,12 @@ export function ConversationProcessDisclosure({
     handleContentTransitionEnd,
     handleSummaryClick,
     mounted,
-  } = useConversationProcessDisclosureMotion(running, onUserToggle, controlledExpanded, onExpandedChange);
+  } = useConversationProcessDisclosureMotion(
+    presentation === "flow" ? false : running,
+    onUserToggle,
+    controlledExpanded,
+    onExpandedChange,
+  );
   const contentId = useId();
   const contentRef = useRef<HTMLDivElement>(null);
   const summaryRef = useRef<HTMLElement>(null);
@@ -299,14 +309,57 @@ export function ConversationProcessDisclosure({
       summaryRef.current?.focus({ preventScroll: true });
     }
   }, [expanded]);
-  const label = processLabel(cells, language, messageOrder, turnStreaming, workSummary, elapsedSeconds);
+  const label = processLabel(cells, language, messageOrder, turnStreaming, workSummary, elapsedSeconds, presentation !== "flow");
   const toggleLabel = language === "zh"
     ? "展开或收起处理记录"
     : "Expand or collapse process details";
   // Keep the trail mounted while the turn streams so the full multi-step flow
   // stays visible; after settle, unmount when collapsed (Codex-style compact summary).
   const shouldRenderContent = mounted || turnStreaming || typeof window === "undefined";
-  const rows = shouldRenderContent ? Children.toArray(children) : [];
+  const content = typeof children === "function" ? children(expanded) : children;
+  const rows = shouldRenderContent ? Children.toArray(content) : [];
+
+  if (presentation === "flow") {
+    const hasThoughts = cells.some((cell) => cell.kind === "reasoning_summary" && Boolean((cell.text || cell.summary || "").trim()));
+    return (
+      <div
+        className={styles.flow}
+        data-codex-process-disclosure="true"
+        data-codex-process-presentation="flow"
+        data-codex-process-state={state}
+        data-codex-process-expanded={expanded ? "true" : "false"}
+        data-codex-process-turn-streaming={turnStreaming ? "true" : undefined}
+        data-active-turn-stage={turnStreaming ? activeStage : undefined}
+        data-codex-process-elapsed-seconds={elapsedSeconds ?? undefined}
+      >
+        <div className={styles.flowStatusRow}>
+          <span data-codex-process-work-status="true" role={running ? "status" : undefined}>{label}</span>
+          {hasThoughts ? (
+            <VButton
+              ref={summaryRef as React.Ref<HTMLButtonElement>}
+              type="button"
+              variant="ghost"
+              contentLayout="plain"
+              className={styles.flowThoughtToggle}
+              aria-controls={contentId}
+              aria-expanded={expanded}
+              onClick={handleSummaryClick}
+            >
+              {language === "zh" ? (expanded ? "收起思考" : "显示思考") : (expanded ? "Hide thoughts" : "Show thoughts")}
+              <ChevronRight
+                className={[styles.chevron, expanded ? styles.chevronExpanded : ""].filter(Boolean).join(" ")}
+                size={12}
+                aria-hidden="true"
+              />
+            </VButton>
+          ) : null}
+        </div>
+        <div ref={contentRef} id={contentId} className={styles.flowContent}>
+          {content}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <details

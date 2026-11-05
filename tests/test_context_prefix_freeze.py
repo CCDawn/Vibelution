@@ -217,6 +217,32 @@ def test_frozen_output_matches_fresh_output_when_inputs_stable(tmp_path, monkeyp
     assert _sha(fresh_other_session.static_context_block) == _sha(frozen.static_context_block)
 
 
+def test_accepted_profile_version_refreshes_only_agent_runtime_and_keeps_old_admission(tmp_path, monkeypatch):
+    """A newly accepted profile changes its segment; accepted A can still run after B."""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    catalog, template = _install_drifting_block_fakes(monkeypatch)
+    agent = _create_research_agent(tmp_path, monkeypatch)
+    old = {**agent, "displayName": "accepted name A", "personaProfile": {"personality": "persona A"},
+           "taskProfile": {"mission": "task A"}, "_acceptedPromptConfigHash": "accepted-config-a"}
+    first = context_engine.build_agent_context(agent["agentId"], session_id="same-session", agent_snapshot=old)
+    catalog["block"] = "## Public Structure Catalog\nincluded=99"
+    template["block"] = "## Prompt Template edited outside accepted snapshot"
+    new = {**agent, "displayName": "accepted name B", "personaProfile": {"personality": "persona B"},
+           "taskProfile": {"mission": "task B"}, "_acceptedPromptConfigHash": "accepted-config-b"}
+    second = context_engine.build_agent_context(agent["agentId"], session_id="same-session", agent_snapshot=new)
+    assert "accepted name B" in second.static_context_block
+    assert "persona B" in second.static_context_block and "task B" in second.static_context_block
+    assert "included=3" in second.static_context_block and "included=99" not in second.static_context_block
+    assert "Prompt Template v1" in second.static_context_block
+    assert second.timings["agentRuntimeStaticFrozen"] is False
+    replay_old = context_engine.build_agent_context(agent["agentId"], session_id="same-session", agent_snapshot=old)
+    assert replay_old.static_context_block == first.static_context_block
+    assert replay_old.timings["agentRuntimeStaticFrozen"] is True
+    repeated_new = context_engine.build_agent_context(agent["agentId"], session_id="same-session", agent_snapshot=new)
+    assert repeated_new.static_context_block == second.static_context_block
+    assert repeated_new.timings["agentRuntimeStaticFrozen"] is True
+
+
 def test_session_freeze_ttl_refresh_recomputes_after_expiry(monkeypatch):
     context_engine.reset_session_context_freeze_cache()
     calls = []

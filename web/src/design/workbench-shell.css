@@ -1,6 +1,10 @@
+[data-vui-app="launcher"],
 :where(.vui-app-appshell).shell {
   --shell-topbar-height: 44px;
   --shell-window-control-inset: 0px;
+}
+
+:where(.vui-app-appshell).shell {
   --shell-surface: var(--vui-surface-rail);
   --shell-surface-muted: var(--vui-surface-row);
   --shell-surface-hover: var(--vui-surface-row-hover);
@@ -59,6 +63,7 @@
   --theme-background-blur: 2px;
 }
 
+[data-vui-app="launcher"][data-desktop-shell="electron"],
 :where(.vui-app-appshell).shell[data-desktop-shell="electron"] {
   /* The native caption overlay owns this platform's title-bar height. */
   --shell-topbar-height: 40px;

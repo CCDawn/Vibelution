@@ -14,10 +14,10 @@ import {
   Sparkles,
   UsersRound,
 } from "lucide-react";
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import type { SessionReferenceAttachment } from "../../api/types";
-import { VButton, VDialog, VInput, VNativeInput, VPopover, VStringSelect } from "../../components/vui";
+import { VButton, VDialog, VInput, VNativeInput, VPopover, VStateSurface } from "../../components/vui";
 import { rankByScore } from "../../components/conversation/conversationFuzzyMatch";
 import { ChatComposerBudgetPopover, type ChatComposerBudgetControl, type ChatComposerBudgetPanelLabels } from "./ChatComposerBudgetPopover";
 import { composerAttachmentAcceptAttribute } from "./chatComposerSubmitModel";
@@ -36,15 +36,21 @@ export type ChatComposerKnowledgeReferenceState = {
   onRequest: () => void;
 };
 
-/** Privacy attachment surface (personal assistant only). The dialog collects a
- * kind, an optional display label and the plaintext; the host stages the value
- * through its closed IPC and receives a `sec_` reference. The plaintext lives
- * only in this dialog's controlled input state and is dropped on success,
- * close or unmount — it never enters a draft, snapshot or storage. */
-export type ChatComposerSecretKind = "api_key" | "token" | "password" | "secret";
+/** Privacy attachment surface (personal assistant only). The dialog collects an
+ * optional display label and the plaintext; the host stages the value through
+ * its closed IPC and receives a `sec_` reference. The plaintext lives only in
+ * this dialog's controlled input state and is dropped on success, close or
+ * unmount — it never enters a draft, snapshot or storage. */
 export type ChatComposerSecretAttachmentInput = {
-  secretType: ChatComposerSecretKind;
   value: string;
+  label?: string;
+};
+
+/** A live assistant `secret_request` receipt (the model asked the operator for
+ * a private credential). Null or omitted renders nothing, so ordinary chats
+ * never see the banner. */
+export type ChatComposerSecretRequest = {
+  purpose: string;
   label?: string;
 };
 
@@ -94,6 +100,12 @@ export type ChatComposerPlusMenuProps = ChatComposerCapabilityProps & {
   /** Privacy attachment entry; omitted surfaces get no menu item (ordinary
    * chats never pass it, so their plus menu stays bit-for-bit identical). */
   onAttachSecret?: (input: ChatComposerSecretAttachmentInput) => Promise<void>;
+  /** A pending assistant `secret_request` receipt; renders a one-click request
+   * banner near the composer until attached or dismissed. Hidden while the
+   * private attachment dialog is open so the two never stack. */
+  secretRequest?: ChatComposerSecretRequest | null;
+  /** The operator ignored the current request; the host keys the dismissal. */
+  onSecretRequestDismiss?: () => void;
   sessionReferences: ChatComposerSessionReferenceOption[];
   onAddSessionReference?: (reference: SessionReferenceAttachment) => void;
   knowledgeReferenceOptions?: ChatComposerSessionReferenceOption[];
@@ -141,6 +153,8 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
     attachmentDisabled,
     onAddAttachments,
     onAttachSecret,
+    secretRequest,
+    onSecretRequestDismiss,
     sessionReferences: defaultSessionReferences,
     onAddSessionReference,
     knowledgeReferenceOptions,
@@ -155,6 +169,13 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
   const canLoadMoreReferences = Boolean(scopedSessionReferences?.hasMore && scopedSessionReferences.onLoadMore);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const composerAnchorRef = useRef<HTMLElement | null>(null);
+  const [hasComposerAnchor, setHasComposerAnchor] = useState(false);
+  const captureComposerAnchor = useCallback((node: HTMLButtonElement | null) => {
+    const anchor = node?.closest<HTMLElement>(".composerCodex, .composer") ?? null;
+    composerAnchorRef.current = anchor;
+    setHasComposerAnchor(Boolean(anchor));
+  }, []);
   const [open, setOpen] = useState(false);
   const [referenceDialogOpen, setReferenceDialogOpen] = useState(false);
   const [referenceQuery, setReferenceQuery] = useState("");
@@ -163,7 +184,6 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
   // Privacy attachment dialog state. `secretValue` is the only place the
   // plaintext ever lives renderer-side; every exit path clears it immediately.
   const [secretDialogOpen, setSecretDialogOpen] = useState(false);
-  const [secretType, setSecretType] = useState<ChatComposerSecretKind>("api_key");
   const [secretLabel, setSecretLabel] = useState("");
   const [secretValue, setSecretValue] = useState("");
   const [secretPending, setSecretPending] = useState(false);
@@ -272,7 +292,6 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
   }
 
   function resetSecretDraft() {
-    setSecretType("api_key");
     setSecretLabel("");
     setSecretValue("");
     setSecretError("");
@@ -286,6 +305,18 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
     }
   }
 
+  /** The request banner's one-click path into the same dialog the plus menu
+   * uses. The suggested display name prefills only while the operator has not
+   * typed one; a closed dialog always resets the label, so this fills just the
+   * assistant's suggestion and never overwrites a manual entry. */
+  function openSecretRequestDialog() {
+    setSecretError("");
+    if (secretRequest?.label && !secretLabel.trim()) {
+      setSecretLabel(secretRequest.label);
+    }
+    setSecretDialogOpen(true);
+  }
+
   async function submitSecretAttachment() {
     if (!onAttachSecret || secretPending || !secretValue.trim()) return;
     setSecretPending(true);
@@ -293,7 +324,6 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
     const trimmedLabel = secretLabel.trim();
     try {
       await onAttachSecret({
-        secretType,
         value: secretValue,
         ...(trimmedLabel ? { label: trimmedLabel } : {}),
       });
@@ -309,13 +339,6 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
       setSecretPending(false);
     }
   }
-
-  const secretKindOptions = useMemo(() => [
-    { value: "api_key" as const, label: lang === "zh" ? "API 密钥" : "API key" },
-    { value: "token" as const, label: lang === "zh" ? "访问令牌" : "Access token" },
-    { value: "password" as const, label: lang === "zh" ? "密码" : "Password" },
-    { value: "secret" as const, label: lang === "zh" ? "其他隐私" : "Other secret" },
-  ], [lang]);
 
   function renderSection(section: SectionDescriptor, children: ReactNode) {
     return (
@@ -448,6 +471,29 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
 
   return (
     <>
+      {secretRequest && !secretDialogOpen ? (
+        <VStateSurface
+          density="compact"
+          tone="info"
+          role="status"
+          data-testid="chat-composer-secret-request"
+          className={styles.secretRequestBar}
+          icon={<KeyRound size={14} aria-hidden="true" />}
+          title={`${lang === "zh" ? "助理请求隐私内容：" : "Assistant requests private content: "}${secretRequest.purpose}`}
+          actions={<>
+            <VButton type="button" onPress={openSecretRequestDialog}>
+              {lang === "zh" ? "立即附加" : "Attach now"}
+            </VButton>
+            <VButton type="button" variant="ghost" onPress={() => onSecretRequestDismiss?.()}>
+              {lang === "zh" ? "忽略" : "Dismiss"}
+            </VButton>
+          </>}
+        >
+          {secretRequest.label
+            ? lang === "zh" ? `建议显示名：${secretRequest.label}` : `Suggested display name: ${secretRequest.label}`
+            : null}
+        </VStateSurface>
+      ) : null}
       <VPopover
         open={open}
         onOpenChange={(nextOpen) => {
@@ -457,12 +503,15 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
         align="start"
         sideOffset={8}
         aria-label={lang === "zh" ? "更多操作" : "More actions"}
-        contentClassName={styles.popoverContent}
+        anchorRef={hasComposerAnchor ? composerAnchorRef : undefined}
+        contentClassName={[styles.popoverContent, hasComposerAnchor ? styles.composerWidth : styles.standaloneWidth].join(" ")}
         trigger={(
           <VButton
+            ref={captureComposerAnchor}
             type="button"
             isIconOnly
-            variant="secondary"
+            variant="ghost"
+            className={styles.trigger}
             aria-label={lang === "zh" ? "更多操作" : "More actions"}
             icon={<Plus size={16} />}
           />
@@ -636,15 +685,6 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
       >
         <div className={styles.secretBody}>
           <label className={styles.secretField}>
-            <span>{lang === "zh" ? "类型" : "Kind"}</span>
-            <VStringSelect
-              ariaLabel={lang === "zh" ? "隐私附件类型" : "Private attachment kind"}
-              value={secretType}
-              options={secretKindOptions}
-              onValueChange={next => setSecretType(next as ChatComposerSecretKind)}
-            />
-          </label>
-          <label className={styles.secretField}>
             <span>{lang === "zh" ? "显示名（可选）" : "Display name (optional)"}</span>
             <VInput
               value={secretLabel}
@@ -661,7 +701,7 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
               autoComplete="new-password"
               value={secretValue}
               onChange={(event) => setSecretValue(event.target.value)}
-              placeholder={lang === "zh" ? "粘贴密钥或明文，仅此一次输入" : "Paste the key or plaintext; entered once only"}
+              placeholder={lang === "zh" ? "粘贴隐私内容，仅此一次输入" : "Paste the private content; entered once only"}
               aria-label={lang === "zh" ? "隐私内容" : "Private value"}
             />
           </label>

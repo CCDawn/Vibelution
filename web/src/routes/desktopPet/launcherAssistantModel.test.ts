@@ -55,10 +55,11 @@ afterEach(async () => {
   bridge.subscribeLauncherAssistantSessionEvent.mockImplementation(() => null);
 });
 
-async function renderAssistant(initialDetail?: Record<string, unknown>, initialStatus?: Record<string, unknown>, statusRequest?: () => Promise<unknown>, routeProps: Partial<ComponentProps<typeof LauncherAssistantRoute>> = {}) {
+async function renderAssistant(initialDetail?: Record<string, unknown>, initialStatus?: Record<string, unknown>, statusRequest?: () => Promise<unknown>, routeProps: Partial<ComponentProps<typeof LauncherAssistantRoute>> = {}, detailRequest?: () => Promise<unknown>) {
   if (statusRequest) bridge.getLauncherAssistantStatus.mockImplementation(statusRequest);
   else bridge.getLauncherAssistantStatus.mockResolvedValue(initialStatus ?? { assistant: { agentId: "a", directSessionId: "s", displayName: "助理" } });
-  bridge.getLauncherAssistantDetail.mockResolvedValue(initialDetail ?? { id: "s", status: "ready", messages: [], defaultFileContext: "" });
+  if (detailRequest) bridge.getLauncherAssistantDetail.mockImplementation(detailRequest);
+  else bridge.getLauncherAssistantDetail.mockResolvedValue(initialDetail ?? { id: "s", status: "ready", messages: [], defaultFileContext: "" });
   bridge.getLauncherAssistantDispatches.mockResolvedValue([]);
   bridge.getLauncherAssistantApprovals.mockResolvedValue([]);
   bridge.setLauncherAssistantExpanded.mockResolvedValue(undefined);
@@ -648,6 +649,140 @@ describe("Launcher assistant state", () => {
     await act(async () => root?.unmount());
     root = undefined;
     expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps one pending detail recovery read through repeated push gaps and allows a later recovery read", async () => {
+    let push: ((event: LauncherAssistantSessionEvent) => void) | undefined;
+    bridge.subscribeLauncherAssistantSessionEvent.mockImplementation((listener: (event: LauncherAssistantSessionEvent) => void) => {
+      push = listener;
+      return () => {};
+    });
+    const initialDetail = { id: "s", status: "running", activeTurnId: "t1", messages: [], defaultFileContext: "", ledgerSeq: 1 };
+    await renderAssistant(initialDetail, undefined, undefined, { embedded: true });
+    expect(push).toBeTypeOf("function");
+    expect(client?.getQueryData(["launcher-assistant", "detail", "s"])).toMatchObject(initialDetail);
+    const reads = bridge.getLauncherAssistantDetail.mock.calls.length;
+    let resolveDetail!: (detail: typeof initialDetail) => void;
+    const pendingDetail = new Promise<typeof initialDetail>(resolve => { resolveDetail = resolve; });
+    bridge.getLauncherAssistantDetail.mockImplementation(() => pendingDetail);
+    const freshDetail = { ...initialDetail, ledgerSeq: 5 };
+    const deliverGap = async (ledgerSeq: number) => {
+      await act(async () => {
+        push?.({ type: "assistant_delta", sessionId: "s", turnId: "t1", needsRefresh: true, ledgerSeq, at: Date.now() });
+      });
+      await settle();
+    };
+
+    try {
+      await deliverGap(2);
+      expect(bridge.getLauncherAssistantDetail).toHaveBeenCalledTimes(reads + 1);
+      for (const ledgerSeq of [3, 4, 5]) await deliverGap(ledgerSeq);
+      expect(bridge.getLauncherAssistantDetail).toHaveBeenCalledTimes(reads + 1);
+
+      await act(async () => resolveDetail(freshDetail));
+      await settle(); await settle();
+      expect(client?.getQueryData(["launcher-assistant", "detail", "s"])).toMatchObject(freshDetail);
+
+      const laterDetail = { ...initialDetail, ledgerSeq: 6 };
+      bridge.getLauncherAssistantDetail.mockResolvedValue(laterDetail);
+      await deliverGap(6);
+      expect(bridge.getLauncherAssistantDetail).toHaveBeenCalledTimes(reads + 2);
+      expect(client?.getQueryData(["launcher-assistant", "detail", "s"])).toMatchObject(laterDetail);
+    } finally {
+      await act(async () => resolveDetail(freshDetail));
+      await settle();
+    }
+  });
+
+  it("replaces a pending old-epoch detail read and waits for the new epoch before accepting appends", async () => {
+    let push: ((event: LauncherAssistantSessionEvent) => void) | undefined;
+    bridge.subscribeLauncherAssistantSessionEvent.mockImplementation((listener: (event: LauncherAssistantSessionEvent) => void) => {
+      push = listener;
+      return () => {};
+    });
+    const item = { id: "native-answer", itemId: "native-answer", version: 3, sessionId: "s", turnId: "t1", revision: 1,
+      sequence: 1, status: "running", type: "agent_message", phase: "final_answer", text: "seed" };
+    const detailWithText = (text: string) => ({ id: "s", status: "running", activeTurnId: "t1", currentPhase: "responding",
+      messages: [{ id: "m1", role: "assistant", turnId: "t1", status: "running", turnItems: [{ ...item, text }] }],
+      defaultFileContext: "", ledgerSeq: 10 });
+    const initialDetail = { ...detailWithText("seed"), messages: [] };
+    await renderAssistant(initialDetail, undefined, undefined, { embedded: true });
+    const frame = { type: "assistant_delta", sessionId: "s", turnId: "t1", at: 1, ledgerSeq: 10,
+      updatedAt: "2026-11-03T02:00:00Z", stage: "assistant_response", done: false };
+    await act(async () => push?.({ ...frame, deltaSeq: 1, turnItems: [item] } as LauncherAssistantSessionEvent));
+    expect(conversation?.activeTurnMessage?.turnItems?.[0]).toMatchObject({ text: "seed" });
+
+    const reads = bridge.getLauncherAssistantDetail.mock.calls.length;
+    let resolveOld!: (detail: ReturnType<typeof detailWithText>) => void;
+    let resolveNew!: (detail: ReturnType<typeof detailWithText>) => void;
+    const oldRead = new Promise<ReturnType<typeof detailWithText>>(resolve => { resolveOld = resolve; });
+    const newRead = new Promise<ReturnType<typeof detailWithText>>(resolve => { resolveNew = resolve; });
+    bridge.getLauncherAssistantDetail.mockImplementationOnce(() => oldRead).mockImplementation(() => newRead);
+    const deliver = async (event: LauncherAssistantSessionEvent) => {
+      await act(async () => push?.(event));
+      await settle();
+    };
+    const newDetail = detailWithText("🐳abc");
+
+    try {
+      await deliver({ type: "heartbeat", sessionId: "s", connectionEpoch: 1, ledgerSeq: 10, at: 2 });
+      expect(bridge.getLauncherAssistantDetail).toHaveBeenCalledTimes(reads + 1);
+      await deliver({ type: "heartbeat", sessionId: "s", connectionEpoch: 2, ledgerSeq: 10, at: 3 });
+      expect(bridge.getLauncherAssistantDetail).toHaveBeenCalledTimes(reads + 2);
+
+      // Equal journal watermark and text length cannot make the old read fresh
+      // for the new connection; its different body must remain unobservable.
+      await act(async () => resolveOld(detailWithText("old!")));
+      await settle(); await settle();
+      expect(client?.getQueryData(["launcher-assistant", "detail", "s"])).toMatchObject(initialDetail);
+      expect(conversation?.activeTurnMessage?.turnItems?.[0]).toMatchObject({ text: "seed" });
+      const append = { ...frame, connectionEpoch: 2, deltaSeq: 1, deltaSeqFrom: 1, turnItems: [], streamEncoding: "append-v1",
+        turnItemAppends: [{ kind: "append", itemId: "native-answer", itemType: "agent_message", baseLength: 4, appendedLength: 1, appendedText: "?" }] };
+      await deliver(append as LauncherAssistantSessionEvent);
+      expect(conversation?.activeTurnMessage?.turnItems?.[0]).toMatchObject({ text: "seed" });
+
+      await act(async () => resolveNew(newDetail));
+      await settle(); await settle();
+      expect(client?.getQueryData(["launcher-assistant", "detail", "s"])).toMatchObject(newDetail);
+      await deliver({ ...append, deltaSeq: 2, deltaSeqFrom: 2,
+        turnItemAppends: [{ ...append.turnItemAppends[0], appendedLength: 2, appendedText: "继续" }] } as LauncherAssistantSessionEvent);
+      expect(conversation?.activeTurnMessage?.turnItems?.[0]).toMatchObject({ text: "🐳abc继续" });
+
+      const settledReads = bridge.getLauncherAssistantDetail.mock.calls.length;
+      await deliver({ ...frame, connectionEpoch: 1, deltaSeq: 100, deltaSeqFrom: 100, done: true,
+        turnItems: [{ ...item, text: "old!", status: "completed", terminal: true }] } as LauncherAssistantSessionEvent);
+      expect(bridge.getLauncherAssistantDetail).toHaveBeenCalledTimes(settledReads);
+      expect(conversation?.activeTurnMessage?.turnItems?.[0]).toMatchObject({ text: "🐳abc继续" });
+    } finally {
+      await act(async () => { resolveOld(detailWithText("old!")); resolveNew(newDetail); });
+      await settle();
+    }
+  });
+
+  it("replaces an initial detail read without cached data when the connection epoch changes", async () => {
+    let push: ((event: LauncherAssistantSessionEvent) => void) | undefined;
+    bridge.subscribeLauncherAssistantSessionEvent.mockImplementation(listener => { push = listener; return () => {}; });
+    const snapshot = (ledgerSeq: number) => ({ id: "s", status: "ready", messages: [], defaultFileContext: "", ledgerSeq });
+    let resolveInitial!: (value: ReturnType<typeof snapshot>) => void;
+    const initial = new Promise<ReturnType<typeof snapshot>>(resolve => { resolveInitial = resolve; });
+    let requests = 0;
+    await renderAssistant(undefined, undefined, undefined, { embedded: true }, () => {
+      requests++;
+      return requests === 1 ? initial : Promise.resolve(snapshot(20));
+    });
+    try {
+      expect(client?.getQueryData(["launcher-assistant", "detail", "s"])).toBeUndefined();
+      await act(async () => push?.({ type: "heartbeat", sessionId: "s", at: 1, connectionEpoch: 1 }));
+      await settle(); await settle();
+      expect(requests).toBe(2);
+      expect(client?.getQueryData(["launcher-assistant", "detail", "s"])).toMatchObject(snapshot(20));
+      await act(async () => resolveInitial(snapshot(10)));
+      await settle();
+      expect(client?.getQueryData(["launcher-assistant", "detail", "s"])).toMatchObject(snapshot(20));
+    } finally {
+      resolveInitial(snapshot(10));
+      await settle();
+    }
   });
 
   it("applies native full and append frames with one stable item identity until durable readback", async () => {

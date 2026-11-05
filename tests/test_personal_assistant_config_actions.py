@@ -280,17 +280,18 @@ def test_provider_add_unknown_or_expired_credential_token_fails_without_writes(o
     assert peek_secret_attachment(keep) == "api_key"  # unrelated live attachment untouched
 
 
-def test_provider_add_non_api_key_credential_kind_is_consumed_and_rejected(operator, monkeypatch):
-    from core.assistant_runtime.secret_attachments import resolve_secret_attachment
+def test_provider_add_accepts_any_attachment_kind_as_credential(operator, monkeypatch):
     writes, deletes = _record_env(monkeypatch)
-    before = operator.read_bytes()
     token = _stage_secret("fixture-pass", "password")
     result = call("provider_add", {"provider_id": "tokened", "base_url": "https://tokened.example/v1",
                   "credential_token": token}, governed=True)
-    assert result["error"] == "credential_token_kind"
-    assert writes == [] and deletes == []
-    assert operator.read_bytes() == before
-    assert resolve_secret_attachment(token) is None  # pop-on-read consumed the failed attempt
+    assert result["ok"] and result["verified"], result
+    assert result["credentialState"] == "configured"
+    assert writes == [("VIBELUTION_LLM_TOKENED_API_KEY", "fixture-pass")]
+    assert deletes == []
+    provider = read(operator)["llm"]["providers"]["tokened"]
+    assert provider["auth_kind"] == "api_key"
+    assert provider["requires_credential"] is True
 
 
 def test_provider_add_credential_token_and_source_provider_are_mutually_exclusive(operator, monkeypatch):
@@ -351,6 +352,42 @@ def test_provider_add_still_rejects_inline_api_key_field(operator):
     assert result["error"] == "invalid_input"
     assert operator.read_bytes() == before
     assert "fixture-secret" not in json.dumps(result)
+
+
+def test_secret_request_returns_pure_receipt_without_config_access(operator, monkeypatch):
+    monkeypatch.setattr(actions, "_path", lambda: pytest.fail("receipt action must not read config"))
+    contract = actions.contracts()["secret_request"]
+    assert contract["governed"] is False
+    assert contract["parameters"]["properties"]["purpose"]["maxLength"] == 200
+    assert contract["parameters"]["properties"]["label"]["maxLength"] == 120
+    before = operator.read_bytes()
+    result = call("secret_request", {"purpose": "配置 Pixel 中转需要 API key", "label": "Pixel 密钥"})
+    assert result == {"ok": True, "action": "secret_request", "status": "awaiting_user_attachment",
+                      "purpose": "配置 Pixel 中转需要 API key", "label": "Pixel 密钥",
+                      "hint": "等待用户附加隐私附件；附加后在下一条用户消息会出现 sec_ 引用标记，届时由对应工具参数引用（如 provider_add 的 credential_token）"}
+    assert operator.read_bytes() == before
+
+
+def test_secret_request_label_is_optional(operator):
+    result = call("secret_request", {"purpose": "连接官方 API 需要 token"})
+    assert result["ok"] is True and "label" not in result
+    assert result["status"] == "awaiting_user_attachment"
+    assert result["purpose"] == "连接官方 API 需要 token"
+    assert result["hint"].startswith("等待用户附加隐私附件")
+
+
+@pytest.mark.parametrize("purpose", ["", "p" * 201])
+def test_secret_request_rejects_invalid_purpose_without_touching_config(operator, monkeypatch, purpose):
+    monkeypatch.setattr(actions, "_path", lambda: pytest.fail("validation failure must not read config"))
+    before = operator.read_bytes()
+    result = call("secret_request", {"purpose": purpose})
+    assert result["error"] == "invalid_input"
+    assert operator.read_bytes() == before
+
+
+def test_secret_request_runs_without_native_approval(monkeypatch):
+    monkeypatch.setattr(actions, "_path", lambda: pytest.fail("receipt must not need approval-gated config"))
+    assert call("secret_request", {"purpose": "p"}, governed=False)["ok"] is True
 
 
 def test_provider_update_preserves_models_and_unrelated_provider(operator):

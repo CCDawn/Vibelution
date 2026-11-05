@@ -830,6 +830,48 @@ def stop(turn_id: str) -> dict[str, Any]:
         return ack
 
 
+def _validate_queued_turn_id(queued_turn_id: str) -> None:
+    if not isinstance(queued_turn_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", queued_turn_id):
+        raise AssistantSessionError("SESSION_INVALID")
+
+
+def update_queued_turn(queued_turn_id: str, *, content: str | None = None,
+                       position: int | None = None, status: str | None = None) -> dict[str, Any]:
+    """Edit the fixed Session's native queue without owning another queue."""
+    _validate_queued_turn_id(queued_turn_id)
+    if (content is not None and (not isinstance(content, str) or len(content) > 64000)
+            or position is not None and (type(position) is not int or not 1 <= position <= 2**53 - 1)
+            or status is not None and (not isinstance(status, str) or status not in {"paused", "queued"})):
+        raise AssistantSessionError("SESSION_INVALID")
+    with _session_command() as (_, session_id):
+        from core.web.services.session.queued_turns import update_session_queued_turn
+
+        return {"queuedTurns": update_session_queued_turn(
+            session_id, queued_turn_id, content=content, position=position, status=status,
+        )}
+
+
+def remove_queued_turn(queued_turn_id: str) -> dict[str, Any]:
+    """Withdraw one row through the native owner of the fixed Session."""
+    _validate_queued_turn_id(queued_turn_id)
+    with _session_command() as (_, session_id):
+        from core.web.services.session.queued_turns import remove_session_queued_turn
+
+        return {"queuedTurns": remove_session_queued_turn(session_id, queued_turn_id)}
+
+
+def send_now_queued_turn(queued_turn_id: str, *, expected_turn_id: str = "") -> dict[str, Any]:
+    """Keep native promotion, stop fencing, rollback and repeated-click semantics."""
+    _validate_queued_turn_id(queued_turn_id)
+    if not isinstance(expected_turn_id, str) or (expected_turn_id
+            and not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", expected_turn_id)):
+        raise AssistantSessionError("SESSION_INVALID")
+    with _session_command() as (_, session_id):
+        from core.web.services.session.queued_turns import send_now_session_queued_turn
+
+        return send_now_session_queued_turn(session_id, queued_turn_id, expected_turn_id=expected_turn_id)
+
+
 def continue_turn(request_id: str, continuation: dict[str, Any]) -> dict[str, Any]:
     """Admit one fixed continuation against the native settled snapshot."""
     if not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", request_id):
