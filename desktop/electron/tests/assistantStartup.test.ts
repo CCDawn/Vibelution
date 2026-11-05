@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AssistantProjectRegistryConnection } from "../src/assistant/projectRegistryConnection.js";
 import { PrehostRecoveryDrainedUnknown } from "../src/assistant/prehostRecoveryJob.js";
 import { InitialMigrationResults } from "../src/assistant/initialMigrationResults.js";
-import { startAssistantReminderPump } from "../src/assistant/reminderPump.js";
+import { createReminderTransportWarningGate, REMINDER_TRANSPORT_FAILURE_LIMIT, startAssistantReminderPump } from "../src/assistant/reminderPump.js";
 import { AssistantProjectLifecycleRequestStore } from "../src/assistant/projectLifecycleRequestStore.js";
 import { unwrapSource } from "../src/state/launcherStateStore.js";
 import { createSingleInstanceEnvelope, resolveSecondInstanceIntent, resolveSingleInstanceCliIntent, resolveSingleInstanceProvenance } from "../src/appLock.js";
@@ -87,6 +87,7 @@ function fixture() {
     AssistantHost: vi.fn(function () { return host; }), AssistantWindow: vi.fn(function () { return window; }),
     AssistantProjectLifecycleRequestStore: vi.fn(function () { return { get: vi.fn(async () => null) }; }),
     startAssistantReminderPump: vi.fn(() => vi.fn(async () => undefined)),
+    createReminderTransportWarningGate, REMINDER_TRANSPORT_FAILURE_LIMIT,
     startAssistantEventPump: vi.fn(() => ({ done: Promise.resolve() })),
     AssistantProjectRegistryConnection: vi.fn(function () { return projects; }),
     createAssistantTray: vi.fn(() => ({ destroy: vi.fn() })), requestDesktopShellExit: vi.fn(),
