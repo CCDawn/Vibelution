@@ -296,6 +296,11 @@ class ManagementService:
         return result
 
     def read_asset(self, subject, capability, operation, parameters):
+        from .agent_configuration_contracts import AgentConfigurationQuery, AgentConfigurationResponse
+        from .agent_configuration import AgentConfigurationControl
+        from .configuration_discovery_contracts import (AgentPromptQuery, AgentPromptResponse,
+            ToolPolicyInspectQuery, ToolPolicyInspectResponse)
+        from .configuration_discovery import ConfigurationDiscovery
         from .asset_contracts import (TeamAssetQuery, TeamAssetResponse, ToolPolicyQuery, ToolPolicyResponse,
             KnowledgeACLQuery, KnowledgeACLResponse, DispatchAccessQuery, DispatchAccessResponse)
         from .asset_control import AssetControl
@@ -304,6 +309,12 @@ class ManagementService:
         from .dispatch_access import DispatchAccessControl
         control = AssetControl(self.native)
         scope, query_type, response_type, reader = {
+            "agent-config": ("agents:configuration:read", AgentConfigurationQuery, AgentConfigurationResponse,
+                             AgentConfigurationControl(self.native).read_configuration),
+            "agent-prompt": ("agents:configuration:read", AgentPromptQuery, AgentPromptResponse,
+                             ConfigurationDiscovery(self.native).read_prompt),
+            "tool-policy-inspect": ("agents:tool-policy:read", ToolPolicyInspectQuery, ToolPolicyInspectResponse,
+                             ConfigurationDiscovery(self.native).inspect_policy),
             "team": ("teams:manage:read", TeamAssetQuery, TeamAssetResponse, control.read_team),
             "team-archive": ("teams:manage:read", TeamAssetQuery, TeamArchivePreviewResponse, TeamLifecycleControl(self.native).read_archive_preview),
             "tool-policy": ("agents:tool-policy:read", ToolPolicyQuery, ToolPolicyResponse, control.read_tool_policy),

@@ -617,12 +617,18 @@ class ManagedAgentBackendClient:
         return result
 
     async def management_asset(self, operation: str, **parameters) -> dict[str, Any]:
+        from core.web.services.external_management.agent_configuration_contracts import AgentConfigurationQuery, AgentConfigurationResponse
+        from core.web.services.external_management.configuration_discovery_contracts import (AgentPromptQuery, AgentPromptResponse,
+            ToolPolicyInspectQuery, ToolPolicyInspectResponse)
         from pydantic import ValidationError
         from core.web.services.external_management.asset_contracts import (
             TeamAssetQuery, TeamAssetResponse, ToolPolicyQuery, ToolPolicyResponse, KnowledgeACLQuery, KnowledgeACLResponse,
             DispatchAccessQuery, DispatchAccessResponse)
         from core.web.services.external_management.team_lifecycle_contracts import TeamArchivePreviewResponse
         choices = {"team": (TeamAssetQuery, TeamAssetResponse, "team_id", "teamId"),
+            "agent-config": (AgentConfigurationQuery, AgentConfigurationResponse, "agent_id", "agentId"),
+            "agent-prompt": (AgentPromptQuery, AgentPromptResponse, "agent_id", "agentId"),
+            "tool-policy-inspect": (ToolPolicyInspectQuery, ToolPolicyInspectResponse, "agent_id", "agentId"),
             "team-archive": (TeamAssetQuery, TeamArchivePreviewResponse, "team_id", "teamId"),
             "tool-policy": (ToolPolicyQuery, ToolPolicyResponse, "agent_id", "agentId"),
             "knowledge-acl": (KnowledgeACLQuery, KnowledgeACLResponse, "knowledge_base_id", "knowledgeBaseId"),

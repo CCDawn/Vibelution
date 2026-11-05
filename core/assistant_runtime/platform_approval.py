@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from .team_management_approval import TEAM_MANAGEMENT_ACTIONS, team_management_approval_summary
 
 PLATFORM_MANAGEMENT_ACTIONS = frozenset({"dispatch_cancel", "runtime_command", "team_update",
+    "agent_parameters_update", "agent_prompt_update",
     "agent_tool_policy_update", "knowledge_acl_grant", "knowledge_acl_revoke", "flow_save", "flow_start", "agent_dispatch_access_set", *TEAM_MANAGEMENT_ACTIONS})
 
 
@@ -76,6 +77,14 @@ def platform_management_approval_summary(action, parameters):
         changed, delta = ["command"], {"command": values["command"]}
     elif action == "agent_dispatch_access_set":
         changed, delta = ["enabled"], {"enabled": values["enabled"]}
+    elif action == "agent_parameters_update":
+        changed = [values["kind"]]
+        delta = _decimal_values(values["parameters"])
+    elif action == "agent_prompt_update":
+        changed = ["promptTemplateId", "promptContent"]
+        delta = {"scope": "single_agent_copy_on_write", "contentChars": str(len(values["content"])),
+                 "contentDigest": _digest(values["content"]), "activation": "next_submission"}
+        content_omitted = True
     elif action.startswith("knowledge_acl_"):
         changed, delta = ["permissions"], {"permissions": values["permissions"]}
     elif action == "agent_tool_policy_update":
