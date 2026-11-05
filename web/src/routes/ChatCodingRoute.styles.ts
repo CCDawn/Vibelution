@@ -86,7 +86,7 @@ const styles: Record<string, string> = {
   layoutConversationOnly:
     "vui-routes-chatcodingroute layoutConversationOnly w-full grid !grid-cols-[minmax(0,1fr)]",
   layoutOverlay:
-    "vui-routes-chatcodingroute layoutOverlay relative w-full grid min-w-0 grid-cols-[minmax(0,1fr)] overflow-hidden",
+    "vui-routes-chatcodingroute layoutOverlay relative w-full grid min-w-0 !grid-cols-[minmax(0,1fr)] overflow-hidden",
   // Rail sections separate by whitespace rhythm (p-2 vertical), not hairline rules;
   // state emphasis moves to the active block accent (currentSessionBlock_active).
   leftBlock:

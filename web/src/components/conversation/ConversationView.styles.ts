@@ -82,7 +82,7 @@ const composerRoundActionButton = cv(
   "composerRoundButton",
   "min-w-0 inline-grid",
   compactIconButtonSize,
-  "place-items-center rounded-full border p-0",
+  "place-items-center !rounded-full border p-0",
   composerIconOnlySlot,
   composerQuietActionState,
 );
@@ -96,7 +96,7 @@ const composerPrimaryActionButton = cv(
 const composerSendActionButton = cv(
   "sendButton",
   compactIconButtonSize,
-  "inline-grid place-items-center rounded-full border p-0",
+  "inline-grid place-items-center !rounded-full border p-0",
   composerIconOnlySlot,
   "!border-[var(--fg-primary)] !bg-[var(--fg-primary)] !text-[var(--vui-surface-workspace)] shadow-none transition-colors duration-150 hover:translate-y-0 hover:!border-[color-mix(in_srgb,var(--fg-primary)_82%,var(--accent-cool))] hover:!bg-[color-mix(in_srgb,var(--fg-primary)_82%,var(--accent-cool))] hover:!text-[var(--vui-surface-workspace)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--vui-surface-panel)] active:!bg-[color-mix(in_srgb,var(--fg-primary)_72%,var(--accent-cool))] disabled:!border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] disabled:!bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] disabled:!text-[var(--fg-tertiary)] disabled:hover:!border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] disabled:hover:!bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] disabled:hover:!text-[var(--fg-tertiary)]",
 );

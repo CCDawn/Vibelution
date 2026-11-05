@@ -1289,6 +1289,7 @@ export function useConversationComposer({
           ) : null}
           <VNativeTextarea
             ref={composerInputRef}
+            rows={composerVariant === "codex" ? 1 : undefined}
             className={composerVariant === "codex" ? styles.inputCodex : styles.input}
             value={composerValue}
             disabled={composerDisabled && resolvedActionMode !== "stop"}
