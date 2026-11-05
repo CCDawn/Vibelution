@@ -88,10 +88,11 @@ def test_pa_session_secret_attachment_marks_model_message_without_plaintext(
         assert len(scheduled_contexts) == 1
         context = scheduled_contexts[0]
         model_message = str(context["user_message"])
-        # Presence marker names the one-shot token and the kind label...
+        # Presence marker names the one-shot token and the display label...
         assert token in model_message
         assert "[隐私附件]" in model_message
-        assert "API 密钥" in model_message
+        assert "Provider Key" in model_message
+        assert "类型" not in model_message
         assert 'credential_token="' + token + '"' in model_message
         # ...but the plaintext never reaches the model context.
         assert SECRET_PLAINTEXT not in model_message
@@ -110,6 +111,19 @@ def test_pa_session_secret_attachment_marks_model_message_without_plaintext(
         assert SECRET_PLAINTEXT not in json.dumps(payload, ensure_ascii=False, default=str)
     finally:
         _reset_seeded_session_runtime(session_id)
+
+
+def test_secret_attachment_prompt_block_uses_label_or_unnamed_fallback() -> None:
+    token = secret_attachments.issue_secret_attachment(SECRET_PLAINTEXT, "api_key", label="")
+    bare = submit._secret_attachment_prompt_block([{"attachmentId": token}])
+    assert "[隐私附件]" in bare
+    assert "未命名" in bare
+    assert "类型" not in bare
+    assert 'credential_token="' + token + '"' in bare
+    labeled = submit._secret_attachment_prompt_block([{"attachmentId": token, "label": "邮箱密码"}])
+    assert "邮箱密码" in labeled
+    assert "未命名" not in labeled
+    assert "类型" not in labeled
 
 
 def test_ordinary_session_treats_secret_ids_as_nonexistent(

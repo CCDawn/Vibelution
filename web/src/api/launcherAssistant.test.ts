@@ -9,6 +9,7 @@ import {
   regenerateLauncherAssistantMessage, guideLauncherAssistantTurn,
   getLauncherOperatorAsset, getLauncherAssistantAvatar, openLauncherFromAssistant,
   subscribeLauncherAssistantSessionEvent,
+  uploadLauncherUserSecret,
   setLauncherManagementPermissionPreset,
   getLauncherAssistantBudget, setLauncherAssistantBudget,
   getLauncherAssistantUsageSummary,
@@ -658,5 +659,48 @@ describe("Launcher session event subscription", () => {
     const throwingUnsubscribe = subscribeLauncherAssistantSessionEvent(() => {});
     expect(() => throwingUnsubscribe?.()).not.toThrow();
     expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Launcher user secret staging", () => {
+  it("sends value plus optional label on the closed verb, never secretKind", async () => {
+    const invoke = vi.fn().mockResolvedValue({ attachmentId: "sec_abc123", kind: "user_secret" });
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    await expect(uploadLauncherUserSecret("sk-live-value", "中转站密钥")).resolves
+      .toEqual({ attachmentId: "sec_abc123", kind: "user_secret" });
+    expect(invoke).toHaveBeenLastCalledWith({ operation: "upload_attachment", kind: "user_secret",
+      value: "sk-live-value", label: "中转站密钥" });
+    await expect(uploadLauncherUserSecret("sk-live-value")).resolves
+      .toEqual({ attachmentId: "sec_abc123", kind: "user_secret" });
+    expect(invoke).toHaveBeenLastCalledWith({ operation: "upload_attachment", kind: "user_secret", value: "sk-live-value" });
+    await expect(uploadLauncherUserSecret("", "label")).rejects.toThrow("请粘贴隐私内容后再提交。");
+    await expect(uploadLauncherUserSecret("value", "x".repeat(161))).rejects.toThrow("显示名无效。");
+    expect(invoke).toHaveBeenCalledTimes(2);
+  });
+
+  it("accepts exactly 2-key or 3-key confirmations and rejects every other shape", async () => {
+    const invoke = vi.fn();
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    for (const confirmed of [
+      { attachmentId: "sec_abc123", kind: "user_secret" },
+      { attachmentId: "sec_abc123", kind: "user_secret", label: "中转站密钥" },
+    ]) {
+      invoke.mockResolvedValueOnce(confirmed);
+      await expect(uploadLauncherUserSecret("sk-live-value", "中转站密钥")).resolves
+        .toEqual({ attachmentId: "sec_abc123", kind: "user_secret" });
+    }
+    for (const invalid of [
+      null,
+      { attachmentId: "sec_abc123" },
+      { attachmentId: "sec_abc123", kind: "user_secret", extra: 1 },
+      { attachmentId: "sec_abc123", kind: "user_secret", label: 7 },
+      { attachmentId: "sec_abc123", kind: "user_secret", label: "x".repeat(161) },
+      { attachmentId: "user-image-1.png", kind: "user_secret" },
+      { attachmentId: "sec_abc123", kind: "user_image" },
+    ]) {
+      invoke.mockResolvedValueOnce(invalid);
+      await expect(uploadLauncherUserSecret("sk-live-value")).rejects.toThrow("Launcher 未确认隐私附件暂存。");
+    }
+    expect(invoke).toHaveBeenCalledTimes(9);
   });
 });

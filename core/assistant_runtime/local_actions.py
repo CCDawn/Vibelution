@@ -13,7 +13,7 @@ _ASSISTANT_ACTIONS = (
     "dialogue_settings", "dialogue_settings_update",
 )
 _CONFIG_ACTIONS = (
-    "provider_catalog", "provider_add", "provider_update", "provider_remove",
+    "secret_request", "provider_catalog", "provider_add", "provider_update", "provider_remove",
     "provider_test", "provider_discover", "provider_models", "model_update",
     "model_details", "model_defaults", "model_remove", "model_default",
 )
@@ -27,6 +27,8 @@ def contracts() -> dict:
     from tools import pa_assistant_actions, pa_config_actions, pa_platform_actions
 
     result = {}
+    from tools import pa_provider_onboarding
+    result.update(pa_provider_onboarding.contracts())
     for names, source in (
         (_ASSISTANT_ACTIONS, pa_assistant_actions.contracts()),
         (_CONFIG_ACTIONS, pa_config_actions.contracts()),
@@ -60,6 +62,8 @@ def contracts() -> dict:
     for name in _REFERENCE_DELETIONS:
         from .configuration_control import available
         result[name] = {**result[name], "available": available(), "unavailableReason": "" if available() else _REFERENCE_GUARD_MESSAGE}
+    result["provider_add"] = {**result["provider_add"], "description":
+        result["provider_add"]["description"] + " 用户仅提供地址或文档时先用provider_prepare整理协议与目标；保存后用provider_model_resolve查询模型和失败补填，无需先索要准确模型ID。"}
     from .configuration_control import ReferenceQuery
     result["configuration_references"] = {"action": "configuration_references", "governed": False,
         "parameters": ReferenceQuery.model_json_schema(),
@@ -72,6 +76,9 @@ def execute(action: str, parameters: dict, runtime: dict, *, governed: bool = Fa
     contract = contracts().get(action)
     if contract is None:
         raise ValueError("未知的 Launcher 本地操作，请先 index/describe 查询。")
+    if action in {"provider_prepare", "provider_model_resolve"}:
+        from tools import pa_provider_onboarding
+        return pa_provider_onboarding.execute(action, parameters, runtime, governed=governed)
     if action == "configuration_references":
         from .configuration_control import inspect
         return inspect(parameters, runtime)

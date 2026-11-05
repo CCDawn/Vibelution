@@ -95,9 +95,8 @@ export type LauncherAssistantRequest =
   | { operation: "uploadAttachment"; filename: string; contentType: string; dataBase64: string }
   /** Privacy attachments ride their own closed verb: plaintext never becomes a
    * base64 body, a URL, or any persisted renderer state — the response carries
-   * only the staged `sec_` reference. `secretKind` carries the dialog's type
-   * choice; the host defaults it to "secret" when absent. */
-  | { operation: "upload_attachment"; kind: "user_secret"; value: string; label?: string; secretKind: LauncherUserSecretKind }
+   * only the staged `sec_` reference (plus the echoed label when one was sent). */
+  | { operation: "upload_attachment"; kind: "user_secret"; value: string; label?: string }
   | { operation: "readAttachment"; artifactId: string }
   | { operation: "stop"; turnId: string }
   | { operation: "continue"; requestId: string; continuation: SessionContinuationExpectation }
@@ -509,39 +508,27 @@ export async function uploadLauncherAttachment(file: File): Promise<string> {
   return result.artifactId as string;
 }
 
-/** Privacy attachment kind chosen in the composer dialog; labels below are the
- * only renderer-visible copy — the plaintext value itself never leaves this
- * call's argument position and is never stored, logged or re-read. */
-export type LauncherUserSecretKind = "api_key" | "token" | "password" | "secret";
-
-export function launcherUserSecretKindLabel(kind: LauncherUserSecretKind, lang: "zh" | "en"): string {
-  const labels: Record<LauncherUserSecretKind, readonly [string, string]> = {
-    api_key: ["API 密钥", "API key"],
-    token: ["访问令牌", "Access token"],
-    password: ["密码", "Password"],
-    secret: ["其他隐私", "Other secret"],
-  };
-  return labels[kind]?.[lang === "zh" ? 0 : 1] || kind;
-}
-
+/** The dialog's optional display name is the only renderer-visible copy — the
+ * plaintext value itself never leaves this call's argument position and is
+ * never stored, logged or re-read. */
 function validSecretReference(id: string): boolean {
   return validArtifactId(id) && /^sec_/.test(id);
 }
 
 /** Stages a user secret through its dedicated IPC verb and returns only the
  * opaque `sec_` reference. The response shape is exact-checked so a value can
- * never ride back into the renderer. */
-export async function uploadLauncherUserSecret(value: string, kind: LauncherUserSecretKind = "api_key",
+ * never ride back into the renderer; the host echoes the label as a third key
+ * when one was sent, and both shapes are accepted. */
+export async function uploadLauncherUserSecret(value: string,
                                               label?: string): Promise<{ attachmentId: string; kind: "user_secret" }> {
   const normalizedValue = String(value ?? "");
   const normalizedLabel = String(label ?? "").trim();
   if (!normalizedValue) throw new Error("请粘贴隐私内容后再提交。");
   if (normalizedLabel.length > 160 || /[\u0000-\u001f\u007f]/.test(normalizedLabel)) throw new Error("显示名无效。");
-  if (!["api_key", "token", "password", "secret"].includes(kind)) throw new Error("隐私附件类型无效。");
   let result: unknown;
   try {
     result = await launcherAssistantBridge().invoke({
-      operation: "upload_attachment", kind: "user_secret", value: normalizedValue, secretKind: kind,
+      operation: "upload_attachment", kind: "user_secret", value: normalizedValue,
       ...(normalizedLabel ? { label: normalizedLabel } : {}),
     });
   } catch (error) {
@@ -549,8 +536,12 @@ export async function uploadLauncherUserSecret(value: string, kind: LauncherUser
     if (message.includes("ASSISTANT_SECRET_")) throw new Error(message);
     throw new Error("隐私附件暂存失败，请重试。");
   }
-  if (!exactFields(result, ["attachmentId", "kind"]) || result.kind !== "user_secret"
-    || typeof result.attachmentId !== "string" || !validSecretReference(result.attachmentId)) {
+  if (!record(result) || Array.isArray(result) || result.kind !== "user_secret"
+    || typeof result.attachmentId !== "string" || !validSecretReference(result.attachmentId)
+    || ![["attachmentId", "kind"], ["attachmentId", "kind", "label"]].some(fields =>
+      Object.keys(result).length === fields.length
+      && fields.every(field => Object.prototype.hasOwnProperty.call(result, field))
+      && (fields.length === 2 || typeof result.label === "string" && result.label.length <= 160))) {
     throw new Error("Launcher 未确认隐私附件暂存。");
   }
   return { attachmentId: result.attachmentId, kind: "user_secret" };

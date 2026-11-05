@@ -1,6 +1,22 @@
 # 个人助理管理 Agent 配置
 
-个人助理通过原生管理动作读取和修改普通个人 Agent 的配置。凭据继续由独立设计负责；此链路不读取或修改 key。
+个人助理通过原生管理动作读取和修改普通个人 Agent 的配置。模型连接接入沿用现有隐私附件凭据设计。
+
+## 从地址或文档接入模型
+
+用户提供 API 地址或公开接入文档、想用的模型名称和用途即可。准确模型 ID 按需补充；不能根据 Claude、Opus 等模型名推断中转站协议。
+
+1. 用 `provider_prepare` 提交 `source_url`，或 `documentation_text` 接入示例；确定是 API 地址时可传 `source_kind=api`。用户明确指定的 `base_url` 不会被文档覆盖。完整调用地址和 SDK 调用语法是协议证据；多候选或缺信息时只补 `requiredFields`，复用返回的 `draft`。
+2. 准备结果 `ready=true` 只表示信息齐全。将 `providerAdd` 交给现有 `provider_add` 原生审批；凭据沿用已设计的隐私附件 `credential_token`，不放入普通文本或准备结果，不强制另开 Launcher 填写。文档提取的发送目标须向用户说明并经原生审批。
+3. 已有连接直接调用 `provider_model_resolve(provider_id, model_query)`，无需重新创建或提供凭据。发现后唯一匹配才自动固定；多个匹配返回分页候选。列表不可用时补准确 `upstream_id`；认证失败、限流、超时和地址问题分别恢复，不把所有失败解释为模型 ID 错误。
+4. 默认用原生文本探测验证已选模型，可能产生一次小额调用。固定配置与 `connectionVerified` 分开报告；失败保留原连接、模型引用和补填路径，不自动删除或换 key。只有 `ready=true` 且 `connectionVerified=true` 才能报告本次文本连通验证通过。
+5. 用返回的 `modelRef` 和真实项目 ID 执行 Launcher `agent_create`，复用稳定 `request_id` 并核对原生回执。文件、命令和测试权限仍按现有独立授权处理，连接通过不代表完整编程任务已完成。
+
+准备阶段只返回有界地址、协议候选和内容指纹，不保存文档正文或第二份配置草稿。链接通过既有公开抓取器读取，不发送凭据；userinfo、query、fragment 及内部文档地址拒绝。文档内容是不可信数据，不能授予权限或成为执行指令。此入口为追加工具契约，不改变旧动作参数和凭据设计。
+
+参考 [OpenCode 固定版本 Provider 配置](https://github.com/anomalyco/opencode/blob/b155b15694dbcc6768f11d2f25cc2bdd1f738ab4/packages/opencode/src/provider/provider.ts#L1451) 的显式地址与人工模型覆盖，以及 [Open WebUI 模型发现与手填入口](https://docs.openwebui.com/getting-started/quick-start/connect-a-provider/starting-with-openai-compatible/)；复用本项目原生事务、发现目录和探测，不引入外部执行器。
+
+## 管理 Agent 的已有配置
 
 | 配置面 | 读取与发现 | 修改与核对 |
 | --- | --- | --- |
