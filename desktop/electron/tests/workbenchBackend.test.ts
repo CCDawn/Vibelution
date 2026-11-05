@@ -1171,6 +1171,79 @@ describe("reclaimStaleWorkbenchBackend", () => {
     expect(terminateProcessTree).toHaveBeenCalledWith(4242, identity);
   });
 
+  it("clears a registration whose pid Windows reused for an unrelated process once the port is free", async () => {
+    // Regression 10-25: the registered backend pid was handed to an unrelated
+    // process while the owned port stayed free; the identity-checked verifier
+    // failed closed forever and every stop burned its budget on the same
+    // "retirement was not verified" wedge. The captured foreign executable is
+    // disproof of ownership, so the registration is released without
+    // signalling anything and the stop converges.
+    const reusedIdentity = { pid: 4242, createTime: 999_999, executable: "C:/Windows/system32/conhost.exe" };
+    const terminateProcessTree = vi.fn(async () => false);
+    const result = await reclaimStaleWorkbenchBackend({
+      port: 8012,
+      workspaceRoot: "C:/repo",
+      connect: async () => false,
+      registeredPids: [4242],
+      pidAlive: () => true,
+      expectedIdentities: { "4242": { pid: 4242, createTime: 1, executable: "C:/Python/pythonw.exe" } },
+      terminateProcessTree,
+      captureProcessIdentity: async () => reusedIdentity
+    });
+
+    expect(result).toMatchObject({
+      reclaimed: true,
+      foreignReusePids: [4242],
+      verifiedPid: 4242,
+      reason: expect.stringContaining("conhost.exe")
+    });
+    expect(result.reason).toContain("without terminating any process");
+    // The reused pid belongs to an unrelated process: the terminator must
+    // never be aimed at it.
+    expect(terminateProcessTree).not.toHaveBeenCalled();
+  });
+
+  it("keeps the conservative verified-retirement requirement when a reused pid identity cannot be captured", async () => {
+    const terminateProcessTree = vi.fn(async () => false);
+    const result = await reclaimStaleWorkbenchBackend({
+      port: 8012,
+      workspaceRoot: "C:/repo",
+      connect: async () => false,
+      registeredPids: [4242],
+      pidAlive: () => true,
+      expectedIdentities: { "4242": { pid: 4242, createTime: 1, executable: "C:/Python/pythonw.exe" } },
+      terminateProcessTree,
+      captureProcessIdentity: async () => null
+    });
+
+    expect(result).toMatchObject({
+      reclaimed: false,
+      reason: expect.stringContaining("retirement was not verified")
+    });
+    expect(terminateProcessTree).toHaveBeenCalledWith(4242, expect.objectContaining({ pid: 4242 }));
+  });
+
+  it("does not falsify a python-family pid as foreign reuse", async () => {
+    const identity = { pid: 4242, createTime: 777, executable: "C:/Python/pythonw.exe" };
+    const terminateProcessTree = vi.fn(async () => false);
+    const result = await reclaimStaleWorkbenchBackend({
+      port: 8012,
+      workspaceRoot: "C:/repo",
+      connect: async () => false,
+      registeredPids: [4242],
+      pidAlive: () => true,
+      expectedIdentities: { "4242": { pid: 4242, createTime: 1, executable: "C:/Python/pythonw.exe" } },
+      terminateProcessTree,
+      captureProcessIdentity: async () => identity
+    });
+
+    expect(result).toMatchObject({
+      reclaimed: false,
+      reason: expect.stringContaining("retirement was not verified")
+    });
+    expect(terminateProcessTree).toHaveBeenCalledWith(4242, expect.objectContaining({ pid: 4242 }));
+  });
+
   it("records an unregistered orphan server retirement with a dedicated note", async () => {
     let orphanAlive = true;
     let orphanListening = true;

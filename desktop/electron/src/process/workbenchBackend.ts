@@ -1063,6 +1063,32 @@ function recordBackendRetirementTiming(workspaceRoot: string, stage: string, sta
   return settledAt;
 }
 
+/**
+ * Structured note for a registration released because the captured identity
+ * proved Windows pid reuse (foreign executable) while the owned port was
+ * already free. Diagnostics only: must never alter the reclaim outcome.
+ */
+function recordForeignPidRegistrationClearance(
+  workspaceRoot: string,
+  port: number,
+  foreignReused: ReadonlyMap<number, string>
+): void {
+  try {
+    if (!existsSync(launcherStatePath(workspaceRoot))) {
+      return;
+    }
+    appendSupervisorEventFallback(workspaceRoot, {
+      eventCode: "electron.backend_reclaim.foreign_pid_registration_cleared",
+      message: "Registered backend pid was reused by an unrelated process; its registration was cleared without terminating any process.",
+      fields: {
+        port,
+        reusedPids: [...foreignReused.keys()].join(","),
+        reusedExecutables: [...foreignReused.values()].join(",")
+      }
+    });
+  } catch { /* Diagnostic failure cannot change the reclaim outcome. */ }
+}
+
 export async function reclaimStaleWorkbenchBackend(input: {
   port: number;
   host?: string;
@@ -1108,6 +1134,13 @@ export async function reclaimStaleWorkbenchBackend(input: {
   activeWorkBlocked?: boolean;
   /** A retired real server that was absent from the launcher registry. */
   retiredUnregisteredPid?: number;
+  /**
+   * Registered pids whose live identity was captured and proven foreign (not
+   * the python family the backend runs as) while the owned port was already
+   * free: Windows pid reuse, not a leaked tree. Callers must release these
+   * registrations; no process behind them was signalled.
+   */
+  foreignReusePids?: number[];
 }> {
   input.signal?.throwIfAborted();
   const port = Math.trunc(input.port);
@@ -1240,8 +1273,8 @@ export async function reclaimStaleWorkbenchBackend(input: {
     }
     return [...new Set([...candidates.filter((pid) => pidAlive(pid)), ...failedTreePids])];
   };
-  const retireRegistered = async (excludePid?: number): Promise<number[]> => {
-    const candidates = registeredPids.filter((pid) => pid !== excludePid && (input.terminateProcessTree || pidAlive(pid)));
+  const retireRegistered = async (candidatesOverride?: readonly number[]): Promise<number[]> => {
+    const candidates = (candidatesOverride ?? registeredPids).filter((pid) => input.terminateProcessTree || pidAlive(pid));
     for (const pid of candidates) {
       await terminateOne(pid);
     }
@@ -1254,7 +1287,36 @@ export async function reclaimStaleWorkbenchBackend(input: {
         reason: "explicit user restart shutdown was not confirmed; registered trees remain without a reachable backend"
       };
     }
-    const registeredStillPresent = await retireRegistered();
+    // Windows can hand a retired backend's registered pid to an unrelated
+    // process before the next reclaim. With the owned port already free, a
+    // live registered pid whose captured identity is provably foreign (not
+    // the python family the backend runs as) is pid reuse, not a leaked tree:
+    // release that registration without signalling anything, mirroring the
+    // start-side daemon-record falsification. An identity that cannot be
+    // captured, or that still looks like our python family, keeps the
+    // conservative verified-retirement requirement below.
+    const foreignReused = new Map<number, string>();
+    if (input.captureProcessIdentity) {
+      for (const pid of registeredPids) {
+        if (!pidAlive(pid)) {
+          continue;
+        }
+        const captured = await input.captureProcessIdentity(pid);
+        input.signal?.throwIfAborted();
+        const executable = String(captured?.executable || "").trim();
+        if (
+          captured
+          && Math.trunc(Number(captured.pid)) === pid
+          && Number.isFinite(Number(captured.createTime))
+          && Number(captured.createTime) > 0
+          && executable
+          && !executableLooksLikePythonDaemon(executable)
+        ) {
+          foreignReused.set(pid, basename(executable));
+        }
+      }
+    }
+    const registeredStillPresent = await retireRegistered(registeredPids.filter((pid) => !foreignReused.has(pid)));
     if (registeredStillPresent.length > 0) {
       return {
         reclaimed: false,
@@ -1268,6 +1330,18 @@ export async function reclaimStaleWorkbenchBackend(input: {
       return {
         reclaimed: false,
         reason: `port ${port} is released but runtime manager pid ${extrasStillAlive.join(",")} is still alive`
+      };
+    }
+    if (foreignReused.size > 0) {
+      const reuseSummary = [...foreignReused].map(([pid, executable]) => `${pid} (${executable})`).join(", ");
+      recordForeignPidRegistrationClearance(input.workspaceRoot, port, foreignReused);
+      return {
+        reclaimed: true,
+        reason: `port ${port} is already released; registered backend pid ${reuseSummary} `
+          + `was reused by an unrelated process (Windows pid reuse), so its registration was cleared `
+          + `without terminating any process`,
+        verifiedPid: registeredPids.length === 1 ? registeredPids[0] : undefined,
+        foreignReusePids: [...foreignReused.keys()]
       };
     }
     return {
@@ -2115,6 +2189,7 @@ export async function executeMainLineWorkbench(
       verifiedPid?: number;
       activeWorkBlocked?: boolean;
       retiredUnregisteredPid?: number;
+      foreignReusePids?: number[];
     };
     if (gracefulShutdown && terminateProcessTree) {
       staleReclaim = await reclaimStaleWorkbenchBackend({
@@ -2174,6 +2249,13 @@ export async function executeMainLineWorkbench(
         connect: input.connect
       });
       for (const pid of postReclaimReconcile.reconciledPids) {
+        reconciledDeadPids.add(pid);
+      }
+      for (const pid of staleReclaim.foreignReusePids ?? []) {
+        // A captured foreign executable plus an already-released port proves
+        // the registered pid was reused by an unrelated process; clearing it
+        // here lets stateWithoutReconciledBackendHandles drop the stale
+        // registration instead of wedging every later stop on it.
         reconciledDeadPids.add(pid);
       }
       if (postReclaimReconcile.reconciledPids.length > 0) {
