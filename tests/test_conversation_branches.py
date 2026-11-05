@@ -348,3 +348,36 @@ def test_branch_view_tolerates_empty_and_unknown_events():
     view = analyze_conversation_branches(events)
 
     assert view.active_leaf_id == "event-a2"
+
+
+def test_long_linear_session_does_not_overflow_recursion():
+    import sys
+    import threading
+
+    events = list(_main_fixture())
+    sequence = 5
+    for index in range(800):
+        events.append(_event(f"event-u{index+3}", f"turn-{index+3}", sequence, EVENT_USER_MESSAGE, payload={"content": f"问题{index}"}))
+        sequence += 1
+        events.append(_event(f"event-a{index+3}", f"turn-{index+3}", sequence, EVENT_ASSISTANT_MESSAGE, payload={"content": f"回答{index}"}))
+        sequence += 1
+
+    previous_limit = sys.getrecursionlimit()
+    holder: dict = {}
+
+    def run() -> None:
+        # Long-lived assistant sessions chain past the interpreter default
+        # recursion limit; the recursive default_leaf walk raised
+        # RecursionError there and failed the whole turn projection.
+        sys.setrecursionlimit(1000)
+        try:
+            holder["messages"], holder["leaf"], _ = visible_messages_with_branch_info(events)
+        finally:
+            sys.setrecursionlimit(previous_limit)
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    thread.join()
+
+    assert holder["leaf"] == f"event-a{800 + 2}"
+    assert len(holder["messages"]) == 1604
