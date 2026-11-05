@@ -1,5 +1,5 @@
 import * as PopoverPrimitive from "@radix-ui/react-popover";
-import { type ReactNode } from "react";
+import { type ReactNode, type RefObject } from "react";
 
 import { cn } from "../../lib/cn";
 
@@ -13,6 +13,7 @@ export type ShadcnPopoverProps = {
   side?: "top" | "right" | "bottom" | "left";
   align?: "start" | "center" | "end";
   sideOffset?: number;
+  anchorRef?: RefObject<HTMLElement | null>;
   /** When true, focus is trapped like a dialog. Default false for workbench panels. */
   modal?: boolean;
   "aria-label"?: string;
@@ -42,6 +43,7 @@ export function ShadcnPopover({
   side = "bottom",
   align = "start",
   sideOffset = 6,
+  anchorRef,
   modal = false,
   "aria-label": ariaLabel,
   contentClassName,
@@ -55,6 +57,7 @@ export function ShadcnPopover({
       onOpenChange={onOpenChange}
       modal={modal}
     >
+      {anchorRef ? <PopoverPrimitive.Anchor virtualRef={anchorRef} /> : null}
       <PopoverPrimitive.Trigger asChild>{trigger}</PopoverPrimitive.Trigger>
       <PopoverPrimitive.Portal>
         <PopoverPrimitive.Content

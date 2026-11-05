@@ -10,6 +10,8 @@ type AgentMessageTurnViewProps = {
   sectionKinds?: string;
   className: string;
   compactHeader: boolean;
+  /** Single-speaker conversations keep identity in their page title. */
+  minimalIdentity?: boolean;
   avatar: ReactNode;
   speakerLabel: ReactNode;
   identityAccessory?: ReactNode;
@@ -26,6 +28,7 @@ export function AgentMessageTurnView({
   sectionKinds,
   className,
   compactHeader,
+  minimalIdentity = false,
   avatar,
   speakerLabel,
   identityAccessory,
@@ -41,18 +44,21 @@ export function AgentMessageTurnView({
   return (
     <article
       className={className}
-      aria-label={turnLabel}
+      aria-label={minimalIdentity && typeof visibleSpeakerLabel === "string"
+        ? [turnLabel, visibleSpeakerLabel].filter(Boolean).join(" · ")
+        : turnLabel}
       data-conversation-row-key={rowKey}
       data-conversation-message-key={messageKey}
       data-agent-message-id={agentMessageId}
       data-agent-section-count={sectionCount}
       data-agent-section-kinds={sectionKinds || undefined}
+      data-conversation-identity={minimalIdentity ? "minimal" : "speaker"}
     >
-      <div className={styles.turnAvatar} aria-hidden="true">
+      {!minimalIdentity ? <div className={styles.turnAvatar} aria-hidden="true">
         {compactHeader ? null : avatar}
-      </div>
+      </div> : null}
       <div className={styles.turnContent}>
-        {compactHeader ? null : (
+        {compactHeader || minimalIdentity ? null : (
           <div className={styles.turnMeta}>
             {hasIdentity ? (
               <div className={styles.turnMetaIdentity}>
@@ -73,7 +79,13 @@ export function AgentMessageTurnView({
             </span>
           </div>
         )}
+        {minimalIdentity && identityAccessory ? <div>{identityAccessory}</div> : null}
         {children}
+        {minimalIdentity && metaActions ? (
+          <div className={styles.turnFooter} data-conversation-turn-actions="true">
+            {metaActions}
+          </div>
+        ) : null}
       </div>
     </article>
   );

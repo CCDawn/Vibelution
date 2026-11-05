@@ -115,15 +115,19 @@ describe("Launcher embedded assistant page", () => {
     expect(document.body.dataset.vibelutionDesktopPet).toBeUndefined();
   });
 
-  it("keeps the reading column capped by the embedded stylesheet contract", async () => {
+  it("leaves conversation geometry to the shared surface in both Launcher hosts", async () => {
     const { readFileSync } = await import("node:fs");
     const { resolve } = await import("node:path");
     const launcherCss = readFileSync(resolve(import.meta.dirname, "../../design/route-css/desktop-pet.tailwind.css"), "utf8");
     const block = launcherCss.match(/\[data-assistant-embedded="true"\] \.desktop-assistant-chat-body \{([^}]+)\}/)?.[1] || "";
-    expect(block).toContain("max-width: 920px");
+    expect(block).toContain("width: 100%");
+    expect(block).not.toContain("max-width:");
     expect(block).toContain("margin-inline: auto");
-    // The embedded density block keeps the structural fill rules only; the
-    // compact size rules (fonts, paddings) stay scoped to "compact".
+    // Hosts own outer structure; neither host overrides shared composer,
+    // transcript, model controls or avatars with a second visual contract.
+    expect(launcherCss).not.toMatch(/\[data-assistant-chat="(?:compact|embedded)"\][^{]*\.vui-components-conversationview/);
+    expect(launcherCss).not.toContain('[data-testid="conversation-turn-model-control"]');
+    expect(launcherCss).not.toContain('[data-operator-avatar="custom"]');
     const structural = launcherCss.match(/\[data-assistant-chat="embedded"\] [^\n]+\.layout \{([^}]+)\}/)?.[1] || "";
     expect(structural).toContain("flex: 1");
     expect(structural).toContain("height: 100%");

@@ -14,7 +14,7 @@ import {
   Sparkles,
   UsersRound,
 } from "lucide-react";
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import type { SessionReferenceAttachment } from "../../api/types";
 import { VButton, VDialog, VInput, VNativeInput, VPopover, VStateSurface } from "../../components/vui";
@@ -169,6 +169,13 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
   const canLoadMoreReferences = Boolean(scopedSessionReferences?.hasMore && scopedSessionReferences.onLoadMore);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const composerAnchorRef = useRef<HTMLElement | null>(null);
+  const [hasComposerAnchor, setHasComposerAnchor] = useState(false);
+  const captureComposerAnchor = useCallback((node: HTMLButtonElement | null) => {
+    const anchor = node?.closest<HTMLElement>(".composerCodex, .composer") ?? null;
+    composerAnchorRef.current = anchor;
+    setHasComposerAnchor(Boolean(anchor));
+  }, []);
   const [open, setOpen] = useState(false);
   const [referenceDialogOpen, setReferenceDialogOpen] = useState(false);
   const [referenceQuery, setReferenceQuery] = useState("");
@@ -496,9 +503,11 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
         align="start"
         sideOffset={8}
         aria-label={lang === "zh" ? "更多操作" : "More actions"}
-        contentClassName={styles.popoverContent}
+        anchorRef={hasComposerAnchor ? composerAnchorRef : undefined}
+        contentClassName={[styles.popoverContent, hasComposerAnchor ? styles.composerWidth : styles.standaloneWidth].join(" ")}
         trigger={(
           <VButton
+            ref={captureComposerAnchor}
             type="button"
             isIconOnly
             variant="secondary"

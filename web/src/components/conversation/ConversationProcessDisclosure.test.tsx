@@ -50,6 +50,42 @@ function retryCell(status: CodexTranscriptCell["status"] = "running"): CodexTran
 }
 
 describe("ConversationProcessDisclosure", () => {
+  it("keeps the flow visible after settlement and makes only thoughts opt-in", () => {
+    const cells = [
+      processCell("completed"),
+      { ...processCell("completed"), id: "second-tool" },
+      { ...processCell("completed"), id: "thought", kind: "reasoning_summary" as const, text: "思考摘要" },
+    ];
+    const html = renderToStaticMarkup(
+      <ConversationProcessDisclosure cells={cells} language="zh" presentation="flow">
+        {(showThoughts) => <><p>完整进展正文</p><span>工具记录</span>{showThoughts ? <p>思考摘要</p> : null}</>}
+      </ConversationProcessDisclosure>,
+    );
+    expect(html).toContain('data-codex-process-presentation="flow"');
+    expect(html).toContain("完整进展正文");
+    expect(html).toContain("工具记录");
+    expect(html).toContain("显示思考");
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).not.toContain("思考摘要");
+    expect(html).not.toContain("<details");
+    expect(html).not.toContain('aria-hidden="true" inert');
+    expect(html).not.toContain("3 步");
+    expect(html.indexOf("已工作")).toBeLessThan(html.indexOf("工具记录"));
+  });
+
+  it("keeps failed flow evidence visible without adding an empty thought toggle", () => {
+    const html = renderToStaticMarkup(
+      <ConversationProcessDisclosure cells={[processCell("failed")]} language="zh" presentation="flow">
+        <p>失败原因和已完成进展</p>
+      </ConversationProcessDisclosure>,
+    );
+    expect(html).toContain('data-codex-process-state="failed"');
+    expect(html).toContain("失败原因和已完成进展");
+    expect(html).toContain("工具失败");
+    expect(html).not.toContain("显示思考");
+    expect(html).not.toContain("<details");
+  });
+
   it("uses total turn elapsed time for running work, independently of tool durations", () => {
     expect(processLabel([processCell("completed")], "zh", undefined, true, null, 65))
       .toBe("工作中 1 分 5 秒");

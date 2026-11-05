@@ -5,6 +5,13 @@ function cx(key: string, ...classNames: string[]) {
 }
 
 const styles = {
+  flow: cx("flow", "grid min-w-0 content-start gap-2"),
+  flowContent: cx("flow-content", "grid min-w-0 content-start gap-2"),
+  flowStatusRow: cx("flow-status-row", "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--border-subtle)] pb-2 pt-1 text-vui-xs text-[var(--fg-tertiary)]"),
+  flowThoughtToggle: cx("flow-thought-toggle", "inline-flex min-h-6 items-center gap-1 border-0 bg-transparent px-0 text-vui-xs font-normal text-[var(--fg-tertiary)] hover:text-[var(--fg-secondary)]"),
+  progress: cx("progress", "min-w-0 py-1 text-[var(--fg-primary)]"),
+  progressBody: cx("progress-body", "min-w-0 break-words"),
+  progressPlainText: cx("progress-plain-text", "whitespace-pre-wrap"),
   disclosure: cx("disclosure", "min-w-0"),
   summary: cx(
     "summary",

@@ -1,9 +1,10 @@
-import { Bot, Layers, RotateCcw, Save, SlidersHorizontal, Zap } from "lucide-react";
+import { Layers, RotateCcw, Save, Zap } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 
 import type { SessionLlmModelOption } from "../../api/types";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { VButton, VIconButton, VInput, VNativeInput, VPopover } from "../vui";
+import { ConversationModelControlTrigger } from "./ConversationModelControlTrigger";
 import styles from "./ConversationTurnModelControl.styles";
 
 export type ConversationModelParameters = {
@@ -215,22 +216,14 @@ export function ConversationTurnModelControl({
         contentClassName={styles.popover}
         data-vui="conversation-model-parameters"
         trigger={(
-          <VButton
-            type="button"
-            contentLayout="plain"
-            className={styles.trigger}
-            isDisabled={!canConfigure || loading || error || pending}
-            aria-haspopup="dialog"
-            aria-expanded={open}
+          <ConversationModelControlTrigger
+            label={shortName}
+            fullName={fullName}
+            open={open}
+            isDisabled={!canConfigure || error}
+            isPending={loading || pending}
             aria-label={`${zh ? "Agent 模型" : "Agent model"}: ${fullName}`}
-            aria-busy={loading || pending || undefined}
-            data-open={open ? "true" : "false"}
-            title={fullName}
-          >
-            <Bot className={styles.icon} size={12} aria-hidden="true" />
-            <span className={styles.label}>{shortName}</span>
-            <SlidersHorizontal className={styles.settingsIcon} size={12} aria-hidden="true" />
-          </VButton>
+          />
         )}
       >
         <div className={styles.fields} data-testid="conversation-model-parameters-panel">

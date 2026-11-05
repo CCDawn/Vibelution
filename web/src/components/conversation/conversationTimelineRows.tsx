@@ -366,6 +366,7 @@ export type ConversationTimelineRowsDeps = {
   answerOnlyProcessMode: boolean;
   showMentalSnapshots: boolean;
   companionMode: boolean;
+  minimalIdentity?: boolean;
   lang: "zh" | "en";
   t: (key: TranslationKey) => string;
   phase: string;
@@ -457,6 +458,7 @@ export function createConversationTimelineRows({
   answerOnlyProcessMode,
   showMentalSnapshots,
   companionMode,
+  minimalIdentity = false,
   lang,
   t,
   phase,
@@ -673,6 +675,7 @@ export function createConversationTimelineRows({
             const imageArtifact = imageArtifactForMessage(message);
             const agentInboxMessage = isAgentInboxMessage(message);
             const groupTranscriptMessage = isGroupRoomTranscriptMessage(message);
+            const showMinimalIdentity = minimalIdentity && !companionMode && !agentInboxMessage && !groupTranscriptMessage;
             const previousMessage = activeTimelineMessages[index - 1];
             const previousAgentRenderState = previousMessage
               ? agentRenderStatesByMessageId.get(previousMessage.id)
@@ -868,6 +871,7 @@ export function createConversationTimelineRows({
               // Hover-reveal anchor: per-message action buttons fade in only
               // while the pointer (or keyboard focus) is on this row.
               "group",
+              showMinimalIdentity ? styles.turnWithoutIdentity : "",
               groupTranscriptMessage
                 ? styles.groupTranscriptTurn
                 : message.role === "assistant"
@@ -1030,6 +1034,7 @@ export function createConversationTimelineRows({
                 sectionKinds={agentRenderState.sectionKinds}
                 className={turnClassName}
                 compactHeader={false}
+                  minimalIdentity={showMinimalIdentity}
                 avatar={
                   <ConversationTurnAvatarContent
                     content={resolveMessageTurnAvatar(message, {

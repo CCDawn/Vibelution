@@ -1,5 +1,7 @@
 const styles: Record<string, string> = {
-  popoverContent: "vui-routes-chatcomposerplusmenu popoverContent !w-80 !max-w-[calc(100vw-1.5rem)] !p-0",
+  popoverContent: "vui-routes-chatcomposerplusmenu popoverContent !min-w-0 !max-w-[calc(100vw-1.5rem)] !rounded-2xl !p-0",
+  composerWidth: "vui-routes-chatcomposerplusmenu composerWidth !w-[var(--radix-popover-trigger-width)]",
+  standaloneWidth: "vui-routes-chatcomposerplusmenu standaloneWidth !w-80",
   menu: "vui-routes-chatcomposerplusmenu menu grid w-full content-start gap-0 p-1.5 max-h-[min(70vh,32rem)] overflow-y-auto overscroll-contain outline-none",
   section: "vui-routes-chatcomposerplusmenu section grid gap-0.5 border-t border-[var(--vui-border-subtle)] px-0 pt-1.5 first:border-t-0 first:pt-0",
   sectionTitle: "vui-routes-chatcomposerplusmenu sectionTitle px-2.5 pb-0.5 pt-1 text-vui-micro-11 font-semibold tracking-wide text-[var(--fg-tertiary)]",

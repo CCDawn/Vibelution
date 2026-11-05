@@ -1,8 +1,9 @@
-import { Bot, SlidersHorizontal } from "lucide-react";
+import { SlidersHorizontal } from "lucide-react";
 import { useState } from "react";
 import type { LauncherAssistantModelChoice } from "../../api/launcherAssistant";
 import styles from "./LauncherAssistantModelControl.styles";
 import { VButton, VPopover, VStringSelect } from "../../components/vui";
+import { ConversationModelControlTrigger } from "../../components/conversation/ConversationModelControlTrigger";
 
 /** Native Launcher model actions in the shared conversation toolbar recipe. */
 export function LauncherAssistantModelControl({
@@ -32,15 +33,9 @@ export function LauncherAssistantModelControl({
   return <div className={styles.root} data-launcher-assistant-model-control>
     <VPopover open={open} onOpenChange={setOpen} side="top" align="end" sideOffset={6}
       aria-label={zh ? "助理模型" : "Assistant model"} contentClassName={styles.popover}
-      trigger={<VButton type="button" contentLayout="plain" className={styles.trigger}
-        isDisabled={pending} aria-haspopup="dialog" aria-expanded={open}
-        aria-busy={pending || undefined}
+      trigger={<ConversationModelControlTrigger label={label} open={open} isPending={pending}
         aria-label={`${zh ? "助理模型" : "Assistant model"}: ${label}`}
-        data-open={open ? "true" : "false"} title={label}>
-        <Bot className={styles.icon} size={12} aria-hidden="true" />
-        <span className={styles.label}>{label}</span>
-        <SlidersHorizontal className={styles.settingsIcon} size={12} aria-hidden="true" />
-      </VButton>}>
+      />}>
       <p className={styles.fullName}>{label}</p>
       {choices.length ? <VStringSelect ariaLabel={zh ? "切换助理模型" : "Change assistant model"}
         value={modelId} isDisabled={pending || selectionDisabled} options={modelOptions}

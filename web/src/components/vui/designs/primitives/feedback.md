@@ -289,6 +289,7 @@ import { VPopover, VButton } from "@/components/vui";
 | --- | --- | --- |
 | `trigger` / children | 触发与面板内容 | trigger 需可 focus |
 | `side` / `align` / `open` | 定位与受控 | 避免挡住主 CTA |
+| `anchorRef` | 可选的所属表面锚点 | Radix virtual anchor；保留真实 trigger 的键盘焦点与关闭后返回；宽度可使用 `--radix-popover-trigger-width` |
 | `onEscapeKeyDown` | 面板按 Esc 时的原生事件回调 | 内嵌编辑器可 `preventDefault()` 先取消字段编辑；其他状态保留 Radix 默认关闭行为 |
 
 ### 视觉与状态

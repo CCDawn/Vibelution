@@ -1,4 +1,6 @@
 const styles = {
+  turnFooter:
+    "vui-components-conversationview turnFooter flex min-h-6 min-w-0 flex-wrap items-center gap-2 text-vui-xs text-[var(--fg-tertiary)] opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100 motion-reduce:transition-none",
   turnAvatar:
     "vui-components-conversationview turnAvatar mt-0.5 grid size-8 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--vui-control-muted)] text-[var(--fg-primary)] font-semibold ring-1 ring-inset ring-[var(--vui-border-strong)]",
   turnContent:

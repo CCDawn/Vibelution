@@ -1189,7 +1189,10 @@ export const ConversationView = React.memo(function ConversationView({
     codexTranscriptCellIcon,
     codexTranscriptCellTitle,
     codexTranscriptCellMeta,
-  } = createCodexTranscriptCellRenderers({ lang, t, getExpansionState, toggleSection });
+  } = createCodexTranscriptCellRenderers({
+    lang, t, getExpansionState, toggleSection,
+    renderProgressText: (text, streaming) => renderAssistantTranscriptResponseText(text, streaming),
+  });
 
   const {
     codexTranscriptToolDetailRows,
@@ -1482,6 +1485,7 @@ export const ConversationView = React.memo(function ConversationView({
     answerOnlyProcessMode,
     showMentalSnapshots,
     companionMode,
+    minimalIdentity: composerVariant === "codex",
     lang,
     t,
     phase,

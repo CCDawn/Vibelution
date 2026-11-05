@@ -11,8 +11,9 @@ import stylesSource from "./ChatComposerPlusMenu.styles.ts?raw";
 import chatSurfaceSource from "./useChatConversationSurfaceModel.tsx?raw";
 
 describe("ChatComposerPlusMenu contract", () => {
-  it("renders one compact vertical menu with grouped sections", () => {
-    expect(stylesSource).toContain('popoverContent: "vui-routes-chatcomposerplusmenu popoverContent !w-80');
+  it("renders grouped sections anchored to the shared composer width", () => {
+    expect(stylesSource).toContain("!w-[var(--radix-popover-trigger-width)]");
+    expect(source).toContain("anchorRef={hasComposerAnchor ? composerAnchorRef : undefined}");
     expect(stylesSource).toContain('menu: "vui-routes-chatcomposerplusmenu menu grid');
     expect(stylesSource).toContain('sectionTitle: "vui-routes-chatcomposerplusmenu sectionTitle');
     expect(source).toContain('role="menu"');
@@ -116,6 +117,27 @@ describe("lazy knowledge picker", () => {
     await act(async () => root?.unmount());
     container?.remove();
     root = null;
+  });
+  it("anchors inside either shared composer and restores keyboard focus on Escape", async () => {
+    container = document.createElement("div"); document.body.append(container);
+    root = createRoot(container);
+    await act(async () => root!.render(<div className="composerCodex"><ChatComposerPlusMenu
+      lang="zh" showCapabilities={false} showReferences={false} attachmentDisabled={false}
+      sessionReferences={[]} onAddAttachments={vi.fn()}
+      onAttachSecret={vi.fn().mockResolvedValue(undefined)} /></div>));
+    const trigger = container.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')!;
+    await act(async () => { trigger.focus(); trigger.click(); await new Promise(resolve => setTimeout(resolve, 0)); });
+    const panel = document.querySelector<HTMLElement>('[data-vui="popover"]')!;
+    expect(panel.className).toContain("composerWidth");
+    const menu = panel.querySelector<HTMLElement>('[role="menu"]')!;
+    const items = [...menu.querySelectorAll<HTMLButtonElement>('[data-plus-menu-item="true"]:not([disabled])')];
+    expect(items.length).toBeGreaterThan(1);
+    await act(async () => items[0].dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true })));
+    expect(document.activeElement).toBe(items.at(-1));
+    await act(async () => { menu.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); await new Promise(resolve => setTimeout(resolve, 0)); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
   });
   it("offers native assistant budgets without exposing unsupported capability toggles", async () => {
     container = document.createElement("div"); document.body.append(container);

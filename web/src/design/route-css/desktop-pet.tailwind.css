@@ -36,40 +36,7 @@
 [data-assistant-chat="compact"] .desktop-assistant-chat-body > .vui-routes-chatcodingroute.layout { flex: 1; height: 100%; max-height: 100%; min-height: 0; grid-template-rows: minmax(0, 1fr); }
 [data-assistant-chat="compact"] .vui-routes-chatcodingroute.centerPane { margin: 0; border: 0; border-radius: 0; grid-template-rows: minmax(0, 1fr); }
 [data-assistant-chat="compact"] .vui-routes-chatcodingroute.tabStrip { display: none; }
-[data-assistant-chat="compact"] .vui-components-conversationview.composerCodex { width: calc(100% - 20px); margin: 0 10px 10px; border-radius: 10px; }
-[data-assistant-chat="compact"] .vui-components-conversationview.composerFieldCodex { min-height: 0; padding: 8px 10px 6px; }
-[data-assistant-chat="compact"] .vui-components-conversationview.inputCodex { max-height: 120px; font-size: 14px; line-height: 1.5; }
-[data-assistant-chat="compact"] .vui-components-conversationview.composerToolbarCodex { flex-wrap: wrap; gap: 2px; min-height: 28px; padding-top: 0; }
-[data-assistant-chat="compact"] .vui-components-conversationview.composerToolbarStart,
-[data-assistant-chat="compact"] .vui-components-conversationview.composerToolbarEnd { display: contents; }
-[data-assistant-chat="compact"] [data-testid="conversation-turn-model-control"] { order: 1; flex: 1 1 88px; height: auto; }
-[data-assistant-chat="compact"] [data-testid="conversation-turn-model-control"] button svg:first-child { display: none; }
-[data-assistant-chat="compact"] [data-testid="conversation-turn-model-control"] .truncate { max-width: none; white-space: normal; overflow: visible; overflow-wrap: anywhere; text-overflow: clip; }
-[data-assistant-chat="compact"] [data-testid="agent-permission-preset-control"] { order: 2; flex-shrink: 0; }
-[data-assistant-chat="compact"] [data-testid="agent-permission-preset-control"] .truncate { overflow: visible; text-overflow: clip; }
-[data-assistant-chat="compact"] [data-testid="composer-context-ring"] { order: 3; margin-left: auto; }
-[data-assistant-chat="compact"] [data-testid="composer-context-ring"] button svg { width: 16px; height: 16px; }
-[data-assistant-chat="compact"] .vui-components-conversationview.composerActionStack { order: 4; margin-left: auto; }
-[data-assistant-chat="compact"] .vui-components-conversationview.timeline { padding: 16px 12px; }
-[data-assistant-chat="compact"] .vui-components-conversationview.assistantTurn,
-[data-assistant-chat="compact"] .vui-components-conversationview.userTurn,
-[data-assistant-chat="compact"] .vui-components-conversationview.companionTypingTurn { grid-template-columns: minmax(0, 1fr); gap: 0; }
-[data-assistant-chat="compact"] .vui-components-conversationview.turnAvatar,
-[data-assistant-chat="compact"] .vui-components-conversationview.companionTypingAvatar { display: none; }
-[data-assistant-chat="compact"] .vui-components-conversationview.turnContent { grid-column: 1 !important; }
-[data-assistant-chat="compact"] .vui-components-conversationview.userTurn .turnContent { max-width: 90% !important; }
-[data-assistant-chat="compact"] .vui-components-conversationview.markdownBody,
-[data-assistant-chat="compact"] .vui-components-conversationview.messageBody { font-size: 14px; line-height: 1.7; }
-[data-assistant-chat="compact"] .vui-components-conversationview.emptyStateStarters { display: none; }
-[data-assistant-chat="compact"] .vui-components-conversationview.emptyState { font-size: 13px; }
-[data-assistant-chat="compact"] .vui-components-conversationview.userMessageBody { border: 0; background: var(--vui-selection-bg); border-radius: 12px 12px 3px 12px; padding: 10px 13px; }
-
-/* Embedded Launcher page (920px reading column): only the structural rules of
-   the compact set — the ones that make the conversation fill its pane — are
-   reused. Every size/density rule (13-14px fonts, 8px paddings, toolbar
-   wrapping, hidden avatars) is deliberately omitted so the transcript and
-   composer render at the standard workbench chat density inside the default
-   760px codex composer. */
+/* Conversation visuals and responsive behavior belong to the shared components. */
 [data-assistant-chat="embedded"] .desktop-assistant-chat-body > .vui-routes-chatcodingroute.layout { flex: 1; height: 100%; max-height: 100%; min-height: 0; grid-template-rows: minmax(0, 1fr); }
 [data-assistant-chat="embedded"] .vui-routes-chatcodingroute.centerPane { margin: 0; border: 0; border-radius: 0; grid-template-rows: minmax(0, 1fr); }
 [data-assistant-chat="embedded"] .vui-routes-chatcodingroute.tabStrip { display: none; }
@@ -87,26 +54,7 @@
    window never sets data-assistant-embedded. */
 [data-assistant-embedded="true"] .desktop-assistant-chat-body {
   width: 100%;
-  max-width: 920px;
   margin-inline: auto;
-}
-
-/* Restore the native user avatar rail only for the Launcher custom image. */
-.launcher-assistant-chat-window[data-operator-avatar="custom"] .vui-components-conversationview.userTurn {
-  grid-template-columns: minmax(0, 1fr) 2rem;
-  gap: 0 12px;
-}
-.launcher-assistant-chat-window[data-operator-avatar="custom"] .vui-components-conversationview.userTurn .turnAvatar {
-  display: grid;
-  grid-column: 2;
-  grid-row: 1;
-}
-.launcher-assistant-chat-window[data-operator-avatar="custom"] .vui-components-conversationview.userTurn .turnContent {
-  max-width: min(76%, 640px) !important;
-}
-@media (max-width: 719px) {
-  .launcher-assistant-chat-window[data-operator-avatar="custom"] .vui-components-conversationview.userTurn { column-gap: 8px; }
-  .launcher-assistant-chat-window[data-operator-avatar="custom"] .vui-components-conversationview.userTurn .turnContent { max-width: min(88%, 36rem) !important; }
 }
 
 /* Expanded Launcher owns an opaque fill above the VUI recipe's transparent
@@ -145,15 +93,6 @@
 .launcher-assistant-chat-window[data-theme-background="custom"][data-theme-background-readability="strong"] {
   --theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 60%, transparent);
   --theme-background-blur: 2px;
-}
-
-/* Important Tailwind utilities must be overridden in the same cascade layer. */
-@layer utilities {
-  [data-assistant-chat="compact"] .vui-components-conversationview.composerFieldCodex { gap: 2px !important; }
-  [data-assistant-chat="compact"] .vui-components-conversationview.inputCodex { min-height: 48px !important; }
-  [data-assistant-chat="compact"] [data-testid="conversation-turn-model-control"] button { height: auto !important; min-height: 28px; gap: 3px !important; padding-inline: 4px !important; font-size: 11px !important; }
-  [data-assistant-chat="compact"] [data-testid="agent-permission-preset-control"] button { font-size: 11px !important; }
-  [data-assistant-chat="compact"] [data-testid="composer-context-ring"] button { gap: 2px !important; padding-inline: 2px !important; }
 }
 
 html[data-vibelution-desktop-pet="true"],

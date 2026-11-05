@@ -91,7 +91,9 @@ function compactionSegmentStartIndex(
   groups: readonly CodexTranscriptCellMessageGroup[],
   changedIndex: number,
 ) {
-  for (let index = changedIndex; index >= 0; index -= 1) {
+  // A cleared timeline has no changed group to inspect; fall through to a
+  // full empty pass so the prior message map is discarded as well.
+  for (let index = Math.min(changedIndex, groups.length - 1); index >= 0; index -= 1) {
     if (groups[index].barrier) {
       return index;
     }
