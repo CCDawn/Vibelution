@@ -47,7 +47,7 @@ describe("Electron desktop window icons", () => {
       icon: resolveWorkspaceIconPath(desktopPaths),
       backgroundColor: "#e9e9e9",
       titleBarStyle: "hidden",
-      titleBarOverlay: { color: "#00000000", height: 44 },
+      titleBarOverlay: { color: "#00000000", height: 40 },
       skipTaskbar: false,
       autoHideMenuBar: true
     });
