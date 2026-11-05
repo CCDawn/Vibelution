@@ -925,6 +925,27 @@ describe("AssistantHost", () => {
     await host.stop();
   });
 
+  it("passes the computer router's root-cause codes through to the renderer", async () => {
+    // computer_control.py splits driver outage (503), moved operator state
+    // (409) and a request that can never bind (422); the structured codes must
+    // cross the host instead of folding back into ASSISTANT_HTTP_FAILED.
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const rows = [
+      [503, { detail: { code: "ASSISTANT_COMPUTER_DRIVER_UNAVAILABLE", message: "driver" } }, "ASSISTANT_COMPUTER_DRIVER_UNAVAILABLE"],
+      [409, { detail: { code: "ASSISTANT_COMPUTER_STATE_CHANGED", message: "state" } }, "ASSISTANT_COMPUTER_STATE_CHANGED"],
+      [422, { detail: { code: "ASSISTANT_COMPUTER_REQUEST_INVALID", message: "invalid" } }, "ASSISTANT_COMPUTER_REQUEST_INVALID"],
+    ] as const;
+    for (const [status, body, expected] of rows) {
+      fetchImpl.mockResolvedValueOnce(Response.json(body, { status }));
+      await expect(host.request({ operation: "computerState" })).rejects.toThrow(expected);
+    }
+    // A legacy string detail (or unparseable body) keeps the status-only fold.
+    fetchImpl.mockResolvedValueOnce(Response.json({ detail: "private" }, { status: 409 }));
+    await expect(host.request({ operation: "computerState" })).rejects.toThrow("ASSISTANT_HTTP_FAILED");
+    await host.stop();
+  });
+
   it("forwards only valid optional computer authorization request IDs", async () => {
     const { host, fetchImpl } = fixture({ graceful: true }); await host.start();
     const idle = { available: true, status: "idle", message: "", grantId: null, window: null, pending: null };

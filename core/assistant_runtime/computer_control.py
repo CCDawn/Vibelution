@@ -27,11 +27,31 @@ def create_router(token: str) -> APIRouter:
     router = APIRouter(prefix="/api/assistant/computer", dependencies=[Depends(require_main)])
 
     def call(method, *args):
+        # Three root causes used to fold into one 409 "refresh and retry",
+        # which made the desktop retry a broken driver loop and re-send a
+        # request that can never bind again. They stay distinguishable here;
+        # codes carry the ASSISTANT_ prefix so the desktop host's structured
+        # passthrough admits them end to end. Never return native exception
+        # details, paths or driver payloads.
         try:
             return method(*args)
-        except (ValueError, OSError, service.CuaDriverError):
-            # Never return native exception details, paths or driver payloads.
-            raise HTTPException(409, "电脑控制状态已变化或驱动不可用，请刷新后重试。") from None
+        except (service.CuaDriverError, OSError):
+            # Driver/bridge infrastructure failed. A later attempt can succeed
+            # once the pinned driver or OS handle recovers; refreshing the
+            # panel alone fixes nothing.
+            raise HTTPException(503, detail={"code": "ASSISTANT_COMPUTER_DRIVER_UNAVAILABLE",
+                "message": "电脑控制驱动暂不可用，请稍后重试；仍未恢复请检查驱动配置。"}) from None
+        except service.adapter.ComputerBlocked:
+            # Operator state moved (grant, selection, confirmation, readiness
+            # or window identity). Refreshing re-aligns the panel with the
+            # real state; replaying the identical request is not attempted.
+            raise HTTPException(409, detail={"code": "ASSISTANT_COMPUTER_STATE_CHANGED",
+                "message": "电脑控制状态已变化，请刷新后重新操作。"}) from None
+        except ValueError:
+            # Unclassified request refusal: neither the driver nor the operator
+            # state is at fault, so replaying the same request cannot succeed.
+            raise HTTPException(422, detail={"code": "ASSISTANT_COMPUTER_REQUEST_INVALID",
+                "message": "该电脑操作请求无法执行，请重新选择窗口后再试。"}) from None
 
     @router.get("", response_model=State)
     def state():

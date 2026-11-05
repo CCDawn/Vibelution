@@ -40,10 +40,18 @@ export function useLauncherAssistantBudget(sessionId: string, agentId: string, l
         current && current.revision > receipt.revision ? current : receipt);
     } catch (error) {
       if (!mounted.current || currentOwner.current !== owner) return;
-      const conflict = error instanceof Error && error.message.includes("ASSISTANT_BUDGET_CONFLICT");
+      const message = error instanceof Error ? error.message : "";
+      const conflict = message.includes("ASSISTANT_BUDGET_CONFLICT");
+      // An identity break is terminal for this binding: the write never bound,
+      // so guiding a refresh/rebuild replaces the old "unconfirmed, retry" loop.
+      const identity = message.includes("ASSISTANT_IDENTITY_INVALID");
       setFailure({ owner, message: lang === "zh"
-        ? conflict ? "预算已在别处更新，请核对后重新保存。" : "预算保存尚未确认，请刷新核对后重试。"
-        : conflict ? "Budget changed elsewhere. Review and save again." : "Budget save is unconfirmed. Refresh and try again." });
+        ? conflict ? "预算已在别处更新，请核对后重新保存。"
+          : identity ? "助理会话身份已失效，预算未保存；请刷新或重建助理会话后重试。"
+          : "预算保存尚未确认，请刷新核对后重试。"
+        : conflict ? "Budget changed elsewhere. Review and save again."
+          : identity ? "The assistant session identity is no longer valid. The budget was not saved; refresh or rebuild the assistant session and try again."
+          : "Budget save is unconfirmed. Refresh and try again." });
       // Read back uncertainty or a conflict; never replay a write.
       void client.invalidateQueries({ queryKey: key, exact: true });
     } finally {

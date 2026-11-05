@@ -433,6 +433,8 @@ export async function setLauncherAssistantModel(modelId: string): Promise<{ mode
   catch (error) {
     const message = error instanceof Error ? error.message : "";
     if (message.includes("ASSISTANT_MODEL_BUSY")) throw new Error("请等待助理当前回复完成后再切换模型。");
+    if (message.includes("ASSISTANT_MODEL_CONFLICT")) throw new Error("模型设置已在别处更新，请刷新后重新选择。");
+    if (message.includes("ASSISTANT_IDENTITY_INVALID")) throw new Error("助理会话身份已失效，本次未切换模型；请刷新或重建助理会话后重试。");
     if (message.includes("ASSISTANT_MODEL_INVALID")) throw new Error("所选模型当前不可用，请刷新后重新选择。");
     throw new Error("助理模型切换尚未确认，请刷新后核对当前模型。");
   }

@@ -29,6 +29,8 @@ function failureMessage(error: unknown, lang: "zh" | "en"): string {
     ? "权限已在别处更新，正在核对当前档位；请重新选择。" : "Permissions changed elsewhere. Refreshing the current level; choose again.";
   if (message.includes("ASSISTANT_REQUEST_INVALID")) return lang === "zh"
     ? "当前版本暂不支持切换权限，请更新 Launcher。" : "This version cannot change permissions. Update Launcher.";
+  if (message.includes("ASSISTANT_IDENTITY_INVALID")) return lang === "zh"
+    ? "助理会话身份已失效，本次未保存；请刷新或重建助理会话后重选。" : "The assistant session identity is no longer valid. Nothing was saved; refresh or rebuild the assistant session and choose again.";
   if (message.includes("ASSISTANT_PERMISSION_UNAVAILABLE")) return lang === "zh"
     ? "权限设置暂不可用，请稍后重试。" : "Permission settings are temporarily unavailable. Try again shortly.";
   if (message.includes("ASSISTANT_PERMISSION_INVALID")) return lang === "zh"

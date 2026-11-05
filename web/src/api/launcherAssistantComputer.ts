@@ -34,18 +34,34 @@ function stateValue(value: unknown): ComputerState {
   return value as ComputerState;
 }
 
+/** Root-cause codes from the native computer router cross the bridge as
+ * HostError messages. Map the three distinguishable failures to operator
+ * guidance instead of surfacing raw codes; everything else keeps its
+ * existing generic handling. Mirrors computer_control.py's split. */
+function operatorFailure(error: unknown): Error {
+  const message = error instanceof Error ? error.message : "";
+  if (message.includes("ASSISTANT_COMPUTER_STATE_CHANGED")) return new Error("电脑控制状态已变化，请刷新后重新操作。");
+  if (message.includes("ASSISTANT_COMPUTER_DRIVER_UNAVAILABLE")) return new Error("电脑控制驱动暂不可用，请稍后重试；仍未恢复请检查驱动配置。");
+  if (message.includes("ASSISTANT_COMPUTER_REQUEST_INVALID")) return new Error("该电脑操作请求无法执行，请重新选择窗口后再试。");
+  return error instanceof Error ? error : invalid();
+}
+
 /** Fixed operator verbs only. Electron main owns authentication and routing. */
 export const launcherAssistantComputer: ComputerTransport = {
   scope: "launcher",
   async state(options) {
     options?.signal?.throwIfAborted();
-    const result = await launcherAssistantBridge().invoke({ operation: "computerState" });
+    let result: unknown;
+    try { result = await launcherAssistantBridge().invoke({ operation: "computerState" }); }
+    catch (error) { throw operatorFailure(error); }
     options?.signal?.throwIfAborted();
     return stateValue(result);
   },
   async windows(options) {
     options?.signal?.throwIfAborted();
-    const result = await launcherAssistantBridge().invoke({ operation: "computerWindows" });
+    let result: unknown;
+    try { result = await launcherAssistantBridge().invoke({ operation: "computerWindows" }); }
+    catch (error) { throw operatorFailure(error); }
     options?.signal?.throwIfAborted();
     if (!exact(result, ["windows"]) || !Array.isArray(result.windows)
       || result.windows.length > 256 || !result.windows.every(windowValue)) throw invalid();
@@ -53,15 +69,21 @@ export const launcherAssistantComputer: ComputerTransport = {
   },
   async grant(payload) {
     if (!token(payload.selectionId) || payload.allowVision !== true || payload.authorizationRequestId !== undefined && !token(payload.authorizationRequestId)) throw invalid();
-    return stateValue(await launcherAssistantBridge().invoke({ operation: "computerGrant", selectionId: payload.selectionId, allowVision: true,
-      ...(payload.authorizationRequestId !== undefined ? { authorizationRequestId: payload.authorizationRequestId } : {}) }));
+    try {
+      return stateValue(await launcherAssistantBridge().invoke({ operation: "computerGrant", selectionId: payload.selectionId, allowVision: true,
+        ...(payload.authorizationRequestId !== undefined ? { authorizationRequestId: payload.authorizationRequestId } : {}) }));
+    } catch (error) { throw operatorFailure(error); }
   },
   async control(payload) {
     if (!token(payload.grantId) || !controls.includes(payload.action)) throw invalid();
-    return stateValue(await launcherAssistantBridge().invoke({ operation: "computerControl", grantId: payload.grantId, action: payload.action }));
+    try {
+      return stateValue(await launcherAssistantBridge().invoke({ operation: "computerControl", grantId: payload.grantId, action: payload.action }));
+    } catch (error) { throw operatorFailure(error); }
   },
   async confirm(payload) {
     if (!token(payload.grantId) || !token(payload.pendingId) || typeof payload.approved !== "boolean") throw invalid();
-    return stateValue(await launcherAssistantBridge().invoke({ operation: "computerConfirm", grantId: payload.grantId, pendingId: payload.pendingId, approved: payload.approved }));
+    try {
+      return stateValue(await launcherAssistantBridge().invoke({ operation: "computerConfirm", grantId: payload.grantId, pendingId: payload.pendingId, approved: payload.approved }));
+    } catch (error) { throw operatorFailure(error); }
   },
 };

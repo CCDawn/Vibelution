@@ -991,6 +991,7 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
             "SESSION_CONFLICT": (409, "Native session changed; refresh before retrying"),
             "SESSION_INVALID": (422, "Native session command is invalid"),
             "ASSISTANT_MODEL_BUSY": (409, "Wait for the assistant to finish before changing its model"),
+            "ASSISTANT_MODEL_CONFLICT": (409, "Assistant model changed; refresh before retrying"),
             "ASSISTANT_MODEL_INVALID": (422, "The assistant model is not available for selection"),
             "ASSISTANT_MODEL_UNAVAILABLE": (503, "The assistant model settings are unavailable"),
             "ASSISTANT_PERMISSION_INVALID": (422, "The management permission request is invalid"),

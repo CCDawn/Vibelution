@@ -81,7 +81,10 @@ def test_launcher_never_retries_a_rejected_bound_grant(client, monkeypatch):
     monkeypatch.setattr(computer_control.service, "grant_window", fail)
     result = http.post("/api/assistant/computer/grant", json={"selectionId": "fake-selection", "allowVision": True,
                        "authorizationRequestId": "expired"}, headers=HEADERS)
-    assert result.status_code == 409 and calls == [("fake-selection", True, "expired")]
+    # An unclassified request refusal is not a state change: it must not ask
+    # the operator to refresh-and-retry the identical request.
+    assert result.status_code == 422 and calls == [("fake-selection", True, "expired")]
+    assert result.json()["detail"]["code"] == "ASSISTANT_COMPUTER_REQUEST_INVALID"
     assert "expired request" not in result.text
 
 
@@ -91,8 +94,35 @@ def test_native_error_does_not_leak_detail(client, monkeypatch):
         raise ValueError("sensitive native payload")
     monkeypatch.setattr(computer_control.service, "grant_window", fail)
     result = http.post("/api/assistant/computer/grant", json={"selectionId": "fake-selection", "allowVision": True}, headers=HEADERS)
-    assert result.status_code == 409
+    assert result.status_code == 422
     assert "sensitive" not in result.text
+
+
+def test_driver_state_and_request_failures_stay_distinguishable(client, monkeypatch):
+    """Regression: all service failures used to fold into one 409 refresh-and-
+    retry, so the desktop could not tell a recoverable driver outage apart from
+    moved operator state or a request that can never bind again."""
+    http, _ = client
+    path = "/api/assistant/computer/grant"
+    body = {"selectionId": "fake-selection", "allowVision": True}
+
+    def driver_down(*args):
+        raise computer_control.service.CuaDriverError("PRIVATE_DRIVER_SENTINEL")
+
+    def state_moved(*args):
+        raise computer_control.service.adapter.ComputerBlocked("授权已变化", "grant changed")
+
+    monkeypatch.setattr(computer_control.service, "grant_window", driver_down)
+    driver = http.post(path, json=body, headers=HEADERS)
+    monkeypatch.setattr(computer_control.service, "grant_window", state_moved)
+    state = http.post(path, json=body, headers=HEADERS)
+    monkeypatch.setattr(computer_control.service, "grant_window", lambda *args: (_ for _ in ()).throw(ValueError("refused")))
+    invalid = http.post(path, json=body, headers=HEADERS)
+    assert (driver.status_code, state.status_code, invalid.status_code) == (503, 409, 422)
+    assert [row.json()["detail"]["code"] for row in (driver, state, invalid)] == [
+        "ASSISTANT_COMPUTER_DRIVER_UNAVAILABLE", "ASSISTANT_COMPUTER_STATE_CHANGED", "ASSISTANT_COMPUTER_REQUEST_INVALID"]
+    for row in (driver, state, invalid):
+        assert "PRIVATE_DRIVER_SENTINEL" not in row.text and "grant changed" not in row.text
 
 
 def test_launcher_host_mounts_computer_controls_behind_private_boundary(monkeypatch):
