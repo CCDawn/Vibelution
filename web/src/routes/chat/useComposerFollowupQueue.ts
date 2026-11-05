@@ -30,9 +30,9 @@ export type ComposerFollowupQueueRuntime = {
 
 const DEFAULT_QUEUE_RUNTIME: ComposerFollowupQueueRuntime = {
   detailQueryKey: queryKeys.session,
-  updateSessionQueuedTurn,
-  removeSessionQueuedTurn,
-  sendNowSessionQueuedTurn,
+  updateSessionQueuedTurn: (...args) => updateSessionQueuedTurn(...args),
+  removeSessionQueuedTurn: (...args) => removeSessionQueuedTurn(...args),
+  sendNowSessionQueuedTurn: (...args) => sendNowSessionQueuedTurn(...args),
 };
 
 /**
