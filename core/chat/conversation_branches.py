@@ -186,18 +186,27 @@ def analyze_conversation_branches(events: Iterable[TurnJournalEvent]) -> Convers
 
     default_leaf_ids: dict[str, str] = {}
 
-    def default_leaf(node_id: str) -> str:
-        cached = default_leaf_ids.get(node_id)
-        if cached:
-            return cached
-        node = nodes.get(node_id)
-        if node is None or not node.child_node_ids:
-            default_leaf_ids[node_id] = node_id
-            return node_id
-        child = max(node.child_node_ids, key=lambda child_id: nodes[child_id].sequence)
-        leaf = default_leaf(child)
-        default_leaf_ids[node_id] = leaf
-        return leaf
+    def default_leaf(node_id: str) -> None:
+        # Iterative walk: long-lived sessions chain thousands of branch nodes,
+        # and the recursive form overflowed the interpreter stack once the
+        # default chain grew past the recursion limit.
+        walk = [node_id]
+        while walk:
+            current = walk[-1]
+            if current in default_leaf_ids:
+                walk.pop()
+                continue
+            node = nodes.get(current)
+            if node is None or not node.child_node_ids:
+                default_leaf_ids[current] = current
+                walk.pop()
+                continue
+            child = max(node.child_node_ids, key=lambda child_id: nodes[child_id].sequence)
+            if child in default_leaf_ids:
+                default_leaf_ids[current] = default_leaf_ids[child]
+                walk.pop()
+                continue
+            walk.append(child)
 
     for logical_id in logical_order:
         default_leaf(logical_id)
