@@ -722,7 +722,7 @@ describe("Launcher assistant state", () => {
       await act(async () => push?.(event));
       await settle();
     };
-    const newDetail = detailWithText("new!");
+    const newDetail = detailWithText("🐳abc");
 
     try {
       await deliver({ type: "heartbeat", sessionId: "s", connectionEpoch: 1, ledgerSeq: 10, at: 2 });
@@ -746,13 +746,13 @@ describe("Launcher assistant state", () => {
       expect(client?.getQueryData(["launcher-assistant", "detail", "s"])).toMatchObject(newDetail);
       await deliver({ ...append, deltaSeq: 2, deltaSeqFrom: 2,
         turnItemAppends: [{ ...append.turnItemAppends[0], appendedLength: 2, appendedText: "继续" }] } as LauncherAssistantSessionEvent);
-      expect(conversation?.activeTurnMessage?.turnItems?.[0]).toMatchObject({ text: "new!继续" });
+      expect(conversation?.activeTurnMessage?.turnItems?.[0]).toMatchObject({ text: "🐳abc继续" });
 
       const settledReads = bridge.getLauncherAssistantDetail.mock.calls.length;
       await deliver({ ...frame, connectionEpoch: 1, deltaSeq: 100, deltaSeqFrom: 100, done: true,
         turnItems: [{ ...item, text: "old!", status: "completed", terminal: true }] } as LauncherAssistantSessionEvent);
       expect(bridge.getLauncherAssistantDetail).toHaveBeenCalledTimes(settledReads);
-      expect(conversation?.activeTurnMessage?.turnItems?.[0]).toMatchObject({ text: "new!继续" });
+      expect(conversation?.activeTurnMessage?.turnItems?.[0]).toMatchObject({ text: "🐳abc继续" });
     } finally {
       await act(async () => { resolveOld(detailWithText("old!")); resolveNew(newDetail); });
       await settle();

@@ -199,7 +199,7 @@ export function createLauncherAssistantStream(sessionId: string) {
     }
     const normalized = decoderPayload(payload, sessionStreamAppendBaseline(
       sessionId, payload.turnId, detailItems(authority, payload.turnId),
-      layer?.turnId === payload.turnId ? layer.turnItems : undefined,
+      lastDeltaTurn === payload.turnId && layer?.turnId === payload.turnId ? layer.turnItems : undefined,
     ));
     const expanded = normalized && decoder.expand(normalized);
     if (!expanded || expanded.gaps.length) {

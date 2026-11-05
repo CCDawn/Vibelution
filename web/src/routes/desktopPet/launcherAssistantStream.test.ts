@@ -260,6 +260,18 @@ describe("launcher assistant native stream", () => {
     expect(grown.layer?.turnItems[0]).toMatchObject({ text: "hello restart!" });
   });
 
+  it("normalizes the first new-epoch append against fresh authority rather than the retired decoder layer", () => {
+    const stream = createLauncherAssistantStream("session-1");
+    stream.apply({ type: "heartbeat", sessionId: "session-1", at: 1, connectionEpoch: 1 });
+    stream.reconcile(detail());
+    stream.apply(event({ connectionEpoch: 1, turnItems: [item("seed")] }));
+    stream.apply({ type: "heartbeat", sessionId: "session-1", at: 2, connectionEpoch: 2 });
+    stream.reconcile(detail([item("🐳abc")]));
+    const next = stream.apply(appendEvent(1, 4, "继续", { connectionEpoch: 2 }));
+    expect(next.needsRefresh).toBe(false);
+    expect(next.layer?.turnItems[0]).toMatchObject({ text: "🐳abc继续" });
+  });
+
   it("validates and preserves only positive bounded connection epochs at the IPC boundary", () => {
     expect(parseLauncherAssistantSessionEvent(event({ connectionEpoch: 2 }))).toMatchObject({ connectionEpoch: 2 });
     for (const connectionEpoch of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, "2", Number.NaN]) {
