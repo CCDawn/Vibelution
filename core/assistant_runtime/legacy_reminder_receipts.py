@@ -62,10 +62,58 @@ class LegacyReminderReceipts:
         self.closed = False
         self._pid = os.getpid()
         self._thread = threading.get_ident()
+        self.recovered_superseded_attempts = self._recover_superseded_attempts()
 
     def _check_owner(self):
         if self.closed or self._pid != os.getpid() or self._thread != threading.get_ident():
             raise ReminderReceiptError("legacy_reminder_owner_closed")
+
+    def _recover_superseded_attempts(self) -> int:
+        """One-time startup recovery for pending attempts that cannot be live.
+
+        The attempt token hash is durable in each pending row, so the trusted
+        desktop can settle or abandon a same-day attempt after this host
+        restarts. An attempt in a day directory OLDER than today, however,
+        cannot belong to any in-flight notification: reservations and their
+        settlements happen inside the event's own UTC day, and historical
+        days are fenced from settlement by design. This owner therefore
+        treats older-day pending attempts as abandoned exactly once, at
+        startup: their stored token hash is replaced so a retained token can
+        never confirm them late, while the row itself stays pending -
+        unknown, never marked delivered, and never authorized for a resend.
+
+        Re-reserving (re-delivery) is deliberately rejected: a pending row's
+        delivery outcome is unknown, and re-sending a possibly delivered
+        reminder is the one outcome this ledger must never produce. Corrupt
+        or unreadable days are skipped - recovery must never make startup
+        fail where it previously succeeded, and those days keep failing
+        closed for reads as before.
+        """
+        now = self.clock()
+        if (not isinstance(now, datetime) or now.tzinfo is None
+                or not self.directory.is_dir()):
+            return 0
+        today = now.astimezone(timezone.utc).strftime("%Y%m%d")
+        retired = 0
+        for day in sorted(p.name for p in self.directory.iterdir()):
+            if not re.fullmatch(r"[0-9]{8}", day) or day >= today:
+                continue
+            try:
+                store = ReminderReceiptStore(self.directory / day, owner_id=_OWNER,
+                                             maximum=_CAPACITY, create=False)
+                store.__enter__()
+            except ReminderReceiptError:
+                continue
+            try:
+                retired += store.retire_pending_attempts()
+            finally:
+                try:
+                    store.__exit__(None, None, None)
+                except ReminderReceiptError:
+                    # A day whose close fails stays exactly as readable or
+                    # unreadable as it was before this recovery.
+                    pass
+        return retired
 
     def _retire_old(self, day: str):
         for previous in list(self.stores):
@@ -125,35 +173,50 @@ class LegacyReminderReceipts:
         if (not isinstance(token, str) or not _TOKEN.fullmatch(token)
                 or not isinstance(channel, str) or channel not in _CHANNELS):
             raise ReminderReceiptError("legacy_reminder_request_invalid")
-        # Settlement belongs to the live store which made the reservation.
-        # Reopening an old day creates a different owner and can never make
-        # its token valid; retaining such stores also exhausts the day limit.
-        store = self._owned_attempt(day, event_key, token)
+        # Submission ownership stays bound to the live store which made the
+        # reservation: only that context attests that the one authorized send
+        # actually returned. A replacement host must not confirm a submission
+        # it did not supervise, so an attempt whose owner context died stays
+        # pending and unknown (the desktop then abandons it, which works
+        # across restarts below, and reconciliation acknowledges the row as
+        # unknown - never as delivered, never replayed). Reopening another
+        # day's ledger is equally refused, and exhausting the day limit must
+        # not be reachable through settlement.
+        store = self.stores.get(day)
+        if store is None:
+            raise ReminderReceiptError("receipt_attempt_owner_required")
         receipt = store.record_submitted(event_key, token, channel=channel)
-        self.outstanding[day].pop(event_key)
+        self.outstanding.get(day, {}).pop(event_key, None)
         return {"schemaVersion": 1, "eventKey": event_key,
                 "state": receipt["state"], "channel": receipt["channel"]}
 
-    def _owned_attempt(self, day, event_key, token):
-        digest = hashlib.sha256(token.encode("ascii")).hexdigest()
-        store = self.stores.get(day)
-        if store is None or not secrets.compare_digest(self.outstanding.get(day, {}).get(event_key, ""), digest):
-            raise ReminderReceiptError("receipt_attempt_owner_required")
-        return store
-
     def abandon(self, request: dict) -> dict:
-        """Forget this attempt's live capability without changing its ledger.
+        """Destroy this attempt's settlement capability, durably.
 
-        The caller must stop the dispatch before invoking this. A pending row
-        stays uncertain; neither a later settlement nor a resend is authorized.
+        The caller must stop the dispatch before invoking this. The token is
+        verified against the hash persisted with the pending row, so the
+        desktop can abandon an attempt whose reservation was made by a
+        previous host lifetime - the window that used to leave such attempts
+        permanently unconfirmable and un-abandonable. The pending row itself
+        stays uncertain (state and channel untouched): neither a later
+        settlement nor a resend is authorized, and the stored hash is rotated
+        so that verdict survives any number of restarts.
         """
         self._check_owner()
         day, event_key = _request(request, {"sourceKey", "eventId", "attemptToken"})
         token = request["attemptToken"]
         if not isinstance(token, str) or not _TOKEN.fullmatch(token):
             raise ReminderReceiptError("legacy_reminder_request_invalid")
-        self._owned_attempt(day, event_key, token)
-        self.outstanding[day].pop(event_key)
+        store = self.stores.get(day)
+        if store is None:
+            # Only the current day's own ledger is reopened, and only for the
+            # deliberate capability destruction above; historical days stay
+            # fenced from every token-bearing call.
+            if day != self.clock().astimezone(timezone.utc).strftime("%Y%m%d"):
+                raise ReminderReceiptError("receipt_attempt_owner_required")
+            store = self._store(day, create=False)
+        store.abandon_attempt(event_key, token)
+        self.outstanding.get(day, {}).pop(event_key, None)
         return {"schemaVersion": 1, "eventKey": event_key, "state": "abandoned"}
 
     def inventory(self) -> dict:

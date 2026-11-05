@@ -8,12 +8,14 @@ The caller never supplies paths, agent IDs or a ledger digest.
 """
 from __future__ import annotations
 
+import logging
 import os
 import math
 import re
 import secrets
 import threading
 import time
+from collections import OrderedDict
 from contextlib import ExitStack
 from pathlib import Path
 
@@ -26,6 +28,15 @@ from core.web.services.personal_assistant_project.windows_read import _locked_so
 _TOKEN = re.compile(r"[a-f0-9]{64}\Z")
 _MAX_LEASES = 16
 _MAX_TTL_MS = 10000
+# Released permit ids must stay rejected (a release may legitimately arrive
+# before its acquire, and a replayed id must never re-pin the source), but
+# remembering them unbounded made acquire_permit fail with
+# reminder_lease_capacity forever once 4096 permits had completed in one
+# host lifetime. The retention is therefore a bounded most-recent window of
+# the same size as the old hard limit; see _retire_permit_id.
+_MAX_RETIRED_PERMITS = 4096
+_CLOSE_DRAIN_TIMEOUT_SECONDS = 5.0
+_logger = logging.getLogger(__name__)
 
 
 class ReminderSourceLeaseOwner:
@@ -47,14 +58,30 @@ class ReminderSourceLeaseOwner:
         self._leases = {}
         self._permits = {}
         self._pending_permit_ids = set()
-        self._retired_permit_ids = set()
+        self._retired_permit_ids = OrderedDict()
         self._releasing_permit_ids = set()
-        self._failed_release_ids = set()
         self._pending = 0
         self._epoch = 0
         self._revoking = False
         self._closed = False
         self._pid = os.getpid()
+
+    def _retire_permit_id(self, token: str) -> None:
+        """Remember a released permit id so it can never bind pins again.
+
+        The desktop main process chooses the id, and its release may arrive
+        before a lost acquire or after the handoff was cancelled; replaying
+        such an id must not re-pin the source or let a late delivery bind
+        (see the client-owned-id drain contract). The memory is bounded: once
+        4096 later permits have completed, the oldest id is forgotten. Any
+        replay window that still matters is far shorter than 4096 subsequent
+        permit lifetimes, and a forgotten id can at worst re-attach through
+        the ordinary live-permit path - it can never resurrect closed pins.
+        """
+        self._retired_permit_ids.pop(token, None)
+        self._retired_permit_ids[token] = None
+        while len(self._retired_permit_ids) > _MAX_RETIRED_PERMITS:
+            self._retired_permit_ids.popitem(last=False)
 
     def _active(self):
         if self._closed or self._revoking or self._pid != os.getpid():
@@ -87,8 +114,6 @@ class ReminderSourceLeaseOwner:
                 return {"schemaVersion": 1, "permitId": permit_id, "ledgerKey": key,
                         "coverage": "cooperating_route_writers", "unmanagedSenders": "unknown", "readyForCutover": False}
             if len(self._leases) + len(self._permits) + self._pending >= _MAX_LEASES:
-                raise MigrationIOError("reminder_lease_capacity")
-            if len(self._retired_permit_ids) >= 4096:
                 raise MigrationIOError("reminder_lease_capacity")
             if type(revision) is not int or self._dispatch._registry_revision != revision:
                 raise MigrationIOError("reminder_lease_request_invalid")
@@ -176,33 +201,54 @@ class ReminderSourceLeaseOwner:
             if token in self._retired_permit_ids:
                 while token in self._pending_permit_ids or token in self._releasing_permit_ids:
                     self._condition.wait()
-                if token in self._failed_release_ids:
-                    raise MigrationIOError("reminder_lease_unavailable")
+                # A previous attempt may have failed mid-close; the permit row
+                # is retained until every pin closes, so this call retries the
+                # remaining work instead of failing the id forever.
+                self._finish_release(token)
                 return
-            if len(self._retired_permit_ids) >= 4096:
-                raise MigrationIOError("reminder_lease_capacity")
-            self._retired_permit_ids.add(token)
+            self._retire_permit_id(token)
             self._releasing_permit_ids.add(token)
             try:
                 while token in self._pending_permit_ids:
                     self._condition.wait()
-                row = self._permits.pop(token, None)
-                if row is None:
-                    return
-                observation, stack, gate, _, _, _ = row
-                try:
-                    stack.close()
-                finally:
-                    try:
-                        observation.close()
-                    finally:
-                        gate.release()
-            except BaseException:
-                self._failed_release_ids.add(token)
-                raise
+                self._finish_release(token)
             finally:
                 self._releasing_permit_ids.discard(token)
                 self._condition.notify_all()
+
+    def _finish_release(self, token: str) -> None:
+        """Close the pinned resources of a permit whose id is already retired.
+
+        The permit row stays published until every pin has closed, so a
+        transient close failure leaves the release retryable instead of
+        permanently unavailable: the caller's id stays retired and rejected
+        for acquisition, and a later release re-attempts exactly the steps
+        that have not completed. Only when all three close steps succeed is
+        the row dropped and the release confirmed.
+        """
+        row = self._permits.get(token)
+        if row is None:
+            return
+        observation, stack, gate = row[0], row[1], row[2]
+        # Each step tolerates having already completed on an earlier attempt:
+        # ExitStack and the observation close idempotently, so a retry only
+        # redoes the step that failed. A failed step keeps the row published,
+        # which keeps the underlying pins attested as held.
+        try:
+            stack.close()
+        except Exception:
+            raise MigrationIOError("reminder_lease_release_unavailable") from None
+        try:
+            observation.close()
+        except Exception:
+            raise MigrationIOError("reminder_lease_release_unavailable") from None
+        try:
+            gate.release()
+        except Exception:
+            # The gate thread owns the route lock. A gate that cannot certify
+            # its release is a recovered-guard situation, not a retry.
+            raise MigrationIOError("reminder_lease_unavailable") from None
+        self._permits.pop(token, None)
 
     def acquire(self, project_id: str, revision: int, ttl_ms: int) -> dict:
         if type(ttl_ms) is not int or not 100 <= ttl_ms <= _MAX_TTL_MS:
@@ -347,19 +393,47 @@ class ReminderSourceLeaseOwner:
         finally:
             self.end_revocation()
 
-    def close(self) -> None:
+    def close(self, *, timeout: float = _CLOSE_DRAIN_TIMEOUT_SECONDS) -> None:
+        """Stop the owner, waiting bounded for held permits to be released.
+
+        The host calls this during shutdown. Senders normally release their
+        permits through the ordinary fence; a permit (or an in-flight
+        revocation fence) that is still unsettled after `timeout` seconds is
+        force-dropped (best-effort close, then discard) so a wedged sender
+        can never hang process exit. The OS reclaims any handle a forced
+        drop could not close, and the drop is logged without source content.
+        """
         with self._condition:
             if self._pid != os.getpid():
                 raise MigrationIOError("reminder_lease_owner_closed")
-            while self._revoking:
-                self._condition.wait()
-            if self._closed:
-                while self._pending or self._permits:
-                    self._condition.wait()
-                return
-            self._closed = True
-            self._epoch += 1
-            for token in list(self._leases):
-                self._discard(token)
-            while self._pending or self._permits:
-                self._condition.wait()
+            if not self._closed:
+                self._closed = True
+                self._epoch += 1
+                for token in list(self._leases):
+                    self._discard(token)
+            self._drain_or_force_drop(timeout)
+
+    def _drain_or_force_drop(self, timeout: float) -> None:
+        if not self._revoking and not self._pending and not self._permits:
+            return
+        deadline = time.monotonic() + max(float(timeout), 0.0)
+        while ((self._revoking or self._pending or self._permits)
+               and deadline > time.monotonic()):
+            self._condition.wait(deadline - time.monotonic())
+        if not self._permits:
+            return
+        # Pending acquisitions abort against the closed owner at their
+        # publish gate, and a fence's wait_revocation returns once the rows
+        # below are gone, so only rows published before close remain. A
+        # forced drop may leave an OS pin behind if even the close fails;
+        # the host process is exiting and the handles die with it.
+        forced = len(self._permits)
+        for token in list(self._permits):
+            try:
+                self._finish_release(token)
+            except Exception:
+                pass
+        self._permits.clear()
+        self._condition.notify_all()
+        _logger.warning("reminder_source_lease force-dropped %d held permit(s) "
+                        "after a %.1fs close drain timeout", forced, max(float(timeout), 0.0))
