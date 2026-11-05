@@ -15,6 +15,14 @@ from core.launcher import service as launcher_service
 from core.runtime_manager import instances_registry as registry
 
 
+@pytest.fixture(autouse=True)
+def _isolated_instance_registry(tmp_path, monkeypatch):
+    """Cleanup fences never touch the real %LOCALAPPDATA% instances registry."""
+    registry_path = tmp_path / "Vibelution" / "instances.json"
+    monkeypatch.setattr(registry, "instances_registry_path", lambda: registry_path)
+    monkeypatch.setattr(registry, "_port_is_free", lambda _port, host=None: True)
+
+
 def _git(root: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", *args],
