@@ -364,7 +364,7 @@ def test_secret_request_returns_pure_receipt_without_config_access(operator, mon
     result = call("secret_request", {"purpose": "配置 Pixel 中转需要 API key", "label": "Pixel 密钥"})
     assert result == {"ok": True, "action": "secret_request", "status": "awaiting_user_attachment",
                       "purpose": "配置 Pixel 中转需要 API key", "label": "Pixel 密钥",
-                      "hint": "等待用户附加隐私附件；附加后在下一条用户消息会出现 sec_ 引用标记，届时用 credential_token 继续"}
+                      "hint": "等待用户附加隐私附件；附加后在下一条用户消息会出现 sec_ 引用标记，届时由对应工具参数引用（如 provider_add 的 credential_token）"}
     assert operator.read_bytes() == before
 
 

@@ -691,7 +691,7 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
               autoComplete="new-password"
               value={secretValue}
               onChange={(event) => setSecretValue(event.target.value)}
-              placeholder={lang === "zh" ? "粘贴密钥或明文，仅此一次输入" : "Paste the key or plaintext; entered once only"}
+              placeholder={lang === "zh" ? "粘贴隐私内容，仅此一次输入" : "Paste the private content; entered once only"}
               aria-label={lang === "zh" ? "隐私内容" : "Private value"}
             />
           </label>
