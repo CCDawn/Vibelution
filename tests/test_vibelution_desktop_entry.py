@@ -709,7 +709,7 @@ def test_launcher_api_bridge_runtime_inventory_does_not_import_service_or_filter
         {"id": f"worktree:{state}", "current": False, "runtime": {"status": state}}
         for state in ("live", "closed", "unknown", "inflight", "legacy", "unregistered")
     )
-    inventories = [{"items": rows, "observation": observation} for observation in (1, 2)]
+    inventories = [{"currentId": "main", "items": rows, "observation": observation} for observation in (1, 2)]
     snapshots = [json.dumps(payload, sort_keys=True) for payload in inventories]
     calls = []
 
@@ -740,6 +740,56 @@ def test_launcher_api_bridge_runtime_inventory_does_not_import_service_or_filter
 
     assert calls == [{"include_dirty": False}, {"include_dirty": False}]
     assert [json.dumps(payload, sort_keys=True) for payload in inventories] == snapshots
+
+
+@pytest.mark.parametrize("current_identity", [{"currentId": "worktree:task"}, {"currentId": None}, {"currentId": ""}, {}])
+def test_launcher_api_bridge_runtime_inventory_non_main_identity_uses_original_service(monkeypatch, current_identity):
+    entry = _load_desktop_entry_py()
+    monkeypatch.setattr(entry, "_append_log", lambda *a, **k: None)
+    monkeypatch.setitem(sys.modules, "core.launcher", types.ModuleType("core.launcher"))
+    lifecycle_module = types.ModuleType("core.launcher.branch_instance_lifecycle")
+    events = []
+    inventory = {**current_identity, "items": [{"id": "worktree:task", "current": True}]}
+    expected = {
+        "currentId": "worktree:task",
+        "items": [{"id": "worktree:task", "current": True, "runtime": {"backend": {"healthy": True}}}],
+        "authoritativeBundle": True,
+    }
+
+    def list_overlayed_branch_instances(**kwargs):
+        events.append(("overlay", kwargs))
+        return inventory
+
+    def list_launcher_branch_instances(**kwargs):
+        events.append(("service_call", kwargs))
+        return expected
+
+    lifecycle_module.list_overlayed_branch_instances = list_overlayed_branch_instances
+    launcher_module = _fake_launcher_service_module()
+    launcher_module.list_launcher_branch_instances = list_launcher_branch_instances
+    monkeypatch.setitem(sys.modules, "core.launcher.branch_instance_lifecycle", lifecycle_module)
+    monkeypatch.setitem(sys.modules, "core.launcher.service", launcher_module)
+    original_import = builtins.__import__
+
+    def record_service_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "core.launcher" and "service" in fromlist:
+            events.append(("service_import", None))
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", record_service_import)
+    payload = entry._run_launcher_api_bridge(
+        argparse.Namespace(
+            launcher_api_path="branch-instances?runtimeOnly=true", launcher_api_method="GET", launcher_api_body="",
+        )
+    )
+
+    assert payload == {"schemaVersion": 1, "ok": True, "payload": expected}
+    assert payload["payload"] is expected
+    assert events == [
+        ("overlay", {"include_dirty": False}),
+        ("service_import", None),
+        ("service_call", {"runtime_only": True}),
+    ]
 
 
 @pytest.mark.parametrize("failure_stage", ["import", "call"])
@@ -852,7 +902,7 @@ def test_launcher_api_bridge_branch_instances_cleanup_metadata_is_opt_in(monkeyp
 
     def capture_overlay(**kwargs):
         overlay_calls.append(kwargs)
-        return {"items": [], "runtimeInventory": True}
+        return {"currentId": "main", "items": [], "runtimeInventory": True}
 
     lifecycle_module.list_overlayed_branch_instances = capture_overlay
     monkeypatch.setitem(sys.modules, "core.launcher.branch_instance_lifecycle", lifecycle_module)
@@ -894,7 +944,9 @@ def test_launcher_api_bridge_branch_instances_cleanup_metadata_is_opt_in(monkeyp
             launcher_api_path="branch-instances?runtimeOnly=true", launcher_api_method="GET", launcher_api_body="",
         )
     )
-    assert runtime_payload == {"schemaVersion": 1, "ok": True, "payload": {"items": [], "runtimeInventory": True}}
+    assert runtime_payload == {
+        "schemaVersion": 1, "ok": True, "payload": {"currentId": "main", "items": [], "runtimeInventory": True},
+    }
     assert len(seen) == service_calls
     assert overlay_calls == [{"include_dirty": False}]
 
