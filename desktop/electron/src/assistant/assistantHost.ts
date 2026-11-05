@@ -123,6 +123,8 @@ export type AssistantHostOptions = {
   pythonArguments?: string[];
   native?: WorkbenchJobNative;
   fetch?: typeof globalThis.fetch;
+  /** Owner shutdown fences new starts, never the captured Job's stop/drain. */
+  startupSignal?: AbortSignal;
   /** Main-only native lifecycle capability; deliberately absent from renderer IPC. */
   mainControl?: (request: MainControlRequest, signal?: AbortSignal, hostContext?: ConfigurationReferenceHostContext) => Promise<unknown>;
   mainControlSettled?: (request: MainControlRequest, result: Record<string, unknown>, accepted: boolean | undefined,
@@ -621,6 +623,7 @@ export class AssistantHost {
   }
 
   start(): Promise<AssistantHostSnapshot> {
+    if (this.options.startupSignal?.aborted) return Promise.reject(new HostError("ASSISTANT_STOPPED"));
     // The bridge calls start() before request(). Lifecycle requests must reach
     // that owner to veto replacement or receive CLOSING, never wait invisibly.
     if (this.lifecycleAdmission) {
@@ -642,6 +645,7 @@ export class AssistantHost {
   }
 
   private startOwned(migration: boolean): Promise<AssistantHostSnapshot> {
+    if (this.options.startupSignal?.aborted) return Promise.reject(new HostError("ASSISTANT_STOPPED"));
     if (this.starting && this.startingRevision === this.revision) return this.starting;
     // Respawn budget exhausted: fail observably instead of hanging or spawning.
     // An in-flight start above is still joined; migration startup stays allowed.
@@ -1329,7 +1333,7 @@ export class AssistantHost {
   }
 
   private async startGeneration(revision: number, migration = false): Promise<AssistantHostSnapshot> {
-    if (revision !== this.revision) throw new HostError("ASSISTANT_STOPPED");
+    if (this.options.startupSignal?.aborted || revision !== this.revision) throw new HostError("ASSISTANT_STOPPED");
     const previous = this.current;
     if (previous && !previous.closed) {
       if (previous.migrationRetirementRequested) throw new HostError("ASSISTANT_JOB_STILL_OWNED");
@@ -1353,7 +1357,7 @@ export class AssistantHost {
         if (this.current === previous && previous.closed) this.current = null;
       }
       // stop() may have invalidated this recovery while the old stdio drained.
-      if (revision !== this.revision) throw new HostError("ASSISTANT_STOPPED");
+      if (this.options.startupSignal?.aborted || revision !== this.revision) throw new HostError("ASSISTANT_STOPPED");
     }
     this.view = { state: "starting", errorCode: null };
     let generation: Generation | undefined;
@@ -1387,6 +1391,7 @@ export class AssistantHost {
       if (this.options.mainControl && this.options.appearanceControl) environment.VIBELUTION_ASSISTANT_APPEARANCE_CONTROL = "1";
       if (this.options.mainControl && this.options.initialMigrationControl) environment.VIBELUTION_ASSISTANT_INITIAL_MIGRATION_CONTROL = "1";
       const nativeAssistantRoot = realpathSync.native(this.options.profileRoot), profileIdentity = this.configurationReferenceProfileIdentity();
+      if (this.options.startupSignal?.aborted || revision !== this.revision) throw new HostError("ASSISTANT_STOPPED");
       const spawned = native.spawn({
         executable: python,
         arguments: [...this.options.pythonArguments!, join(this.options.sourceRoot, "scripts", "assistant_host.py"), "--profile-root", this.options.profileRoot,
@@ -1404,7 +1409,7 @@ export class AssistantHost {
       generation.pid = spawned.pid;
       const deadline = Date.now() + STARTUP_MS;
       while (Date.now() < deadline) {
-        if (revision !== this.revision || generation.abort.signal.aborted) throw new HostError("ASSISTANT_STOPPED");
+        if (this.options.startupSignal?.aborted || revision !== this.revision || generation.abort.signal.aborted) throw new HostError("ASSISTANT_STOPPED");
         if (native.activeCount(generation.job) === 0) throw new HostError("ASSISTANT_EXITED");
         const ready = this.readReady(generation);
         if (ready) {
@@ -1421,7 +1426,7 @@ export class AssistantHost {
             const status = await this.rpc(generation, "/api/assistant", "GET", undefined, Math.max(1, deadline - Date.now()));
             generation.sessionId = identity(status);
             generation.agentId = (status as { assistant: { agentId: string } }).assistant.agentId;
-            if (revision !== this.revision || generation.abort.signal.aborted) throw new HostError("ASSISTANT_STOPPED");
+            if (this.options.startupSignal?.aborted || revision !== this.revision || generation.abort.signal.aborted) throw new HostError("ASSISTANT_STOPPED");
             this.view = { state: "ready", errorCode: null };
             if (this.options.mainControl) this.startMainControl(generation);
             generation.readyAt = Date.now();
