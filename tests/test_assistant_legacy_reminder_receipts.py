@@ -190,6 +190,91 @@ def test_abandon_checks_token_and_fences_late_settlement(tmp_path):
     reopened.close()
 
 
+def test_abandon_survives_host_restart_and_stays_destroyed(tmp_path):
+    """A desktop abandon must work after the reserving host lifetime died.
+
+    The token hash persisted with the pending row authorizes the deliberate
+    capability destruction across restarts; the rotation makes that verdict
+    durable, so neither settlement nor a repeated abandon can ever revive it.
+    """
+    root = tmp_path / "legacy-receipts"
+    first = owner(root)
+    request = {"sourceKey": SOURCE, "eventId": EVENT}
+    token = first.reserve(request)["attemptToken"]
+    first.close()  # The in-memory live-owner capability is gone.
+    reopened = owner(root)
+    assert reopened.abandon({**request, "attemptToken": token})["state"] == "abandoned"
+    reopened.close()
+    final = owner(root)
+    with pytest.raises(ReminderReceiptError, match="receipt_attempt_owner_required"):
+        final.settle({**request, "attemptToken": token, "channel": "system_notification"})
+    with pytest.raises(ReminderReceiptError, match="receipt_attempt_owner_required"):
+        final.abandon({**request, "attemptToken": token})
+    # The row itself stays pending: unknown outcome, never delivered, never
+    # resendable.
+    assert final.reserve(request)["state"] == "pending"
+    final.close()
+
+
+def test_startup_retires_superseded_older_day_pending_attempts(tmp_path):
+    """Older-day pending attempts are dead on arrival and retired once.
+
+    Reservations and their settlements happen inside the event's own day, so
+    a pending row in an older day directory cannot belong to any in-flight
+    notification. Startup rotates its stored token hash (never its state or
+    channel): the row stays pending/unknown, nothing is re-delivered, and a
+    retained token can never confirm it late.
+    """
+    import hashlib
+    from core.assistant_runtime.reminder_receipts import ReminderReceiptStore
+    root = tmp_path / "legacy-receipts"
+    previous = LegacyReminderReceipts(root, clock=lambda: datetime(2026, 10, 27, 1, tzinfo=timezone.utc))
+    request = {"sourceKey": SOURCE, "eventId": "affair-reminder:fictional-item:20261027"}
+    reservation = previous.reserve(request)
+    token = reservation["attemptToken"]
+    previous.close()
+    reopened = owner(root)
+    assert reopened.recovered_superseded_attempts == 1
+    with pytest.raises(ReminderReceiptError, match="receipt_attempt_owner_required"):
+        reopened.settle({**request, "attemptToken": token, "channel": "system_notification"})
+    records = reopened.inventory()["records"]
+    assert records == [{"day": "20261027", "eventKey": reservation["eventKey"],
+                        "state": "pending", "channel": None, "inflight": True}]
+    reopened.close()
+    with ReminderReceiptStore(root / "20261027", owner_id="legacy-reminders-v1", maximum=4096) as store:
+        with store._transaction() as conn:
+            stored = list(conn.execute("SELECT token_hash FROM reminder_receipts"))[0][0]
+    assert stored != hashlib.sha256(token.encode("ascii")).hexdigest()
+
+
+def test_host_maps_permanent_receipt_refusals_with_distinguishable_codes(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    import core.assistant_runtime.host as host_module
+
+    class Native:
+        root = tmp_path
+        assistant = {"agentId": "native", "directSessionId": "session"}
+        def bootstrap(self): return {"assistant": self.assistant}
+        def shutdown(self): pass
+
+    monkeypatch.setattr(host_module, "NativeFacade", Native)
+    # The real host clock reserves only the current UTC day's events.
+    request = {"sourceKey": SOURCE,
+               "eventId": "affair-reminder:fixture:" + datetime.now(timezone.utc).strftime("%Y%m%d")}
+    headers = {"Authorization": "Bearer private-test-token"}
+    with TestClient(host_module.create_app(native=Native(), token="private-test-token"),
+                    base_url="http://127.0.0.1", headers=headers) as client:
+        reserved = client.post("/api/assistant/legacy-reminders/reserve", json=request).json()
+        settled = client.post("/api/assistant/legacy-reminders/settle", headers=headers,
+                              json={**request, "attemptToken": "f" * 64, "channel": "system_notification"})
+        assert settled.status_code == 409
+        assert settled.json()["detail"] == {"code": "receipt_attempt_owner_required", "retryable": False}
+        # The correct token still settles within the same owner lifetime.
+        ok = client.post("/api/assistant/legacy-reminders/settle", headers=headers,
+                         json={**request, "attemptToken": reserved["attemptToken"], "channel": "system_notification"})
+        assert ok.status_code == 200 and ok.json()["state"] == "submitted"
+
+
 def test_inventory_reads_all_days_without_replaying_or_releasing_pending(tmp_path):
     root = tmp_path / "legacy-receipts"
     now = [NOW]
