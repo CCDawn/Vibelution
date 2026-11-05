@@ -96,7 +96,7 @@ export async function waitForBackendHealthy(input: {
   delay?: (ms: number) => Promise<void>;
   connect?: (port: number, host: string) => Promise<boolean>;
   fetchHealth?: (url: string) => Promise<WorkbenchHealthResponse>;
-}): Promise<void> {
+}): Promise<Record<string, unknown> | null> {
   const timeoutMs = Math.max(1, input.timeoutMs ?? BACKEND_HEALTH_WAIT_MS);
   const pollIntervalMs = Math.max(0, input.pollIntervalMs ?? BACKEND_HEALTH_POLL_MS);
   const now = input.now ?? Date.now;
@@ -113,8 +113,9 @@ export async function waitForBackendHealthy(input: {
       throw new Error(`workbench backend exited before it became healthy at ${workbenchHealthUrl(input.port, input.host)}`);
     }
     try {
-      if (await probeBackendHealthy(input)) {
-        return;
+      const body = await fetchReadyHealthBody(input);
+      if (body) {
+        return body;
       }
       lastError = "health probe failed";
     } catch (error: unknown) {
@@ -131,6 +132,54 @@ export async function waitForBackendHealthy(input: {
   throw new Error(
     `workbench backend was not healthy at ${workbenchHealthUrl(input.port, input.host)}${lastError ? `: ${lastError}` : ""}`
   );
+}
+
+/** Fetch /api/health once and return the parsed body only when it is ready. */
+async function fetchReadyHealthBody(input: {
+  port: number;
+  host?: string;
+  readiness?: WorkbenchReadiness;
+  connectTimeoutMs?: number;
+  httpTimeoutMs?: number;
+  signal?: AbortSignal;
+  connect?: (port: number, host: string) => Promise<boolean>;
+  fetchHealth?: (url: string) => Promise<WorkbenchHealthResponse>;
+}): Promise<Record<string, unknown> | null> {
+  const host = input.host?.trim() || "127.0.0.1";
+  const port = Math.trunc(input.port);
+  if (!Number.isFinite(port) || port <= 0) {
+    return null;
+  }
+  const connect = input.connect ?? ((nextPort, nextHost) =>
+    probeTcpConnect(nextPort, nextHost, input.connectTimeoutMs ?? BACKEND_CONNECT_TIMEOUT_MS));
+  if (!(await connect(port, host))) {
+    return null;
+  }
+  input.signal?.throwIfAborted();
+  const url = workbenchHealthUrl(port, host);
+  const httpTimeoutMs = Math.max(1, input.httpTimeoutMs ?? BACKEND_HEALTH_HTTP_TIMEOUT_MS);
+  const fetchHealth =
+    input.fetchHealth ?? defaultFetchWorkbenchHealth({ httpTimeoutMs, signal: input.signal });
+  try {
+    const response = await fetchHealth(url);
+    if (response.status !== 200 || typeof response.json !== "function") {
+      return null;
+    }
+    const body: unknown = await response.json();
+    input.signal?.throwIfAborted();
+    if (!workbenchHealthPayloadReady(body, input.readiness)) {
+      return null;
+    }
+    return typeof body === "object" && body !== null && !Array.isArray(body)
+      ? body as Record<string, unknown>
+      : null;
+  } catch (error: unknown) {
+    input.signal?.throwIfAborted();
+    if (input.signal?.aborted) {
+      throw error;
+    }
+    return null;
+  }
 }
 
 async function abortableDelay(timeoutMs: number, signal?: AbortSignal): Promise<void> {
