@@ -191,10 +191,11 @@ def list_externally_callable_agents(
     active_team_lookup: ActiveTeamLookup | None = None,
     operator_enabled: OperatorEnabled | None = None,
     operator_explicitly_enabled: OperatorExplicitlyEnabled | None = None,
+    eligibility: Callable[[dict[str, Any]], ExternalAgentEligibility] | None = None,
 ) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for agent in agents:
-        decision = external_mcp_eligibility(
+        decision = eligibility(agent) if eligibility is not None else external_mcp_eligibility(
             agent,
             active_team_lookup=active_team_lookup,
             operator_enabled=operator_enabled,

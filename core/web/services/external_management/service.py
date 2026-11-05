@@ -382,14 +382,14 @@ class ManagementService:
             raise ManagementError("DIRECTORY_UNAVAILABLE", 503) from None
 
     def read_agents(self, subject, capability, **parameters):
-        from .contracts import AgentDirectoryQuery, AgentDirectoryResponse
+        from .contracts import AgentDirectoryReadQuery, AgentDirectoryResponse
         grant = self._authorize(subject, capability, "agents:directory:read")
         try:
-            query = AgentDirectoryQuery.model_validate(parameters)
+            query = AgentDirectoryReadQuery.model_validate(parameters)
         except ValidationError:
             raise ManagementError("INVALID_INPUT", 422) from None
         try:
-            result = AgentDirectoryResponse.model_validate(self.native.read_agents(query)).model_dump()
+            result = AgentDirectoryResponse.model_validate(self.native.read_agents(query)).model_dump(exclude_unset=True)
         except ValidationError:
             raise ManagementError("AGENT_DIRECTORY_UNAVAILABLE", 503) from None
         if self._authorize(subject, capability, "agents:directory:read") != grant:

@@ -790,21 +790,26 @@ class ManagedAgentBackendClient:
     async def management_team_list(self, **parameters):
         return await self._management_directory_list("teams", parameters)
 
-    async def management_agent_list(self, **parameters) -> dict[str, Any]:
+    async def management_agent_list(self, *, dispatch_context="external", **parameters) -> dict[str, Any]:
         from pydantic import ValidationError
-        from core.web.services.external_management.contracts import AgentDirectoryQuery, AgentDirectoryResponse
+        from core.web.services.external_management.contracts import AgentDirectoryReadQuery, AgentDirectoryResponse
 
         try:
-            query = AgentDirectoryQuery.model_validate(parameters)
+            query = AgentDirectoryReadQuery.model_validate({**parameters, "dispatch_context": dispatch_context})
         except ValidationError:
             raise BackendClientError("Invalid Agent directory query.", code="INVALID_MANAGEMENT_REQUEST") from None
-        public = await self._management_directory_read("/directory/agents?" +
-            urlencode(query.model_dump(exclude_none=True)), AgentDirectoryResponse)
+        values = query.model_dump(exclude_none=True)
+        if query.dispatch_context == "external":
+            values.pop("dispatch_context")  # Preserve the legacy default request and response contract.
+        public = await self._management_directory_read("/directory/agents?" + urlencode(values), AgentDirectoryResponse)
         end = public["offset"] + len(public["agents"])
-        if (public["offset"] != query.offset or len(public["agents"]) > query.limit
+        if (public["dispatchContext"] != query.dispatch_context
+                or public["offset"] != query.offset or len(public["agents"]) > query.limit
                 or public["nextOffset"] != (end if end < public["total"] else None)
                 or query.expected_revision and public["revision"] != query.expected_revision):
             raise BackendClientError("Agent directory query binding changed.", code="BACKEND_PROTOCOL_ERROR")
+        if query.dispatch_context == "external":
+            public.pop("dispatchContext")
         return public
 
     async def management_team_result(self, *, request_id: str):
