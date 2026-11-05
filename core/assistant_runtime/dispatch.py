@@ -89,6 +89,12 @@ _RECEIPT_FIELDS = frozenset({
     "completedAt", "resultSummary", "error", "pendingApprovals", "pollAfterMs",
     "shouldPoll", "guideUri", "guideVersion",
 })
+# Records rejected with these codes can never be acted on by stop/cancel/
+# renew/reap; they are the only rows the explicit dismiss exit archives.
+_CORRUPT_DISMISS_CODES = frozenset({"DISPATCH_STATE_CORRUPT", "DISPATCH_STATE_SHAPE_INVALID"})
+# Forensic digest is computed only for bounded content; oversized damaged
+# files are archived whole without hashing.
+_CORRUPT_ARCHIVE_READ_LIMIT = 1024 * 1024
 
 
 class DispatchError(RuntimeError):
@@ -945,6 +951,95 @@ class DispatchService:
                 raise DispatchError("Native task binding changed; refresh its original receipt.", code="DISPATCH_CONFLICT")
             return await self._update(record, lambda client: client.cancel_task(task_id=record["nativeTaskId"]))
 
+    async def dismiss_corrupt(self, dispatch_id: str, *, confirmed: bool, reason: str = "") -> dict[str, Any]:
+        """Archive an unreadable or shape-invalid record after explicit confirmation.
+
+        This is the recovery exit for rows that list_dispatches retains as
+        ``stateInvalid``: stop/cancel/renew/reap can never act on them, so the
+        only bounded way out is moving the original bytes into
+        ``records-corrupt`` with an audit file. The audit is persisted before
+        the atomic rename, so the original content always survives both
+        intermediate failures. Readable references — including binding-drifted
+        ones that lists merely hide — are refused; this exit never deletes a
+        live dispatch reference.
+        """
+        if confirmed is not True:
+            raise DispatchError("Dismissal requires explicit confirmation.", code="DISMISS_CONFIRMATION_REQUIRED")
+        reason = reason if isinstance(reason, str) else ""
+        async with self._dispatch_admission:
+            self._check_dispatch_unfenced()
+            async with self._dispatch_lock(dispatch_id):
+                path = self._path(dispatch_id)
+                try:
+                    self._read(dispatch_id, require_authorized=False)
+                except DispatchError as exc:
+                    if exc.code == "DISPATCH_NOT_FOUND":
+                        raise
+                    if exc.code not in _CORRUPT_DISMISS_CODES:
+                        # A readable reference is a real dispatch record even
+                        # when its binding drifted; it is hidden, not broken.
+                        raise DispatchError("Only unreadable or shape-invalid records can be dismissed.",
+                                            code="DISPATCH_DISMISS_REFUSED") from None
+                    invalid_code = exc.code
+                else:
+                    raise DispatchError("Only unreadable or shape-invalid records can be dismissed.",
+                                        code="DISPATCH_DISMISS_REFUSED")
+                corrupt_dir = self._root / "records-corrupt"
+                corrupt_dir.mkdir(parents=True, exist_ok=True)
+                archive = corrupt_dir / f"{dispatch_id}.json"
+                suffix = 1
+                while archive.exists():
+                    archive = corrupt_dir / f"{dispatch_id}.{suffix}.json"
+                    suffix += 1
+                size, digest = 0, None
+                try:
+                    raw = _read_dispatch_metadata(path, _CORRUPT_ARCHIVE_READ_LIMIT)
+                    size = len(raw)
+                    digest = hashlib.sha256(raw).hexdigest()
+                except (OSError, ValueError, RecursionError):
+                    try:
+                        size = path.lstat().st_size
+                    except OSError:
+                        size = 0
+                stamp = _now()
+                audit_name = archive.stem + ".dismiss-audit.json"
+                audit = {
+                    "schemaVersion": 1,
+                    "kind": "dispatch_corrupt_dismissal",
+                    "dispatchId": dispatch_id,
+                    "originalPath": f"records/{path.name}",
+                    "archivePath": f"records-corrupt/{archive.name}",
+                    "reason": reason[:300],
+                    "dismissedAt": stamp,
+                    "invalidCode": invalid_code,
+                    "sizeBytes": size,
+                    "contentDigest": digest,
+                    "lockSidecarPresent": path.with_name(path.name + ".lock").exists(),
+                }
+                # Forensic copy first; the rename below is atomic on one volume,
+                # so the damaged content is never absent from both directories.
+                atomic_write_json(corrupt_dir / audit_name, audit, sort_keys=True, indent=2)
+                try:
+                    os.replace(path, archive)
+                except OSError:
+                    raise DispatchError("Dispatch reference could not be archived; it is left in place.",
+                                        code="DISPATCH_DISMISS_FAILED") from None
+                lock_removed = False
+                sidecar = path.with_name(path.name + ".lock")
+                for _attempt in range(3):
+                    try:
+                        sidecar.unlink()
+                        lock_removed = True
+                        break
+                    except FileNotFoundError:
+                        lock_removed = not audit["lockSidecarPresent"]
+                        break
+                    except OSError:
+                        continue
+                return {"dispatchId": dispatch_id, "dismissed": True, "invalidCode": invalid_code,
+                        "archivePath": audit["archivePath"], "auditPath": f"records-corrupt/{audit_name}",
+                        "lockSidecarRemoved": lock_removed}
+
     async def heartbeat(self) -> list[dict[str, Any]]:
         """Renew active refs and read receipts; one failed dispatch does not stop peers.
 
@@ -973,6 +1068,10 @@ class DispatchService:
             try:
                 record = self._read(dispatch_id)
                 groups.setdefault(record["projectId"], []).append(dispatch_id)
+            except DispatchError as exc:
+                # Corrupt/shape/binding failures stay distinguishable; only a
+                # non-adapter exception remains unknown.
+                results.append({"dispatchId": dispatch_id, "lastError": {"code": exc.code}})
             except Exception:
                 results.append({"dispatchId": dispatch_id, "lastError": {"code": "DISPATCH_STATE_UNKNOWN"}})
 
@@ -996,6 +1095,8 @@ class DispatchService:
                                 or row.get("lastError") is not None and not isinstance(row.get("lastError"), dict)):
                             raise DispatchError("Invalid native task state.", code="DISPATCH_STATE_INVALID")
                         records.append(row)
+                    except DispatchError as exc:
+                        results.append({"dispatchId": dispatch_id, "lastError": {"code": exc.code}})
                     except Exception:
                         results.append({"dispatchId": dispatch_id, "lastError": {"code": "DISPATCH_STATE_UNKNOWN"}})
 
@@ -1119,14 +1220,17 @@ class DispatchService:
             try:
                 record = self._read(path.stem, require_authorized=False)
                 if record.get("receipt") is not None and not isinstance(record["receipt"], dict):
-                    raise DispatchError("Dispatch receipt is invalid.", code="DISPATCH_STATE_INVALID")
-            except DispatchError:
+                    raise DispatchError("Dispatch receipt is invalid.", code="DISPATCH_STATE_SHAPE_INVALID")
+            except DispatchError as exc:
+                if exc.code == "DISPATCH_NOT_FOUND":
+                    continue  # raced with an archive or cleanup; nothing to retain
                 # Preserve the original file. One broken reference must not
                 # prevent healthy tasks from renewing their finite leases.
+                # dismiss_corrupt archives the row after explicit confirmation.
                 ref = path.stem if _DISPATCH_ID.fullmatch(path.stem) else "invalid-" + _digest(path.name)[:12]
                 records.append({"dispatchId": ref, "projectId": "", "nativeTaskId": "", "receipt": None,
-                    "stateInvalid": True, "lastError": {"code": "DISPATCH_STATE_INVALID",
-                    "message": "Dispatch reference is unreadable; it was retained for recovery."}})
+                    "stateInvalid": True, "lastError": {"code": exc.code,
+                    "message": "Dispatch reference is unreadable; confirm dismissal to archive it for forensics."}})
                 continue
             registered = self._projects.get(str(record.get("projectId") or ""))
             if registered is None or record.get("projectBinding") != self._binding(registered):
@@ -1267,10 +1371,16 @@ class DispatchService:
             record = json.loads(path.read_text(encoding="utf-8"))
         except FileNotFoundError:
             raise DispatchError("Dispatch reference was not found.", code="DISPATCH_NOT_FOUND") from None
-        except (OSError, ValueError):
-            raise DispatchError("Dispatch reference is unreadable; refusing to recreate it.", code="DISPATCH_STATE_INVALID") from None
-        if not isinstance(record, dict) or record.get("schemaVersion") != 1 or record.get("dispatchId") != dispatch_id:
-            raise DispatchError("Dispatch reference is invalid; refusing to recreate it.", code="DISPATCH_STATE_INVALID")
+        # Unreadable bytes or unparseable content: the file itself is damaged.
+        # A readable file with the wrong identity/schema is a shape defect.
+        # The two stay distinguishable across lists, refresh and operations,
+        # and both are dismissible (see dismiss_corrupt).
+        except (OSError, ValueError, RecursionError):
+            raise DispatchError("Dispatch reference is unreadable; refusing to recreate it.", code="DISPATCH_STATE_CORRUPT") from None
+        if not isinstance(record, dict):
+            raise DispatchError("Dispatch reference is not an object; refusing to recreate it.", code="DISPATCH_STATE_SHAPE_INVALID")
+        if record.get("schemaVersion") != 1 or record.get("dispatchId") != dispatch_id:
+            raise DispatchError("Dispatch reference shape is invalid; refusing to recreate it.", code="DISPATCH_STATE_SHAPE_INVALID")
         if require_authorized:
             project_root = self._project(str(record.get("projectId") or ""))
             if record.get("projectBinding") != self._binding(project_root):

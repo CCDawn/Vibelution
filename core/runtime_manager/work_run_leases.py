@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
@@ -234,7 +235,93 @@ def leases_for_snapshot(snapshot: dict[str, Any]) -> list[str]:
     return default_leases_for_run_kind(run_kind)
 
 
+CHAT_TURN_WRITE_ACTION_MARKERS = (
+    "修改",
+    "修复",
+    "实现",
+    "新增",
+    "删除",
+    "重构",
+    "提交",
+    "继续修",
+    "继续做",
+    "动手",
+    "apply",
+    "edit",
+    "modify",
+    "fix",
+    "implement",
+    "refactor",
+    "commit",
+)
+
+# Concrete-target evidence for the legacy-client keyword fallback: a path
+# fragment ("core/foo.py", "web\\src\\App.tsx") or a code/doc/config file
+# suffix ("readme.md"). Deliberately narrow so read-only questions that
+# merely mention a write keyword never look like write intent.
+_CHAT_TURN_WRITE_TARGET_PATH_RE = re.compile(r"[A-Za-z0-9_\-.]+[/\\][A-Za-z0-9_\-.]+")
+_CHAT_TURN_WRITE_TARGET_SUFFIX_RE = re.compile(
+    r"[A-Za-z0-9_\-]\.(?:tsx|jsx|mjs|cjs|ts|js|py|vue|go|rs|java|kt|cpp|hpp|cs|rb|php|swift|"
+    r"md|json|yaml|yml|toml|ini|cfg|html|css|scss|sql|sh|ps1|bat|h|c)\b",
+    re.IGNORECASE,
+)
+
+
+def _message_names_concrete_write_target(content_lower: str) -> bool:
+    for match in _CHAT_TURN_WRITE_TARGET_PATH_RE.finditer(content_lower):
+        # Date-like fragments ("2026/05/21") are not write targets: require
+        # the final path segment to carry at least one letter.
+        last_segment = re.split(r"[/\\]", match.group(0))[-1]
+        if re.search(r"[a-z]", last_segment):
+            return True
+    return bool(_CHAT_TURN_WRITE_TARGET_SUFFIX_RE.search(content_lower))
+
+
+def _record_chat_turn_keyword_advisory_event(
+    *,
+    matched_markers: list[str],
+    names_write_target: bool,
+    leases: list[str],
+) -> None:
+    try:
+        from core.web.services.runtime_scene_service import record_runtime_scene_event
+
+        record_runtime_scene_event(
+            "work_run",
+            "lease",
+            "work_run.chat_turn.keyword_write_inference",
+            message=(
+                "Chat turn message mentions write keywords; keyword-only inference is advisory "
+                "and no longer selects a write lease."
+                if not names_write_target
+                else "Chat turn message mentions write keywords and names a concrete target; "
+                "legacy fallback selects a write lease."
+            ),
+            level="info",
+            outcome="fallback_applied" if names_write_target else "advisory",
+            fields={
+                "matchedMarkers": matched_markers[:8],
+                "namesWriteTarget": names_write_target,
+                "inferredLeases": list(leases),
+                "policySignal": True,
+            },
+        )
+    except Exception:
+        return
+
+
 def infer_chat_turn_leases(payload: dict[str, Any] | None) -> list[str]:
+    """Resolve chat turn leases from explicit intent signals, then a narrow fallback.
+
+    Write leases are only inferred from explicit evidence: the ``writeIntent``
+    flag, a write-ish turn/tool mode, or an active task that declares write
+    state. Message text alone is advisory: keyword matches are logged but, on
+    their own, keep the turn read-only so questions like "上次修复了什么"
+    cannot hit a 409 lease conflict. The sole text fallback that still selects
+    a write lease is the legacy-client double evidence (no explicit signal
+    above matched AND the message names a concrete target path) — clients that
+    predate the explicit intent fields otherwise lose brain-split protection.
+    """
     data = payload if isinstance(payload, dict) else {}
     if bool(data.get("writeIntent")):
         return [WORKTREE_WRITE_LEASE, MEMORY_WRITE_LEASE]
@@ -253,28 +340,28 @@ def infer_chat_turn_leases(payload: dict[str, Any] | None) -> list[str]:
     if active_task_status in {"editing", "verifying", "blocked", "stopped"} or list(changed_files or []):
         return [WORKTREE_WRITE_LEASE, MEMORY_WRITE_LEASE]
 
-    content = str(data.get("content") or "").strip().lower()
-    compact_content = "".join(content.split())
-    write_markers = (
-        "修改",
-        "修复",
-        "实现",
-        "新增",
-        "删除",
-        "重构",
-        "提交",
-        "继续修",
-        "继续做",
-        "动手",
-        "apply",
-        "edit",
-        "modify",
-        "fix",
-        "implement",
-        "refactor",
-        "commit",
-    )
-    if any(marker in compact_content for marker in write_markers):
-        return [WORKTREE_WRITE_LEASE, MEMORY_WRITE_LEASE]
+    # No explicit signal matched: keyword hits become advisory telemetry, and
+    # only the double evidence (write keyword + concrete target path) keeps
+    # the legacy write-lease fallback alive. A single keyword is never enough.
+    content = str(data.get("content") or "").strip()
+    if not content:
+        return [READONLY_CHAT_LEASE]
+    content_lower = content.lower()
+    compact_content = "".join(content_lower.split())
+    matched_markers = [
+        marker for marker in CHAT_TURN_WRITE_ACTION_MARKERS if marker in compact_content
+    ]
+    if not matched_markers:
+        return [READONLY_CHAT_LEASE]
 
-    return [READONLY_CHAT_LEASE]
+    names_write_target = _message_names_concrete_write_target(content_lower)
+    if names_write_target:
+        leases = [WORKTREE_WRITE_LEASE, MEMORY_WRITE_LEASE]
+    else:
+        leases = [READONLY_CHAT_LEASE]
+    _record_chat_turn_keyword_advisory_event(
+        matched_markers=matched_markers,
+        names_write_target=names_write_target,
+        leases=leases,
+    )
+    return leases

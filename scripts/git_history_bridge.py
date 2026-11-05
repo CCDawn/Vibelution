@@ -12,10 +12,12 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import zipfile
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from types import MappingProxyType
 
@@ -410,8 +412,68 @@ def task_base(repo: Path, receipt: MappingReceipt, head: str = "HEAD") -> str:
     return _oid(bases[0])
 
 
+def _emit_bridge_event(payload: dict) -> None:
+    """Emit one structured stderr event line; hook output is the shared channel.
+
+    The caller has already degraded or raised, so a broken stderr stream must
+    never turn an emitted event back into a blocked commit.
+    """
+    try:
+        print(
+            "[history-bridge] " + json.dumps(payload, sort_keys=True, ensure_ascii=True),
+            file=sys.stderr,
+            flush=True,
+        )
+    except (OSError, ValueError):
+        pass
+
+
+def _quarantine_corrupt_pointer(active: Path, reason: str) -> Path:
+    """Move unreadable pointer evidence aside so reads degrade, not deadlock.
+
+    The corrupt bytes are preserved verbatim under ``active.json.corrupt-<ts>``
+    for human inspection. Quarantine failure (permission class) stays loud: an
+    environment that cannot even rename the file cannot be safely degraded.
+    """
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+    backup = active.with_name(f"{active.name}.corrupt-{stamp}")
+    for attempt in range(1, 6):
+        try:
+            if not backup.exists():
+                active.rename(backup)
+                return backup
+        except OSError as error:
+            raise HistoryBridgeError(
+                f"could not quarantine corrupt active pointer: {error}"
+            ) from error
+        backup = active.with_name(f"{active.name}.corrupt-{stamp}-{attempt}")
+    raise HistoryBridgeError("could not quarantine corrupt active pointer: no free backup name")
+
+
+def _degrade_corrupt_pointer(active: Path, reason: str) -> None:
+    """Quarantine the corrupt pointer file and record one structured event."""
+    backup = _quarantine_corrupt_pointer(active, reason)
+    _emit_bridge_event({
+        "event": "active_pointer_corrupt",
+        "action": "quarantined",
+        "path": str(active),
+        "backup": str(backup),
+        "reason": reason,
+    })
+
+
 def load_active_mapping(repo: Path) -> MappingReceipt | None:
-    """Load the strict common-dir pointer; malformed/stale evidence never falls back."""
+    """Load the strict common-dir pointer.
+
+    Two failure tiers. Unreadable pointer content (interrupted write, disk rot,
+    manual mangling that leaves invalid JSON) is quarantined to an
+    ``active.json.corrupt-<ts>`` sibling and degrades to "no active mapping",
+    because there is no verifiable evidence to translate against and blocking
+    every read would deadlock every commit. Semantic evidence failures (pointer
+    structure, receipt outside the directory, digest mismatch, unrelated main,
+    permission-class I/O) still fail closed: the JSON parsed, so the content is
+    decidable evidence that contradicts the repair contract.
+    """
     repo = Path(repo)
     common = Path(os.fsdecode(_git(repo, "rev-parse", "--git-common-dir").strip()))
     if not common.is_absolute():
@@ -421,7 +483,24 @@ def load_active_mapping(repo: Path) -> MappingReceipt | None:
     if not active.exists():
         return None
     try:
-        pointer = json.loads(active.read_text(encoding="utf-8"))
+        pointer_text = active.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None  # Raced with another reader's quarantine; same as absent.
+    except UnicodeDecodeError as error:
+        # Undecodable bytes are file-level corruption (truncated/failed write).
+        _degrade_corrupt_pointer(active, str(error))
+        return None
+    except OSError as error:
+        raise HistoryBridgeError(
+            f"active history mapping pointer is unreadable: {error}"
+        ) from error
+    try:
+        pointer = json.loads(pointer_text)
+    except ValueError as error:
+        # json.JSONDecodeError: the bytes decode but are not intact JSON.
+        _degrade_corrupt_pointer(active, str(error))
+        return None
+    try:
         if set(pointer) != {"receipt", "digest"} or not isinstance(pointer["receipt"], str):
             raise HistoryBridgeError("invalid active history mapping pointer")
         path = Path(pointer["receipt"])

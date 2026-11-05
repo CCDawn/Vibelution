@@ -309,6 +309,13 @@ class DispatchApprovalBoundDecision(DispatchApprovalPreview):
     decision: Literal["accept", "decline"]
 
 
+class DispatchCorruptDismiss(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    dispatchId: str = Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+    confirmed: bool
+    reason: str = Field(default="", max_length=300)
+
+
 class ReminderSettlement(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     eventId: str = Field(pattern=r"^reminder:[0-9]{8}:[a-f0-9]{64}$")
@@ -1913,6 +1920,14 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
             except DispatchError as exc:
                 raise HTTPException(409, detail={"code": exc.code}) from None
 
+        @app.post("/api/assistant/dispatches/dismiss")
+        async def dismiss_corrupt_dispatch(payload: DispatchCorruptDismiss):
+            from .dispatch import DispatchError
+            try:
+                return await dispatch.dismiss_corrupt(payload.dispatchId, confirmed=payload.confirmed,
+                                                      reason=payload.reason)
+            except DispatchError as exc:
+                raise HTTPException(409, detail={"code": exc.code}) from None
 
     # Operator-only single-window controls retain the host bearer boundary;
     # the model only sees the separate scoped computer tools.

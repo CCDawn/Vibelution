@@ -289,9 +289,67 @@ def test_active_pointer_requires_common_directory_receipt_and_exact_digest(dag):
     pointer.write_text(json.dumps({"receipt": str(repo.path.parent / "outside.json"), "digest": receipt.digest}))
     with pytest.raises(bridge.HistoryBridgeError, match="inside the common"):
         bridge.load_active_mapping(repo.path)
-    pointer.write_text("not JSON")
-    with pytest.raises(bridge.HistoryBridgeError):
+
+
+def test_corrupt_active_pointer_is_quarantined_and_reads_degrade(dag, capsys):
+    repo, _ids = dag
+    directory = repo.path / ".git" / "vibelution-cache" / "history-bridge"
+    directory.mkdir(parents=True)
+    pointer = directory / "active.json"
+
+    for corrupt_content in ("not JSON", "", "{truncated"):
+        pointer.write_text(corrupt_content, encoding="utf-8")
+        assert bridge.load_active_mapping(repo.path) is None
+        assert not pointer.exists()
+        backups = list(directory.glob("active.json.corrupt-*"))
+        assert len(backups) == 1, corrupt_content
+        assert backups[0].read_text(encoding="utf-8") == corrupt_content
+        stderr = capsys.readouterr().err
+        event = json.loads(stderr.splitlines()[-1].removeprefix("[history-bridge] "))
+        assert event["event"] == "active_pointer_corrupt"
+        assert event["action"] == "quarantined"
+        assert event["backup"] == str(backups[0].resolve())
+        backups[0].unlink()  # Pointer was renamed away; reset for the next variant.
+
+    # Undecodable bytes (truncated/failed write) degrade through the same path.
+    pointer.write_bytes(b"{\xff\xfeBroken")
+    assert bridge.load_active_mapping(repo.path) is None
+    assert not pointer.exists()
+    assert len(list(directory.glob("active.json.corrupt-*"))) == 1
+    capsys.readouterr()
+
+    # Once quarantined, later reads are the ordinary absent-pointer path.
+    assert bridge.load_active_mapping(repo.path) is None
+    assert len(list(directory.glob("active.json.corrupt-*"))) == 1
+
+
+def test_active_pointer_semantic_and_permission_failures_stay_loud(dag, monkeypatch):
+    repo, _ids = dag
+    directory = repo.path / ".git" / "vibelution-cache" / "history-bridge"
+    directory.mkdir(parents=True)
+    pointer = directory / "active.json"
+
+    pointer.write_text('{"receipt": 7}')
+    with pytest.raises(bridge.HistoryBridgeError, match="invalid active history mapping pointer"):
         bridge.load_active_mapping(repo.path)
+    assert pointer.exists()  # Decidable evidence is never quarantined away.
+
+    pointer.write_text("not JSON")
+    def deny_rename(_path, _target):
+        raise PermissionError("rename denied")
+    monkeypatch.setattr(bridge.Path, "rename", deny_rename)
+    with pytest.raises(bridge.HistoryBridgeError, match="could not quarantine corrupt active pointer"):
+        bridge.load_active_mapping(repo.path)
+    monkeypatch.undo()
+    assert pointer.exists()  # The corrupt evidence was not lost.
+
+    def deny_read(_path, *_args, **_kwargs):
+        raise PermissionError("read denied")
+    monkeypatch.setattr(bridge.Path, "read_text", deny_read)
+    with pytest.raises(bridge.HistoryBridgeError, match="pointer is unreadable"):
+        bridge.load_active_mapping(repo.path)
+    assert pointer.exists()
+    assert not list(directory.glob("active.json.corrupt-*"))
 
 
 def test_fixture_git_environment_isolated_from_real_checkout(tmp_path, monkeypatch):
