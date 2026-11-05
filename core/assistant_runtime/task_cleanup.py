@@ -27,6 +27,13 @@ _TEAM_TERMINAL_STATUSES = {"completed", "failed", "stopped"}
 # A source team receipt that can never be re-confirmed: the request record is
 # gone or the management identity rotated away from this association.
 _TEAM_UNOBSERVABLE_RECEIPT_CODES = {"REQUEST_UNAVAILABLE", "MANAGEMENT_IDENTITY_ROTATED"}
+# Tombstone identity keys: the compared subset that fences replay of one
+# task's cleanup. `_marker_scope` additionally records entry metadata
+# (`agentId`, `directSessionId`, `localOnly`) per target kind; those fields
+# only say who performed the removal and never take part in the identity
+# check, so recognizing the same marker from another assistant session or
+# via the other removal mode is correct, not a bypass.
+_MARKER_IDENTITY_KEYS = ("schemaVersion", "kind", "projectId", "projectBinding")
 
 
 class _Closed(BaseModel):
@@ -92,6 +99,21 @@ def _dispatch_binding(row):
     return tuple(row.get(key) for key in ("dispatchId", "projectId", "projectBinding", "agentId", "nativeTaskId", "requestDigest"))
 
 
+def _read_root(binding):
+    """The stable half of a `_project_read_binding` result: the admitted root.
+
+    The registry gate generation bumps on every registry event — suspend, any
+    snapshot apply, revoke/re-admit at the same root — none of which moves the
+    source or changes what cleanup can observe there. Cleanup therefore fences
+    on the root only: the generation is not a replay fence on this path (the
+    marker dedup uses the record's requestDigest and record re-checks use
+    `_dispatch_binding`, both generation-free), so a generation-only bump at
+    the same root must not reject cleanup, while a genuinely moved root still
+    refuses with `cleanup_source_moved`.
+    """
+    return binding[1]
+
+
 def _failure_reason(error):
     code = getattr(error, "code", "") or str(error)
     reasons = {
@@ -110,6 +132,7 @@ def _failure_reason(error):
         "BACKEND_TIMEOUT": "源项目未及时响应，清理结果尚未确认，请稍后重试。",
         "BACKEND_UNAVAILABLE": "源项目当前无法连接，已保留任务关联，请恢复连接后重试。",
         "cleanup_reference_changed": "任务关联或项目绑定已变化，请刷新后重试。",
+        "cleanup_source_moved": "源项目已换到别的路径，无法核验源资源，已保留任务关联。",
         "cleanup_run_changed": "团队任务身份与所选关联不一致，请刷新后重试。",
         "cleanup_path_invalid": "任务记录路径不安全，已保留记录。",
         "cleanup_request_unconfirmed": "无法确认原请求是否已受理或结束，已保留任务关联。",
@@ -173,6 +196,13 @@ class TaskCleanup:
         return adapter._root / "cleanup_tombstones" / (key + ".json")
 
     def _marker_scope(self, target, payload, project_binding=None):
+        """Full tombstone payload for one cleaned task.
+
+        Identity keys (`_MARKER_IDENTITY_KEYS` plus the per-kind task
+        identity: `dispatchId`, or `originAction` + `requestId`) are compared
+        on every later read; `agentId`, `directSessionId` and `localOnly` are
+        entry metadata — written for observability, never compared.
+        """
         if project_binding is None:
             binding = self.dispatch._project_read_binding(target.projectId)
             project_binding = self.dispatch._binding(binding[1])
@@ -208,8 +238,10 @@ class TaskCleanup:
                 raise ValueError("cleanup_completion_unconfirmed")
             data = json.loads(marker.read_text(encoding="utf-8"))
             scope = self._marker_scope(target, payload)
+            identity_keys = ({*_MARKER_IDENTITY_KEYS, "dispatchId"} if target.kind == "dispatch"
+                             else {*_MARKER_IDENTITY_KEYS, "originAction", "requestId"})
             if (not isinstance(data, dict) or type(data.get("schemaVersion")) is not int or type(data.get("localOnly")) is not bool
-                    or any(data.get(key) != value for key, value in scope.items())):
+                    or any(data.get(key) != value for key, value in scope.items() if key in identity_keys)):
                 raise ValueError("cleanup_completion_unconfirmed")
             if target.kind == "dispatch":
                 if not re.fullmatch(r"[a-f0-9]{64}", str(data.get("requestDigest", ""))):
@@ -218,15 +250,23 @@ class TaskCleanup:
                 from .team_patrol import _ID
                 for key in ("teamId", "flowId", "runId"):
                     value = data.get(key)
-                    if target.localOnly and value is None and getattr(target, key) is None:
+                    # An unresolved run identity is entry-mode data, not task
+                    # identity: tolerate marker None against an unselected
+                    # request regardless of the removal mode, but a selected
+                    # identity still can never match an unresolved marker.
+                    if value is None and getattr(target, key) is None:
                         continue
                     if (not isinstance(value, str) or not _ID.fullmatch(value)
                             or getattr(target, key) is not None and value != getattr(target, key)):
                         raise ValueError("cleanup_completion_unconfirmed")
         except (OSError, ValueError, TypeError):
             raise ValueError("cleanup_completion_unconfirmed") from None
-        if not _absent(path) or self.dispatch._project_read_binding(target.projectId) != binding:
+        if not _absent(path):
             raise ValueError("cleanup_reference_changed")
+        # A generation-only registry bump (revoke/re-admit at the same root)
+        # leaves the source observable; only a moved root hides it.
+        if self.dispatch._project_read_binding(target.projectId)[1] != _read_root(binding):
+            raise ValueError("cleanup_source_moved")
         retained = [{"kind": "deduplication_marker", "reason": "仅保留任务与身份标识的清理凭据，不保存任务内容。"}]
         return {"path": path, "marker": marker, "markerData": data, "binding": binding, "alreadyDeleted": True}, {
             "status": "ready", "estimatedBytes": 0, "resources": [], "retained": retained}
@@ -375,8 +415,10 @@ class TaskCleanup:
         if target.kind == "team_run" and any(getattr(target, key) is not None
                 and getattr(target, key) != run.get(key) for key in ("teamId", "flowId", "runId")):
             raise ValueError("cleanup_run_changed")
-        if binding is not None and self.dispatch._project_read_binding(target.projectId) != binding:
-            raise ValueError("cleanup_reference_changed")
+        if binding is not None and self.dispatch._project_read_binding(target.projectId)[1] != _read_root(binding):
+            # A moved root would leave this reference pointing at an
+            # unobservable source; a generation-only bump does not.
+            raise ValueError("cleanup_source_moved")
         size = _size(path)
         plan = {"path": path, "bytes": size, "referenceOnly": True, "sourceStatus": source_status,
                 "binding": _dispatch_binding(record) if target.kind == "dispatch" else binding,
@@ -420,8 +462,8 @@ class TaskCleanup:
             if any(getattr(target, name) is not None and isinstance(run.get(name), str)
                    and run[name] != getattr(target, name) for name in ("teamId", "flowId", "runId")):
                 raise ValueError("cleanup_run_changed")
-            if self.dispatch._project_read_binding(target.projectId) != binding:
-                raise ValueError("cleanup_reference_changed")
+            if self.dispatch._project_read_binding(target.projectId)[1] != _read_root(binding):
+                raise ValueError("cleanup_source_moved")
             run_binding = tuple(value if isinstance(value, str) and _ID.fullmatch(value) else None
                                 for value in (run.get("teamId"), run.get("flowId"), run.get("runId")))
             return {"path": path, "record": record, "binding": binding, "runBinding": run_binding,
@@ -441,8 +483,8 @@ class TaskCleanup:
             raise ValueError("cleanup_run_changed")
         if run.get("status") not in _TEAM_TERMINAL_STATUSES:
             raise ValueError("cleanup_task_active")
-        if self.dispatch._project_read_binding(target.projectId) != binding:
-            raise ValueError("cleanup_reference_changed")
+        if self.dispatch._project_read_binding(target.projectId)[1] != _read_root(binding):
+            raise ValueError("cleanup_source_moved")
         return {"path": path, "record": record, "binding": binding,
                 "runBinding": tuple(run[name] for name in ("teamId", "flowId", "runId")),
                 "revision": run.get("revision"), "status": run["status"], "bytes": size}, {
@@ -600,7 +642,10 @@ class TaskCleanup:
                         if not _absent(plan["path"]):
                             raise ValueError("cleanup_reference_changed")
                         current, summary = self._completed_plan(target, payload, plan["path"])
-                        if any(current[key] != plan[key] for key in ("binding", "markerData")):
+                        # Read bindings fence on the admitted root only (see
+                        # `_read_root`); markerData is the same on-disk file.
+                        if (current["markerData"] != plan["markerData"]
+                                or current["binding"][1] != _read_root(plan["binding"])):
                             raise ValueError("cleanup_reference_changed")
                         self._identity(payload)
                         item.update(status="deleted", alreadyDeleted=True, retained=summary["retained"])
@@ -650,6 +695,9 @@ class TaskCleanup:
                             # A reference-only plan is verified against the
                             # record's own binding digest, which equals the
                             # registry digest while the project stays admitted.
+                            # Identity fields fence replay; agentId/
+                            # directSessionId/localOnly are entry metadata
+                            # only (never compared on later reads).
                             marker_data = {**self._marker_scope(target, payload,
                                 plan["binding"][2] if plan.get("referenceOnly") else None),
                                 "requestDigest": row["requestDigest"]}
@@ -662,14 +710,20 @@ class TaskCleanup:
                     key = adapter._key(target.projectId, target.originAction, target.requestId)
                     async with adapter._locks.setdefault(key, anyio.Lock()):
                         current, summary = await self._plan(target, payload)
-                        fields = ("record", "binding", "runBinding") if target.localOnly else (
-                            "record", "binding", "runBinding", "revision", "status")
-                        if current is None or any(current[key] != plan[key] for key in fields):
+                        # Team plan bindings are `_project_read_binding`
+                        # snapshots; fence on the admitted root only, the rest
+                        # must still match exactly (see `_read_root`).
+                        fields = ("record", "runBinding") if target.localOnly else (
+                            "record", "runBinding", "revision", "status")
+                        if (current is None or current["binding"][1] != _read_root(plan["binding"])
+                                or any(current[key] != plan[key] for key in fields)):
                             raise ValueError("cleanup_reference_changed")
                         self._identity(payload)
                         marker = self._marker_path(target)
                         local_paths = [current["path"], marker]
                         local_before = sum(_size(path) for path in local_paths if not _absent(path))
+                        # Same split as the dispatch marker: identity keys
+                        # fence replay, entry metadata is recorded only.
                         marker_data = {**self._marker_scope(target, payload),
                                        **dict(zip(("teamId", "flowId", "runId"), current["runBinding"]))}
                         atomic_write_json(marker, marker_data, strict_replace=True)
