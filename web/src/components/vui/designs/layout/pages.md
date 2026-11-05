@@ -25,7 +25,7 @@ AppShell 内的顶级 VUI page / recipe 和已有域壳统一由 `design/workben
 
 圆角衔接由外层 pane 独占：同尺寸的 Board/Canvas/Agent pane-root 不重复画 8px 内框；灰 sidebar 的 recipe 根不保留矩形边框。页级标题不再套第二张圆角卡片；分栏页的页级工具条与外框同灰，白 pane 内的工具条继续与正文相连；Dense 页的页头和正文共用同一白色基底。共享拖动线使用正文色，贴左右 pane 边界且上下各避开 12px 弧段；保留原命中区、键盘和宽度记忆。
 
-工作台壳由 AppShell 中常驻的 `VWorkbenchFrame` 提供内容宿主；LauncherShell 使用自己的 `VSplitWorkspace` 与内容表面。页根由 `data-vui-page="surface|workspace|session"` 显式声明；公共页框不再根据域名或 `:has()` 推断内部布局。`VWorkbenchPage` / `VPage` 自动登记，少量已有自定义根使用相同标记。简单滚动页和窄屏设置通过 `data-vui-page-scroll="true"` 保留根滚动。
+工作台壳由 AppShell 中常驻的 `VWorkbenchFrame` 提供内容宿主；LauncherShell 同样使用常驻 `VWorkbenchFrame`，其直接子级 `VSplitWorkspace chrome="workbench"` 负责灰色导航与白色主区的单层外框，不再另套内容表面。Launcher 保留独立导航、状态来源与 IPC；内层对话/网页分栏使用 embedded，避免重复套框。两种壳共用 `design/workbench-shell.css` 的标题栏高度与原生窗口按钮避让变量（浏览器 44px、Electron 40px）；桌面判定独立于完整 Launcher state bridge，兼容工作台宿主。页根由 `data-vui-page="surface|workspace|session"` 显式声明；公共页框不再根据域名或 `:has()` 推断内部布局。`VWorkbenchPage` / `VPage` 自动登记，少量已有自定义根使用相同标记。简单滚动页和窄屏设置通过 `data-vui-page-scroll="true"` 保留根滚动。
 
 窗口 pane 的圆角使用 `--vui-workbench-radius`（12px），与内部卡片的 `--vui-radius-panel-soft`（8px）分开；不要修改卡片 token 来对齐窗口。`VSplitWorkspace chrome="workbench"` 绘制公共栏位，默认 `embedded` 保留内层编辑器/画布语义。List/Board/Canvas recipes 自动采用公共栏位；自定义尺寸控制器可用 `VUI_WORKBENCH_PANE_CLASS` / `VUI_WORKBENCH_RAIL_CLASS` / `VUI_WORKBENCH_TOOLBAR_CLASS`，不得为复用外观增加第二个 resize hook。颜色、圆角、边框、裁切和拖杆规则唯一落在 `design/workbench-frame.css`。
 
@@ -35,7 +35,7 @@ AppShell 内的顶级 VUI page / recipe 和已有域壳统一由 `design/workben
 
 ### 功能
 
-持久的工作台窗口内容宿主（`data-vui="workbench-frame"`），位于 Outlet 和其 Suspense 外，由 AppShell 使用。children 是路由正文，不缓存、不保留已离开的业务页面，不管理 Session、查询或尺寸持久化。
+持久的工作台窗口内容宿主（`data-vui="workbench-frame"`），位于 Outlet 和其 Suspense 外，由 AppShell 与 LauncherShell 使用。children 是路由正文或其窗口级分栏，不缓存、不保留已离开的业务页面，不管理 Session、查询或尺寸持久化。
 
 ### 适用范围
 

@@ -1,6 +1,6 @@
 const styles={
-  root:"z-20 h-12 min-h-12 gap-2.5 !border-0 border-b border-vui-border-subtle !bg-vui-surface-raised px-5 max-[700px]:px-2",
-  desktop:"!pr-[max(138px,calc(100vw_-_env(titlebar-area-x,0px)_-_env(titlebar-area-width,calc(100vw_-_138px))))] [-webkit-app-region:no-drag]",
+  root:"z-20 h-[var(--shell-topbar-height)] min-h-[var(--shell-topbar-height)] gap-1 !border-0 !bg-vui-surface-rail px-2 [-webkit-app-region:no-drag]",
+  desktop:"!pr-[max(var(--shell-window-control-inset),calc(100vw_-_env(titlebar-area-x,0px)_-_env(titlebar-area-width,calc(100vw_-_var(--shell-window-control-inset)))))]",
   menu:"min-[701px]:!hidden",
   icon:"shrink-0 text-vui-fg-secondary",
   brand:"text-vui-sm font-semibold max-[520px]:hidden",
