@@ -31,6 +31,7 @@ export async function acquireAssistantLifecycleLease(input: {
   current(): boolean;
   reopen(): boolean;
   releaseOwner(): void;
+  signal?: AbortSignal;
 }): Promise<AssistantLifecycleLease> {
   let admission: ReturnType<Host["beginLifecycleAdmission"]> | undefined;
   let registry: ReturnType<typeof input.projects.beginMigrationTransition> | undefined;
@@ -53,33 +54,50 @@ export async function acquireAssistantLifecycleLease(input: {
     input.releaseOwner();
   })();
   try {
+    input.signal?.throwIfAborted();
     if (!input.current() || input.host.snapshot().state !== "ready") throw new Error("ASSISTANT_LIFECYCLE_UNAVAILABLE");
     const reminders = input.reminders.tryDrainForLifecycle();
     if (!reminders) throw new Error("ASSISTANT_LIFECYCLE_BUSY");
     await reminders;
     remindersDrained = true;
+    input.signal?.throwIfAborted();
     admission = input.host.beginLifecycleAdmission();
     registry = input.projects.beginMigrationTransition();
     await Promise.all([admission.drained, registry.drained]);
+    input.signal?.throwIfAborted();
     await input.drainQueues();
+    input.signal?.throwIfAborted();
     await admission.seal();
+    input.signal?.throwIfAborted();
     admission.check();
     if (!input.current()) throw new Error("ASSISTANT_LIFECYCLE_UNAVAILABLE");
     barrierAttempted = true;
+    // Cancellation stops the next phase, never an RPC already owning native
+    // admission. A delayed prepare must settle before its release is sent.
     await input.host.migrationBarrier("prepare");
+    input.signal?.throwIfAborted();
     let state = await input.host.migrationBarrier("status");
+    input.signal?.throwIfAborted();
     for (let attempt = 0; state === "probing" && attempt < 20 && input.current(); attempt++) {
-      await pause(); state = await input.host.migrationBarrier("status");
+      await pause();
+      input.signal?.throwIfAborted();
+      state = await input.host.migrationBarrier("status");
+      input.signal?.throwIfAborted();
     }
     if (state !== "ready" || !input.current()) throw new Error("ASSISTANT_LIFECYCLE_BUSY");
     admission.check();
     return { release, commit: () => {
+      input.signal?.throwIfAborted();
+      if (releasing) throw new Error("ASSISTANT_LIFECYCLE_BUSY");
       if (!input.current()) throw new Error("ASSISTANT_LIFECYCLE_UNAVAILABLE");
       admission!.commit();
     } };
   } catch (error) {
     // Do not make a stalled release look like idle or start another owner.
-    void release().catch(() => undefined);
+    // Cancellable callers use rejection as the handoff to ordinary stop, so
+    // they must not observe it until this same barrier confirms release.
+    if (input.signal) await release();
+    else void release().catch(() => undefined);
     throw error;
   }
 }

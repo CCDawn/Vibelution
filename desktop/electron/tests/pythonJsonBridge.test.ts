@@ -467,18 +467,18 @@ describe("launcherApiBridgeTimeoutMs", () => {
     expect(launcherApiBridgeTimeoutMs("status", "GET")).toBe(PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS);
   });
 
-  it("allows a cold worktree inventory to finish after the ordinary query deadline", async () => {
+  it.each(["branch-instances", "branch-instances?runtimeOnly=true"])("allows %s to finish after the ordinary query deadline", async path => {
     vi.useFakeTimers();
     try {
       const output = JSON.stringify({ ok: true, payload: { items: [{ id: "worktree:target" }] } });
       const { kill, spawnImpl } = fakeSpawnWithOutput(output, 0, 6_000);
       const result = runPythonJsonBridge({
         pythonPath: "python",
-        args: ["--action", "launcher-api", "--launcher-api-path", "branch-instances"],
+        args: ["--action", "launcher-api", "--launcher-api-path", path],
         cwd: "C:/repo",
         spawnImpl,
         failureLabel: "launcher inventory bridge",
-        timeoutMs: launcherApiBridgeTimeoutMs("branch-instances", "GET"),
+        timeoutMs: launcherApiBridgeTimeoutMs(path, "GET"),
         killPolicy: "child",
       });
       const outcome = result.then(value => value, error => error);
@@ -523,6 +523,15 @@ describe("launcherApiBridgeTimeoutMs", () => {
     expect(launcherApiBridgeTimeoutMs("branch-instances/cleanup-metadata", "POST")).toBe(
       PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS
     );
+  });
+
+  it.each([
+    "branch-instances?runtimeOnly=true",
+    "branch-instances?runtimeOnly=true&cleanupMetadata=1",
+    "branch-instances?cleanupMetadata=1&runtimeOnly=true",
+  ])("keeps the inventory budget for query variants: %s", path => {
+    expect(launcherApiBridgeTimeoutMs(path, "GET")).toBe(PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS);
+    expect(launcherApiBridgeTimeoutMs("status?runtimeOnly=true", "GET")).toBe(PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS);
   });
 
   it("keeps the heavy launcher mutations on their own budgets", () => {
