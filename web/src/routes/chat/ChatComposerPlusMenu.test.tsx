@@ -8,6 +8,7 @@ import type { ChatComposerBudgetControl } from "./ChatComposerBudgetPopover";
 
 import source from "./ChatComposerPlusMenu.tsx?raw";
 import stylesSource from "./ChatComposerPlusMenu.styles.ts?raw";
+import chatSurfaceSource from "./useChatConversationSurfaceModel.tsx?raw";
 
 describe("ChatComposerPlusMenu contract", () => {
   it("renders one compact vertical menu with grouped sections", () => {
@@ -81,6 +82,27 @@ describe("ChatComposerPlusMenu contract", () => {
     expect(source).toContain('data-plus-menu-item="true"');
     // Entry presence is prop-gated (group/companion/finance surfaces pass nothing).
     expect(source).toContain("{budget ? (");
+  });
+
+  it("gates the private attachment entry on onAttachSecret and keeps the plaintext write-only", () => {
+    expect(source).toContain("onAttachSecret?");
+    // The menu item only exists when the prop is passed (ordinary chats never pass it).
+    expect(source).toContain("{onAttachSecret ? renderAction({");
+    expect(source).toContain('id: "attach-secret"');
+    // Dialog composition: typed kind select + masked value input + optional label.
+    expect(source).toContain("<VStringSelect");
+    expect(source).toContain('type="password"');
+    expect(source).toContain('autoComplete="new-password"');
+    // Every exit burns the in-memory draft; the value never reaches props storage.
+    expect(source).toContain("resetSecretDraft()");
+    // No persistence, draft or snapshot ever receives the dialog state.
+    expect(source).not.toContain("localStorage");
+    expect(stylesSource).toContain("secretBody");
+  });
+
+  it("never wires the private attachment entry into ordinary chat surfaces", () => {
+    // The shared chat surface model mounts the plus menu without the secret prop.
+    expect(chatSurfaceSource).not.toContain("onAttachSecret");
   });
 });
 
@@ -220,6 +242,104 @@ describe("composer budget entry interaction", () => {
   it("keeps the budget entry disabled while the session capability gate is off", async () => {
     await renderMenu(budgetControl, true);
     expect(budgetEntry()?.disabled).toBe(true);
+  });
+});
+
+describe("composer private attachment dialog interaction", () => {
+  let root: Root | null = null;
+  let container: HTMLDivElement;
+  afterEach(async () => {
+    await act(async () => root?.unmount());
+    container?.remove();
+    root = null;
+  });
+  async function renderMenu(onAttachSecret?: (input: { secretType: string; value: string; label?: string }) => Promise<void>) {
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => root!.render(
+      <VuiProvider><ChatComposerPlusMenu lang="zh" showCapabilities={false} showReferences={false}
+        attachmentDisabled={false} sessionReferences={[]} onAddAttachments={vi.fn()}
+        onAttachSecret={onAttachSecret} /></VuiProvider>,
+    ));
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="更多操作"]')!.click());
+  }
+  function secretMenuItem(): HTMLButtonElement | undefined {
+    return [...document.querySelectorAll<HTMLButtonElement>('[data-plus-menu-item="true"]')]
+      .find((button) => button.textContent?.includes("隐私附件"));
+  }
+  function passwordInput(): HTMLInputElement {
+    const element = document.querySelector<HTMLInputElement>('input[type="password"]');
+    if (!element) throw new Error("missing password input");
+    return element;
+  }
+  function setInputValue(element: HTMLInputElement, value: string) {
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(element, value);
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
+  it("renders no private attachment menu item without the prop", async () => {
+    await renderMenu(undefined);
+    expect(secretMenuItem()).toBeUndefined();
+    expect(document.body.textContent).not.toContain("隐私附件");
+  });
+  it("collects kind, optional label and plaintext once, then drops the value after staging", async () => {
+    const onAttachSecret = vi.fn(async () => {});
+    await renderMenu(onAttachSecret);
+    expect(secretMenuItem()?.disabled).toBe(false);
+    await act(async () => secretMenuItem()!.click());
+    expect(document.querySelector('input[type="password"]')).not.toBeNull();
+    setInputValue(document.querySelector<HTMLInputElement>('input[aria-label="隐私附件显示名"]')!, "中转站密钥");
+    setInputValue(passwordInput(), "sk-relay-9f8a-live");
+    const submit = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "添加")!;
+    await act(async () => submit.click());
+    expect(onAttachSecret).toHaveBeenCalledExactlyOnceWith({ secretType: "api_key", value: "sk-relay-9f8a-live", label: "中转站密钥" });
+    // Success closes the dialog; the plaintext state was dropped with it.
+    expect(document.querySelector('input[type="password"]')).toBeNull();
+    expect(document.body.textContent).not.toContain("sk-relay-9f8a-live");
+  });
+  it("keeps the dialog open with the value intact when staging fails, and shows the error", async () => {
+    const onAttachSecret = vi.fn(async () => { throw new Error("Launcher 未确认隐私附件暂存。"); });
+    await renderMenu(onAttachSecret);
+    await act(async () => secretMenuItem()!.click());
+    setInputValue(passwordInput(), "sk-retry-input");
+    const submit = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "添加")!;
+    await act(async () => submit.click());
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("未确认隐私附件暂存");
+    // In-memory only, kept for a correction; still absent from any storage.
+    expect(passwordInput().value).toBe("sk-retry-input");
+    expect(localStorage.length).toBe(0);
+    // A correction succeeds and closes the dialog, dropping the value.
+    onAttachSecret.mockImplementation(async () => {});
+    await act(async () => submit.click());
+    expect(onAttachSecret).toHaveBeenCalledTimes(2);
+    expect(document.querySelector('input[type="password"]')).toBeNull();
+    expect(document.querySelector('[role="alert"]')).toBeNull();
+  });
+  it("forwards the chosen kind (not just the default) to the host callback", async () => {
+    const onAttachSecret = vi.fn(async () => {});
+    await renderMenu(onAttachSecret);
+    await act(async () => secretMenuItem()!.click());
+    // Radix select: one ArrowDown opens the list, then click the option.
+    const kindTrigger = document.querySelector('[role="combobox"][aria-label="隐私附件类型"]');
+    expect(kindTrigger).not.toBeNull();
+    await act(async () => kindTrigger!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+    const kindOption = [...document.querySelectorAll<HTMLElement>('[role="option"]')]
+      .find((item) => item.textContent?.trim() === "密码");
+    expect(kindOption).toBeTruthy();
+    await act(async () => kindOption!.click());
+    setInputValue(passwordInput(), "pw-value");
+    const submit = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "添加")!;
+    await act(async () => submit.click());
+    expect(onAttachSecret).toHaveBeenCalledExactlyOnceWith({ secretType: "password", value: "pw-value" });
+  });
+  it("disables submit while the value is empty", async () => {
+    const onAttachSecret = vi.fn(async () => {});
+    await renderMenu(onAttachSecret);
+    await act(async () => secretMenuItem()!.click());
+    const submit = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "添加")!;
+    expect(submit.disabled).toBe(true);
   });
 });
 

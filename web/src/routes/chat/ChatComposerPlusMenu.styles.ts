@@ -18,6 +18,10 @@ const styles: Record<string, string> = {
   referenceTitle: "vui-routes-chatcomposerplusmenu referenceTitle truncate text-vui-xs",
   referenceMeta: "vui-routes-chatcomposerplusmenu referenceMeta truncate text-vui-xs text-[var(--fg-tertiary)]",
   referenceEmpty: "vui-routes-chatcomposerplusmenu referenceEmpty px-3 py-5 text-center text-vui-xs text-[var(--fg-tertiary)]",
+  secretBody: "vui-routes-chatcomposerplusmenu secretBody grid min-h-0 gap-3 overflow-hidden py-1",
+  secretField: "vui-routes-chatcomposerplusmenu secretField grid gap-1.5 text-vui-xs font-medium text-[var(--fg-secondary)]",
+  secretError: "vui-routes-chatcomposerplusmenu secretError min-w-0 text-vui-xs leading-[var(--vui-line-readable)] text-[var(--tone-danger, var(--fg-primary))]",
+  secretActions: "vui-routes-chatcomposerplusmenu secretActions flex items-center justify-end gap-2 pt-1",
 };
 
 export default styles;

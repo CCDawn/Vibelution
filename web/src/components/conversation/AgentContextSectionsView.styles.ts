@@ -35,6 +35,12 @@ const styles = {
     "vui-components-conversationview userAttachmentFileName min-w-0 truncate text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   userAttachmentFileSize:
     "vui-components-conversationview userAttachmentFileSize min-w-0 truncate text-vui-xs font-medium leading-tight text-[var(--fg-tertiary)]",
+  // Privacy attachment masked card: identity text only, no value, no actions.
+  userAttachmentSecret: `vui-components-conversationview userAttachmentSecret min-w-0 w-fit max-w-full overflow-hidden ${vuiOpaqueRowClass} flex items-center gap-2 rounded-[var(--radius-control)] border border-dashed border-[color-mix(in_srgb,var(--vui-border-subtle)_88%,transparent)] px-2 py-1.5`,
+  userAttachmentSecretLabel:
+    "vui-components-conversationview userAttachmentSecretLabel min-w-0 truncate text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  userAttachmentSecretMask:
+    "vui-components-conversationview userAttachmentSecretMask shrink-0 tracking-[0.25em] text-vui-xs font-semibold text-[var(--fg-tertiary)]",
   userAttachmentGrid:
     "vui-components-conversationview userAttachmentGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(min(12rem,100%),1fr))]",
   userAttachmentImage:

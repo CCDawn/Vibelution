@@ -8,7 +8,12 @@ import { LauncherAssistantRoute } from "./LauncherAssistantRoute";
 
 vi.mock("./DesktopPetCharacter", () => ({ DesktopPetCharacter: () => null }));
 let conversation: ConversationViewProps;
-vi.mock("../../components/conversation/LazyConversationView", () => ({ LazyConversationView: (props: ConversationViewProps) => { conversation = props; return null; } }));
+vi.mock("../../components/conversation/LazyConversationView", () => ({ LazyConversationView: (props: ConversationViewProps) => {
+  conversation = props;
+  // The composer leading control (ChatComposerPlusMenu) is the surface under
+  // test for privacy attachments; render it so its dialog is reachable by DOM.
+  return props.composerLeadingControl ?? null;
+} }));
 const roots: ReturnType<typeof createRoot>[] = [];
 afterEach(async () => {
   for (const root of roots.splice(0)) await act(async () => root.unmount());
@@ -23,18 +28,29 @@ async function setup(enabled: boolean, statusExtra: Record<string, unknown> = {}
   vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: vi.fn(() => "blob:preview"), revokeObjectURL: vi.fn() }));
   let fail = false;
   let sendFailure: string | null = null;
+  let secretFail = false;
+  let secretSent = false;
   const invoke = vi.fn(async (request: Record<string, unknown>) => {
     switch (request.operation) {
       case "status": return { assistant: { agentId: "a", directSessionId: "s", displayName: "助手" },
         ...(enabled ? { attachmentVersion: 1 } : {}), ...statusExtra };
       case "config": return { language: "zh" };
-      case "detail": return { id: "s", agentId: "a", status: "ready", messages: [{ id: "m", role: "user", content: "", attachments: [{ artifactId: "user-image-1.png", filename: "old.png", kind: "user_image", contentType: "image/png", sizeBytes: 2, status: "ready", url: "/api/secret", imageUrl: "/api/secret", downloadUrl: "/api/secret" }] }] };
+      case "detail": return secretSent ? { id: "s", agentId: "a", status: "ready", messages: [
+        { id: "m", role: "user", content: "", attachments: [{ artifactId: "user-image-1.png", filename: "old.png", kind: "user_image", contentType: "image/png", sizeBytes: 2, status: "ready", url: "/api/secret", imageUrl: "/api/secret", downloadUrl: "/api/secret" }] },
+        { id: "m2", role: "user", content: "", attachments: [{ artifactId: "sec_test123", filename: "中转站密钥", kind: "user_secret", contentType: "application/octet-stream", sizeBytes: 0, status: "ready", url: "", imageUrl: "", downloadUrl: "" }] },
+      ] } : { id: "s", agentId: "a", status: "ready", messages: [{ id: "m", role: "user", content: "", attachments: [{ artifactId: "user-image-1.png", filename: "old.png", kind: "user_image", contentType: "image/png", sizeBytes: 2, status: "ready", url: "/api/secret", imageUrl: "/api/secret", downloadUrl: "/api/secret" }] }] };
       case "approvals": return [];
       case "dispatches": return { dispatches: [] };
       case "setExpanded": return { expanded: request.expanded };
       case "readAttachment": return { contentType: "image/png", dataBase64: "AQI=" };
       case "uploadAttachment": if (fail) throw new Error("failure"); else return { artifactId: "user-image-2.png", filename: "new.png", contentType: "image/png", sizeBytes: 2, kind: "user_image", status: "ready" };
-      case "send": if (sendFailure !== null) throw new Error(sendFailure); return { accepted: true, turnId: "turn" };
+      case "upload_attachment": {
+        if (request.kind !== "user_secret" || typeof request.value !== "string" || !request.value) throw new Error("ASSISTANT_REQUEST_INVALID");
+        if (!["api_key", "token", "password", "secret"].includes(String(request.secretKind))) throw new Error("ASSISTANT_SECRET_KIND_INVALID");
+        if (secretFail) throw new Error("Launcher 未确认隐私附件暂存。");
+        return { attachmentId: "sec_test123", kind: "user_secret" };
+      }
+      case "send": if (sendFailure !== null) throw new Error(sendFailure); secretSent = true; return { accepted: true, turnId: "turn" };
       default: throw new Error("unexpected");
     }
   });
@@ -50,6 +66,7 @@ async function setup(enabled: boolean, statusExtra: Record<string, unknown> = {}
     invoke,
     setFailure(value: boolean) { fail = value; },
     setSendFailure(message: string | null) { sendFailure = message; },
+    setSecretFailure(value: boolean) { secretFail = value; },
   };
 }
 it("keeps unsupported bridge closed and never renders the ordinary session URL", async () => {
@@ -210,5 +227,93 @@ it("restores uploaded attachment chips across a reload and refills previews thro
   expect(invoke.mock.calls.some(([request]) => request.operation === "uploadAttachment")).toBe(false);
   const sent = invoke.mock.calls.find(([request]) => request.operation === "send")?.[0];
   expect(sent).toMatchObject({ message: "恢复的草稿", attachmentIds: ["user-image-2.png"] });
+  expect(conversation.composerAttachments).toHaveLength(0);
+});
+
+it("restores a persisted secret chip as a masked reference without reading any value", async () => {
+  localStorage.setItem("vibelution.launcher-assistant.composer.v1:embedded:s", JSON.stringify({
+    version: 1, sessionId: "s", surface: "embedded",
+    snapshot: { draft: "", outstanding: null, acceptedTurnId: "", queuedAcceptance: null,
+      attachments: [{ id: "sec-chip-1", artifactId: "sec_test123", filename: "隐私 · API 密钥", contentType: "application/octet-stream", sizeBytes: 0, kind: "secret" }] },
+  }));
+  const { invoke } = await setup(true);
+  await settle(); await settle();
+  expect(conversation.composerAttachments).toHaveLength(1);
+  expect(conversation.composerAttachments?.[0]).toMatchObject({ id: "sec-chip-1", artifactId: "sec_test123",
+    kind: "secret", uploadStatus: "uploaded", filename: "隐私 · API 密钥" });
+  // No read attempt for the sec_ reference — it has no bytes here (the image
+  // chip's own preview read is unrelated and allowed).
+  expect(invoke.mock.calls.filter(([request]) => request.operation === "readAttachment")
+    .some(([request]) => String(request.artifactId || "").startsWith("sec_"))).toBe(false);
+  // The restored secret chip rides the next send as a reference.
+  await act(async () => conversation.onSubmit()); await settle(); await settle();
+  const sent = invoke.mock.calls.find(([request]) => request.operation === "send")?.[0];
+  expect(sent).toMatchObject({ message: "", attachmentIds: ["sec_test123"] });
+});
+
+it("stages a private attachment through the closed verb, sends only the sec_ reference and never persists the plaintext", async () => {
+  const PLAINTEXT = "sk-relay-9f8a-live-value";
+  const { invoke, setSecretFailure } = await setup(true);
+  // Open the plus menu, then the private attachment dialog.
+  const trigger = document.querySelector<HTMLButtonElement>('button[aria-label="更多操作"]')!;
+  await act(async () => trigger.click());
+  const menuItem = [...document.querySelectorAll<HTMLButtonElement>('[data-plus-menu-item="true"]')]
+    .find(button => button.textContent?.includes("隐私附件"));
+  expect(menuItem).toBeTruthy();
+  await act(async () => menuItem!.click());
+  const password = document.querySelector<HTMLInputElement>('input[type="password"]');
+  expect(password).not.toBeNull();
+  const labelInput = document.querySelector<HTMLInputElement>('input[aria-label="隐私附件显示名"]')!;
+  // Pick the non-default kind so the request must carry it (secretKind).
+  const kindTrigger = document.querySelector('[role="combobox"][aria-label="隐私附件类型"]');
+  expect(kindTrigger).not.toBeNull();
+  await act(async () => kindTrigger!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+  const kindOption = [...document.querySelectorAll<HTMLElement>('[role="option"]')]
+    .find(item => item.textContent?.trim() === "访问令牌");
+  expect(kindOption).toBeTruthy();
+  await act(async () => kindOption!.click());
+  // Failure first: the error surfaces in the dialog and nothing reaches the tray.
+  setSecretFailure(true);
+  const setInput = (element: HTMLInputElement, value: string) => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(element, value);
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  await act(async () => {
+    setInput(labelInput, "中转站密钥");
+    setInput(password!, PLAINTEXT);
+  });
+  const submit = [...document.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent?.trim() === "添加")!;
+  await act(async () => submit.click());
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain("隐私附件暂存失败");
+  expect(conversation.composerAttachments).toHaveLength(0);
+  // Correction succeeds: the closed verb receives the plaintext exactly once.
+  setSecretFailure(false);
+  await act(async () => submit.click());
+  const upload = invoke.mock.calls.filter(([request]) => request.operation === "upload_attachment");
+  expect(upload).toHaveLength(2);
+  // The dialog's type choice rides the request as secretKind (token picked above).
+  expect(upload[1]![0]).toMatchObject({ operation: "upload_attachment", kind: "user_secret",
+    value: PLAINTEXT, label: "中转站密钥", secretKind: "token" });
+  // Success closes the dialog, burns the plaintext and mounts a masked chip.
+  expect(document.querySelector('input[type="password"]')).toBeNull();
+  expect(document.body.textContent).not.toContain(PLAINTEXT);
+  expect(conversation.composerAttachments).toHaveLength(1);
+  expect(conversation.composerAttachments?.[0]).toMatchObject({ kind: "secret", artifactId: "sec_test123",
+    uploadStatus: "uploaded", filename: "隐私 · 中转站密钥" });
+  // The plaintext never entered any persisted draft or snapshot.
+  for (let index = 0; index < localStorage.length; index += 1) {
+    expect(localStorage.getItem(localStorage.key(index) || "") || "").not.toContain(PLAINTEXT);
+  }
+  // Send rides the sec_ reference only; the mask card data stays unread and URL-less.
+  await act(async () => conversation.onSubmit()); await settle(); await settle();
+  const sent = invoke.mock.calls.filter(([request]) => request.operation === "send").at(-1)?.[0];
+  expect(sent).toMatchObject({ message: "", attachmentIds: ["sec_test123"] });
+  expect(invoke.mock.calls.filter(([request]) => request.operation === "readAttachment")
+    .some(([request]) => String((request as Record<string, unknown>).artifactId || "").startsWith("sec_"))).toBe(false);
+  const secretMessage = conversation.messages.find(message => message.id === "m2");
+  expect(secretMessage && secretMessage.role === "user" ? secretMessage.attachments?.[0] : null).toMatchObject({
+    kind: "user_secret", url: "", imageUrl: "", downloadUrl: "" });
+  expect(document.body.textContent).not.toContain(PLAINTEXT);
+  // The tray chip cleared after the accepted send.
   expect(conversation.composerAttachments).toHaveLength(0);
 });

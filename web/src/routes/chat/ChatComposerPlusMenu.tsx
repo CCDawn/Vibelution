@@ -6,6 +6,7 @@ import {
   Check,
   Gauge,
   ImagePlus,
+  KeyRound,
   MessageCircleHeart,
   MessageSquare,
   Plus,
@@ -16,7 +17,7 @@ import {
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import type { SessionReferenceAttachment } from "../../api/types";
-import { VButton, VDialog, VNativeInput, VPopover } from "../../components/vui";
+import { VButton, VDialog, VInput, VNativeInput, VPopover, VStringSelect } from "../../components/vui";
 import { rankByScore } from "../../components/conversation/conversationFuzzyMatch";
 import { ChatComposerBudgetPopover, type ChatComposerBudgetControl, type ChatComposerBudgetPanelLabels } from "./ChatComposerBudgetPopover";
 import { composerAttachmentAcceptAttribute } from "./chatComposerSubmitModel";
@@ -33,6 +34,18 @@ export type ChatComposerKnowledgeReferenceState = {
   loading: boolean;
   error: boolean;
   onRequest: () => void;
+};
+
+/** Privacy attachment surface (personal assistant only). The dialog collects a
+ * kind, an optional display label and the plaintext; the host stages the value
+ * through its closed IPC and receives a `sec_` reference. The plaintext lives
+ * only in this dialog's controlled input state and is dropped on success,
+ * close or unmount — it never enters a draft, snapshot or storage. */
+export type ChatComposerSecretKind = "api_key" | "token" | "password" | "secret";
+export type ChatComposerSecretAttachmentInput = {
+  secretType: ChatComposerSecretKind;
+  value: string;
+  label?: string;
 };
 
 /** A scoped workspace can supply its existing directory without enabling global queries. */
@@ -78,6 +91,9 @@ export type ChatComposerPlusMenuProps = ChatComposerCapabilityProps & {
   showReferences?: boolean;
   attachmentDisabled: boolean;
   onAddAttachments?: (files: FileList | File[]) => void;
+  /** Privacy attachment entry; omitted surfaces get no menu item (ordinary
+   * chats never pass it, so their plus menu stays bit-for-bit identical). */
+  onAttachSecret?: (input: ChatComposerSecretAttachmentInput) => Promise<void>;
   sessionReferences: ChatComposerSessionReferenceOption[];
   onAddSessionReference?: (reference: SessionReferenceAttachment) => void;
   knowledgeReferenceOptions?: ChatComposerSessionReferenceOption[];
@@ -124,6 +140,7 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
     showReferences = true,
     attachmentDisabled,
     onAddAttachments,
+    onAttachSecret,
     sessionReferences: defaultSessionReferences,
     onAddSessionReference,
     knowledgeReferenceOptions,
@@ -143,6 +160,14 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
   const [referenceQuery, setReferenceQuery] = useState("");
   const [knowledgeDialogOpen, setKnowledgeDialogOpen] = useState(false);
   const [knowledgeQuery, setKnowledgeQuery] = useState("");
+  // Privacy attachment dialog state. `secretValue` is the only place the
+  // plaintext ever lives renderer-side; every exit path clears it immediately.
+  const [secretDialogOpen, setSecretDialogOpen] = useState(false);
+  const [secretType, setSecretType] = useState<ChatComposerSecretKind>("api_key");
+  const [secretLabel, setSecretLabel] = useState("");
+  const [secretValue, setSecretValue] = useState("");
+  const [secretPending, setSecretPending] = useState(false);
+  const [secretError, setSecretError] = useState("");
 
   const addReferenceSection = useMemo<SectionDescriptor>(() => ({
     id: "add-reference",
@@ -245,6 +270,52 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
     closeMenu();
     action();
   }
+
+  function resetSecretDraft() {
+    setSecretType("api_key");
+    setSecretLabel("");
+    setSecretValue("");
+    setSecretError("");
+  }
+
+  function changeSecretDialogOpen(nextOpen: boolean) {
+    setSecretDialogOpen(nextOpen);
+    if (!nextOpen) {
+      // Any exit (cancel, escape, backdrop) burns the draft: write-only.
+      resetSecretDraft();
+    }
+  }
+
+  async function submitSecretAttachment() {
+    if (!onAttachSecret || secretPending || !secretValue.trim()) return;
+    setSecretPending(true);
+    setSecretError("");
+    const trimmedLabel = secretLabel.trim();
+    try {
+      await onAttachSecret({
+        secretType,
+        value: secretValue,
+        ...(trimmedLabel ? { label: trimmedLabel } : {}),
+      });
+      // Staged: the host now holds only the `sec_` reference. Drop the plaintext.
+      resetSecretDraft();
+      setSecretDialogOpen(false);
+    } catch (error) {
+      // Failure keeps the dialog open with the value intact for a correction;
+      // the state is in-memory only and still never reaches storage.
+      setSecretError(error instanceof Error && error.message ? error.message
+        : lang === "zh" ? "隐私附件提交失败，请重试。" : "Could not stage the private attachment; try again.");
+    } finally {
+      setSecretPending(false);
+    }
+  }
+
+  const secretKindOptions = useMemo(() => [
+    { value: "api_key" as const, label: lang === "zh" ? "API 密钥" : "API key" },
+    { value: "token" as const, label: lang === "zh" ? "访问令牌" : "Access token" },
+    { value: "password" as const, label: lang === "zh" ? "密码" : "Password" },
+    { value: "secret" as const, label: lang === "zh" ? "其他隐私" : "Other secret" },
+  ], [lang]);
 
   function renderSection(section: SectionDescriptor, children: ReactNode) {
     return (
@@ -414,6 +485,17 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
                 disabledReason: attachmentUnavailableReason,
                 onSelect: () => attachmentInputRef.current?.click(),
               })}
+              {onAttachSecret ? renderAction({
+                id: "attach-secret",
+                label: lang === "zh" ? "隐私附件" : "Private attachment",
+                icon: <KeyRound size={16} />,
+                disabled: attachmentDisabled,
+                disabledReason: attachmentUnavailableReason,
+                onSelect: () => {
+                  setSecretError("");
+                  setSecretDialogOpen(true);
+                },
+              }) : null}
               {showReferences ? renderAction({
                 id: "reference-session",
                 label: lang === "zh" ? "引用会话" : "Reference session",
@@ -544,6 +626,58 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
           event.currentTarget.value = "";
         }}
       />
+
+      <VDialog
+        open={secretDialogOpen}
+        onOpenChange={changeSecretDialogOpen}
+        title={lang === "zh" ? "添加隐私附件" : "Add a private attachment"}
+        description={lang === "zh" ? "内容经封闭通道直接暂存，聊天里只显示遮罩卡片，不会展示明文。" : "The value is staged through a closed channel; the chat shows a masked card and never the plaintext."}
+        size="md"
+      >
+        <div className={styles.secretBody}>
+          <label className={styles.secretField}>
+            <span>{lang === "zh" ? "类型" : "Kind"}</span>
+            <VStringSelect
+              ariaLabel={lang === "zh" ? "隐私附件类型" : "Private attachment kind"}
+              value={secretType}
+              options={secretKindOptions}
+              onValueChange={next => setSecretType(next as ChatComposerSecretKind)}
+            />
+          </label>
+          <label className={styles.secretField}>
+            <span>{lang === "zh" ? "显示名（可选）" : "Display name (optional)"}</span>
+            <VInput
+              value={secretLabel}
+              onChange={(event) => setSecretLabel(event.target.value)}
+              placeholder={lang === "zh" ? "如：中转站密钥" : "e.g. Relay API key"}
+              aria-label={lang === "zh" ? "隐私附件显示名" : "Private attachment display name"}
+              autoComplete="off"
+            />
+          </label>
+          <label className={styles.secretField}>
+            <span>{lang === "zh" ? "内容" : "Value"}</span>
+            <VInput
+              type="password"
+              autoComplete="new-password"
+              value={secretValue}
+              onChange={(event) => setSecretValue(event.target.value)}
+              placeholder={lang === "zh" ? "粘贴密钥或明文，仅此一次输入" : "Paste the key or plaintext; entered once only"}
+              aria-label={lang === "zh" ? "隐私内容" : "Private value"}
+            />
+          </label>
+          {secretError ? <p className={styles.secretError} role="alert">{secretError}</p> : null}
+          <div className={styles.secretActions}>
+            <VButton type="button" variant="ghost" isDisabled={secretPending}
+              onPress={() => changeSecretDialogOpen(false)}>
+              {lang === "zh" ? "取消" : "Cancel"}
+            </VButton>
+            <VButton type="button" isPending={secretPending} isDisabled={secretPending || !secretValue.trim()}
+              onPress={() => void submitSecretAttachment()}>
+              {lang === "zh" ? "添加" : "Add"}
+            </VButton>
+          </div>
+        </div>
+      </VDialog>
 
       <VDialog
         open={referenceDialogOpen}

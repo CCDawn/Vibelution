@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { attachmentSizeLabel, isImageAttachment } from "./attachmentPresentation";
+import { attachmentSizeLabel, isImageAttachment, isUserSecretAttachment } from "./attachmentPresentation";
 
 describe("attachmentPresentation", () => {
   it("classifies images by kind, then MIME, then the legacy imageUrl fallback", () => {
@@ -12,6 +12,17 @@ describe("attachmentPresentation", () => {
     expect(isImageAttachment({ contentType: "text/markdown" })).toBe(false);
     expect(isImageAttachment({ imageUrl: "/api/artifacts/legacy.png" })).toBe(true);
     expect(isImageAttachment({})).toBe(false);
+  });
+
+  it("registers user_secret kinds and never lets them enter the image branch", () => {
+    expect(isUserSecretAttachment({ kind: "user_secret" })).toBe(true);
+    expect(isUserSecretAttachment({ kind: "secret" })).toBe(true);
+    expect(isUserSecretAttachment({ kind: "user_image" })).toBe(false);
+    expect(isUserSecretAttachment({})).toBe(false);
+    // Even a hostile field combination (image MIME + legacy imageUrl) cannot
+    // turn a privacy attachment into a previewable image.
+    expect(isImageAttachment({ kind: "user_secret", contentType: "image/png", imageUrl: "data:image/png;base64,QQ==" })).toBe(false);
+    expect(isImageAttachment({ kind: "secret", imageUrl: "blob:preview" })).toBe(false);
   });
 
   it("formats compact size labels and hides unknown sizes", () => {

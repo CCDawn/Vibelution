@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ConversationMessage } from "../../api/types";
+import type { ConversationAttachment, ConversationMessage } from "../../api/types";
 import { readLauncherAttachment } from "../../api/launcherAssistant";
 
 const MAX_CACHE_CHARS = 96 * 1024 * 1024;
@@ -12,9 +12,13 @@ export function useLauncherAttachmentHistory(messages: ConversationMessage[], se
   const generatedImageId = (message: ConversationMessage) => message.role === "assistant"
     && message.metadata?.kind === "image2_generation" && message.metadata?.status === "succeeded"
     && typeof message.metadata.artifactId === "string" ? message.metadata.artifactId : "";
+  // Privacy attachments stay unread: their `sec_` reference has no bytes here,
+  // and a read attempt must never become a value-fetch channel.
+  const isReadable = (attachment: ConversationAttachment) =>
+    String(attachment.kind || "").trim().toLowerCase() !== "user_secret";
   const desired = Array.from(new Set(messages.flatMap(message => {
     if (!visible.has(message.id)) return [];
-    if (message.role === "user") return (message.attachments || []).map(attachment => attachment.artifactId).filter(Boolean);
+    if (message.role === "user") return (message.attachments || []).filter(isReadable).map(attachment => attachment.artifactId).filter(Boolean);
     const id = generatedImageId(message);
     return id ? [id] : [];
   })));
@@ -81,6 +85,9 @@ export function useLauncherAttachmentHistory(messages: ConversationMessage[], se
     }
     if (message.role !== "user" || !message.attachments) return message;
     return { ...message, attachments: message.attachments.map(attachment => {
+      if (String(attachment.kind || "").trim().toLowerCase() === "user_secret") {
+        return { ...attachment, url: "", imageUrl: "", downloadUrl: "" };
+      }
       const url = values.get(attachment.artifactId) || "";
       return { ...attachment, url, imageUrl: attachment.kind === "user_image" ? url : "", downloadUrl: url };
     }) };
