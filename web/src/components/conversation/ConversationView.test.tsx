@@ -2190,7 +2190,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(html.indexOf("ORDER_BEFORE_GUIDE")).toBeLessThan(html.indexOf("ORDER_GUIDANCE_INPUT"));
     expect(html.indexOf("ORDER_GUIDANCE_INPUT")).toBeLessThan(html.indexOf("ORDER_AFTER_GUIDE"));
     expect(html).toContain("已纳入");
-    expect(html.match(/已工作/g)).toHaveLength(1);
+    expect(html.match(/data-codex-process-work-status="true"[^>]*>已工作/g)).toHaveLength(1);
   });
 
   it("renders user image attachments and composer image chips", () => {
