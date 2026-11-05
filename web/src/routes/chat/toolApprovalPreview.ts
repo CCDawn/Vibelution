@@ -1,6 +1,9 @@
 import { TOOL_APPROVAL_LABELS } from "./toolApprovalLabels";
 import { ASSISTANT_ACTION_LABELS } from "../../components/conversation/assistantActionLabels";
 import { autonomyActionIsKnown, autonomyApprovalText } from "./autonomyApprovalPreview";
+import { providerModelApprovalText } from "./providerApprovalPreview";
+import { agentConfigurationApprovalActionIsKnown, agentConfigurationApprovalText } from "./agentConfigurationApprovalPreview";
+export { providerModelApprovalPreviewIsValid } from "./providerApprovalPreview";
 export { autonomyActionIsKnown, autonomyApprovalPreviewIsValid } from "./autonomyApprovalPreview";
 
 const PLATFORM_MANAGE_ACTIONS = new Set(["dispatch_cancel", "runtime_command", "team_update", "agent_tool_policy_update",
@@ -342,6 +345,10 @@ export function toolApprovalActionPreview(
     if (summary.assistantArgumentsInvalid || !managementApprovalActionIsKnown(action)) {
       return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新发起。" : "Arguments cannot be verified. Decline and request again."}`;
     }
+    if (action === "provider_model_resolve" || Object.hasOwn(summary, "assistantProviderPreviewVersion")) {
+      return providerModelApprovalText(summary, lang);
+    }
+    if (agentConfigurationApprovalActionIsKnown(action)) return agentConfigurationApprovalText(summary, lang);
     if (autonomyActionIsKnown(action) || Object.hasOwn(summary, "assistantAutonomyPreviewVersion")) {
       return autonomyApprovalText(summary, lang);
     }

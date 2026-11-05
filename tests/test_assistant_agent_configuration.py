@@ -134,6 +134,46 @@ def test_action_discovery_and_approval_share_native_schemas():
         "project_id": "project", "request_id": "request", "agent_id": "agent-a", "expected_config_revision": 7,
         "expected_template_id": "shared", "expected_content_hash": "sha256:" + "a" * 64, "content": "PRIVATE FULL PROMPT"})
     assert "PRIVATE FULL PROMPT" not in json.dumps(summary)
+    assert summary["assistantTargets"] == {"project_id": "project", "request_id": "request", "agent_id": "agent-a",
+        "expected_config_revision": "7", "expected_template_id": "shared", "expected_content_hash": "sha256:" + "a" * 64}
+    assert summary["assistantChangedFields"] == ["promptContent", "promptTemplateId"]
+    assert summary["assistantContentOmitted"] is True and summary["assistantDetailsOmitted"] is False
+    assert summary["assistantDelta"] == {"scope": "single_agent_copy_on_write", "contentChars": "19",
+        "contentDigest": hashlib.sha256(json.dumps("PRIVATE FULL PROMPT").encode()).hexdigest(), "activation": "next_submission"}
+
+
+@pytest.mark.parametrize("kind,parameters,expected", [
+    ("model", {"expected_model_ref": "relay/model", "context_window": 9007199254740993, "reasoning_effort": "high"},
+        {"expected_model_ref": "relay/model", "context_window": "9007199254740993", "reasoning_effort": "high"}),
+    ("budget", {"maxCallsPerTurn": None}, {"maxCallsPerTurn": None}),
+    ("budget", {"maxCallsPerTurn": 0}, {"maxCallsPerTurn": "0"}),
+    ("budget", {"maxCallsPerTurn": 200}, {"maxCallsPerTurn": "200"}),
+])
+def test_agent_parameter_approval_preserves_native_types_and_exact_targets(kind, parameters, expected):
+    from core.assistant_runtime.platform_approval import platform_management_approval_summary
+    summary = platform_management_approval_summary("agent_parameters_update", {"project_id": "project", "request_id": "request",
+        "agent_id": "agent-a", "expected_config_revision": 9007199254740993, "kind": kind, "parameters": parameters})
+    assert summary["assistantTargets"] == {"project_id": "project", "request_id": "request", "agent_id": "agent-a",
+        "expected_config_revision": "9007199254740993", "kind": kind}
+    assert summary["assistantChangedFields"] == [kind] and summary["assistantDelta"] == expected
+    assert summary["assistantContentOmitted"] is False and summary["assistantDetailsOmitted"] is False
+
+
+def test_compression_approval_preserves_float_thresholds_and_serializes_integer_defaults():
+    from core.assistant_runtime.platform_approval import platform_management_approval_summary
+    summary = platform_management_approval_summary("agent_parameters_update", {"project_id": "project", "request_id": "request",
+        "agent_id": "agent-a", "expected_config_revision": 0, "kind": "compression", "parameters": {"policy": {
+            "mode": "custom", "enabled": True, "maxTokenLimit": 50000, "maxCompressionsPerSession": 10,
+            "levels": {"light": 0.7, "standard": 0.8, "deep": 0.9, "emergency": 1},
+            "summaryChars": {"light": 1000, "standard": 2000, "deep": 3000, "emergency": 4000},
+            "preservation": {"keepAiMessages": 5, "preserveErrors": True, "extractKeyDecisions": False}}}})
+    policy = summary["assistantDelta"]["policy"]
+    assert policy["levels"] == {"light": 0.7, "standard": 0.8, "deep": 0.9, "emergency": 1.0}
+    assert all(type(value) is float for value in policy["levels"].values())
+    assert policy["summaryChars"] == {"light": "1000", "standard": "2000", "deep": "3000", "emergency": "4000"}
+    assert policy["policyVersion"] == "0" and policy["compressionTriggerTokenLimit"] == "0"
+    assert policy["postCompressionTargetTokenLimit"] == "0"
+    assert policy["preservation"] == {"keepAiMessages": "5", "preserveErrors": True, "extractKeyDecisions": False, "retentionFocus": None}
 
 
 def test_http_requires_explicit_new_scope_before_read(prompt_env):

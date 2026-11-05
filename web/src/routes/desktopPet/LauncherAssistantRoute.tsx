@@ -41,6 +41,8 @@ import { DEFAULT_PET_PREFERENCES } from "./desktopPetPreferences";
 import { ChatToolApprovalDialog } from "../chat/ChatToolApprovalDialog";
 import { toolApprovalRiskLabel } from "../chat/toolApprovalLabels";
 import { agentArchivePreviewIsValid, agentPurgePreviewIsValid, autonomyActionIsKnown, autonomyApprovalPreviewIsValid, authorizationUpgradePreviewIsValid, browserInteractPreviewIsValid, dispatchWritePreviewIsValid, launcherAgentCreatePreviewIsValid, operatorImageUploadPreviewIsValid, preferenceProposalPreviewIsValid, projectLifecyclePreviewIsValid, recoveryPreviewIsValid, managementApprovalActionIsKnown, platformManagementActionIsKnown, platformManagementPreviewIsValid, toolApprovalActionPreview, toolApprovalDisplayName } from "../chat/toolApprovalPreview";
+import { providerModelApprovalPreviewIsValid } from "../chat/providerApprovalPreview";
+import { agentConfigurationApprovalActionIsKnown, agentConfigurationApprovalPreviewIsValid } from "../chat/agentConfigurationApprovalPreview";
 import { launcherTeamActionIsKnown, launcherTeamPreviewIsValid, launcherTeamActionPreview, launcherTeamActionTitle } from "./teamManagementApprovalPreview";
 import { useLauncherThemeControl } from "./useLauncherThemeControl";
 import { readStoredWorkbenchTheme, requestWorkbenchTheme, subscribeWorkbenchThemeSync, useAuthorityTheme } from "../../app/themePreference";
@@ -123,6 +125,8 @@ function approvalAcceptDisabled(request: SessionToolApprovalRequest): boolean {
   return request.toolName === "personal_assistant_manage_tool" && (!(managementApprovalActionIsKnown(summary?.assistantAction) || launcherTeamActionIsKnown(summary?.assistantAction) || summary?.assistantAction === "agent_purge_batch") || Boolean(summary.assistantArgumentsInvalid)
     || (autonomyActionIsKnown(summary?.assistantAction) || Object.hasOwn(summary || {}, "assistantAutonomyPreviewVersion")) && !autonomyApprovalPreviewIsValid(summary)
     || platformManagementActionIsKnown(summary?.assistantAction) && !platformManagementPreviewIsValid(summary)
+    || (summary?.assistantAction === "provider_model_resolve" || Object.hasOwn(summary || {}, "assistantProviderPreviewVersion")) && !providerModelApprovalPreviewIsValid(summary)
+    || agentConfigurationApprovalActionIsKnown(summary?.assistantAction) && !agentConfigurationApprovalPreviewIsValid(summary)
     || launcherTeamActionIsKnown(summary?.assistantAction) && !launcherTeamPreviewIsValid(summary)
     || summary?.assistantAction === "agent_create" && !launcherAgentCreatePreviewIsValid(summary)
     || summary?.assistantAction === "agent_purge" && !agentPurgePreviewIsValid(summary)
