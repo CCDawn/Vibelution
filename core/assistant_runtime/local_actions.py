@@ -13,7 +13,7 @@ _ASSISTANT_ACTIONS = (
     "dialogue_settings", "dialogue_settings_update",
 )
 _CONFIG_ACTIONS = (
-    "provider_catalog", "provider_add", "provider_update", "provider_remove",
+    "secret_request", "provider_catalog", "provider_add", "provider_update", "provider_remove",
     "provider_test", "provider_discover", "provider_models", "model_update",
     "model_details", "model_defaults", "model_remove", "model_default",
 )
