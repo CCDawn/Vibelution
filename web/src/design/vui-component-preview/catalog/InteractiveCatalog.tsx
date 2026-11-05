@@ -17,6 +17,7 @@ import {
   VWorkbenchPowerMenu,
 } from "../../../components/vui";
 import { ConversationTurnModelControl } from "../../../components/conversation/ConversationTurnModelControl";
+import { ConversationModelControlTrigger } from "../../../components/conversation/ConversationModelControlTrigger";
 import { ConversationTurnNavigator } from "../../../components/conversation/ConversationTurnNavigator";
 import type { SessionLlmModelOption } from "../../../api/types";
 import { VuiPreviewCard } from "../VuiPreviewCard";
@@ -50,6 +51,7 @@ export function InteractiveCatalog() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [approvalDecision, setApprovalDecision] = useState("");
   const [modelParameters, setModelParameters] = useState({ contextWindow: 64000, reasoningEffort: "medium" });
+  const [modelTriggerOpen, setModelTriggerOpen] = useState(false);
 
   return (
     <VuiPreviewSection title="Interactive">
@@ -75,6 +77,16 @@ export function InteractiveCatalog() {
           <p className="pl-14 pt-4" role="status">当前第 {turnIndex + 1} 轮 · 拖窄容器可验证导航隐藏</p>
           <VButton className="ml-14 mt-4" onPress={() => setTurnIndex(119)}>定位第 120 轮</VButton>
         </div>
+      </VuiPreviewCard>
+      <VuiPreviewCard name="ConversationModelControlTrigger">
+        <VPopover
+          open={modelTriggerOpen}
+          onOpenChange={setModelTriggerOpen}
+          aria-label="模型入口预览"
+          trigger={<ConversationModelControlTrigger label="Qwen3 Max · 中" open={modelTriggerOpen} aria-label="模型入口预览" />}
+        >
+          <p>共享模型入口的展开状态；此预览不修改模型设置。</p>
+        </VPopover>
       </VuiPreviewCard>
       <VuiPreviewCard name="ConversationTurnModelControl">
         <ConversationTurnModelControl
