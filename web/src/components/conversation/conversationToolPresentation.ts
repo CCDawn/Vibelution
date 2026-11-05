@@ -4,7 +4,7 @@ import {
   type ConversationPatchRowSummary,
 } from "./conversationPatchModel";
 import { stripAnsiArtifacts } from "./conversationAnsiSanitize";
-import { assistantActionLabel } from "./assistantActionLabels";
+import { assistantActionLabelForTool } from "./assistantActionLabels";
 
 export type ConversationToolPresentationLanguage = "zh" | "en";
 
@@ -45,7 +45,7 @@ function compactToolPresentationText(value: string) {
 }
 
 function isLowValueToolResult(value: string) {
-  return LOW_VALUE_TOOL_RESULTS.has(value.trim().toLowerCase());
+  return LOW_VALUE_TOOL_RESULTS.has(value.trim().toLowerCase().replace(/[。.!！]+$/g, "").trim());
 }
 
 function objectRecord(value: unknown): Record<string, unknown> | null {
@@ -714,6 +714,24 @@ const TOOL_ARGUMENT_URL_KEYS = ["url", "href"];
 const TOOL_ARGUMENT_COMMAND_KEYS = ["displayCommand", "cmd", "command"];
 const TOOL_ARGUMENT_SUBJECT_MAX_LENGTH = 72;
 
+// Explicit entity references only: prompts, message bodies, config values and
+// credential fields must never become a collapsed row's argument summary.
+const TOOL_ARGUMENT_ENTITY_SUBJECTS = [
+  { keys: ["sessionId", "session_id"], zh: "会话", en: "Session" },
+  { keys: ["agentId", "agent_id"], zh: "Agent", en: "Agent" },
+  { keys: ["teamId", "team_id"], zh: "团队", en: "Team" },
+  { keys: ["flowId", "flow_id"], zh: "Flow", en: "Flow" },
+  { keys: ["roomId", "room_id"], zh: "群聊", en: "Room" },
+  { keys: ["knowledgeId", "knowledge_id", "knowledgeBaseId", "knowledge_base_id"], zh: "知识库", en: "Knowledge" },
+  { keys: ["taskId", "task_id"], zh: "任务", en: "Task" },
+  { keys: ["runId", "run_id"], zh: "运行", en: "Run" },
+  { keys: ["resourceId", "resource_id"], zh: "资源", en: "Resource" },
+  { keys: ["requestId", "request_id"], zh: "请求", en: "Request" },
+  { keys: ["providerId", "provider_id"], zh: "连接", en: "Provider" },
+  { keys: ["modelId", "model_id"], zh: "模型", en: "Model" },
+  { keys: ["projectId", "project_id"], zh: "项目", en: "Project" },
+] as const;
+
 function compactArgumentSubject(value: string) {
   return value.length > TOOL_ARGUMENT_SUBJECT_MAX_LENGTH
     ? `${value.slice(0, TOOL_ARGUMENT_SUBJECT_MAX_LENGTH - 1).trimEnd()}…`
@@ -760,6 +778,20 @@ export function subjectFromToolArguments(options: {
   const url = pick(TOOL_ARGUMENT_URL_KEYS);
   if (url) {
     return compactArgumentSubject(url);
+  }
+  const entities: string[] = [];
+  for (const entity of TOOL_ARGUMENT_ENTITY_SUBJECTS) {
+    const value = firstScalar(args, [...entity.keys])
+      || (target ? firstScalar(target, [...entity.keys]) : "");
+    if (value) {
+      entities.push(`${entity[options.language]} ${value}`);
+    }
+    if (entities.length === 2) {
+      break;
+    }
+  }
+  if (entities.length) {
+    return compactArgumentSubject(entities.join(" · "));
   }
   const command = pick(TOOL_ARGUMENT_COMMAND_KEYS);
   return command ? compactArgumentSubject(command) : "";
@@ -836,11 +868,7 @@ function buildToolActivityPillsForStatus(options: {
   const language = options.language;
   const toolName = String(options.toolName || "").trim().toLowerCase();
   const status = normalizeToolActivityStatus(options.status);
-  const actionLabel = (
-    (toolName === "personal_assistant_action_tool" || toolName === "personal_assistant_manage_tool")
-      ? assistantActionLabel(options.toolArguments?.action, language)
-      : null
-  ) || conversationToolPresentationLabel(toolName, language);
+  const actionLabel = conversationToolPresentationLabel(toolName, language, options.toolArguments);
   // Prefer payload timeout signal over generic status text.
   const payloadTimedOut = [options.toolSummary, options.cellSummary, options.resultPreview]
     .some((value) => {
@@ -1178,9 +1206,14 @@ export function conversationToolDetailPresentation({
 export function conversationToolPresentationLabel(
   name: string,
   language: ConversationToolPresentationLanguage,
+  toolArguments?: unknown,
 ) {
   const normalized = String(name ?? "").trim();
   const lower = normalized.toLowerCase();
+  const actionLabel = assistantActionLabelForTool(normalized, toolArguments, language);
+  if (actionLabel) {
+    return actionLabel;
+  }
   const labels: Record<
     string,
     Record<ConversationToolPresentationLanguage, string>

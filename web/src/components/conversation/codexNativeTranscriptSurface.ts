@@ -175,7 +175,7 @@ export function codexNativeTranscriptToCells(
           ? conversationToolSemanticLabel({
               toolName: rawTitle,
               summary: cell.summary,
-              commandSource,
+              commandSource: cell.toolArguments ?? commandSource,
             })
           : cell.title;
         return {

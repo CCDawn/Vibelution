@@ -319,6 +319,20 @@ describe("useConversationProcessExpansion overlay alias migration", () => {
     await mount.unmount();
   });
 
+  it("refreshes work defaults in both directions until the user chooses, then migrates that choice", async () => {
+    const mount = mountExpansionHook(baseInput());
+    await act(async () => mount.render());
+    expect(mount.result.getExpansionState("live", "work", false)).toBe(false);
+    // A late warning, resumed stream or missing final must reveal its record.
+    expect(mount.result.getExpansionState("live", "work", true)).toBe(true);
+    expect(mount.result.getExpansionState("live", "work", false)).toBe(false);
+    await act(async () => mount.result.setExpansionState("live", "work", false));
+    expect(mount.result.getExpansionState("live", "work", true)).toBe(false);
+    await act(async () => mount.render({ retiredOverlayAliases: [{ fromMessageId: "live", toMessageId: "durable" }] }));
+    expect(mount.result.getExpansionState("durable", "work", true)).toBe(false);
+    await mount.unmount();
+  });
+
   it("leaves state untouched when an alias misses (zero drift from current behavior)", async () => {
     const mount = mountExpansionHook(baseInput());
     await act(async () => mount.render());

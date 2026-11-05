@@ -1,6 +1,7 @@
 import type { CodexTranscriptCell } from "./codexTranscriptCells";
 import type { CodexTerminalOperation } from "./codexToolLifecycleModel";
-import { codexTranscriptToolRawName } from "./conversationToolActivityModel";
+import { codexTranscriptToolArguments, codexTranscriptToolRawName } from "./conversationToolActivityModel";
+import { assistantActionFromToolArguments, assistantActionKindForTool } from "./assistantActionLabels";
 import type { ConversationToolPresentationLanguage } from "./conversationToolPresentation";
 import {
   conversationToolRendererFor,
@@ -92,12 +93,12 @@ export function conversationToolActivityRendererForCell(
   language: ConversationToolPresentationLanguage,
 ) {
   const rawName = codexTranscriptToolRawName(cell);
-  const direct = conversationToolRendererFor(rawName);
-  if (direct.family !== "generic") {
+  const direct = conversationToolRendererFor(rawName, codexTranscriptToolArguments(cell));
+  if (direct.family !== "generic" || assistantActionKindForTool(rawName, codexTranscriptToolArguments(cell))) {
     return direct;
   }
   return conversationToolRendererForPresentationLabel(
-    conversationToolRendererLabel(rawName || cell.title || "", language),
+    conversationToolRendererLabel(rawName || cell.title || "", language, codexTranscriptToolArguments(cell)),
     language,
   );
 }
@@ -109,11 +110,12 @@ function toolInvocationCount(cell: CodexTranscriptCell) {
   return Math.max(1, cell.toolLifecycleModel?.toolCalls?.length ?? 0);
 }
 
-function needsAttention(cell: CodexTranscriptCell) {
+export function conversationToolActivityNeedsAttention(cell: CodexTranscriptCell) {
   return cell.status === "failed"
     || cell.status === "degraded"
     || cell.tone === "warning"
     || cell.tone === "error"
+    || cell.toolLifecycleModel?.terminalOperations.some((operation) => operation.result?.timedOut === true)
     || (conversationToolActivityHasNonzeroTerminalExit(cell) && !conversationToolActivityIsNoMatchTerminalExit(cell));
 }
 
@@ -149,7 +151,7 @@ export function buildConversationToolActivityDigestPresentation(
   language: ConversationToolPresentationLanguage,
 ): ConversationToolActivityDigestPresentation {
   const count = cells.reduce((total, cell) => total + toolInvocationCount(cell), 0);
-  const attentionCount = cells.filter(needsAttention).length;
+  const attentionCount = cells.filter(conversationToolActivityNeedsAttention).length;
   const state = cells.some((cell) => cell.status === "running" || cell.status === "pending")
     ? "running"
     : attentionCount > 0
@@ -197,7 +199,12 @@ function completedToolIdentity(cell: CodexTranscriptCell) {
     return "";
   }
   const rawName = codexTranscriptToolRawName(cell).trim().toLowerCase();
-  const family = conversationToolRendererFor(rawName).family;
+  const args = codexTranscriptToolArguments(cell);
+  const family = conversationToolRendererFor(rawName, args).family;
+  const assistantAction = assistantActionFromToolArguments(rawName, args);
+  if (assistantAction) {
+    return `${family}:${rawName}:${assistantAction}`;
+  }
   return family === "generic" || DISTINCT_SEMANTIC_TOOL_NAMES.has(rawName)
     ? `${family}:${rawName}`
     : family;
@@ -208,7 +215,11 @@ function presentationRunTitle(
   language: ConversationToolPresentationLanguage,
 ) {
   const rawName = codexTranscriptToolRawName(cell);
-  const descriptor = conversationToolRendererFor(rawName);
+  const args = codexTranscriptToolArguments(cell);
+  const descriptor = conversationToolRendererFor(rawName, args);
+  if (assistantActionFromToolArguments(rawName, args)) {
+    return conversationToolRendererLabel(rawName, language, args);
+  }
   return descriptor.family === "generic" || DISTINCT_SEMANTIC_TOOL_NAMES.has(rawName.trim().toLowerCase())
     ? conversationToolRendererLabel(rawName, language)
     : descriptor.groupLabel[language];

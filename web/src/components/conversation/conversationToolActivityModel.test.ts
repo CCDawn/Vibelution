@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { CodexTranscriptCell } from "./codexTranscriptCells";
-import { buildCodexTranscriptTimelineNodes } from "./conversationToolActivityModel";
+import { buildCodexTranscriptTimelineNodes, codexTranscriptToolArguments } from "./conversationToolActivityModel";
 
 function cell(id: string, kind: CodexTranscriptCell["kind"], status: CodexTranscriptCell["status"] = "completed"): CodexTranscriptCell {
   return {
@@ -16,6 +16,40 @@ function cell(id: string, kind: CodexTranscriptCell["kind"], status: CodexTransc
 }
 
 describe("conversation tool activity model", () => {
+  it("fills a missing action from lifecycle without replacing an explicit unknown action", () => {
+    const tool = cell("assistant", "tool_call");
+    tool.toolArguments = { projectId: "project-new" };
+    tool.toolLifecycleModel = {
+      toolCalls: [{ toolCallId: "call", rawOperationId: "op", status: "completed",
+        title: "personal_assistant_action_tool", rawToolName: "personal_assistant_action_tool", runtimeKind: "tool",
+        arguments: { action: "source_read", projectId: "project-old", path: "README.md" } }],
+      terminalOperations: [], terminalSessions: [], modelObservations: [],
+    };
+    expect(codexTranscriptToolArguments(tool)).toEqual({ action: "source_read", projectId: "project-new", path: "README.md" });
+    tool.toolArguments.action = "future_action";
+    expect(codexTranscriptToolArguments(tool)?.action).toBe("future_action");
+    expect(tool.toolLifecycleModel.toolCalls[0].arguments?.projectId).toBe("project-old");
+  });
+
+  it("groups across hidden thoughts without crossing visible commentary or errors", () => {
+    const cells = [
+      cell("thought-before", "reasoning_summary"),
+      cell("tool-1", "tool_call"),
+      cell("thought-between", "reasoning_summary"),
+      cell("tool-2", "tool_call"),
+      cell("commentary", "assistant_markdown"),
+      cell("tool-3", "tool_call"),
+      cell("turn-error", "error_notice", "failed"),
+      cell("tool-4", "tool_call"),
+    ];
+    const nodes = buildCodexTranscriptTimelineNodes(cells, { hideReasoning: true });
+    expect(nodes.map((node) => node.kind === "cell" ? node.cell.id : node.activity.cells.map((item) => item.id)))
+      .toEqual([["tool-1", "tool-2"], "commentary", ["tool-3"], "turn-error", ["tool-4"]]);
+    expect(buildCodexTranscriptTimelineNodes(cells).slice(0, 4).map((node) => node.kind === "cell" ? node.cell.id : node.activity.id))
+      .toEqual(["thought-before", "tool-activity:tool-1", "thought-between", "tool-activity:tool-2"]);
+    expect(cells.map((item) => item.id)).toContain("thought-between");
+  });
+
   it("groups only contiguous non-terminal tool calls and preserves canonical order around commentary", () => {
     const nodes = buildCodexTranscriptTimelineNodes([
       cell("commentary-before", "assistant_markdown"),
