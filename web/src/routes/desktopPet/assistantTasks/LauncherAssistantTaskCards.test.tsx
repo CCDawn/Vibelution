@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LauncherAssistantDispatch, LauncherAssistantStatus, LauncherAssistantTeamRun, LauncherAssistantTeamRunsPage } from "../../../api/launcherAssistant";
 import { LauncherAssistantTaskCards } from "./LauncherAssistantTaskCards";
 import { LauncherAssistantTaskSidebar } from "./LauncherAssistantTaskSidebar";
+import { LauncherTaskModelControls } from "./__fixtures__/LauncherTaskModelControls";
 import type { LauncherTaskCleanupPreview, LauncherTaskCleanupResult, LauncherTaskCleanupTarget } from "../../../api/launcherAssistantTaskCleanup";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -186,7 +187,7 @@ describe("task card facts and direct cleanup", () => {
     expect((await openTask()).textContent).toContain("长摘要".repeat(80));
   });
 
-  it("keeps loaded cards during a slow refresh and marks the refresh control pending", async () => {
+  it("keeps loaded cards while the model refresh is pending", async () => {
     await render();
     let resolveRows!: (value: LauncherAssistantDispatch[]) => void;
     dispatchReply = () => new Promise(resolve => { resolveRows = resolve; });
@@ -580,7 +581,10 @@ async function settle() {
 }
 async function render(lang: "zh" | "en" = "zh", children?: React.ReactNode) {
   await act(async () => { root!.render(<QueryClientProvider client={client}>
-    <LauncherAssistantTaskCards onReview={onReview} onApproval={onApproval} lang={lang}>{children}</LauncherAssistantTaskCards>
+    <LauncherAssistantTaskCards onReview={onReview} onApproval={onApproval} lang={lang}>
+      <LauncherTaskModelControls lang={lang} />
+      {children ?? <LauncherAssistantTaskSidebar lang={lang} />}
+    </LauncherAssistantTaskCards>
   </QueryClientProvider>); });
   await settle();
 }

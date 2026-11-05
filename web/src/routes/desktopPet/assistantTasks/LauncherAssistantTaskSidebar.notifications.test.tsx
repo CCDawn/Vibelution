@@ -21,18 +21,24 @@ function model(overrides:Partial<LauncherTaskModel>={}):LauncherTaskModel{return
 };}
 async function render(value:LauncherTaskModel,lang:"zh"|"en"="zh"){await act(async()=>{
  root.render(<LauncherNotificationProvider><TaskOwner value={value} lang={lang}>
-  <LauncherAssistantTaskSidebar/><LauncherAssistantTaskSidebar/><ReadNotices/>
+  <LauncherAssistantTaskSidebar lang={lang}/><LauncherAssistantTaskSidebar lang={lang}/><ReadNotices/>
  </TaskOwner></LauncherNotificationProvider>);
 });}
 beforeEach(()=>{host=document.createElement("div");document.body.append(host);root=createRoot(host);notices=[];});
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();});
 
 describe("task sidebar notifications",()=>{
- it("keeps task controls without permanent history caveats or a false error",async()=>{
-  await render(model({historyIncomplete:true,legacyUnrecoverable:2}));
+ it("keeps categories without a permanent task toolbar, history caveats or a false error",async()=>{
+  await render(model({historyIncomplete:true,legacyUnrecoverable:2,canCleanCompleted:true,cleanableCount:2}));
   expect(host.textContent).not.toMatch(/可显示的历史有限|旧关联无法恢复|仅显示已登记/);
   expect(host.textContent).toContain("待处理 0");
-  expect(host.querySelector('[data-assistant-task-refresh]')).not.toBeNull();
+  const sidebars=host.querySelectorAll('[data-assistant-task-cards]');
+  expect(sidebars).toHaveLength(2);
+  for(const sidebar of sidebars){
+   expect(sidebar.querySelectorAll('[role="tab"]')).toHaveLength(3);
+   expect(sidebar.querySelector('header,h1,h2,h3,[data-assistant-task-refresh],[data-assistant-task-bulk-cleanup]')).toBeNull();
+   expect([...sidebar.querySelectorAll('button')].some(button=>['任务','刷新','清理已结束'].includes(button.textContent?.trim()??'')||button.getAttribute('aria-label')==='刷新')).toBe(false);
+  }
   expect(notices).toEqual([]);
  });
  it("publishes partial and failed reads to the titlebar and withdraws after recovery",async()=>{

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { combineAssistantActiveWork } from "../src/assistant/lifecycleGuard.js";
+import { acquireAssistantLifecycleLease, combineAssistantActiveWork } from "../src/assistant/lifecycleGuard.js";
 import { DesktopLifecycleCoordinator } from "../src/lifecycle/desktopLifecycleCoordinator.js";
 import { createDesktopShellExitDeadline, executeApprovedDesktopShellShutdown, withDesktopShellExitTimeout } from "../src/shutdown/desktopShellExit.js";
 import { decideShutdown, executeShutdownAuthorizationBoundary, resolveQuitActiveWorkStatus, type ActiveWorkStatus, type ShutdownDecision } from "../src/shutdown/shutdownCoordinator.js";
@@ -25,7 +25,7 @@ function harness() {
   let hostState = "ready";
   const release = vi.fn(async () => undefined);
   const commit = vi.fn();
-  const acquire = vi.fn(async () => {
+  const acquire = vi.fn(async (_signal?: AbortSignal) => {
     if (hostState === "stopped") throw new Error("ASSISTANT_LIFECYCLE_UNAVAILABLE");
     return { release, commit };
   });
@@ -354,25 +354,93 @@ describe("actual Electron main shutdown functions", () => {
     expect(h.release).not.toHaveBeenCalled();
   });
 
-  it("falls back to serial exit when the optional barrier times out and releases its late lease", async () => {
+  it("settles the cancelled acquisition and releases its late lease before serial stop", async () => {
     vi.useFakeTimers();
     const h = harness();
     let finishLease!: (value: { release: typeof h.release; commit: typeof h.commit }) => void;
     h.acquire.mockImplementation(() => new Promise(resolve => { finishLease = resolve; }));
+    let finishRelease!: () => void;
+    h.release.mockImplementation(() => new Promise(resolve => { finishRelease = resolve; }));
     const exiting = h.exit();
     await vi.advanceTimersByTimeAsync(500);
+    expect(h.context.stopLauncherAssistant).not.toHaveBeenCalled();
+    expect(h.stopMain).not.toHaveBeenCalled();
+    finishLease({ release: h.release, commit: h.commit });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.release).toHaveBeenCalledOnce();
+    expect(h.context.stopLauncherAssistant).not.toHaveBeenCalled();
+    finishRelease();
     await exiting;
     expect(h.context.stopLauncherAssistant).toHaveBeenCalledOnce();
     expect(h.stopMain).toHaveBeenCalledOnce();
     expect(h.quit).toHaveBeenCalledOnce();
-    finishLease({ release: h.release, commit: h.commit });
-    await vi.advanceTimersByTimeAsync(0);
-    expect(h.release).toHaveBeenCalledOnce();
     expect(h.commit).not.toHaveBeenCalled();
     expect(h.context.recordSupervisorEventFallbackLocally).toHaveBeenCalledWith(expect.objectContaining({
       eventCode: "electron.desktop_shell.assistant_overlap",
       fields: { mode: "serial", reason: "probe_timeout", probeMs: 500 }
     }));
+  });
+
+  it("releases a real probing barrier before host retirement after a 500ms timeout", async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    let gate = "idle";
+    const releaseProducer = vi.fn();
+    const admission = { drained: Promise.resolve(), seal: async () => undefined,
+      check: vi.fn(), release: releaseProducer, commit: h.commit };
+    h.acquire.mockImplementation(signal => acquireAssistantLifecycleLease({
+      signal,
+      host: {
+        snapshot: () => ({ state: "ready", errorCode: null }),
+        beginLifecycleAdmission: () => admission,
+        migrationBarrier: async operation => {
+          if (operation === "prepare") { gate = "probing"; return "probing"; }
+          if (operation === "status") {
+            await new Promise(resolve => setTimeout(resolve, 600));
+            gate = "ready"; return "ready";
+          }
+          await new Promise(resolve => setTimeout(resolve, 50));
+          gate = "idle"; return "idle";
+        },
+      },
+      projects: { beginMigrationTransition: () => ({ drained: Promise.resolve(), release: vi.fn() }) },
+      reminders: { tryDrainForLifecycle: async () => undefined, resumeAfterMigration: vi.fn() },
+      drainQueues: async () => undefined, current: () => true, reopen: () => true, releaseOwner: vi.fn(),
+    }));
+    h.context.stopLauncherAssistant.mockImplementation(async () => {
+      expect(gate).toBe("idle");
+      expect(releaseProducer).toHaveBeenCalledOnce();
+    });
+    const exiting = h.exit();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(gate).toBe("probing");
+    expect(h.context.stopLauncherAssistant).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(h.context.stopLauncherAssistant).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(50);
+    await exiting;
+    expect(h.context.stopLauncherAssistant).toHaveBeenCalledOnce();
+    expect(h.commit).not.toHaveBeenCalled();
+    expect(h.quit).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the host alive if cancelled proof cleanup cannot settle within the exit budget", async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    let finishLease!: (value: { release: typeof h.release; commit: typeof h.commit }) => void;
+    h.acquire.mockImplementation(() => new Promise(resolve => { finishLease = resolve; }));
+    const exiting = h.exit();
+    await vi.advanceTimersByTimeAsync(30_001);
+    await exiting;
+    expect(h.context.stopLauncherAssistant).not.toHaveBeenCalled();
+    expect(h.stopMain).not.toHaveBeenCalled();
+    expect(h.closeWindow).not.toHaveBeenCalled();
+    expect(h.quit).not.toHaveBeenCalled();
+    finishLease({ release: h.release, commit: h.commit });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.release).toHaveBeenCalledOnce();
+    expect(h.context.stopLauncherAssistant).not.toHaveBeenCalled();
+    expect(h.commit).not.toHaveBeenCalled();
   });
 
   it("keeps serial retirement when only degraded idle observations are available", async () => {

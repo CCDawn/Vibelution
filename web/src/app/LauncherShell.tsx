@@ -117,11 +117,11 @@ export function LauncherShell() {
       <VSplitWorkspace
         className={styles.workspace}
         columnsClassName={styles.columns}
-        sidebar={<div className={styles.navigation}><LauncherTaskNavigationSlot lang={lang}><LauncherNavigation lang={lang} items={branchInstancesQuery.data?.items ?? []} updateAvailable={updateAvailable} updateFailed={updateFailed}/></LauncherTaskNavigationSlot></div>}
+        sidebar={<div className={styles.navigation}><LauncherNavigation lang={lang} items={branchInstancesQuery.data?.items ?? []} updateAvailable={updateAvailable} updateFailed={updateFailed} taskContent={<LauncherTaskNavigationSlot lang={lang}/>}/></div>}
         main={<VSurface as="div" tone="panel" padding="none" className={styles.main}>{routeContent}</VSurface>}
       />
       <VDialog open={navigationOpen} onOpenChange={setNavigationOpen} title={lang === "zh" ? "功能导航" : "Navigation"} size="sm">
-        <div className={styles.mobileNavigation}><LauncherTaskNavigationSlot lang={lang} onNavigate={()=>setNavigationOpen(false)}><LauncherNavigation lang={lang} items={branchInstancesQuery.data?.items ?? []} onNavigate={() => setNavigationOpen(false)} updateAvailable={updateAvailable} updateFailed={updateFailed}/></LauncherTaskNavigationSlot></div>
+        <div className={styles.mobileNavigation}><LauncherNavigation lang={lang} items={branchInstancesQuery.data?.items ?? []} onNavigate={() => setNavigationOpen(false)} updateAvailable={updateAvailable} updateFailed={updateFailed} taskContent={<LauncherTaskNavigationSlot lang={lang} onNavigate={()=>setNavigationOpen(false)}/>}/></div>
       </VDialog>
     </div>
    </LauncherAssistantTaskCards></LauncherNotificationProvider>
