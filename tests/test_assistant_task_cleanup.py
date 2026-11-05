@@ -521,7 +521,9 @@ async def test_team_cleanup_rechecks_resolved_identity_and_terminal_state(team_s
     elif change == "unverified":
         team_scene.response["verified"] = False
     else:
-        team_scene.service.dispatch._project_read_binding = lambda _: (2, team_scene.path.parent)
+        # A moved root is a genuine binding change; a generation-only bump at
+        # the same root is covered by its own regression test below.
+        team_scene.service.dispatch._project_read_binding = lambda _: (2, team_scene.path.parent / "moved")
     result = await team_scene.service.execute(CleanupExecute(**team_scene.payload.model_dump(), fingerprint=preview["fingerprint"]))
     assert result["items"][0]["status"] == "blocked" and team_scene.path.exists()
 
@@ -649,12 +651,48 @@ async def test_team_registry_change_during_source_read_cannot_authorize_cleanup(
     original = team_scene.management.receipt
 
     async def changed(*args, **kwargs):
-        team_scene.service.dispatch._project_read_binding = lambda _: (2, team_scene.path.parent)
+        # A moved root between the binding capture and the fence must block.
+        team_scene.service.dispatch._project_read_binding = lambda _: (2, team_scene.path.parent / "moved")
         return await original(*args, **kwargs)
 
     team_scene.management.receipt = changed
     preview = await team_scene.service.preview(team_scene.payload)
     assert preview["items"][0]["status"] == "blocked" and team_scene.path.exists()
+    assert "已换到别的路径" in preview["items"][0]["reason"]
+
+
+@pytest.mark.anyio
+async def test_team_registry_generation_churn_during_source_read_is_harmless(team_scene):
+    """Revoke/re-admit at the same root bumps the gate generation mid-read;
+    the source stays observable, so the cleanup must still go through."""
+    original = team_scene.management.receipt
+
+    async def churned(*args, **kwargs):
+        team_scene.service.dispatch._project_read_binding = lambda _: (2, team_scene.path.parent)
+        return await original(*args, **kwargs)
+
+    team_scene.management.receipt = churned
+    preview = await team_scene.service.preview(team_scene.payload)
+    assert preview["items"][0]["status"] == "ready"
+    result = await team_scene.service.execute(CleanupExecute(**team_scene.payload.model_dump(), fingerprint=preview["fingerprint"]))
+    assert result["items"][0]["status"] == "deleted" and not team_scene.path.exists()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("kind", ["dispatch", "team_run"])
+async def test_registry_generation_churn_between_preview_and_execute_does_not_block(scene, team_scene, kind):
+    """A generation-only registry bump (revoke/re-admit at the same root, a
+    suspend, or an unrelated project change) leaves the source observable; it
+    must not block a planned cleanup, unlike a moved root."""
+    case = scene if kind == "dispatch" else team_scene
+    preview = await case.service.preview(case.payload)
+    assert preview["items"][0]["status"] == "ready"
+    root = case.service.dispatch._project_read_binding("project-1")[1]
+    case.service.dispatch._project_read_binding = lambda _: (99, root)
+    result = await case.service.execute(CleanupExecute(**case.payload.model_dump(), fingerprint=preview["fingerprint"]))
+    assert result["items"][0]["status"] == "deleted" and not case.path.exists()
+    if kind == "dispatch":
+        assert (scene.root / "deleted" / "dispatch-1.json").is_file() and scene.client.calls == 1
 
 
 @pytest.mark.anyio
@@ -687,7 +725,7 @@ async def test_lost_cleanup_response_converges_after_service_reload_without_nati
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("kind", ["dispatch", "team_run"])
-@pytest.mark.parametrize("change", ["legacy", "projectId", "agentId", "directSessionId", "projectBinding", "schemaVersion"])
+@pytest.mark.parametrize("change", ["legacy", "projectId", "projectBinding", "schemaVersion"])
 async def test_deleted_reference_needs_current_identity_and_target_scoped_cleanup_receipt(scene, team_scene, kind, change):
     case = scene if kind == "dispatch" else team_scene
     preview = await case.service.preview(case.payload)
@@ -708,6 +746,38 @@ async def test_deleted_reference_needs_current_identity_and_target_scoped_cleanu
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("kind", ["dispatch", "team_run"])
+@pytest.mark.parametrize("field,changed", [("agentId", "assistant-2"), ("directSessionId", "session-2"), ("localOnly", True)])
+async def test_marker_entry_metadata_never_blocks_the_same_task(scene, team_scene, kind, field, changed):
+    """Entry metadata says who performed the cleanup, not which task it was:
+    a marker written by another session or via the other removal mode still
+    identifies the same cleaned task."""
+    case = scene if kind == "dispatch" else team_scene
+    preview = await case.service.preview(case.payload)
+    await case.service.execute(CleanupExecute(**case.payload.model_dump(), fingerprint=preview["fingerprint"]))
+    marker = case.service._marker_path(case.payload.targets[0])
+    data = json.loads(marker.read_text())
+    data[field] = changed
+    marker.write_text(json.dumps(data))
+    payload = case.payload.model_dump()
+    if field == "localOnly":
+        payload["targets"][0]["localOnly"] = changed
+        payload = CleanupPreview(**payload)
+    else:
+        # The requesting assistant itself moved to the new session identity.
+        scene.identity[field] = changed
+        payload[field] = changed
+        payload = CleanupPreview(agentId=payload["agentId"], directSessionId=payload["directSessionId"],
+                                 targets=payload["targets"])
+    recovered = TaskCleanup(case.service.dispatch, case.service.identity)
+    preview = await recovered.preview(payload)
+    assert preview["items"][0]["status"] == "ready" and preview["items"][0]["resources"] == []
+    result = await recovered.execute(CleanupExecute(**payload.model_dump(), fingerprint=preview["fingerprint"]))
+    assert result["items"][0]["status"] == "deleted" and result["items"][0]["alreadyDeleted"] is True
+    assert result["releasedBytes"] == 0 and not case.path.exists()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("kind", ["dispatch", "team_run"])
 @pytest.mark.parametrize("change", ["marker", "record", "binding"])
 async def test_already_deleted_plan_rechecks_record_marker_and_binding_under_task_lock(scene, team_scene, kind, change):
     case = scene if kind == "dispatch" else team_scene
@@ -721,7 +791,9 @@ async def test_already_deleted_plan_rechecks_record_marker_and_binding_under_tas
     if change == "record":
         case.path.write_bytes(original)
     elif change == "binding":
-        case.service.dispatch._project_read_binding = lambda _: (2, case.path.parent)
+        # A moved root is a genuine change; generation-only churn at the same
+        # root must not block (covered by the dedicated regression below).
+        case.service.dispatch._project_read_binding = lambda _: (2, case.path.parent / "moved")
     else:
         data = json.loads(marker.read_text())
         data["requestDigest" if kind == "dispatch" else "runId"] = "b" * 64
@@ -812,8 +884,12 @@ async def test_explicit_local_only_removes_proven_reference_and_retries_without_
         assert scene.client.reads == reads
     else:
         assert len(receipt_reads) == 2
+    # The other removal mode recognizes the same task's marker: entry
+    # metadata (localOnly) is recorded, never part of the identity check.
     normal = await recovered.preview(case.payload)
-    assert normal["items"][0]["status"] == "blocked"
+    assert normal["items"][0]["status"] == "ready" and normal["items"][0]["resources"] == []
+    normal_result = await recovered.execute(CleanupExecute(**case.payload.model_dump(), fingerprint=normal["fingerprint"]))
+    assert normal_result["items"][0]["status"] == "deleted" and normal_result["items"][0]["alreadyDeleted"] is True
 
 
 @pytest.mark.anyio

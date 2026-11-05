@@ -628,7 +628,7 @@ const themeAuthority = new ThemeAuthority(join(app.getPath("userData"), "appeara
 let launcherAssistantExitReady = false;
 let launcherAssistantStarting: Promise<void> | null = null;
 let launcherAssistantStopping: Promise<void> | null = null;
-let acquireResidentAssistantLifecycleLease: (() => Promise<AssistantLifecycleLease>) | null = null;
+let acquireResidentAssistantLifecycleLease: ((signal?: AbortSignal) => Promise<AssistantLifecycleLease>) | null = null;
 let initialMigrationReceiptFence: Promise<void> | null = null;
 const launcherAssistantStartupAbort = new AbortController();
 let launcherAssistantProjects: AssistantProjectRegistryConnection | null = null;
@@ -1578,12 +1578,12 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
         scheduleInitialMigration();
       }
     };
-    acquireResidentAssistantLifecycleLease = async () => {
+    acquireResidentAssistantLifecycleLease = async (signal) => {
       const host = launcherAssistantHost, reminders = stopLauncherAssistantReminders;
       if (!host || !reminders || shutdownApproved || migrationRunning || assistantMigrationPending)
         throw new Error("ASSISTANT_LIFECYCLE_UNAVAILABLE");
       migrationRunning = true;
-      return acquireAssistantLifecycleLease({ host, projects: projectConnection, reminders,
+      return acquireAssistantLifecycleLease({ host, projects: projectConnection, reminders, signal,
         current: () => !shutdownApproved && !launcherAssistantStartupAbort.signal.aborted
           && launcherAssistantHost === host && stopLauncherAssistantReminders === reminders,
         reopen: () => !shutdownApproved && !launcherAssistantStartupAbort.signal.aborted && launcherAssistantHost === host,
@@ -1802,7 +1802,8 @@ async function exitDesktopShellProcess(): Promise<void> {
  * that has not settled could still receive a live turn once its host surfaces:
  * wait this bounded window for the start promise before judging. */
 const ASSISTANT_START_SETTLE_WAIT_MS = 5_000;
-// Optional overlap must not delay the established serial shutdown path.
+// Bound optional proof acquisition; a cancelled proof must release its fences
+// before serial retirement can abort the same host generation.
 const IDLE_ASSISTANT_SHUTDOWN_PROBE_MS = 500;
 
 function residentAssistantStatus(state: "idle" | "active" | "unknown" | "unobservable"): ActiveWorkStatus {
@@ -1833,12 +1834,13 @@ async function residentAssistantActiveWork(): Promise<ActiveWorkStatus> {
   return residentAssistantStatus(launcherAssistantStarting ? "unknown" : "idle");
 }
 
-async function acquireResidentAssistantShutdownGuard(): Promise<AssistantLifecycleLease> {
+async function acquireResidentAssistantShutdownGuard(signal?: AbortSignal): Promise<AssistantLifecycleLease> {
+  signal?.throwIfAborted();
   if (launcherAssistantExitReady && (!launcherAssistantHost || launcherAssistantHost.snapshot().state === "stopped"))
     return { release: async () => undefined, commit: () => undefined };
   if (!launcherAssistantHost && !launcherAssistantStarting) return { release: async () => undefined, commit: () => undefined };
   if (!acquireResidentAssistantLifecycleLease) throw new Error("ASSISTANT_LIFECYCLE_UNAVAILABLE");
-  return acquireResidentAssistantLifecycleLease();
+  return acquireResidentAssistantLifecycleLease(signal);
 }
 
 ipcMain.handle(IPC_CHANNELS.assistantThemeResult, (event,payload:unknown) => {
@@ -4393,30 +4395,31 @@ async function requestDesktopShellExit(
               fields: { stage: "assistant_stop", durationMs: Date.now() - assistantStopStartedAt }
             });
             if (operatorRequested && decision.reason === "no_active_work") {
+              const guardAttempt: { pending?: Promise<AssistantLifecycleLease> } = {};
               try {
                 const lease = await withDesktopShellExitTimeout(probeSignal => {
-                  const pending = acquireResidentAssistantShutdownGuard();
-                  void pending.then(lateLease => {
-                    if (probeSignal.aborted) void lateLease.release().catch(() => undefined);
-                  }, () => undefined);
-                  return pending;
+                  guardAttempt.pending = acquireResidentAssistantShutdownGuard(probeSignal);
+                  return guardAttempt.pending;
                 }, Math.min(IDLE_ASSISTANT_SHUTDOWN_PROBE_MS, deadline.remainingMs()), "prepare idle assistant shutdown");
-                try {
-                  signal.throwIfAborted();
-                  lease.commit();
-                  // All producers are fenced. Both processes may now retire,
-                  // retaining their original owners until both drains finish.
-                  assistantStop = stopLauncherAssistant().finally(recordAssistantStop);
-                  void assistantStop.catch(() => undefined);
-                  recordSupervisorEventFallbackLocally({
-                    eventCode: "electron.desktop_shell.assistant_overlap",
-                    message: "Assistant retirement overlap decision settled.",
-                    fields: { mode: "parallel", reason: "barrier_committed", probeMs: Date.now() - assistantStopStartedAt }
-                  });
-                } finally {
-                  if (!assistantStop) void lease.release().catch(() => undefined);
-                }
+                signal.throwIfAborted();
+                lease.commit();
+                // All producers are fenced. Both processes may now retire,
+                // retaining their original owners until both drains finish.
+                assistantStop = stopLauncherAssistant().finally(recordAssistantStop);
+                void assistantStop.catch(() => undefined);
+                recordSupervisorEventFallbackLocally({
+                  eventCode: "electron.desktop_shell.assistant_overlap",
+                  message: "Assistant retirement overlap decision settled.",
+                  fields: { mode: "parallel", reason: "barrier_committed", probeMs: Date.now() - assistantStopStartedAt }
+                });
               } catch (error) {
+                const probeMs = Date.now() - assistantStopStartedAt;
+                // A timed-out prepare may still own the native barrier. Await
+                // that same acquisition's cleanup before stop aborts its host.
+                // Cleanup keeps running if the overall exit deadline expires.
+                const settled = guardAttempt.pending?.then(lease => lease.release(), () => undefined);
+                void settled?.catch(() => undefined);
+                if (settled) await withDesktopShellExitTimeout(settled, deadline, "release cancelled assistant shutdown proof");
                 // Busy or unavailable barriers keep the established serial stop.
                 const message = error instanceof Error ? error.message : "";
                 const reason = ["ASSISTANT_LIFECYCLE_BUSY", "ASSISTANT_LIFECYCLE_UNAVAILABLE", "ASSISTANT_NOT_READY",
@@ -4425,7 +4428,7 @@ async function requestDesktopShellExit(
                 recordSupervisorEventFallbackLocally({
                   eventCode: "electron.desktop_shell.assistant_overlap",
                   message: "Assistant retirement overlap decision settled.",
-                  fields: { mode: "serial", reason, probeMs: Date.now() - assistantStopStartedAt }
+                  fields: { mode: "serial", reason, probeMs }
                 });
                 signal.throwIfAborted();
               }

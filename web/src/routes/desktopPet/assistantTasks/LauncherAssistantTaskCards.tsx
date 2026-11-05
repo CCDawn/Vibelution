@@ -251,9 +251,9 @@ export function LauncherAssistantTaskCards({onReview,onApproval,onOpenConversati
    const rows=Array.from(document.querySelectorAll<HTMLElement>('[data-assistant-task-id]')).filter(row=>row.dataset.assistantTaskId===anchor.id);
    const currentButtons=rows.map(row=>row.querySelector<HTMLElement>(anchor.action==="cleanup"?'[data-assistant-task-cleanup]':'[data-assistant-task-open]'));
    const otherButtons=rows.map(row=>row.querySelector<HTMLElement>('[data-assistant-task-open]'));
-   const toolbar=Array.from(document.querySelectorAll<HTMLElement>('[data-assistant-task-bulk-cleanup],[data-assistant-task-refresh]'));
+   const categories=Array.from(document.querySelectorAll<HTMLElement>('[data-assistant-task-cards] [role="tab"][aria-selected="true"]'));
    const navigation=Array.from(document.querySelectorAll<HTMLElement>('button[aria-label="打开功能导航"],button[aria-label="Open navigation"]'));
-   [...currentButtons,...otherButtons,...rows,anchor.prior,...toolbar,...navigation].find(visible)?.focus();
+   [...currentButtons,...otherButtons,...rows,anchor.prior,...categories,...navigation].find(visible)?.focus();
   });
  };
  const context={identity,tasks,loading,unavailable,refreshing,teamUnavailable:teamSupported&&teamRuns.isError,

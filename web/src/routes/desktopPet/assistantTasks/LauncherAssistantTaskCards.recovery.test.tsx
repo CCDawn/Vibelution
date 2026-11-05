@@ -7,6 +7,7 @@ import type { LauncherAssistantDispatch, LauncherAssistantStatus, LauncherAssist
 import { LauncherNotificationProvider, useLauncherNotices, type LauncherNotice } from "../../../app/LauncherNotifications";
 import { LauncherAssistantTaskCards } from "./LauncherAssistantTaskCards";
 import { LauncherAssistantTaskSidebar } from "./LauncherAssistantTaskSidebar";
+import { LauncherTaskModelControls } from "./__fixtures__/LauncherTaskModelControls";
 import { useLauncherTasks, type LauncherTaskModel } from "./LauncherTaskContext";
 import type { AssistantTeamRunObservationPage } from "./assistantTeamRunTasks";
 
@@ -41,12 +42,12 @@ async function settle() {
 }
 async function render() {
   await act(async () => root.render(<QueryClientProvider client={client}><LauncherNotificationProvider>
-    <LauncherAssistantTaskCards><LauncherAssistantTaskSidebar/><Observe/></LauncherAssistantTaskCards>
+    <LauncherAssistantTaskCards><LauncherTaskModelControls/><LauncherAssistantTaskSidebar/><Observe/></LauncherAssistantTaskCards>
   </LauncherNotificationProvider></QueryClientProvider>));
   await settle();
 }
 async function refresh() {
-  await act(async () => host.querySelector<HTMLButtonElement>("[data-assistant-task-refresh]")!.click());
+  await act(async () => host.querySelector<HTMLButtonElement>("[data-task-model-refresh]")!.click());
   await settle();
 }
 function operations() { return invoke.mock.calls.map(([request]) => request.operation as string); }
