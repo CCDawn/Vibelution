@@ -37,6 +37,27 @@ def store(sessions, session_id: str, payload: bytes, *, filename: str, content_t
     return {key: result[key] for key in ("artifactId", "filename", "contentType", "sizeBytes", "kind", "status")}
 
 
+def store_secret(value: str, *, kind: str, label: str = "") -> dict:
+    """Stage a privacy attachment in process memory; return public metadata.
+
+    The plaintext never touches disk, logs, or the returned payload: only the
+    one-shot ``sec_`` reference id, the channel kind, and the optional display
+    label (bubble name) come back. Only the personal-assistant attachment link
+    accepts this channel kind; the ordinary session HTTP endpoints do not.
+    """
+    from . import secret_attachments
+
+    try:
+        token = secret_attachments.issue_secret_attachment(value, kind, label=label)
+    except ValueError as error:
+        raise ValueError(f"Invalid secret attachment: {error}") from None
+    result: dict[str, str] = {"attachmentId": token, "kind": "user_secret"}
+    metadata = secret_attachments.secret_attachment_metadata(token)
+    if metadata and metadata.get("label"):
+        result["label"] = metadata["label"]
+    return result
+
+
 def resolve(session_id: str, artifact_id: str):
     if not isinstance(artifact_id, str) or not artifact_id or artifact_id != artifact_id.strip():
         raise FileNotFoundError("invalid attachment")
@@ -65,7 +86,12 @@ def resolve(session_id: str, artifact_id: str):
 def validate_ids(sessions, session_id: str, attachment_ids: list[str]) -> None:
     if not isinstance(attachment_ids, list) or any(not isinstance(item, str) for item in attachment_ids):
         raise sessions.SessionValidationError("Invalid attachment IDs.")
+    from . import secret_attachments
     for artifact_id in attachment_ids:
+        if secret_attachments.is_secret_attachment_id(artifact_id):
+            # Privacy tokens live in process memory, not the artifact stores;
+            # the submit layer validates them against that store instead.
+            continue
         try:
             resolve(session_id, artifact_id)
         except (FileNotFoundError, OSError):

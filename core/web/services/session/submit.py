@@ -648,9 +648,10 @@ def _enqueue_busy_session_turn(
         raise service.SessionNotFoundError(
             service.text_for(lang, zh="未找到当前会话。", en="Session not found.")
         )
+    turn_attachment_ids, secret_attachment_ids = _partition_secret_attachment_ids(attachment_ids)
     image_ids, document_ids = document_attachments.partition_session_attachment_ids(
         conversation,
-        attachment_ids or [],
+        turn_attachment_ids,
     )
     attachments = (
         list(resolved_attachments)
@@ -668,6 +669,17 @@ def _enqueue_busy_session_turn(
             ),
         ]
     )
+    # Privacy rows are value-free and PA-gated via the queued conversation's
+    # agent. artifactId is added so queue normalization keeps the row and the
+    # drain re-submits the token through the full resolve pipeline (which
+    # re-peeks the store and re-applies the personal-assistant gate).
+    queue_agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
+    queue_agent = service.get_agent(queue_agent_id, include_archived=False) if queue_agent_id else None
+    secret_attachment_rows = _resolve_secret_attachment_rows(secret_attachment_ids, agent=queue_agent)
+    attachments = [
+        *attachments,
+        *({**row, "artifactId": row["attachmentId"]} for row in secret_attachment_rows),
+    ]
     session_reference_rows, knowledge_file_rows = conversation_references.partition_conversation_references(
         references or []
     )
@@ -698,13 +710,7 @@ def _enqueue_busy_session_turn(
         ),
     ]
     if not message and not attachments and not all_references:
-        raise service.SessionValidationError(
-            service.text_for(
-                lang,
-                zh="请输入本轮消息、添加图片或引用会话后再发送。",
-                en="Enter a message, attach an image, or reference a session before sending.",
-            )
-        )
+        raise _empty_session_submit_error(service, lang)
     queued_row = service.enqueue_session_queued_turn(
         session_id,
         content=message,
@@ -1402,6 +1408,97 @@ def _settle_session_submit_admission_failure(
     _settlement_step("publish_snapshot", lambda: s._publish_session_detail_snapshot(session_id))
 
 
+def _partition_secret_attachment_ids(attachment_ids: Any) -> tuple[list[str], list[str]]:
+    """Split raw submit ids into (artifact ids, privacy-attachment tokens).
+
+    ``sec_``-prefixed ids belong to the in-process privacy store and must
+    never reach the image/document artifact resolvers, which would hard-reject
+    them as missing files.
+    """
+
+    from core.assistant_runtime import secret_attachments
+
+    artifact_ids: list[str] = []
+    secret_ids: list[str] = []
+    for raw_id in list(attachment_ids or []):
+        artifact_id = str(raw_id or "").strip()
+        if not artifact_id:
+            continue
+        if secret_attachments.is_secret_attachment_id(artifact_id):
+            secret_ids.append(artifact_id)
+        else:
+            artifact_ids.append(artifact_id)
+    return artifact_ids, secret_ids
+
+
+def _agent_has_personal_assistant_profile(agent: Any) -> bool:
+    metadata = agent.get("metadata") if isinstance(agent, dict) else None
+    return isinstance(metadata, dict) and bool(metadata.get("personalAssistantProfile"))
+
+
+def _peek_secret_attachment_rows(secret_ids: list[str]) -> list[dict[str, str]]:
+    """Value-free metadata rows for live privacy tokens (no pop, no values)."""
+
+    from core.assistant_runtime import secret_attachments
+
+    rows: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for token in secret_ids:
+        if token in seen:
+            continue
+        seen.add(token)
+        row = secret_attachments.secret_attachment_metadata(token)
+        if row is not None:
+            rows.append(row)
+    return rows
+
+
+def _resolve_secret_attachment_rows(secret_ids: list[str], *, agent: Any) -> list[dict[str, str]]:
+    """Personal-assistant-only metadata rows; ordinary sessions see none."""
+
+    if not secret_ids or not _agent_has_personal_assistant_profile(agent):
+        # Ordinary sessions treat privacy attachment ids as nonexistent so
+        # their observable behavior stays unchanged.
+        return []
+    return _peek_secret_attachment_rows(secret_ids)
+
+
+def _secret_attachment_prompt_block(rows: list[dict[str, Any]]) -> str:
+    """Model-facing presence marker for privacy attachments.
+
+    Mirrors the document prompt block shape (a data marker, never content):
+    one line per attachment, naming the one-shot token so configuration tools
+    can consume it, and stating that the model cannot see the value.
+    """
+
+    from core.assistant_runtime import secret_attachments
+
+    lines: list[str] = []
+    for row in rows:
+        token = str(row.get("attachmentId") or "").strip()
+        if not token:
+            continue
+        kind = secret_attachments.peek_secret_attachment(token) or "secret"
+        label = secret_attachments.SECRET_KIND_LABELS.get(
+            kind, secret_attachments.SECRET_KIND_LABELS["secret"],
+        )
+        lines.append(
+            f'[隐私附件] {token}（类型：{label}）已附加，模型不可见其内容；'
+            f'可在配置类工具（如 provider_add）中用 credential_token="{token}" 引用'
+        )
+    return "\n".join(lines)
+
+
+def _empty_session_submit_error(s: Any, lang: str) -> Any:
+    return s.SessionValidationError(
+        s.text_for(
+            lang,
+            zh="请输入本轮消息、添加图片或引用会话后再发送。",
+            en="Enter a message, attach an image, or reference a session before sending.",
+        )
+    )
+
+
 def submit_session_message(
     session_id: str,
     content: str,
@@ -1694,9 +1791,10 @@ def submit_session_message(
         )
         if continuation_expected is None:
             s._ensure_conversation_workspace_metadata(conversation)
+        turn_attachment_ids, secret_attachment_ids = _partition_secret_attachment_ids(attachment_ids)
         image_ids, document_ids = document_attachments.partition_session_attachment_ids(
             conversation,
-            attachment_ids or [],
+            turn_attachment_ids,
         )
         image_attachments = s._resolve_session_image_attachments(
             conversation_id,
@@ -1709,6 +1807,9 @@ def submit_session_message(
             conversation=conversation,
         )
         attachments = [*image_attachments, *document_attachments_list]
+        # Privacy (sec_) attachments validate against the in-process store and
+        # never enter image/document resolution or file prompt blocks.
+        secret_attachment_rows = _peek_secret_attachment_rows(secret_attachment_ids)
         session_reference_rows, knowledge_file_rows = conversation_references.partition_conversation_references(
             references or []
         )
@@ -1775,10 +1876,8 @@ def submit_session_message(
                 attachments = [*image_attachments, *document_attachments_list]
             else:
                 recent_image_reference_missing = True
-        if not message and not attachments and not all_references:
-            raise s.SessionValidationError(
-                s.text_for(lang, zh="请输入本轮消息、添加图片或引用会话后再发送。", en="Enter a message, attach an image, or reference a session before sending.")
-            )
+        if not message and not attachments and not secret_attachment_rows and not all_references:
+            raise _empty_session_submit_error(s, lang)
 
         # An idle session can still hold stranded queued rows (e.g. enqueued
         # by a concurrent submit that lost the acceptance window). A direct
@@ -1863,6 +1962,11 @@ def submit_session_message(
                 conversation.get("agent_id") or conversation.get("agentId") or prepared_agent_id
             ).strip() or prepared_agent_id
             agent = prepared_agent
+        # Privacy attachments are a personal-assistant-only channel: ordinary
+        # sessions drop the rows entirely (ids treated as nonexistent).
+        secret_attachment_rows = _resolve_secret_attachment_rows(secret_attachment_ids, agent=agent)
+        if not secret_attachment_rows and secret_attachment_ids and not message and not attachments and not all_references:
+            raise _empty_session_submit_error(s, lang)
         if knowledge_file_reference_rows:
             # Resolve content after the turn agent is known: KB retrieval is
             # governed per agent and file references read session artifacts.
@@ -2036,7 +2140,13 @@ def submit_session_message(
             leases=requested_leases,
             user_payload={
                 "content": message,
-                "attachments": s._normalize_message_attachments(attachments),
+                "attachments": [
+                    *s._normalize_message_attachments(attachments),
+                    # Privacy rows carry only {attachmentId, kind, label?}:
+                    # the generic normalizer would drop them (no artifactId),
+                    # and the plaintext value must never be journaled.
+                    *secret_attachment_rows,
+                ],
                 "references": [
                     *s._normalize_session_references(all_references),
                     # Re-normalize the resolved rows (not the stripped
@@ -2254,9 +2364,10 @@ def submit_session_message(
             document_attachments_list,
             lang=lang,
         )
+        secret_prompt_block = _secret_attachment_prompt_block(secret_attachment_rows)
         reference_prompt_block = "\n\n".join(
             block
-            for block in (reference_prompt_block, knowledge_prompt_block, document_prompt_block)
+            for block in (reference_prompt_block, knowledge_prompt_block, document_prompt_block, secret_prompt_block)
             if block
         )
         if reference_prompt_block:

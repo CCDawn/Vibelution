@@ -514,6 +514,21 @@ def upload_attachment(payload: bytes, *, filename: str, content_type: str) -> di
         return attachments.store(sessions, session_id, payload, filename=filename, content_type=content_type)
 
 
+def upload_secret_attachment(value: str, *, kind: str = "secret", label: str = "") -> dict[str, Any]:
+    """Stage a privacy attachment in process memory; never persist or log it.
+
+    The plaintext stays in the secret store and only the one-shot ``sec_``
+    reference id (plus channel kind and optional display label) is returned.
+    """
+    from . import attachments
+
+    with _session_command():
+        try:
+            return attachments.store_secret(value, kind=kind, label=label)
+        except ValueError:
+            raise AssistantSessionError("SESSION_INVALID") from None
+
+
 def read_attachment(artifact_id: str) -> tuple[bytes, str]:
     """Read an artifact belonging to the fixed assistant Session."""
     from . import attachments
