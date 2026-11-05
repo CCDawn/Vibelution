@@ -9842,7 +9842,10 @@ def test_submit_session_message_persists_lease_conflict_notice_without_llm_call(
 
     response = client.post(
         "/api/sessions/session-live/messages",
-        json={"content": "修复这个前端显示问题"},
+        # Explicit write intent: keyword-only text no longer selects a write
+        # lease, so the persistent 409 rejection must be driven by a declared
+        # write turn instead of the "修复" keyword in the message.
+        json={"content": "修复这个前端显示问题", "writeIntent": True},
     )
 
     assert response.status_code == 409
