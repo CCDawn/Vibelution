@@ -30,7 +30,7 @@ import threading
 import pytest
 from fastapi.testclient import TestClient
 
-from core.assistant_runtime.host import Message, NativeFacade, create_app
+from core.assistant_runtime.host import Message, NativeFacade, QueuedTurn, SendNowQueuedTurn, UpdateQueuedTurn, create_app
 
 # Frozen snapshot of set(SessionMessagePayload.model_fields) -
 # set(Message.model_fields), rebased to the references support already shipped
@@ -53,6 +53,31 @@ HOST_MESSAGE_FIELDS = frozenset({"message", "requestId", "attachmentIds", "refer
 
 ASSISTANT = {"agentId": "local-assistant", "directSessionId": "native-session"}
 AUTH = {"Authorization": "Bearer private-test-token"}
+
+
+def test_private_queue_models_keep_a_closed_fixed_session_transport():
+    assert set(QueuedTurn.model_fields) == {"queuedTurnId"}
+    assert set(UpdateQueuedTurn.model_fields) == {"queuedTurnId", "content", "position", "status"}
+    assert set(SendNowQueuedTurn.model_fields) == {"queuedTurnId", "expectedTurnId"}
+    for model in (QueuedTurn, UpdateQueuedTurn, SendNowQueuedTurn):
+        assert model.model_config["extra"] == "forbid"
+        assert model.model_config["strict"] is True
+
+
+def test_private_queue_facade_only_forwards_to_native_adapter(monkeypatch):
+    from core.assistant_runtime import native
+
+    calls = []
+    for name in ("update_queued_turn", "remove_queued_turn", "send_now_queued_turn"):
+        monkeypatch.setattr(native, name, lambda *args, _name=name, **kwargs:
+                            calls.append((_name, args, kwargs)) or {"queuedTurns": []})
+    facade = NativeFacade.__new__(NativeFacade)
+    facade.update_queued_turn("queued-one", content="edited", position=1, status="paused")
+    facade.remove_queued_turn("queued-one")
+    facade.send_now_queued_turn("queued-one", expected_turn_id="observed-turn")
+    assert calls == [("update_queued_turn", ("queued-one",), {"content": "edited", "position": 1, "status": "paused"}),
+                     ("remove_queued_turn", ("queued-one",), {}),
+                     ("send_now_queued_turn", ("queued-one",), {"expected_turn_id": "observed-turn"})]
 
 
 @pytest.fixture(autouse=True)

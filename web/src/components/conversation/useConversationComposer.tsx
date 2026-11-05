@@ -922,11 +922,11 @@ export function useConversationComposer({
           title={composerInterruptGuidancePending ? resolvedInterruptGuidancePendingLabel : resolvedInterruptGuidanceHint}
           aria-label={composerInterruptGuidancePending ? resolvedInterruptGuidancePendingLabel : resolvedInterruptGuidanceLabel}
           data-testid="composer-interrupt-guidance"
-        >
-          {composerInterruptGuidancePending ? (
+          icon={composerInterruptGuidancePending ? (
             <LoaderCircle className={styles.statusSpinner} size={14} aria-hidden="true" />
-          ) : null}
-          <span>{composerInterruptGuidancePending ? resolvedInterruptGuidancePendingLabel : resolvedInterruptGuidanceLabel}</span>
+          ) : undefined}
+        >
+          {composerInterruptGuidancePending ? resolvedInterruptGuidancePendingLabel : resolvedInterruptGuidanceLabel}
         </VButton>
       ) : null}
       {runningGuidanceActionsEnabled ? (

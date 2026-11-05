@@ -9,7 +9,7 @@ from core.assistant_runtime import migration_history as history
 from core.assistant_runtime.history_host import HistoryHost
 from core.assistant_runtime.host import create_app
 from tests.test_assistant_history_preview import setup_preview  # noqa: F401
-from tests.test_assistant_runtime_host import Native
+from tests.test_assistant_runtime_host import Native, QueuedNative
 
 
 def make_host(tmp_path, setup_preview):
@@ -26,6 +26,123 @@ def body(dispatch, operation="1" * 32, *, turn="turn-1"):
     preview = dispatch.history_preview.preview("registered:1", turn_id=turn)
     return {"projectId": "registered:1", "previewId": preview["previewId"],
             "turnId": turn, "revision": 1, "operationId": operation}
+
+
+@pytest.mark.parametrize("acceptance", ["default", "accepted", "repeat", "conflict"])
+def test_history_stop_boundary_only_commits_an_accepted_queue_stop(acceptance):
+    from types import SimpleNamespace
+    from core.assistant_runtime.native import AssistantSessionError
+
+    calls = []
+    owner = HistoryHost.__new__(HistoryHost)
+    owner._lock = threading.RLock()
+    owner._sync_signal_lock = threading.Lock()
+    owner._sync_active = {"turnId": "turn-one", "owner": SimpleNamespace(revoke=lambda: calls.append("signal"))}
+    owner._preview = SimpleNamespace(stop_turn=lambda turn: calls.append(("preview", turn)))
+    owner._operation_turn = "turn-one"
+    owner._operation_stopped = False
+    owner._owner = SimpleNamespace(suspend=lambda: calls.append("suspend"))
+    receipt = {"queuedTurns": [], "stopRequested": acceptance == "accepted"}
+
+    def native_stop(turn):
+        calls.append(("native", turn))
+        if acceptance == "conflict":
+            raise AssistantSessionError("SESSION_CONFLICT")
+        return receipt
+
+    kwargs = {} if acceptance == "default" else {"accepted": lambda result: result.get("stopRequested") is True}
+    if acceptance == "conflict":
+        with pytest.raises(AssistantSessionError, match="SESSION_CONFLICT"):
+            owner.stop_native_turn(native_stop, "turn-one", **kwargs)
+    else:
+        assert owner.stop_native_turn(native_stop, "turn-one", **kwargs) is receipt
+    assert calls[:2] == ["signal", ("native", "turn-one")]
+    committed = acceptance in {"default", "accepted"}
+    assert calls[2:] == ([("preview", "turn-one"), "suspend"] if committed else [])
+    assert owner._operation_stopped is committed
+
+
+@pytest.mark.parametrize("infer_turn", [False, True])
+@pytest.mark.parametrize("outcome", ["accepted", "repeat", "conflict"])
+def test_send_now_uses_personal_assistant_stop_fences_only_for_accepted_stop(
+        tmp_path, setup_preview, monkeypatch, infer_turn, outcome):
+    from core.assistant_runtime.native import AssistantSessionError
+
+    dispatch, _, history_host, _ = make_host(tmp_path, setup_preview)
+    request = body(dispatch)
+    order = []
+    history_host._operation_turn = "turn-1"
+    original_stop = history_host._preview.stop_turn
+
+    def preview_stop(turn):
+        order.append(("preview", turn))
+        original_stop(turn)
+
+    monkeypatch.setattr(history_host._preview, "stop_turn", preview_stop)
+    monkeypatch.setattr(history_host._owner, "suspend", lambda: order.append(("suspend", "turn-1")))
+
+    class Owner(QueuedNative):
+        def get_detail(self):
+            assert infer_turn
+            order.append(("detail", "turn-1"))
+            return {"id": "native-session", "activeTurnId": "turn-1"}
+
+        def stop(self, _):
+            pytest.fail("send-now must retain native promotion/rollback instead of freezing the queue")
+
+        def send_now_queued_turn(self, queued_turn_id, *, expected_turn_id):
+            order.append(("native", expected_turn_id))
+            assert queued_turn_id == "queued-one" and expected_turn_id == "turn-1"
+            assert dispatch.history_preview.verify_preview(request["previewId"])
+            if outcome == "conflict":
+                raise AssistantSessionError("SESSION_CONFLICT")
+            return {"queuedTurns": self.rows, "stopRequested": outcome == "accepted"}
+
+    class Broker:
+        appearance_enabled = True
+        initial_migration_enabled = True
+
+        def begin_initial_fence(self, turn):
+            order.append(("begin", turn))
+            return ["token"]
+
+        def drain_initial_fence(self, tokens):
+            assert tokens == ["token"]
+            order.append(("drain", "turn-1"))
+            return True
+
+        def end_initial_fence(self, turn):
+            order.append(("end", turn))
+
+        def cancel_image_imports(self, turn):
+            order.append(("cancel-image", turn))
+
+        def cancel_history_imports(self, turn):
+            with pytest.raises(history.MigrationIOError, match="history_preview_expired"):
+                dispatch.history_preview.verify_preview(request["previewId"])
+            order.append(("cancel-history", turn))
+
+        def close(self):
+            pass
+
+    app = create_app(native=Owner(), token="private-test-token", dispatch=dispatch,
+                     main_control=Broker(), history_control=history_host)
+    payload = {"queuedTurnId": "queued-one", **({} if infer_turn else {"expectedTurnId": "turn-1"})}
+    with TestClient(app, base_url="http://127.0.0.1", headers={"Authorization": "Bearer private-test-token"}) as client:
+        response = client.post("/api/assistant/queued-turns/send-now", json=payload)
+        assert response.status_code == (409 if outcome == "conflict" else 202)
+        if outcome == "accepted":
+            assert response.json()["stopRequested"] is True
+        elif outcome == "repeat":
+            assert response.json()["stopRequested"] is False
+    prefix = [("detail", "turn-1")] if infer_turn else []
+    committed = [("preview", "turn-1"), ("suspend", "turn-1"),
+                 ("cancel-image", "turn-1"), ("cancel-history", "turn-1")] if outcome == "accepted" else []
+    assert order == [*prefix, ("begin", "turn-1"), ("drain", "turn-1"), ("native", "turn-1"),
+                     *committed, ("end", "turn-1")]
+    assert history_host._operation_stopped is (outcome == "accepted")
+    if outcome != "accepted":
+        assert dispatch.history_preview.verify_preview(request["previewId"])
 
 
 def test_legacy_reminder_source_private_point_in_time_binding(tmp_path, setup_preview):
