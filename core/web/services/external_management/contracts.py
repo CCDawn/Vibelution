@@ -708,6 +708,11 @@ class AgentDirectoryQuery(Closed):
         return self
 
 
+class AgentDirectoryReadQuery(AgentDirectoryQuery):
+    # Read-only metadata context, never execution authority or a model-selected permission.
+    dispatch_context: Literal["external", "launcher_local"] = "external"
+
+
 class AgentDirectoryTeam(Closed):
     teamId: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
     name: str = Field(max_length=120)
@@ -747,7 +752,7 @@ class AgentDirectoryItem(Closed):
     status: str = Field(min_length=1, max_length=32, pattern=r"^[a-z][a-z0-9_-]*$")
     ownership: AgentDirectoryOwnership
     dispatchable: StrictBool
-    dispatchReason: Literal["agent_not_found", "agent_inactive", "team_dedicated_agent", "active_team_member", "operator_disabled", "unsupported_agent_class", "eligible"]
+    dispatchReason: Literal["agent_not_found", "agent_inactive", "team_dedicated_agent", "active_team_member", "operator_disabled", "unsupported_agent_class", "agent_protected", "eligible"]
 
     @model_validator(mode="after")
     def consistent_dispatch(self):
@@ -764,6 +769,7 @@ class AgentDirectoryCounts(Closed):
 
 class AgentDirectoryResponse(UntrustedResponse):
     scope: Literal["all_registered_agents"]
+    dispatchContext: Literal["external", "launcher_local"] = "external"
     agents: list[AgentDirectoryItem] = Field(max_length=6)
     total: int = Field(ge=0, le=100_000)
     registryTotal: int = Field(ge=0, le=100_000)

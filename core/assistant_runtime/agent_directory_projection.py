@@ -42,7 +42,7 @@ def project_directory_labels(content: str, *, tool_name: str) -> str | None:
 
         fields = {key: value for key, value in payload.items() if key not in {"source", "projectId", "directoryVersion"}}
         try:
-            directory = AgentDirectoryResponse.model_validate(fields).model_dump()
+            directory = AgentDirectoryResponse.model_validate(fields).model_dump(exclude_unset=True)
         except ValidationError:
             return None
         return json.dumps({"source": "launcher-assistant", "projectId": project_id,

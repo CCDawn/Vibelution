@@ -28,6 +28,10 @@ class LocalAssistantBackendClient(ManagedAgentBackendClient):
         self._launcher_capability = credential or ""
         super().__init__(project_root, **kwargs)
 
+    async def management_agent_list(self, **parameters) -> dict[str, Any]:
+        return await super().management_agent_list(**{**parameters,
+            "dispatch_context": "launcher_local" if self._launcher_capability else "external"})
+
     def _load_state(self) -> dict[str, Any]:
         state = super()._load_state()
         payload = _read_json(self.state_path)
