@@ -48,6 +48,7 @@ let client: QueryClient;
 let invoke: ReturnType<typeof vi.fn>;
 let failing: Set<string>;
 let readGates: Map<string, Promise<void>>;
+let currentStatus: typeof STATUS;
 
 async function settle() {
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
@@ -58,14 +59,15 @@ async function mount({ initiallyFail = [], withTaskOwner = false }: { initiallyF
   vi.stubGlobal("fetch", vi.fn(() => { throw new Error("HTTP is forbidden in this window"); }));
   failing = new Set(initiallyFail);
   readGates = new Map();
+  currentStatus = structuredClone(STATUS);
   invoke = vi.fn(async (request: Record<string, unknown>) => {
     const operation = String(request.operation);
     if (failing.has(operation)) throw new Error(`${operation} response unavailable`);
     if (readGates.has(operation)) await readGates.get(operation);
     switch (operation) {
-      case "status": return STATUS;
+      case "status": return currentStatus;
       case "config": return { language: "zh" };
-      case "detail": return DETAIL;
+      case "detail": return { ...DETAIL, id: currentStatus.assistant.directSessionId, agentId: currentStatus.assistant.agentId };
       case "usageSummary": return USAGE;
       case "approvals": return [];
       case "dispatches": return { dispatches: [] };
@@ -149,6 +151,28 @@ afterEach(async () => {
 });
 
 describe("Launcher assistant hosted notifications", () => {
+  it.each(["agentId", "directSessionId"] as const)("clears the previous identity's task-read warning after a healthy %s change", async field => {
+    await mount({ initiallyFail: ["dispatches"] });
+    expect(trigger().getAttribute("aria-label")).toContain("1 项提醒");
+    await click(trigger());
+    expect(panel().textContent).toContain("暂时查不到任务进度");
+    const previousReads = operations().filter(operation => operation === "dispatches").length;
+
+    failing.delete("dispatches");
+    currentStatus = { ...currentStatus, assistant: { ...currentStatus.assistant, [field]: `${currentStatus.assistant[field]}-next` } };
+    await act(async () => { await client.refetchQueries({ queryKey: ["launcher-assistant", "status"], exact: true }); });
+    await settle(); await settle();
+
+    expect(operations().filter(operation => operation === "dispatches")).toHaveLength(previousReads + 1);
+    const active = client.getQueryCache().findAll({ queryKey: ["launcher-assistant", "dispatches"], type: "active" });
+    expect(active).toHaveLength(1);
+    expect(active[0].state.status).toBe("success");
+    expect(trigger().getAttribute("aria-label")).toContain("暂无异常, 0 项提醒");
+    expect(panel().textContent).toContain("当前没有异常");
+    expect(operations()).not.toContain("send");
+    expect(operations()).not.toContain("decideDispatchApproval");
+  });
+
   it("recovers cache statistics from the page refresh button without a new detail marker", async () => {
     await mount({ initiallyFail: ["usageSummary"] });
     expect(conversation?.composerCacheUsage?.state).toBe("error");
@@ -320,6 +344,7 @@ describe("Launcher assistant hosted notifications", () => {
   it.each([
     { operation: "detail", query: "detail", title: "聊天没能刷新", retry: "再试一次" },
     { operation: "approvals", query: "approvals", title: "暂时查不到待确认的操作", retry: "再试一次" },
+    { operation: "dispatches", query: "dispatches", title: "暂时查不到任务进度", retry: "再试一次" },
     { operation: "operatorAsset", query: "operator-asset", title: "外观图片未加载", retry: "重试" },
   ])("retains a first-load $operation failure throughout a pending retry", async ({ operation, query, title, retry }) => {
     await mount({ initiallyFail: [operation] });

@@ -529,7 +529,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   const readableDispatch = useRef("");
   readableDispatch.current = reading ? dispatchReadIdentity : "";
   const dispatches = useQuery({
-    queryKey: ["launcher-assistant", "dispatches", epoch],
+    queryKey: ["launcher-assistant", "dispatches", assistantAgentId, sessionId, epoch],
     queryFn: async ({ signal }) => {
       const result = await readLauncherAssistantTaskSource(JSON.stringify([assistantAgentId, sessionId]), signal,
         getLauncherAssistantDispatches, () => mounted.current && document.visibilityState !== "hidden"
