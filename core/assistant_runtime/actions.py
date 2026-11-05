@@ -506,7 +506,7 @@ _HELP = {
     "agent_list": "分页只读完整Agent目录（Agent catalog），含活跃、归档、系统、团队及hidden Agent，仅公开名称、状态、归属等目录元数据。ownership.teams仅含当前roster实证成员关系；recordedTeams是Agent元数据保留但未确认当前成员的团队引用，不证明当前归属，也不改变派遣。createdBy是公开创建来源，templateId是登记模板，未知为空；ownerAgentId/ownerAgentName仅展示显式宿主Agent引用及同一目录公开名称，不读取对方Session或配置；kind=unknown不表示丢失Agent。dispatchable单独表示能否派遣，不扩大执行权限。total是本次query匹配总量，registryTotal是登记总量，当前页行数不能称总量。默认及最多6项，单行query最多64字符且无控制字符。保持query，用offset=nextOffset、expected_revision=revision续页，直到nextOffset为空才查全；revision变化则从首页重查。需独立agents:directory:read，缺scope先查authorization_status，再用authorization_upgrade只显式增加所需scope。旧目标不支持时明确不可用，不能把不可用说成空目录。",
     "dispatch": "以稳定 dispatch_id 派遣只读任务。优先用 task_source 的 start_after/end_before 唯一短锚点提取当前用户原文（都为空表示整条消息）；不得改写任务、ID或引号文字。task 仅允许用户消息的精确原文子串。未知时保留原参数与 ID，查询回执或由原生引用恢复，不能换 ID 重派。",
     "receipt": "查询原生任务回执；离线/超时/等待审批都不代表目标完成。",
-    "agent_get": "读取目标项目普通 Agent 当前 configRevision、updatedAt、模型与头像，用于配置 CAS。",
+    "agent_get": "读取目标项目普通 Agent 当前 configRevision、updatedAt、模型与头像，用于配置 CAS。可选 archiveEligibility 只读身份资格，不代表审批或空闲；eligible 对象用本次 configRevision 执行归档，blocked 说明阻止原因。",
     "agent_purge_preview": "只读预览永久删除已归档Agent，返回身份、名称、configRevision和固定删除影响，不执行删除。永久删除用agent_purge，必须沿用预览的agentId和configRevision；活跃或受保护对象拒绝。需agents:read。",
     "avatar_options": "分页只读目标项目现有 Agent 头像 filename/path 候选；offset最多50000，limit最多30。仅使用返回的路径，不接收模型、URL、目录或图片内容；来源不可用时不得猜测路径。",
     "task_list": "分页只读目标项目原生活跃任务索引，最多6项，按任务ID升序；只返回ID、类型、状态、固定类型摘要和时间，不返回任务原文。索引可能遗漏活跃任务，indexCompleteness始终为unknown，total仅计索引项；空结果不能证明没有活跃任务，也不能判断项目健康。索引缺失或已列项不一致时拒绝。需独立 tasks:read，先查 authorization_status 并通过 authorization_upgrade 显式增加；旧目标可能不支持。分页不是冻结快照。",
@@ -741,7 +741,8 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
 
     One event loop owns every managed client, lock and heartbeat. The native
     worker is synchronous, so it submits to that loop without creating a second
-    client lifecycle or cancelling a write when its response takes too long.
+    client lifecycle. Expired local waits are cancelled; an admitted server-side
+    write retains its original durable request and is recovered by receipt.
     """
     if _binding is None:
         raise ValueError("Launcher assistant host is not running")
@@ -1024,8 +1025,12 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
         coroutine = service.dispatch_from_source(project_id, **args, runtime=runtime)
     elif action == "receipt":
         coroutine = service.reconcile(args["dispatch_id"])
+    future = asyncio.run_coroutine_threadsafe(coroutine, loop)
     try:
-        value = asyncio.run_coroutine_threadsafe(coroutine, loop).result(timeout=125 if action in {"operator_image_upload", "history_import", "affairs_sync", "episodic_sync", "initial_migration_queue", "knowledge_sync_queue", "knowledge_sync_recover", "reminder_handoff_queue", "reminder_handoff_recover"} else 25)
+        # A management POST alone may use 25s, followed by an authenticated
+        # receipt read and diagnostics. Reuse the existing long-operation
+        # window so the synchronous tool does not abandon that recovery early.
+        value = future.result(timeout=125 if action in managed or action in {"operator_image_upload", "history_import", "affairs_sync", "episodic_sync", "initial_migration_queue", "knowledge_sync_queue", "knowledge_sync_recover", "reminder_handoff_queue", "reminder_handoff_recover"} else 25)
         if action in _BROWSER_SCHEMAS:
             return _browser_model_result(value)
         if action == "dispatch_write" and isinstance(value.get("receipt"), dict):
@@ -1036,6 +1041,10 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
                     "recoveryId": value["operationId"], "state": value["state"], "code": value["code"], "readyForCutover": False}
         return value
     except TimeoutError as exc:
+        if action in managed:
+            # Release local project/request lock waits without cancelling the
+            # backend's already admitted native writer.
+            future.cancel()
         if action in {"history_import", "history_import_receipt"}:
             return {"schemaVersion": 1, "projectId": args["project_id"], "previewId": args["preview_id"],
                     "state": "unknown", "code": "unknown", "readyForCutover": False}
