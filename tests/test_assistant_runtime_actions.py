@@ -112,6 +112,25 @@ def test_schema_title_compaction_preserves_business_keys_and_literal_data():
     assert compact["required"] == ["title"] and schema == before
 
 
+def test_management_navigation_builds_each_source_contract_registry_once_per_call(monkeypatch):
+    from core.assistant_runtime import actions
+    from core.web.services.external_management import contracts as source
+    calls = []
+    for name in ("contracts", "pa_managed_write_contracts"):
+        original = getattr(source, name)
+        def counted(original=original, name=name):
+            calls.append(name)
+            return original()
+        monkeypatch.setattr(source, name, counted)
+
+    first = actions._management_contracts()
+    assert calls == ["contracts", "pa_managed_write_contracts"]
+    calls.clear()
+    second = actions._management_contracts()
+    assert calls == ["contracts", "pa_managed_write_contracts"]
+    assert {name: item[1] for name, item in first.items()} == {name: item[1] for name, item in second.items()}
+
+
 @pytest.mark.anyio
 async def test_launcher_index_remains_complete_json_through_native_budget():
     dispatch = Dispatch()

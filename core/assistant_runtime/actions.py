@@ -335,11 +335,12 @@ def _management_contracts():
     # share the same injected project_id/request_id envelope; only their
     # executors differ (project dispatch vs. in-process pa_managed_writes).
     for registry, contract_source in ((ACTION_MODELS, contracts), (PA_MANAGED_WRITE_MODELS, pa_managed_write_contracts)):
+        source_contracts = contract_source()
         for name, model in registry.items():
             schema = create_model(f"Launcher_{model.__name__}", __base__=model,
                 project_id=(str, Field(min_length=1, max_length=160)),
                 request_id=(str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$")))
-            result[name] = (schema, {**contract_source()[name], "parameters": schema.model_json_schema(),
+            result[name] = (schema, {**source_contracts[name], "parameters": schema.model_json_schema(),
                                     "governed": True})
     result["dispatch_write"] = (DispatchWrite, {
         "action": "dispatch_write", "governed": True,
