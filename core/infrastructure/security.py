@@ -94,10 +94,99 @@ FORBIDDEN_COMMANDS: Set[str] = {
     "inject", "hook", "patch",
 }
 
+# 纯破坏类 Git 子命令黑名单：只保留不需看参数即可判定不可逆的操作
+# （filter-branch/filter-repo/rebase 重写历史，checkout/restore 可丢弃
+# 未提交改动，rm 删除工作区文件）。
+# 权威白名单在 consent 层：core/web/services/local_assistant/policy.py 的
+# _git_development 按子命令+参数逐一放行日常安全操作（merge --ff-only、
+# switch -c、stash list/show、add/commit/branch/读取类等）。consent 层
+# 放行的操作不得在本层封禁；其余子命令的不可逆变体由
+# _destructive_git_variant 按参数拦截，不再按子命令整体封禁。
 FORBIDDEN_GIT_SUBCOMMANDS: Set[str] = {
-    "reset", "clean", "rebase", "push", "pull", "fetch", "checkout", "switch",
-    "restore", "cherry-pick", "merge", "stash", "tag", "rm",
+    "filter-branch",
+    "filter-repo",
+    "rebase",
+    "checkout",
+    "restore",
+    "rm",
 }
+
+
+def _extract_git_subcommand(parts: List[str]) -> Tuple[str, List[str]]:
+    """跳过 git 全局选项后返回 (子命令, 子命令参数)；找不到返回 ("", [])。
+
+    ``git -C <path> reset --hard`` 这类带全局选项的命令必须同样命中兜底，
+    否则破坏类变体会借全局选项绕过子命令判定。
+    """
+    index = 1
+    while index < len(parts):
+        token = str(parts[index] or "").strip()
+        if token in {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix"}:
+            index += 2
+            continue
+        if token.startswith("--") and "=" in token:
+            index += 1
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        return token.lower(), [str(part or "").strip() for part in parts[index + 1 :]]
+    return "", []
+
+
+def _short_flag_letters(arg: str) -> Set[str]:
+    """返回单破折号短选项簇中的字母，如 ``-xdf`` -> {'x','d','f'}。"""
+    stripped = str(arg or "").strip()
+    if not stripped.startswith("-") or stripped.startswith("--"):
+        return set()
+    return {char.lower() for char in stripped[1:] if char.isalpha()}
+
+
+def _destructive_git_variant(subcommand: str, args: List[str]) -> str:
+    """返回破坏性 Git 变体描述；空串表示不是破坏类变体。
+
+    只拦截真正不可逆的变体：reset --hard 丢弃工作区改动、clean 带强制时
+    删除未跟踪文件、push --force/--delete 强推或删远端引用、reflog expire
+    清空引用日志、stash drop/clear 销毁暂存、switch --discard-changes 丢弃
+    本地改动。这些子命令的其余用法可逆或只读，不在此拦截。
+    """
+    sub = str(subcommand or "").strip().lower()
+    lowered = [str(arg or "").strip().lower() for arg in args]
+    if sub == "reset":
+        if any(arg == "--hard" for arg in lowered):
+            return "git reset --hard"
+        return ""
+    if sub == "clean":
+        for arg in lowered:
+            if arg == "--force" or "f" in _short_flag_letters(arg):
+                return f"git clean {arg}"
+        return ""
+    if sub == "push":
+        for arg in lowered:
+            if arg in {"--force", "--force-with-lease", "--delete"} or (
+                _short_flag_letters(arg) & {"f", "d"}
+            ):
+                return f"git push {arg}"
+        # refspec 级强推：`git push origin +main` 等价于对该引用 --force。
+        if any(arg.startswith("+") for arg in lowered):
+            return "git push +<refspec>"
+        return ""
+    if sub == "reflog":
+        # git reflog / git reflog show 只读；expire 清空引用日志不可逆。
+        if any(arg == "expire" for arg in lowered):
+            return "git reflog expire"
+        return ""
+    if sub == "stash":
+        # stash push/save/pop/apply 可逆（条目可恢复或改动回到工作区）；
+        # drop/clear 直接销毁暂存条目。
+        if lowered and lowered[0] in {"drop", "clear"}:
+            return f"git stash {lowered[0]}"
+        return ""
+    if sub == "switch":
+        if any(arg == "--discard-changes" for arg in lowered):
+            return "git switch --discard-changes"
+        return ""
+    return ""
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -391,18 +480,28 @@ class SecurityValidator:
         return head
 
     def _validate_git_command(self, command: str) -> Tuple[bool, str]:
-        """Git 命令专项校验。"""
+        """Git 命令专项校验（纯破坏类兜底）。
+
+        日常放行口径以 consent 层为唯一事实源：core/web/services/
+        local_assistant/policy.py 的 _git_development 按子命令+参数逐一
+        放行 merge --ff-only、switch -c、stash list/show 等安全操作。
+        本层只拦截不可逆的破坏类子命令与破坏性参数变体。
+        """
         try:
             parts = shlex.split(command, posix=False)
         except ValueError as e:
             return (False, f"Git 命令解析失败：{e}")
 
-        if len(parts) < 2:
+        subcommand, args = _extract_git_subcommand(parts)
+        if not subcommand:
             return (False, "Git 命令缺少子命令")
 
-        subcommand = parts[1].strip().lower()
         if subcommand in FORBIDDEN_GIT_SUBCOMMANDS:
             return (False, f"禁止使用 Git 子命令：{subcommand}")
+
+        destructive = _destructive_git_variant(subcommand, args)
+        if destructive:
+            return (False, f"禁止使用 Git 破坏性操作：{destructive}")
 
         return (True, f"允许：Git {subcommand}")
 
