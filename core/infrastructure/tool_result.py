@@ -42,9 +42,17 @@ BUSINESS_FAILURE_STATUSES = {
     "policy_blocked",
     "timeout",
     "no_result",
+    "timed_out",
+}
+
+# 异步受理/进行中是工具的“已接收、等待结果”正常态，不是业务失败。把它们
+# 折进 BUSINESS_FAILURE_STATUSES 会把 `{"ok": true, "status": "submitted"}`
+# 这类真实成功产出误标成 tool.execute.failed + canonical is_error=true，
+# 诱导上层重试造成重复提交（如 team_knowledge_tools 的异步摄取回执）。
+# 单列 accepted/pending 语义：语义状态按原样透传，不再触发失败判定。
+ACCEPTED_PENDING_STATUSES = {
     "submitted",
     "in_progress",
-    "timed_out",
 }
 
 # Shell security receipts may include a machine-readable reason in the tag.
@@ -201,6 +209,10 @@ def extract_tool_result_semantics(result: Any) -> dict[str, Any]:
         status = _normalize_text_payload(str(payload.get("status") or "")).lower()
         if status:
             semantics["semanticStatus"] = status
+            if status in ACCEPTED_PENDING_STATUSES:
+                # 异步受理/进行中单独成旗标，供事件面区分“已受理/进行中”
+                # 与普通成功；不参与任何失败判定。
+                semantics["acceptedPending"] = True
         failure_class = _normalize_text_payload(
             str(payload.get("failureClass") or payload.get("failure_class") or "")
         )
@@ -211,6 +223,10 @@ def extract_tool_result_semantics(result: Any) -> dict[str, Any]:
                 try:
                     semantics["exitCode"] = int(payload.get(key))
                 except (TypeError, ValueError) as exc:
+                    # exitCode 解析失败是解析噪音，不是业务失败：单独成码
+                    # （exitCodeParseFailure），保持 exitCode=None 且不把
+                    # semanticStatus 翻成 failed。非零退出码才走 process_exit。
+                    semantics["exitCodeParseFailure"] = True
                     _debug_logger.warning(
                         f"[工具结果] exitCode 解析失败(key={key}, value={payload.get(key)!r}): {type(exc).__name__}: {exc}",
                         tag="TOOL_RESULT",
@@ -290,39 +306,61 @@ def extract_tool_result_semantics(result: Any) -> dict[str, Any]:
     return semantics
 
 
-def _looks_like_business_failure(payload: Any) -> bool:
-    """判断结构化工具返回值是否表达了业务失败。"""
+def _business_failure_reason(payload: Any) -> str:
+    """返回结构化工具返回值表达业务失败的可区分原因码；空串表示不是失败。
+
+    可区分 code 而非折叠文案（范式同 bfc22b149/f276b622f）：
+    - ``ok_false`` / ``success_false``：显式布尔失败位。
+    - ``nonzero_exit``：数值退出码非零。
+    - ``failure_status:<status>``：status 命中 BUSINESS_FAILURE_STATUSES。
+    - ``error_field``：无 ok/success 字段且 error 为非空字符串。
+
+    不判败的解析噪音：exitCode 字段存在但解析失败（非数值）单独成码
+    ``exitCodeParseFailure``（由 extract_tool_result_semantics 携带），
+    不折叠成业务失败；accepted/pending 状态（ACCEPTED_PENDING_STATUSES）
+    是异步正常态，同样不判败。
+    """
     if not isinstance(payload, dict):
-        return False
+        return ""
 
     ok_value = payload.get("ok")
     if ok_value is False:
-        return True
+        return "ok_false"
     success_value = payload.get("success")
     if success_value is False:
-        return True
+        return "success_false"
 
     for key in ("exitCode", "exit_code", "returncode", "return_code"):
         if key not in payload:
             continue
         try:
             if int(payload.get(key)) != 0:
-                return True
+                return "nonzero_exit"
         except (TypeError, ValueError):
-            return True
+            return ""
         break
 
     status_value = payload.get("status")
     if isinstance(status_value, str):
         normalized_status = _normalize_text_payload(status_value)
         if normalized_status.lower() in BUSINESS_FAILURE_STATUSES:
-            return True
+            return f"failure_status:{normalized_status.lower()}"
 
     error_value = payload.get("error")
-    if error_value and ok_value is not True and success_value is not True:
-        return True
+    if (
+        isinstance(error_value, str)
+        and _normalize_text_payload(error_value)
+        and "ok" not in payload
+        and "success" not in payload
+    ):
+        return "error_field"
 
-    return False
+    return ""
+
+
+def _looks_like_business_failure(payload: Any) -> bool:
+    """判断结构化工具返回值是否表达了业务失败。"""
+    return bool(_business_failure_reason(payload))
 
 
 def _is_completed_terminal_lifecycle(result: Any) -> bool:

@@ -1033,8 +1033,6 @@ class TestInferToolBusinessSuccess:
             {"status": "failure", "message": "legacy failure token"},
             {"status": "error", "message": "runtime error"},
             {"status": "no_result", "message": "empty payload"},
-            {"status": "submitted", "message": "async accepted"},
-            {"status": "in_progress", "message": "still running"},
             {"status": "timed_out", "message": "request timed out"},
             {"status": "timeout", "message": "tool call timed out"},
         ],
@@ -1050,8 +1048,6 @@ class TestInferToolBusinessSuccess:
             '{"error":"RuntimeError","status":"failed"}',
             '{"status":"cancelled","error":"User stop requested"}',
             '{"status":"no_result"}',
-            '{"status":"submitted"}',
-            '{"status":"in_progress"}',
             '{"status":"timed_out"}',
             '{"status":"timeout"}',
         ],
@@ -1093,6 +1089,95 @@ class TestInferToolBusinessSuccess:
 
     def test_failed_dict_is_business_failure(self):
         assert infer_tool_business_success({"status": "failed", "message": "send failed"}) is False
+
+    @pytest.mark.parametrize(
+        "result",
+        [
+            {"ok": True, "status": "submitted", "message": "async accepted"},
+            {"ok": True, "status": "in_progress", "message": "still running"},
+            {"status": "submitted", "message": "async accepted"},
+            {"status": "in_progress", "message": "still running"},
+        ],
+    )
+    def test_accepted_pending_status_is_not_business_failure(self, result):
+        """submitted/in_progress 是异步受理正常态，不判业务失败。"""
+        assert infer_tool_business_success(result) is True
+        # canonical 链路用 infer_tool_execution_success 判 is_error，必须为成功。
+        assert infer_tool_execution_success(result) is True
+
+    def test_accepted_pending_status_keeps_raw_semantics_without_failure_class(self):
+        payload = {"ok": True, "status": "submitted", "agentId": "agent-1", "package": {}}
+
+        semantics = extract_tool_result_semantics(payload)
+        envelope = package_tool_result(payload)
+
+        # 语义状态按原样透传（模型可见文本不变），不再携带失败类。
+        assert semantics["semanticStatus"] == "submitted"
+        assert semantics["acceptedPending"] is True
+        assert semantics["failureClass"] == ""
+        assert envelope.semantic_status == "submitted"
+        assert envelope.failure_class == ""
+
+    @pytest.mark.parametrize(
+        "result",
+        [
+            {"ok": True, "error": "ignored detail"},
+            {"success": True, "error": "ignored detail"},
+            '{"ok":true,"error":"ignored detail"}',
+        ],
+    )
+    def test_error_field_with_explicit_ok_or_success_is_not_failure(self, result):
+        """error 字段与显式 ok/success 共存时以布尔位为准，不判败。"""
+        assert infer_tool_business_success(result) is True
+
+    @pytest.mark.parametrize(
+        "result",
+        [
+            {"error": "boom"},
+            {"error": "boom", "status": "failed"},
+            '{"error":"RuntimeError","message":"scheduler closed"}',
+        ],
+    )
+    def test_error_field_without_ok_or_success_still_fails(self, result):
+        """无 ok/success 字段且 error 为非空字符串时仍计业务失败。"""
+        assert infer_tool_business_success(result) is False
+
+    @pytest.mark.parametrize(
+        "result",
+        [
+            {"error": {"code": "E42"}},
+            {"error": ""},
+            {"error": ["boom"]},
+        ],
+    )
+    def test_non_string_or_empty_error_field_is_not_failure(self, result):
+        """error 为非字符串或空值时是解析噪音，不判业务失败。"""
+        assert infer_tool_business_success(result) is True
+
+    def test_unparseable_exit_code_is_not_failure_but_distinguishable(self):
+        """exitCode 非数值是解析噪音：不判败，单独成码 exitCodeParseFailure。"""
+        payload = {"ok": True, "status": "completed", "exitCode": "N/A"}
+
+        assert infer_tool_business_success(payload) is True
+        semantics = extract_tool_result_semantics(payload)
+        envelope = package_tool_result(payload)
+
+        assert semantics["exitCodeParseFailure"] is True
+        assert semantics["exitCode"] is None
+        assert semantics["semanticStatus"] == "completed"
+        assert semantics["failureClass"] == ""
+        assert envelope.semantic_status == "completed"
+        assert envelope.exit_code is None
+
+    def test_nonzero_exit_code_still_overrides_accepted_pending_status(self):
+        """非零数值退出码仍是硬失败，即使 status 是受理态。"""
+        payload = {"ok": True, "status": "submitted", "exitCode": 3}
+
+        assert infer_tool_business_success(payload) is False
+        semantics = extract_tool_result_semantics(payload)
+        assert semantics["semanticStatus"] == "failed"
+        assert semantics["failureClass"] == "process_exit"
+        assert semantics["exitCode"] == 3
 
     def test_nonzero_exit_code_dict_is_business_failure_even_with_success_status(self):
         payload = {"status": "success", "exitCode": 255, "message": "process failed"}
