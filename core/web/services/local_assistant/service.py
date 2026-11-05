@@ -30,6 +30,9 @@ def materialize_workspace(project_root, task_id):
 class LocalAssistantTaskService(ExternalAgentTaskService):
     """Only authenticated transport may select this policy; DTOs cannot."""
 
+    cleanup_workspaces = True
+    cleanup_absent_sessions = False
+
     def __init__(self, store, *, project_root, authority_fingerprint=None, workspace_factory=None, **kwargs):
         from core.infrastructure.launcher_assistant_authority import launcher_authority_fingerprint
         self.project_root = Path(project_root).resolve()
@@ -44,6 +47,12 @@ class LocalAssistantTaskService(ExternalAgentTaskService):
         current = self.authority_fingerprint()
         if not current or self.request_authority_fingerprint and current != self.request_authority_fingerprint:
             raise ExternalAgentAccessError("Local assistant authorization is unavailable", code="LOCAL_ASSISTANT_DISABLED")
+
+    def _require_cleanup_ownership(self, record):
+        authority = self.authority_fingerprint()
+        proofs = [record.get(key) for key in ("localAuthorityFingerprint", "localCleanupAuthorityFingerprint") if record.get(key)]
+        if not authority or not proofs or any(proof != authority for proof in proofs):
+            raise ExternalAgentAccessError("Task does not belong to current Launcher", code="TASK_NOT_FOUND")
 
     def _operator_agent_enabled(self, agent_id):
         return bool(agent_id and agent_id not in self.denied_agent_ids)

@@ -1,4 +1,4 @@
-import type { AgentPermissionPreset, ConfigBootstrap, SessionBudgetParameters, SessionDetail, SessionMessageCurationAction, SessionMessageCurationMutationResponse, SessionMessageCurationResponse, SessionReferenceAttachment, SessionToolApprovalRequest, TokenUsageRollup, TokenUsageSample } from "./types";
+import type { AgentPermissionPreset, ConfigBootstrap, SessionBudgetParameters, SessionDetail, SessionMessageCurationAction, SessionMessageCurationMutationResponse, SessionMessageCurationResponse, SessionQueuedTurn, SessionReferenceAttachment, SessionToolApprovalRequest, TokenUsageRollup, TokenUsageSample } from "./types";
 import type { DesktopPetPreferences } from "../routes/desktopPet/desktopPetPreferences";
 import type { SessionContinuationExpectation } from "./chat";
 
@@ -15,6 +15,7 @@ export type LauncherAssistantModelChoice = {
 export type LauncherManagementPermission = { preset: AgentPermissionPreset; revision: number };
 
 export type LauncherAssistantStatus = {
+  followupQueueVersion?: 1;
   teamRunsVersion?: 1;
   assistantAvatarVersion?: 1;
   assistantAvatarRevision?: string | null;
@@ -103,6 +104,9 @@ export type LauncherAssistantRequest =
   | { operation: "switchHead"; nodeId: string }
   | { operation: "regenerate"; messageId: string; requestId: string }
   | { operation: "guidance"; content: string; mode: "safe" | "interrupt" }
+  | { operation: "updateQueuedTurn"; sessionId: string; queuedTurnId: string; content?: string; position?: number; status?: "paused" | "queued" }
+  | { operation: "removeQueuedTurn"; sessionId: string; queuedTurnId: string }
+  | { operation: "sendNowQueuedTurn"; sessionId: string; queuedTurnId: string; expectedTurnId?: string }
   | { operation: "config" }
   | { operation: "operatorAsset"; kind: LauncherOperatorAssetKind }
   | { operation: "computerState" | "computerWindows" }
@@ -370,6 +374,7 @@ export async function getLauncherAssistantStatus(): Promise<LauncherAssistantSta
     }
   }
   if (result.attachmentVersion !== undefined && result.attachmentVersion !== 1) throw new Error("Launcher 附件版本不可用。");
+  if (result.followupQueueVersion !== undefined && result.followupQueueVersion !== 1) throw new Error("Launcher 队列版本不可用。");
   if (result.settings !== undefined) {
     const settings = result.settings;
     if (!record(settings) || typeof settings.ok !== "boolean" || !record(settings.preferences)
@@ -609,6 +614,54 @@ export async function guideLauncherAssistantTurn(sessionId: string, content: str
   const result = await launcherAssistantBridge().invoke({ operation: "guidance", content: normalized, mode });
   if (!record(result) || result.id !== sessionId) throw new Error("Launcher 未确认引导所属会话。");
   return result as SessionDetail;
+}
+
+function assertQueuedTurnIdentity(sessionId: string, queuedTurnId: string): void {
+  if (![sessionId, queuedTurnId].every(value => typeof value === "string"
+    && /^[A-Za-z0-9_-]{1,160}(?![\s\S])/.test(value))) throw new Error("ASSISTANT_REQUEST_INVALID");
+}
+
+function readLauncherQueuedTurns(result: unknown, sendNow = false): SessionQueuedTurn[] {
+  if (!record(result) || Array.isArray(result) || !Array.isArray(result.queuedTurns)
+    || Object.keys(result).some(key => key !== "queuedTurns" && !(sendNow && key === "stopRequested"))
+    || !result.queuedTurns.every(row => record(row) && !Array.isArray(row)
+      && typeof row.id === "string" && /^[A-Za-z0-9_-]{1,160}(?![\s\S])/.test(row.id)
+      && Number.isSafeInteger(row.position) && Number(row.position) >= 1 && typeof row.status === "string" && Boolean(row.status)
+      && typeof row.content === "string")) throw new Error("ASSISTANT_RESPONSE_INVALID");
+  return result.queuedTurns as SessionQueuedTurn[];
+}
+
+/** Native queue writes stay behind the Launcher-owned, session-scoped IPC. */
+export async function updateLauncherAssistantQueuedTurn(sessionId: string, queuedTurnId: string,
+  payload: { content?: string; position?: number; status?: "paused" | "queued" }): Promise<SessionQueuedTurn[]> {
+  assertQueuedTurnIdentity(sessionId, queuedTurnId);
+  if (!record(payload) || Array.isArray(payload) || !Object.values(payload).some(value => value !== undefined)
+    || Object.keys(payload).some(key => !["content", "position", "status"].includes(key))
+    || (payload.content !== undefined && (typeof payload.content !== "string" || payload.content.length > 64_000))
+    || (payload.position !== undefined && (!Number.isSafeInteger(payload.position) || payload.position < 1))
+    || (payload.status !== undefined && !["paused", "queued"].includes(payload.status))) throw new Error("ASSISTANT_REQUEST_INVALID");
+  const fields = Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
+  const result = await launcherAssistantBridge().invoke({ operation: "updateQueuedTurn", sessionId, queuedTurnId, ...fields });
+  return readLauncherQueuedTurns(result);
+}
+
+export async function removeLauncherAssistantQueuedTurn(sessionId: string, queuedTurnId: string): Promise<SessionQueuedTurn[]> {
+  assertQueuedTurnIdentity(sessionId, queuedTurnId);
+  return readLauncherQueuedTurns(await launcherAssistantBridge().invoke({ operation: "removeQueuedTurn", sessionId, queuedTurnId }));
+}
+
+export async function sendNowLauncherAssistantQueuedTurn(sessionId: string, queuedTurnId: string,
+  payload: { expectedTurnId?: string } = {}): Promise<{ queuedTurns: SessionQueuedTurn[]; stopRequested: boolean }> {
+  assertQueuedTurnIdentity(sessionId, queuedTurnId);
+  if (!record(payload) || Array.isArray(payload) || Object.keys(payload).some(key => key !== "expectedTurnId")
+    || (payload.expectedTurnId !== undefined && (typeof payload.expectedTurnId !== "string"
+      || !/^[A-Za-z0-9_-]{1,160}(?![\s\S])/.test(payload.expectedTurnId))))
+    throw new Error("ASSISTANT_REQUEST_INVALID");
+  const result = await launcherAssistantBridge().invoke({ operation: "sendNowQueuedTurn", sessionId, queuedTurnId,
+    ...(payload.expectedTurnId === undefined ? {} : { expectedTurnId: payload.expectedTurnId }) });
+  const queuedTurns = readLauncherQueuedTurns(result, true);
+  if (!record(result) || typeof result.stopRequested !== "boolean") throw new Error("ASSISTANT_RESPONSE_INVALID");
+  return { queuedTurns, stopRequested: result.stopRequested };
 }
 
 function isApproval(value: unknown, sessionId: string): value is SessionToolApprovalRequest {

@@ -58,7 +58,12 @@ export type AssistantHostSnapshot = {
   state: "stopped" | "starting" | "ready" | "stopping" | "failed";
   errorCode: string | null;
 };
+export type AssistantQueuedTurnRequest =
+  | { operation: "updateQueuedTurn"; sessionId: string; queuedTurnId: string; content?: string; position?: number; status?: "paused" | "queued" }
+  | { operation: "removeQueuedTurn"; sessionId: string; queuedTurnId: string }
+  | { operation: "sendNowQueuedTurn"; sessionId: string; queuedTurnId: string; expectedTurnId?: string };
 export type AssistantHostRequest =
+  | AssistantQueuedTurnRequest
   | { operation: "previewTaskCleanup" | "executeTaskCleanup"; agentId: string; directSessionId: string; targets: unknown[]; fingerprint?: string }
   | { operation: "teamRuns"; cursor?: string }
   | { operation: "setModel"; modelId: string }
@@ -180,6 +185,21 @@ function object(value: unknown): value is Record<string, unknown> {
 }
 function ownKeys(value: Record<string, unknown>, allowed: string[]): boolean {
   return Object.keys(value).every(key => allowed.includes(key));
+}
+/** Shared transport validation; fixed Session identity is checked by the host generation. */
+export function isAssistantQueuedTurnRequest(value: unknown): value is AssistantQueuedTurnRequest {
+  if (!object(value)) return false;
+  const fields = value.operation === "updateQueuedTurn" ? ["content", "position", "status"]
+    : value.operation === "sendNowQueuedTurn" ? ["expectedTurnId"]
+    : value.operation === "removeQueuedTurn" ? [] : null;
+  const id = (item: unknown): item is string => typeof item === "string" && /^[A-Za-z0-9_-]{1,160}(?![\s\S])/.test(item);
+  if (fields === null || !ownKeys(value, ["operation", "sessionId", "queuedTurnId", ...fields])
+    || !id(value.sessionId) || !id(value.queuedTurnId)) return false;
+  if ("content" in value && (typeof value.content !== "string" || value.content.length > 64000)
+    || "position" in value && (!Number.isSafeInteger(value.position) || (value.position as number) < 1)
+    || "status" in value && value.status !== "paused" && value.status !== "queued"
+    || "expectedTurnId" in value && !id(value.expectedTurnId)) return false;
+  return true;
 }
 const USAGE_NUMBER_FIELDS = ["inputTokens", "cachedInputTokens", "cacheReadInputTokens", "cacheCreationInputTokens",
   "uncachedInputTokens", "outputTokens", "reasoningOutputTokens", "totalTokens", "latencyMs"];
@@ -1331,6 +1351,23 @@ export class AssistantHost {
         if (!ownKeys(payload, ["operation", "turnId"]) || typeof payload.turnId !== "string"
           || !payload.turnId.trim() || payload.turnId.length > 160) throw new HostError("ASSISTANT_REQUEST_INVALID");
         return await this.rpc(generation, "/api/assistant/stop", "POST", { turnId: payload.turnId });
+      case "updateQueuedTurn":
+      case "removeQueuedTurn":
+      case "sendNowQueuedTurn": {
+        if (!isAssistantQueuedTurnRequest(payload)) throw new HostError("ASSISTANT_REQUEST_INVALID");
+        if (payload.sessionId !== generation.sessionId) throw new HostError("ASSISTANT_SESSION_FORBIDDEN");
+        const path = payload.operation === "updateQueuedTurn" ? "update"
+          : payload.operation === "removeQueuedTurn" ? "remove" : "send-now";
+        const { operation: _operation, sessionId: _sessionId, ...body } = payload;
+        const result = await this.rpc(generation, `/api/assistant/queued-turns/${path}`, "POST", body);
+        const sendNow = payload.operation === "sendNowQueuedTurn";
+        if (!object(result) || Object.keys(result).length !== (sendNow ? 2 : 1)
+          || !ownKeys(result, sendNow ? ["queuedTurns", "stopRequested"] : ["queuedTurns"])
+          || !Array.isArray(result.queuedTurns) || result.queuedTurns.some(row => !object(row)
+            || typeof row.id !== "string" || !row.id)
+          || sendNow && typeof result.stopRequested !== "boolean") throw new HostError("ASSISTANT_RESPONSE_INVALID");
+        return result;
+      }
       case "continue": {
         const expected = payload.continuation;
         if (!ownKeys(payload, ["operation", "requestId", "continuation"])

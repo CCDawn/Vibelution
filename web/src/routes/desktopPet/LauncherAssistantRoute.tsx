@@ -21,6 +21,8 @@ import type { SessionContinuationExpectation } from "../../api/chat";
 import { queryKeys } from "../../api/queryKeys";
 import type { SessionToolApprovalRequest } from "../../api/types";
 import { LazyConversationView } from "../../components/conversation/LazyConversationView";
+import { FollowupQueueTogglePauseContext } from "../../components/conversation/ConversationFollowupQueueBar";
+import { useLauncherAssistantFollowupQueue } from "./useLauncherAssistantFollowupQueue";
 import { LauncherAssistantWelcome } from "./LauncherAssistantWelcome";
 import { LauncherAssistantQuestionCard } from "./LauncherAssistantQuestionCard";
 import { VButton, VDenseOpsPage, VNativeButton, VStateSurface } from "../../components/vui";
@@ -1279,6 +1281,11 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   const stopping = Boolean(detail.data?.stopRequested);
   const canContinue = !draft.trim() && !attachments.length && !sendUnconfirmed && Boolean(resolveConversationContinuation(detail.data, sessionId));
   const actionMode = busy || stopping ? "stop" : canContinue ? "continue" : "send";
+  const queueEnabled = status.data?.followupQueueVersion === 1;
+  const followupQueue = useLauncherAssistantFollowupQueue({
+    sessionId, activeTurnId: acceptedTurnId || undefined, detail: detail.data, enabled: queueEnabled, lang,
+    blocked: sendPending || sendUnconfirmed || controlPending || stopping || modelConfigPending || Boolean(guidancePendingMode),
+  });
   // "待你回答" banner above the composer. Same gates as the chat page: a
   // running turn (execution ownership) or an unfinished send hides the banner,
   // and only the question written by the last terminal turn stays fresh.
@@ -1518,7 +1525,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       actions={<VButton onClick={() => void status.refetch()}>{copy.retry}</VButton>}>{status.error.message}</VStateSurface>
       : !notificationsHosted && statusDegradeTone === "soft" ? <VStateSurface density="compact" tone="unavailable" title={copy.statusDelayed} /> : null}
     {showWelcome ? <LauncherAssistantWelcome lang={lang} onPrompt={changeDraft}/> : null}
-    {detail.data ? <LazyConversationView
+    {detail.data ? <FollowupQueueTogglePauseContext.Provider value={queueEnabled ? followupQueue.handleFollowupQueueTogglePause : null}>
+    <LazyConversationView
       runtimeApi={launcherConversationApi}
       sessionId={detail.data.id} title={detail.data.title || identity?.displayName || copy.title}
       phase={resolveSessionActivity(detail.data).execution} messages={historyAttachments.messages}
@@ -1542,6 +1550,13 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       // its own pending source so queueing never borrows the stopping copy.
       composerStopPending={controlPending || stopping} composerQueueSendPending={sendPending}
       queueSendPendingLabel={copy.queueSendPending}
+      followupQueue={followupQueue.followupQueue}
+      onFollowupQueueUpdate={queueEnabled ? followupQueue.handleFollowupQueueUpdate : undefined}
+      onFollowupQueueRemove={queueEnabled ? followupQueue.handleFollowupQueueRemove : undefined}
+      onFollowupQueueMove={queueEnabled ? followupQueue.handleFollowupQueueMove : undefined}
+      onFollowupQueueSteer={queueEnabled ? followupQueue.handleFollowupQueueSteer : undefined}
+      onFollowupQueueSendNow={queueEnabled ? followupQueue.handleFollowupQueueSendNow : undefined}
+      followupQueueSteerLabel={copy.safeGuidance}
       composerAttachmentInputDisabled={status.data?.attachmentVersion !== 1 || sendPending || sendUnconfirmed || controlPending}
       composerAttachments={attachments}
       composerReferences={composerReferences}
@@ -1552,10 +1567,10 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       onRetryComposerAttachment={id => void uploadAttachments(id)} onRetryComposerAttachmentUploads={() => void uploadAttachments()}
       composerError={sendUnconfirmed ? copy.unknownSend
         : attachments.some(item => item.kind === "image") && status.data?.settings?.supportsImageInput === false ? copy.imageUnsupported
-        : attachments.some(item => item.uploadStatus === "failed") ? (lang === "zh" ? "附件上传失败，请重试。" : "Attachment upload failed; retry.") : ""}
+        : attachments.some(item => item.uploadStatus === "failed") ? (lang === "zh" ? "附件上传失败，请重试。" : "Attachment upload failed; retry.") : followupQueue.error}
       submitLabel={sendUnconfirmed ? copy.retry : copy.send} submitPendingLabel={copy.sending}
       composerActionDisabled={sendPending || controlPending || (attachments.length > 0 && status.data?.attachmentVersion !== 1) || (actionMode === "stop" ? stopping || !resolveSessionStopTurnId(detail.data, acceptedTurnId) : actionMode === "send" && !sendUnconfirmed && !draft.trim() && !attachments.length)}
-      onComposerChange={changeDraft} onSubmit={() => void submit()}
+      onComposerChange={value => { followupQueue.clearError(); changeDraft(value); }} onSubmit={() => void submit()}
       onStop={() => void stopTurn()} onContinueTurn={() => void continueTurn()}
       composerContextRing={composerContextRing}
       composerCacheUsage={composerCacheUsage}
@@ -1572,7 +1587,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       onInterruptGuidance={() => void submitGuidance("interrupt")}
       safeGuidanceLabel={copy.safeGuidance} safeGuidancePendingLabel={copy.safeGuidancePending}
       interruptGuidanceLabel={copy.interruptGuidance} interruptGuidancePendingLabel={copy.interruptGuidancePending}
-      composerSafeGuidancePending={guidancePendingMode === "safe"}
+      composerSafeGuidancePending={guidancePendingMode === "safe" || followupQueue.guidancePending}
       composerInterruptGuidancePending={guidancePendingMode === "interrupt"}
       composerLeadingControl={<><ChatComposerPlusMenu lang={lang} showCapabilities={false} showReferences={false}
         budget={budget}
@@ -1605,7 +1620,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       {computerAccess.notice ? <p className={petStyles.computerNotice} role="status">{computerAccess.notice}</p> : null}
       {approvalPrompt}</>}
       fallback={<VStateSurface fill tone="loading" title={copy.loading} />}
-    /> : <VStateSurface fill tone={detail.isError ? notificationsHosted ? "unavailable" : "error" : "loading"} title={detail.isError ? notificationsHosted ? copy.conversationUnavailable : copy.unavailable : copy.loading}
+    />
+    </FollowupQueueTogglePauseContext.Provider> : <VStateSurface fill tone={detail.isError ? notificationsHosted ? "unavailable" : "error" : "loading"} title={detail.isError ? notificationsHosted ? copy.conversationUnavailable : copy.unavailable : copy.loading}
       actions={detail.isError && !notificationsHosted ? <VButton onClick={() => void detail.refetch()}>{copy.retry}</VButton> : undefined}>{notificationsHosted ? null : detail.error?.message}</VStateSurface>}
     {!detail.data ? approvalPrompt : null}
     {!notificationsHosted && historyAttachments.missingGenerated ? <VStateSurface tone="error" title={lang === "zh" ? "历史图片缺少附件标识，暂不可查看" : "Historical image has no artifact ID"}
@@ -1621,7 +1637,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       actions={<VButton onClick={() => { setPreviewAttempt(value => value + 1); void dispatches.refetch(); }}>{copy.retry}</VButton>} /> : null}
     {approvalError || !notificationsHosted && approvals.isError ? <VStateSurface tone="error" title={approvalError || (lang === "zh" ? "待授权查询暂不可用" : "Pending approvals unavailable")}
       actions={<VButton onClick={() => { setApprovalError(""); setDecidedDispatchKey(""); setPreviewAttempt(value => value + 1); void approvals.refetch(); void dispatches.refetch(); }}>{copy.retry}</VButton>}>{notificationsHosted ? null : approvals.error?.message}</VStateSurface> : null}
-    {detail.data?.queuedTurns?.length || queuedAcceptance ? <section data-launcher-assistant-queue
+    {(!queueEnabled && detail.data?.queuedTurns?.length) || detail.data?.queueHold
+      || (queuedAcceptance && !queuedAcceptance.observed) || queueReadback.removed ? <section data-launcher-assistant-queue
       className={petStyles.receiptPanel}
       aria-label={lang === "zh" ? "原生消息队列" : "Native message queue"}>
       {/* An explicit stop freezes the queue until a new message unfreezes it;
@@ -1630,7 +1647,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
         {lang === "zh" ? "队列已暂停：停止后排队消息保持冻结，发送新消息即可恢复。" : "Queue paused: queued messages stay frozen after a stop; send a new message to resume."}
       </p> : null}
       {queuedAcceptance && !queuedAcceptance.observed ? <p role="status">{waitingQueueText}</p> : null}
-      {detail.data?.queuedTurns?.map(row => <p key={row.id} role="status">{launcherAssistantQueueLabel(row.status, lang)}{row.lastError ? ` · ${row.lastError}` : ""}</p>)}
+      {!queueEnabled ? detail.data?.queuedTurns?.map(row => <p key={row.id} role="status">{launcherAssistantQueueLabel(row.status, lang)}{row.lastError ? ` · ${row.lastError}` : ""}</p>) : null}
       {queueReadback.removed ? <p role="status">{removedQueueText}</p> : null}
     </section> : null}
     {sendUnconfirmed && !outstanding.current?.answerQuestion ? <VStateSurface tone="error" title={copy.unknownSend}
