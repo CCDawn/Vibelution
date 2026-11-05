@@ -159,7 +159,8 @@ describe("Launcher assistant workspace", () => {
 
   it("clears an old task review when leaving the assistant or opening another task's approval across pages", async () => {
     dispatches.push({ projectId: "project-1", dispatchId: "dispatch-approval", nativeTaskId: "native-approval", agentId: "worker-2",
-      title: "待授权任务 B", receipt: { taskId: "native-approval", status: "awaiting_approval", shouldPoll: false } });
+      title: "待授权任务 B", receipt: { taskId: "native-approval", status: "awaiting_approval", shouldPoll: false,
+        pendingApprovals: [{ approvalId: "approval-B", toolName: "write", risk: "write", targetSummary: {}, revision: "r1", availableDecisions: ["accept", "decline"] }] } });
     await render("dialogue", true);
     const composerKey = ["launcher-assistant", "composer", "session"];
     const savedDraft = { draft: "尚未发送的当前草稿", outstanding: null, acceptedTurnId: "", queuedAcceptance: null };
