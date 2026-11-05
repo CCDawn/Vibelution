@@ -3,6 +3,7 @@ from dataclasses import replace
 from hashlib import sha256
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -82,6 +83,135 @@ def test_cleanup_removes_exclusive_session_files_and_keeps_content_free_terminal
     assert not {"sessionId", "turnId", "resultSummary", "error", "localWorkspacePath"}.intersection(stub)
     assert "private result" not in path.read_text() and "private error" not in path.read_text()
     assert (task.project / "user.txt").read_text() == "user source"
+
+
+@pytest.fixture
+def absent_legacy_task(legacy_task, monkeypatch):
+    from core.web.services.session import directory_runtime
+
+    task = legacy_task
+    task.state["raw"] = None
+    (task.directory / "turn_journal.jsonl").unlink()
+    task.directory_row = None
+    task.directory_children = []
+    task.directory_runtime_row = None
+    task.pin_current = True
+    task.pin_generation = 1
+    task.directory_store = SimpleNamespace(repository=SimpleNamespace(
+        get_session=lambda *args, **kwargs: task.directory_row,
+        get_session_runtime_state=lambda *args: task.directory_runtime_row,
+        list_child_sessions=lambda *args: task.directory_children))
+    monkeypatch.setattr(directory_runtime, "get_open_directory_store", lambda: task.directory_store)
+    monkeypatch.setattr(directory_runtime, "pin_open_directory_store", lambda root:
+        SimpleNamespace(store=task.directory_store, generation=task.pin_generation) if task.directory_store else None)
+    monkeypatch.setattr(directory_runtime, "directory_store_pin_is_current", lambda pin:
+        task.pin_current and pin.store is task.directory_store)
+    return task
+
+
+def test_absent_native_session_with_only_guards_cleans_legacy_record_without_native_mutation(absent_legacy_task):
+    task = absent_legacy_task
+    snapshot = preview(task)
+    assert snapshot["status"] == "ready"
+    assert [row["kind"] for row in snapshot["resources"]] == ["task_record"]
+
+    result = execute(task, snapshot)
+
+    assert result["status"] == "deleted" and result["releasedBytes"] > 0
+    assert task.state["calls"] == [] and task.state["raw"] is None
+    assert sorted(path.name for path in task.directory.iterdir()) == ["session_admission.lock"]
+    stub = task.service.store.get_task(task.record["taskId"])
+    assert stub["localCleanupComplete"] is True and "sessionId" not in stub
+    assert execute(task)["alreadyDeleted"] is True
+
+
+@pytest.mark.parametrize("change", ["content", "directory_row", "directory_unavailable", "directory_child",
+    "family_child", "direct", "work_run", "shared_task", "runtime_row", "pin_changed", "running", "stopping"])
+def test_absent_session_requires_no_content_and_complete_exclusive_absence_proof(absent_legacy_task, change):
+    task = absent_legacy_task
+    if change == "content":
+        (task.directory / "unowned.txt").write_text("unowned content")
+    elif change == "directory_row":
+        task.directory_row = {"agentId": "coder"}
+    elif change == "directory_unavailable":
+        task.directory_store = None
+    elif change == "directory_child":
+        task.directory_children = [{"sessionId": "child"}]
+    elif change == "family_child":
+        task.state["others"] = [{"conversation_id": "child", "parent_session_id": "session-1"}]
+    elif change == "direct":
+        task.state["agents"] = [{"directSessionId": "session-1"}]
+    elif change == "work_run":
+        task.state["active"] = True
+    elif change == "runtime_row":
+        task.directory_runtime_row = {"conversation_id": "session-1"}
+    elif change == "pin_changed":
+        task.pin_current = False
+    elif change in {"running", "stopping"}:
+        task.state["phase"] = change
+    else:
+        store = ExternalAgentTaskStore(task.tmp / "runtime" / "local_assistant_tasks")
+        other, _ = store.create_task(**request_kwargs(task, client_request_id="another-request"))
+        store.transition(other["taskId"], status="running", fields={"sessionId": "session-1"})
+
+    assert preview(task)["status"] == "blocked"
+    assert execute(task)["status"] == "blocked"
+    assert task.state["calls"] == []
+    assert not task.service.store.get_task(task.record["taskId"]).get("localCleanupComplete")
+
+
+def test_absent_session_proof_is_fingerprinted_and_cannot_delete_a_reappeared_session(absent_legacy_task):
+    task = absent_legacy_task
+    snapshot = preview(task)
+    assert snapshot["status"] == "ready"
+    task.state["raw"] = {"conversation_id": "session-1", "agent_id": "coder", "conversation_index_kind": "hidden",
+        "metadata": {"source": "external_agent_task", "externalTaskId": task.record["taskId"]}}
+
+    with pytest.raises(ExternalAgentConflictError) as error:
+        execute(task, snapshot)
+
+    assert error.value.code == "CLEANUP_STALE" and task.state["calls"] == []
+
+
+def test_absent_session_compatibility_does_not_change_local_task_policy(absent_legacy_task):
+    task = absent_legacy_task
+    record = {**task.record, "localAuthorityFingerprint": "a" * 64}
+    task.local_service.store._write_locked(record)
+
+    result = cleanup.preview_task_cleanup(task.local_service, owner_id=OWNER, task_id=record["taskId"])
+
+    assert result["status"] == "blocked" and task.state["calls"] == []
+
+
+def test_absent_session_preview_is_stale_after_directory_store_generation_changes(absent_legacy_task):
+    task = absent_legacy_task
+    snapshot = preview(task)
+    task.pin_generation += 1
+
+    with pytest.raises(ExternalAgentConflictError) as error:
+        execute(task, snapshot)
+
+    assert error.value.code == "CLEANUP_STALE" and task.state["calls"] == []
+    assert not task.service.store.get_task(task.record["taskId"]).get("localCleanupComplete")
+
+
+def test_absent_session_rechecks_directory_pin_after_accounting_before_any_write(absent_legacy_task, monkeypatch):
+    task = absent_legacy_task
+    snapshot = preview(task)
+    original = cleanup._accounting_snapshot
+
+    def accounting(*args):
+        result = original(*args)
+        task.pin_current = False
+        return result
+
+    monkeypatch.setattr(cleanup, "_accounting_snapshot", accounting)
+    with pytest.raises(ExternalAgentConflictError) as error:
+        execute(task, snapshot)
+
+    assert error.value.code == "CLEANUP_OWNER_CHANGED" and task.state["calls"] == []
+    record = task.service.store.get_task(task.record["taskId"])
+    assert not record.get("localCleanupComplete") and not record.get("localCleanupSessionDeleted")
 
 
 def test_original_external_store_replays_same_request_and_rejects_changed_digest_after_cleanup(legacy_task):

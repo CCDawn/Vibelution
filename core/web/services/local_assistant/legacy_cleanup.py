@@ -40,6 +40,7 @@ class LegacyAssistantCleanupService(LocalAssistantTaskService):
     # External tasks never established ownership of an isolated worktree.
     # Session workingDirectory or arbitrary old projection fields are not proof.
     cleanup_workspaces = False
+    cleanup_absent_sessions = True
 
     def _require_cleanup_ownership(self, record):
         request_id = record.get("clientRequestId")
