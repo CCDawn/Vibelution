@@ -21,6 +21,7 @@ import { queryKeys } from "../../api/queryKeys";
 import type { SessionToolApprovalRequest } from "../../api/types";
 import { LazyConversationView } from "../../components/conversation/LazyConversationView";
 import { LauncherAssistantWelcome } from "./LauncherAssistantWelcome";
+import { LauncherAssistantQuestionCard } from "./LauncherAssistantQuestionCard";
 import { VButton, VDenseOpsPage, VNativeButton, VStateSurface } from "../../components/vui";
 import { ChatComposerPlusMenu } from "../chat/ChatComposerPlusMenu";
 import { LauncherAssistantModelControl } from "./LauncherAssistantModelControl";
@@ -55,7 +56,7 @@ import {
   launcherAssistantSessionEventRefreshesDetail, launcherAssistantSseHealthy,
   launcherAssistantStatusDegradeTone, launcherAssistantWaitInterval, launcherAssistantContextRing, launcherAssistantModelDisplay,
   launcherAssistantEditBackfillDraft,
-  type LauncherAssistantSubmission, type LauncherAssistantQueuedAcceptance,
+  type LauncherAssistantSubmission, type LauncherAssistantQueuedAcceptance, type LauncherAssistantQuestionDraft,
 } from "./launcherAssistantModel";
 import { activeTurnLayerToConversationMessage, createLauncherAssistantStream } from "./launcherAssistantStream";
 import type { ActiveTurnLayerState } from "../chatActiveTurnLayer";
@@ -85,8 +86,6 @@ const COPY = {
     waitingBackend: "正在等待工作台后端启动…",
     statusStale: "个人助理状态轮询暂不可用，会话内容可能未更新",
     statusDelayed: "状态刷新延迟，会话内容可能未更新",
-    pendingQuestion: "待你回答",
-    answerBelow: "去回答", answerHint: "请在下方输入回答，再点击发送。",
     editAsNew: "编辑为新消息",
     safeGuidance: "引导", safeGuidancePending: "正在引导",
     interruptGuidance: "打断并引导", interruptGuidancePending: "正在打断引导",
@@ -105,8 +104,6 @@ const COPY = {
     waitingBackend: "Waiting for the workbench backend…",
     statusStale: "Assistant status polling is unavailable; conversation content may be stale",
     statusDelayed: "Status refresh is delayed; conversation content may be stale",
-    pendingQuestion: "Waiting for your answer",
-    answerBelow: "Answer below", answerHint: "Type your answer below, then send it.",
     editAsNew: "Edit as new message",
     safeGuidance: "Steer", safeGuidancePending: "Steering",
     interruptGuidance: "Interrupt & steer", interruptGuidancePending: "Interrupting steer",
@@ -145,7 +142,7 @@ function readableApprovalJson(source: string): string {
 }
 
 type ContinueAttempt = { requestId: string; expected: SessionContinuationExpectation; accepted: boolean };
-type ComposerSnapshot = { draft: string; outstanding: LauncherAssistantSubmission | null; acceptedTurnId: string; queuedAcceptance: LauncherAssistantQueuedAcceptance | null; continuation?: ContinueAttempt; attachments?: ComposerImageAttachment[]; references?: SessionReferenceAttachment[] };
+type ComposerSnapshot = { draft: string; outstanding: LauncherAssistantSubmission | null; acceptedTurnId: string; queuedAcceptance: LauncherAssistantQueuedAcceptance | null; continuation?: ContinueAttempt; attachments?: ComposerImageAttachment[]; references?: SessionReferenceAttachment[]; questionDraft?: LauncherAssistantQuestionDraft | null };
 
 export function LauncherAssistantRoute({ embedded = false, navigationOwned = false, computerRequested = false, entryIntent }: {
   embedded?: boolean; navigationOwned?: boolean; computerRequested?: boolean;
@@ -175,10 +172,9 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   const resizing = useRef(false);
   const outstanding = useRef<LauncherAssistantSubmission | null>(null);
   const [draft, setDraft] = useState("");
-  const [answerFocus, setAnswerFocus] = useState<{ sessionId: string; questionId: string; signal: string } | null>(null);
-  const settleAnswerFocus = useCallback((signal: string) => {
-    setAnswerFocus(current => current?.signal === signal ? null : current);
-  }, []);
+  const [questionDraft, setQuestionDraft] = useState<(LauncherAssistantQuestionDraft & { sessionId: string }) | null>(null);
+  const questionDraftRef = useRef(questionDraft);
+  const [answeredQuestion, setAnsweredQuestion] = useState<{ sessionId: string; id: string; turnId: string } | null>(null);
   const [attachments, setAttachments] = useState<ComposerImageAttachment[]>([]);
   const [visibleMessageIds, setVisibleMessageIds] = useState<string[]>([]);
   const attachmentsRef = useRef<ComposerImageAttachment[]>([]);
@@ -308,6 +304,17 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       return next;
     });
   }
+  function acceptQuestionAnswer(submission: LauncherAssistantSubmission): Partial<ComposerSnapshot> {
+    const question = submission.answerQuestion;
+    if (!question || sessionIdRef.current !== sessionId) return {};
+    setAnsweredQuestion({ sessionId, id: question.id, turnId: question.turnId });
+    const current = questionDraftRef.current;
+    if (current?.sessionId !== sessionId || current.question.id !== question.id
+      || current.question.turnId !== question.turnId || current.value.trim() !== submission.message) return {};
+    questionDraftRef.current = null;
+    setQuestionDraft(null);
+    return { questionDraft: null };
+  }
   useEffect(() => {
     if (!sessionId) return;
     const key = ["launcher-assistant", "composer", sessionId];
@@ -327,6 +334,18 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     composerReferencesRef.current = saved?.references || [];
     setComposerReferences(composerReferencesRef.current);
     outstanding.current = saved?.outstanding || null;
+    // A transport callback from the previous Session may still arrive. Its
+    // durable outstanding request remains with that Session, but it must not
+    // keep this Session's answer locked or retire a newer flight.
+    sending.current = null;
+    setSendPending(false);
+    setSendUnknownDetail("");
+    setFeedback("");
+    const recoveredQuestionDraft = saved?.questionDraft ?? (saved?.outstanding?.answerQuestion
+      ? { question: saved.outstanding.answerQuestion, value: saved.outstanding.message } : null);
+    questionDraftRef.current = recoveredQuestionDraft ? { ...recoveredQuestionDraft, sessionId } : null;
+    setQuestionDraft(questionDraftRef.current);
+    setAnsweredQuestion(null);
     setSendUnconfirmed(Boolean(saved?.outstanding));
     setAcceptedTurnId(saved?.acceptedTurnId || "");
     setQueuedAcceptance(saved?.queuedAcceptance || null);
@@ -441,7 +460,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     clearAcceptedAttachments(submission);
     const remainingDraft = !submission.preserveDraft && draftRef.current === (submission.draftSnapshot ?? submission.message) ? "" : draftRef.current;
     draftRef.current = remainingDraft;
-    saveComposer({ draft: remainingDraft, outstanding: null, acceptedTurnId: recovered.turnId, queuedAcceptance: recovered.queuedAcceptance });
+    saveComposer({ draft: remainingDraft, outstanding: null, acceptedTurnId: recovered.turnId,
+      queuedAcceptance: recovered.queuedAcceptance, ...acceptQuestionAnswer(submission) });
     setDraft(remainingDraft);
     setAcceptedTurnId(recovered.turnId);
     setQueuedAcceptance(recovered.queuedAcceptance);
@@ -884,7 +904,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       const queueReceipt = acceptance.queuedTurnId ? { id: acceptance.queuedTurnId, clientSubmissionId: acceptance.clientSubmissionId, observed: false } : null;
       const remainingDraft = !submission.preserveDraft && draftRef.current === (submission.draftSnapshot ?? submission.message) ? "" : draftRef.current;
       draftRef.current = remainingDraft;
-      saveComposer({ draft: remainingDraft, outstanding: null, acceptedTurnId: acceptance.turnId, queuedAcceptance: queueReceipt });
+      saveComposer({ draft: remainingDraft, outstanding: null, acceptedTurnId: acceptance.turnId,
+        queuedAcceptance: queueReceipt, ...acceptQuestionAnswer(submission) });
       setAcceptedTurnId(acceptance.turnId);
       setQueuedAcceptance(queueReceipt);
       setDraft(remainingDraft);
@@ -1149,12 +1170,43 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   // running turn (execution ownership) or an unfinished send hides the banner,
   // and only the question written by the last terminal turn stays fresh.
   const pendingQuestion = (() => {
+    // Keep the exact question and answer visible while its original request is
+    // pending/unconfirmed, even if native admission has already consumed the slot.
+    if ((sendPending || sendUnconfirmed) && outstanding.current?.answerQuestion) return outstanding.current.answerQuestion;
     const question = detail.data?.pendingQuestion ?? null;
-    if (!question) return null;
+    if (!question || detail.data?.id !== sessionId) return null;
+    if (answeredQuestion?.sessionId === sessionId && answeredQuestion.id === question.id
+      && answeredQuestion.turnId === question.turnId) return null;
     if (question.turnId !== "" && question.turnId !== (detail.data?.lastTurnTerminalTurnId ?? "")) return null;
     if (busy || sendPending || sendUnconfirmed) return null;
     return question;
   })();
+  const answerValue = pendingQuestion && questionDraft?.sessionId === sessionId
+    && questionDraft.question.id === pendingQuestion.id && questionDraft.question.turnId === pendingQuestion.turnId
+    ? questionDraft.value : outstanding.current?.answerQuestion?.id === pendingQuestion?.id ? outstanding.current?.message || "" : "";
+  function changeQuestionAnswer(value: string) {
+    if (!pendingQuestion || sendPending || sendUnconfirmed || controlPending) return;
+    const next = { question: pendingQuestion, value };
+    questionDraftRef.current = { ...next, sessionId };
+    setQuestionDraft(questionDraftRef.current);
+    saveComposer({ questionDraft: next });
+    setFeedback("");
+  }
+  function submitQuestionAnswer() {
+    if (!pendingQuestion || sessionIdRef.current !== sessionId || sending.current || controlPending || stopping) return;
+    if (outstanding.current?.answerQuestion) {
+      // An unknown outcome must replay the original identity, never create a
+      // second answer just because the backend slot has moved on.
+      if (sendUnconfirmed) void submit();
+      return;
+    }
+    const current = latestDetail.current;
+    const question = current?.pendingQuestion;
+    if (busy || !question || current?.id !== sessionId || question.id !== pendingQuestion.id
+      || question.turnId !== pendingQuestion.turnId
+      || (question.turnId && question.turnId !== current.lastTurnTerminalTurnId) || !answerValue.trim()) return;
+    void submit({ message: answerValue.trim(), requestId: crypto.randomUUID(), preserveDraft: true, answerQuestion: { ...question } });
+  }
   const queueRow = detail.data?.queuedTurns?.find(row => row.id === queuedAcceptance?.id) || detail.data?.queuedTurns?.[0];
   const waitingQueueText = lang === "zh" ? "已排队，正在读取原生队列…" : "Queued; reading the native queue…";
   const removedQueueText = lang === "zh" ? "排队消息已移除" : "Queued message removed";
@@ -1362,9 +1414,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       // The embedded page reads at standard density; the compact surface
       // paddings stay exclusive to the 400px floating window.
       density={embedded ? "default" : "compact"} composerVariant="codex"
-      composerValue={draft} composerPlaceholder={copy.placeholder} composerDisabled={sendPending || sendUnconfirmed || controlPending}
-      composerFocusSignal={answerFocus?.sessionId === sessionId && answerFocus.questionId === pendingQuestion?.id ? answerFocus.signal : ""}
-      onComposerFocusRequestSettled={settleAnswerFocus}
+      composerValue={draft} composerPlaceholder={copy.placeholder} composerDisabled={sendPending || sendUnconfirmed || controlPending || Boolean(pendingQuestion)}
+      composerHidden={Boolean(pendingQuestion)}
       composerPending={sendPending || controlPending || stopping} composerActionMode={actionMode}
       // While busy, a control RPC is the stop request; the queue/send submit is
       // its own pending source so queueing never borrows the stopping copy.
@@ -1414,16 +1465,12 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
         onModelChange={modelId => void changeModel(modelId)}
         onOpenSettings={embedded ? () => void openModelConnection() : undefined} /> : undefined}
       composerPrecedingContent={<>
-      {pendingQuestion ? <VStateSurface density="compact" tone="info" title={copy.pendingQuestion}
-        data-launcher-assistant-pending-question={pendingQuestion.id}
-        actions={<VButton isDisabled={sendPending || sendUnconfirmed || controlPending} onClick={event => {
-          // This explicit handoff releases button focus so the shared scheduler
-          // can focus the composer without overriding another active control.
-          event.currentTarget.blur();
-          setAnswerFocus({ sessionId, questionId: pendingQuestion.id, signal: crypto.randomUUID() });
-        }}>{copy.answerBelow}</VButton>}>
-        {pendingQuestion.questionText}<br />{copy.answerHint}
-      </VStateSurface> : null}
+      {pendingQuestion ? <LauncherAssistantQuestionCard key={sessionId + ":" + pendingQuestion.id}
+        questionId={pendingQuestion.id} questionText={pendingQuestion.questionText} value={answerValue}
+        onChange={changeQuestionAnswer} onSubmit={submitQuestionAnswer} lang={lang}
+        pending={sendPending} disabled={controlPending || stopping || (!sendUnconfirmed && busy)}
+        unconfirmed={sendUnconfirmed}
+        error={sendUnconfirmed ? [copy.unknownSend, sendUnknownDetail].filter(Boolean).join(" ") : feedback} /> : null}
       {entryIntent && dismissedEntry !== entryIntent.key ? <VStateSurface density="compact" tone="empty" title={entryIntent.title}
         actions={<><VButton isDisabled={sendPending || controlPending || sendUnconfirmed} onClick={() => {
           void submit({ message: entryIntent.message, requestId: crypto.randomUUID(), preserveDraft: true }).then(attempted => {
@@ -1463,7 +1510,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       {detail.data?.queuedTurns?.map(row => <p key={row.id} role="status">{launcherAssistantQueueLabel(row.status, lang)}{row.lastError ? ` · ${row.lastError}` : ""}</p>)}
       {queueReadback.removed ? <p role="status">{removedQueueText}</p> : null}
     </section> : null}
-    {sendUnconfirmed ? <VStateSurface tone="error" title={copy.unknownSend}
+    {sendUnconfirmed && !outstanding.current?.answerQuestion ? <VStateSurface tone="error" title={copy.unknownSend}
       actions={<VButton onClick={() => void submit()} isDisabled={sendPending || controlPending || stopping}>{copy.retry}</VButton>}>{sendUnknownDetail}</VStateSurface> : null}
     {!notificationsHosted && detail.isError && detail.data && statusDegradeTone !== "error" ? <VStateSurface tone="error" title={copy.unavailable}
       actions={<VButton onClick={() => void detail.refetch()}>{copy.retry}</VButton>}>{detail.error.message}</VStateSurface> : null}

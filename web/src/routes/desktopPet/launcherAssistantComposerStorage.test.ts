@@ -23,6 +23,10 @@ function pending(): PersistedLauncherComposer {
   } };
 }
 
+function question() {
+  return { id: "question:1", questionText: "先处理哪一项？", askedAt: "2026-11-05T01:00:00Z", turnId: "turn:1" };
+}
+
 function chip(overrides: Partial<ComposerImageAttachment> = {}): ComposerImageAttachment {
   return {
     id: "composer-image-1", file: new File([new Uint8Array([1])], "shot.png", { type: "image/png" }),
@@ -50,6 +54,121 @@ describe("launcher assistant composer recovery storage", () => {
     expect(loadLauncherComposer("session-1", "floating", storage)).toEqual(pending());
     expect(loadLauncherComposer("session-1", "embedded", storage)?.draft).toBe("embedded draft");
     expect(loadLauncherComposer("session-2", "floating", storage)).toEqual({ ...empty(), draft: "other session" });
+  });
+
+  it("round-trips question drafts independently across both surfaces and sessions", () => {
+    const storage = memoryStorage();
+    for (const session of ["session-1", "session-2"]) {
+      for (const surface of ["floating", "embedded"] as const) {
+        const value = { ...empty(), draft: `ordinary ${session} ${surface}`,
+          questionDraft: { question: question(), value: `  answer ${session} ${surface}\n  ` } };
+        expect(saveLauncherComposer(session, surface, value, storage)).toBe(true);
+      }
+    }
+    expect(storage.entries.size).toBe(4);
+    for (const session of ["session-1", "session-2"]) {
+      for (const surface of ["floating", "embedded"] as const) {
+        expect(loadLauncherComposer(session, surface, storage)).toEqual({ ...empty(),
+          draft: `ordinary ${session} ${surface}`,
+          questionDraft: { question: question(), value: `  answer ${session} ${surface}\n  ` } });
+      }
+    }
+  });
+
+  it("restores an unconfirmed answer's original request and question while retaining the ordinary draft and tray", () => {
+    const storage = memoryStorage();
+    const value: PersistedLauncherComposer = { ...pending(),
+      questionDraft: { question: question(), value: "  先修复显示\n保留回答  " },
+      outstanding: { message: "先修复显示\n保留回答", requestId: "original.answer:1",
+        draftSnapshot: "  先修复显示\n保留回答  ", preserveDraft: true, answerQuestion: question() },
+      attachments: [{ id: "ordinary-chip", artifactId: "ordinary-artifact.png", filename: "shot.png",
+        contentType: "image/png", sizeBytes: 1, kind: "image" }],
+    };
+    expect(saveLauncherComposer("session", "embedded", value, storage)).toBe(true);
+    const restored = loadLauncherComposer("session", "embedded", storage)!;
+    expect(restored).toEqual(value);
+    expect(restored.questionDraft).not.toBe(value.questionDraft);
+    expect(restored.questionDraft!.question).not.toBe(value.questionDraft!.question);
+    expect(restored.outstanding!.answerQuestion).not.toBe(value.outstanding!.answerQuestion);
+    expect(restored.outstanding!.answerQuestion).not.toBe(restored.questionDraft!.question);
+    restored.questionDraft!.question.id = "changed";
+    restored.outstanding!.answerQuestion!.questionText = "changed";
+    expect(loadLauncherComposer("session", "embedded", storage)).toEqual(value);
+  });
+
+  it("preserves explicit null clearing and accepts legacy questions with empty time and turn IDs", () => {
+    const storage = memoryStorage();
+    const legacyQuestion = { ...question(), askedAt: "", turnId: "" };
+    const value = { ...pending(), questionDraft: { question: legacyQuestion, value: "" },
+      outstanding: { message: "回答", requestId: "request:1", preserveDraft: true as const, answerQuestion: legacyQuestion } };
+    expect(saveLauncherComposer("session", "floating", value, storage)).toBe(true);
+    expect(loadLauncherComposer("session", "floating", storage)).toEqual(value);
+    const cleared = { ...empty(), questionDraft: null };
+    expect(saveLauncherComposer("session", "floating", cleared, storage)).toBe(true);
+    expect(loadLauncherComposer("session", "floating", storage)).toEqual(cleared);
+    expect(JSON.parse([...storage.entries.values()][0]).snapshot.questionDraft).toBeNull();
+  });
+
+  it.each([
+    ["unknown field", (row: any) => { row.extra = "untrusted"; }],
+    ["missing id", (row: any) => { delete row.id; }],
+    ["missing question text", (row: any) => { delete row.questionText; }],
+    ["missing askedAt", (row: any) => { delete row.askedAt; }],
+    ["missing turnId", (row: any) => { delete row.turnId; }],
+    ["invalid id", (row: any) => { row.id = "question id"; }],
+    ["empty id", (row: any) => { row.id = ""; }],
+    ["non-string id", (row: any) => { row.id = 1; }],
+    ["oversized id", (row: any) => { row.id = "x".repeat(256); }],
+    ["non-string text", (row: any) => { row.questionText = 1; }],
+    ["oversized text", (row: any) => { row.questionText = "x".repeat(4_001); }],
+    ["non-string askedAt", (row: any) => { row.askedAt = 1; }],
+    ["oversized askedAt", (row: any) => { row.askedAt = "x".repeat(65); }],
+    ["non-string turnId", (row: any) => { row.turnId = 1; }],
+    ["invalid turnId", (row: any) => { row.turnId = "turn id"; }],
+    ["oversized turnId", (row: any) => { row.turnId = "x".repeat(256); }],
+  ])("rejects question metadata with %s in both recovery fields", (_label, mutate) => {
+    for (const source of ["draft", "submission"]) {
+      const storage = memoryStorage();
+      const value = { ...pending(), questionDraft: { question: question(), value: "回答" },
+        outstanding: { ...pending().outstanding!, answerQuestion: question() } };
+      saveLauncherComposer("session", "floating", value, storage);
+      const [key, raw] = [...storage.entries][0];
+      const row = JSON.parse(raw);
+      mutate(source === "draft" ? row.snapshot.questionDraft.question : row.snapshot.outstanding.answerQuestion);
+      expect(saveLauncherComposer("session", "floating", row.snapshot, storage)).toBe(false);
+      expect(loadLauncherComposer("session", "floating", storage)).toEqual(value);
+      const invalid = JSON.stringify(row);
+      storage.setItem(key, invalid);
+      expect(loadLauncherComposer("session", "floating", storage)).toBeNull();
+      expect(storage.getItem(key)).toBe(invalid);
+    }
+  });
+
+  it.each([
+    ["non-object question draft", (row: any) => { row.questionDraft = "answer"; }],
+    ["unknown question draft field", (row: any) => { row.questionDraft.extra = "untrusted"; }],
+    ["missing question draft value", (row: any) => { delete row.questionDraft.value; }],
+    ["non-string question draft value", (row: any) => { row.questionDraft.value = 1; }],
+    ["oversized question draft value", (row: any) => { row.questionDraft.value = "x".repeat(64_001); }],
+    ["missing question draft question", (row: any) => { delete row.questionDraft.question; }],
+    ["null question draft question", (row: any) => { row.questionDraft.question = null; }],
+    ["non-object answer question", (row: any) => { row.outstanding.answerQuestion = "question"; }],
+    ["null answer question", (row: any) => { row.outstanding.answerQuestion = null; }],
+    ["answer question without preserveDraft", (row: any) => { delete row.outstanding.preserveDraft; }],
+  ])("rejects %s without replacing existing recovery state", (_label, mutate) => {
+    const storage = memoryStorage();
+    const value = { ...pending(), questionDraft: { question: question(), value: "回答" },
+      outstanding: { ...pending().outstanding!, answerQuestion: question() } };
+    saveLauncherComposer("session", "floating", value, storage);
+    const [key, raw] = [...storage.entries][0];
+    const row = JSON.parse(raw);
+    mutate(row.snapshot);
+    expect(saveLauncherComposer("session", "floating", row.snapshot, storage)).toBe(false);
+    expect(loadLauncherComposer("session", "floating", storage)).toEqual(value);
+    const invalid = JSON.stringify(row);
+    storage.setItem(key, invalid);
+    expect(loadLauncherComposer("session", "floating", storage)).toBeNull();
+    expect(storage.getItem(key)).toBe(invalid);
   });
 
   it("overwrites an old outstanding request with native acceptance and then an empty snapshot", () => {
@@ -90,12 +209,13 @@ describe("launcher assistant composer recovery storage", () => {
     expect(JSON.stringify(savedSnapshot)).not.toContain("continuation");
   });
 
-  it("loads envelopes written before attachment persistence with an empty tray", () => {
+  it("loads envelopes written before attachment and question persistence with an empty tray", () => {
     const storage = memoryStorage();
     saveLauncherComposer("session", "floating", pending(), storage);
     const [key, raw] = [...storage.entries][0];
     const legacy = JSON.parse(raw);
     delete legacy.snapshot.attachments;
+    delete legacy.snapshot.questionDraft;
     storage.setItem(key, JSON.stringify(legacy));
     expect(loadLauncherComposer("session", "floating", storage)).toEqual(pending());
   });
@@ -155,6 +275,7 @@ describe("launcher assistant composer recovery storage", () => {
     ["invalid request ID", (row: any) => { row.snapshot.outstanding.requestId = "new request"; }],
     ["oversized request ID", (row: any) => { row.snapshot.outstanding.requestId = "x".repeat(129); }],
     ["attachment body", (row: any) => { row.snapshot.outstanding.attachments = [{ dataBase64: "body" }]; }],
+    ["submission references outside the recovery whitelist", (row: any) => { row.snapshot.outstanding.references = []; }],
     ["artifact path", (row: any) => { row.snapshot.outstanding.attachmentIds = ["../artifact"]; }],
     ["invalid attachment snapshot ID", (row: any) => { row.snapshot.outstanding.attachmentSnapshotIds = [1]; }],
     ["too many attachments", (row: any) => { row.snapshot.outstanding.attachmentIds = Array(33).fill("artifact"); }],
@@ -174,7 +295,7 @@ describe("launcher assistant composer recovery storage", () => {
     expect(storage.getItem(key)).toBe(invalid);
   });
 
-  it.each(["{", "null", "[]", "x".repeat(1_200_001)])("returns null for corrupt or oversized JSON", raw => {
+  it.each(["{", "null", "[]", "x".repeat(1_800_001)])("returns null for corrupt or oversized JSON", raw => {
     expect(loadLauncherComposer("session", "floating", { getItem: () => raw })).toBeNull();
   });
 
@@ -198,6 +319,21 @@ describe("launcher assistant composer recovery storage", () => {
     expect(saveLauncherComposer("session", "embedded", value, storage)).toBe(true);
     expect(loadLauncherComposer("session", "embedded", storage)).toEqual(value);
     expect(saveLauncherComposer("session", "floating", { ...empty(), outstanding: { message: " ", requestId: "request" } }, storage)).toBe(false);
+  });
+
+  it("accepts four fully JSON-escaped maximum text fields and bounded question metadata", () => {
+    const storage = memoryStorage();
+    const maxText = "\u0000".repeat(64_000);
+    const maxQuestion = { id: "q".repeat(255), questionText: "\u0000".repeat(4_000),
+      askedAt: "t".repeat(64), turnId: "t".repeat(255) };
+    const value = { ...empty(), draft: maxText, questionDraft: { question: maxQuestion, value: maxText },
+      outstanding: { message: maxText, requestId: "r".repeat(128), draftSnapshot: maxText,
+        preserveDraft: true as const, answerQuestion: maxQuestion } };
+    expect(saveLauncherComposer("session", "embedded", value, storage)).toBe(true);
+    const raw = [...storage.entries.values()][0];
+    expect(raw.length).toBeGreaterThan(1_200_000);
+    expect(raw.length).toBeLessThan(1_800_000);
+    expect(loadLauncherComposer("session", "embedded", storage)).toEqual(value);
   });
 
   it("degrades safely when storage is absent, access is blocked or writes exceed quota", () => {

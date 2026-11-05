@@ -185,6 +185,9 @@ export type ConversationViewProps = {
   /** Route-owned panel mounted directly above the composer surface (e.g. the
    * embedded assistant page's collapsible dispatch receipts). */
   composerPrecedingContent?: ReactNode;
+  /** Keep the editor mounted but visually hidden while a route-owned answer
+   * surface occupies its dock. Ordinary sessions keep the default false. */
+  composerHidden?: boolean;
   permissionControl?: ConversationPermissionControl;
   /** Pending tool approval shown under the matching running tool (Codex-style). */
   toolApproval?: ConversationToolApprovalSurface | null;

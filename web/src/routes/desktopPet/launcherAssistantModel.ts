@@ -1,6 +1,6 @@
 import type { LauncherAssistantDispatch, LauncherAssistantSessionEvent } from "../../api/launcherAssistant";
 import type { PetActivityTone, PetAnimationState } from "../../api/types/petActivity";
-import type { ConversationMessage, SessionDetail, SessionQueuedTurn, SessionReferenceAttachment } from "../../api/types";
+import type { ConversationMessage, SessionDetail, SessionPendingQuestion, SessionQueuedTurn, SessionReferenceAttachment } from "../../api/types";
 import { exactAcceptedSubmitTurnId, findSubmitAcceptanceEvidence } from "../chat/chatSubmitAcceptanceReadback";
 import {
   buildComposerContextRingModel, resolveComposerContextUsage,
@@ -10,7 +10,8 @@ import { promptSegmentDisplayLabel } from "../chat/chatRoutePresentation";
 import { dispatchFailureCodeLabel } from "./assistantTasks/assistantTaskPresentation";
 import { hasExecutionOwnership, resolveSessionActivity, type SessionActivitySource } from "../sessionActivityState";
 
-export type LauncherAssistantSubmission = { message: string; requestId: string; draftSnapshot?: string; attachmentIds?: string[]; attachmentSnapshotIds?: string[]; references?: SessionReferenceAttachment[]; preserveDraft?: true };
+export type LauncherAssistantQuestionDraft = { question: SessionPendingQuestion; value: string };
+export type LauncherAssistantSubmission = { message: string; requestId: string; draftSnapshot?: string; attachmentIds?: string[]; attachmentSnapshotIds?: string[]; references?: SessionReferenceAttachment[]; preserveDraft?: true; answerQuestion?: SessionPendingQuestion };
 export type LauncherAssistantQueuedAcceptance = { id: string; clientSubmissionId: string; observed: boolean };
 type LauncherAssistantActivitySource = SessionActivitySource & Partial<Pick<SessionDetail, "messages" | "activeTask">>
   & { queuedTurns?: Array<Pick<SessionQueuedTurn, "id" | "status" | "clientSubmissionId">> };
