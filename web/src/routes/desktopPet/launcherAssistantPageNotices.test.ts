@@ -66,6 +66,9 @@ describe("Launcher page-level notices", () => {
     new Error("ASSISTANT_REQUEST_TIMEOUT"),
     "Error invoking remote method 'launcherAssistant:invoke': Error: ASSISTANT_REQUEST_TIMEOUT",
     new Error("Error invoking remote method 'launcherAssistant:invoke': ASSISTANT_REQUEST_TIMEOUT"),
+    new Error('Error invoking remote method "launcherAssistant:invoke": Error: ASSISTANT_REQUEST_TIMEOUT'),
+    "Error invoking remote method launcher-assistant: ASSISTANT_REQUEST_TIMEOUT",
+    new Error("Error invoking remote method assistant:invoke: Error: ASSISTANT_REQUEST_TIMEOUT"),
   ])("shows the assistant error code without an IPC wrapper: %s", error => {
     const notices = launcherAssistantPageNotices({ lang: "en", reads: [{ ...read("detail"), error }], appearance: [] });
     expect(notices[0].details).toBe("detail: ASSISTANT_REQUEST_TIMEOUT");
@@ -79,6 +82,17 @@ describe("Launcher page-level notices", () => {
     expect(notices[0].details).toBe("detail: ASSISTANT_REQUEST_TIMEOUT\napprovals: ASSISTANT_RESPONSE_INVALID");
     expect(notices[0].description).toBe("Try again in a moment.");
   });
+
+  it.each([
+    "'launcherAssistant:invoke'", '"launcherAssistant:invoke"', "launcher-assistant", "assistant:invoke",
+  ].flatMap(method => ["", "Error: "].map(prefix => ({ method, prefix }))))(
+    "removes the $method IPC wrapper with '$prefix' and preserves the error body",
+    ({ method, prefix }) => {
+      const error = new Error(`Error invoking remote method ${method}: ${prefix}detail: response unavailable`);
+      const notices = launcherAssistantPageNotices({ lang: "en", reads: [{ ...read("detail"), error }], appearance: [] });
+      expect(notices[0].details).toBe("detail: detail: response unavailable");
+    },
+  );
 
   it("removes the IPC wrapper and bounds an unknown error", () => {
     const error = new Error(`Error invoking remote method 'launcherAssistant:invoke': Error: ${"x".repeat(4_000)}`);

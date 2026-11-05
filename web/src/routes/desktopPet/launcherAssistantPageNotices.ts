@@ -20,7 +20,7 @@ function diagnostic(error: unknown): string {
     .replace(/\s+/g, " ").trim();
   const codes = message.match(/\bASSISTANT_[A-Z][A-Z0-9_]*\b/g);
   return (codes ? [...new Set(codes)].join(", ")
-    : message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, ""))
+    : message.replace(/^Error invoking remote method\s+(?:'[^']+'|"[^"]+"|[\w.:-]+):\s*(?:Error:\s*)?/, ""))
     .slice(0, 500);
 }
 
