@@ -112,7 +112,8 @@ def _scanned_repo(tmp_path: Path) -> tuple[Path, dict[str, dict]]:
     clean = _worktree(root, "clean", "codex/clean")
     unmerged = _worktree(root, "unmerged", "codex/unmerged", commit=True)
     dirty = _worktree(root, "dirty", "codex/dirty")
-    (dirty / "notes.txt").write_text("scratch\n", encoding="utf-8")
+    # Modified tracked file: the real launcher dirty scan ignores untracked files.
+    (dirty / "README.md").write_text("scratch\n", encoding="utf-8")
     items = {
         "clean": _item("worktree:clean", clean, "codex/clean", merged=True),
         "unmerged": _item("worktree:unmerged", unmerged, "codex/unmerged", merged=False),
@@ -458,6 +459,8 @@ def test_instances_registry_fallback_resolves_single_git_root(tmp_path, monkeypa
     from core.runtime_manager import instances_registry as registry
 
     root, items = _scanned_repo(tmp_path)
+    foreign = _init_repo(tmp_path / "foreign-repo")
+    foreign_branch = _worktree(foreign, "foreign-branch", "codex/foreign")
     _redirect_host_project_root(monkeypatch, tmp_path)
     monkeypatch.setattr("core.assistant_runtime.actions._binding", None)
     _no_claims(monkeypatch)
@@ -465,8 +468,10 @@ def test_instances_registry_fallback_resolves_single_git_root(tmp_path, monkeypa
     registry_path.parent.mkdir(parents=True, exist_ok=True)
     registry_path.write_text(json.dumps({"schemaVersion": 3, "instances": {
         "worktree:elsewhere": {"projectRoot": str(tmp_path / "not-a-repo"), "status": "closed"},
-        "worktree:main": {"status": "closed"},
-        "worktree:managed": {"projectRoot": str(root), "status": "closed"},
+        "worktree:same-branch": {"projectRoot": str(items["clean"]["path"]), "status": "closed"},
+        "worktree:foreign-branch": {"projectRoot": str(foreign_branch), "status": "closed"},
+        "worktree:no-root": {"status": "closed"},
+        "worktree:managed-main": {"projectRoot": str(root), "status": "closed"},
     }}, ensure_ascii=False), encoding="utf-8")
 
     plan = actions.plan({})
@@ -474,6 +479,7 @@ def test_instances_registry_fallback_resolves_single_git_root(tmp_path, monkeypa
     assert plan["ok"] is True
     rows = {row["instanceId"]: row for row in plan["instances"]}
     assert rows["worktree:clean"]["eligible"] is True
+    assert {row["instanceId"] for row in plan["instances"]} >= {"main"}
 
 
 def test_execute_fails_closed_without_root_and_never_scans(tmp_path, monkeypatch):
@@ -493,13 +499,95 @@ def test_execute_fails_closed_without_root_and_never_scans(tmp_path, monkeypatch
     assert _branch_exists(root, "codex/clean")
 
 
-def test_dispatch_registry_exposes_distinct_physical_roots(tmp_path):
+def test_dispatch_registry_exposes_only_main_line_roots(tmp_path):
     from core.assistant_runtime.dispatch import DispatchService
 
-    first = tmp_path / "repo-one"
-    second = tmp_path / "repo-two"
-    first.mkdir()
-    second.mkdir()
-    service = DispatchService(tmp_path / "profile", {"registered:1": first, "registered:2": second,
-                                                     "registered:aliased": first})
-    assert service.registered_project_roots() == (first.resolve(), second.resolve())
+    root = _init_repo(tmp_path / "repo")
+    branch = _worktree(root, "task-branch", "codex/task-branch")
+    retired = tmp_path / "not-git-dir"
+    retired.mkdir()
+    service = DispatchService(tmp_path / "profile", {
+        "registered:main": root, "registered:branch": branch, "registered:unknown": retired,
+        "registered:aliased-main": root,
+    })
+    assert service.registered_project_roots() == (root.resolve(),)
+
+
+def test_plan_resolves_main_root_from_mixed_instance_registrations(tmp_path, monkeypatch):
+    """E2E regression: main + many branch registrations resolve to one root."""
+    from core.assistant_runtime.dispatch import DispatchService
+    from core.launcher import service as launcher_service
+
+    root, items = _scanned_repo(tmp_path)
+    foreign = _init_repo(tmp_path / "foreign-repo")
+    foreign_branch = _worktree(foreign, "foreign-branch", "codex/foreign")
+    _redirect_host_project_root(monkeypatch, tmp_path)
+    service = DispatchService(tmp_path / "profile", {
+        "registered:main": root,
+        "registered:clean": Path(items["clean"]["path"]),
+        "registered:unmerged": Path(items["unmerged"]["path"]),
+        "registered:dirty": Path(items["dirty"]["path"]),
+        "registered:foreign-branch": foreign_branch,
+    })
+    monkeypatch.setattr("core.assistant_runtime.actions._binding", (service, object(), None))
+    _no_claims(monkeypatch)
+    scans: list[dict] = []
+    real_list = launcher_service.list_launcher_branch_instances
+
+    def spying_list(**kwargs):
+        scans.append(kwargs)
+        return real_list(**kwargs)
+
+    monkeypatch.setattr(launcher_service, "list_launcher_branch_instances", spying_list)
+
+    plan = actions.plan({"agentId": "assistant"})
+
+    assert plan["ok"] is True and plan["status"] == "observed"
+    assert scans == [{"include_cleanup_metadata": True, "checkout": root}]
+    rows = {row["instanceId"]: row for row in plan["instances"]}
+    assert rows["worktree:clean"]["eligible"] is True
+    assert rows["worktree:unmerged"]["reasons"] == ["UNMERGED"]
+    assert rows["worktree:dirty"]["reasons"] == ["DIRTY"]
+
+
+def test_plan_stays_ambiguous_when_two_main_lines_registered(tmp_path, monkeypatch):
+    from core.assistant_runtime.dispatch import DispatchService
+    from core.launcher import service as launcher_service
+
+    root, items = _scanned_repo(tmp_path)
+    second = _init_repo(tmp_path / "second-repo")
+    _redirect_host_project_root(monkeypatch, tmp_path)
+    service = DispatchService(tmp_path / "profile", {
+        "registered:main-one": root, "registered:main-two": second,
+        "registered:branch": Path(items["clean"]["path"]),
+    })
+    monkeypatch.setattr("core.assistant_runtime.actions._binding", (service, object(), None))
+    monkeypatch.setattr(launcher_service, "list_launcher_branch_instances",
+                        lambda **kwargs: (_ for _ in ()).throw(AssertionError("ambiguous main roots must not scan")))
+
+    result = actions.plan({})
+
+    assert result["ok"] is False
+    assert result["error"] == "project_root_ambiguous"
+    assert "主线" in result["message"]
+
+
+def test_plan_fails_closed_when_only_branch_registrations_exist(tmp_path, monkeypatch):
+    from core.assistant_runtime.dispatch import DispatchService
+    from core.launcher import service as launcher_service
+
+    root, items = _scanned_repo(tmp_path)
+    _redirect_host_project_root(monkeypatch, tmp_path)
+    service = DispatchService(tmp_path / "profile", {
+        "registered:clean": Path(items["clean"]["path"]),
+        "registered:unmerged": Path(items["unmerged"]["path"]),
+    })
+    monkeypatch.setattr("core.assistant_runtime.actions._binding", (service, object(), None))
+    monkeypatch.setattr(launcher_service, "list_launcher_branch_instances",
+                        lambda **kwargs: (_ for _ in ()).throw(AssertionError("no main root, no scan")))
+
+    result = actions.plan({})
+
+    assert result["ok"] is False
+    assert result["error"] == "project_root_unavailable"
+    assert Path(items["clean"]["path"]).exists()

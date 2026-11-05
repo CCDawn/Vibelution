@@ -598,18 +598,24 @@ class DispatchService:
         return tuple(sorted(self._projects))
 
     def registered_project_roots(self) -> tuple[Path, ...]:
-        """Distinct physical roots of host-authorized projects, in registry order.
+        """Distinct main-line integration roots, in registry order.
 
-        Launcher-supplied authority for host-side filesystem actions that need
-        the managed checkout (assistant branch cleanup). Distinctness follows
-        the platform path rules so aliased registrations collapse.
+        Launcher registrations cover every checked-out instance (main plus
+        branch worktrees), so roots are filtered to Git main-line checkouts via
+        the branch-workspace layout role; task/retired/unknown worktrees never
+        qualify. Multiple distinct main roots (a true multi-project workbench)
+        stay in the result and leave the ambiguity decision to the caller.
         """
+        from core.infrastructure.branch_workspace import resolve_branch_workspace
+
         roots: list[Path] = []
         for path in self._projects.values():
             try:
                 resolved = path.expanduser().resolve()
+                if resolve_branch_workspace(resolved).role != "main":
+                    continue
             except (OSError, RuntimeError, ValueError):
-                resolved = path
+                continue
             if resolved not in roots:
                 roots.append(resolved)
         return tuple(roots)
