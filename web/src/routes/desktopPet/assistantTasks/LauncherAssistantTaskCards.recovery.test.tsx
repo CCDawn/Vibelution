@@ -31,7 +31,7 @@ function terminalDispatches(): LauncherAssistantDispatch[] {
 }
 
 let root: Root, host: HTMLDivElement, client: QueryClient;
-let invoke: ReturnType<typeof vi.fn>, teamReply: () => Promise<LauncherAssistantTeamRunsPage>;
+let invoke: ReturnType<typeof vi.fn>, teamReply: (cursor?: string) => Promise<LauncherAssistantTeamRunsPage>;
 let currentPage: LauncherAssistantTeamRunsPage, rows: LauncherAssistantDispatch[];
 let notices: LauncherNotice[], model: LauncherTaskModel | null;
 function Observe() { notices = useLauncherNotices(); model = useLauncherTasks(); return null; }
@@ -54,6 +54,15 @@ function cachedPage() { return client.getQueryData<InfiniteData<AssistantTeamRun
 function expectReadOnly() {
   expect(operations().every(operation => ["status", "dispatches", "teamRuns"].includes(operation))).toBe(true);
 }
+function expectConflictWarning() {
+  expect(notices).toHaveLength(1);
+  expect(notices[0]).toMatchObject({ features: ["tasks"], title: "暂时查不到任务进度" });
+  expect(model!.partial).toBe(true);
+  const tasks = model!.tasks.filter(task => task.kind === "team_run");
+  expect(tasks).toHaveLength(1);
+  expect(tasks[0]).toMatchObject({ state: "unknown", conflictingObservations: true, receiptBound: false });
+  expect(tasks[0].sourceRefs).toHaveLength(2);
+}
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -61,10 +70,10 @@ beforeEach(() => {
   vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
   rows = terminalDispatches(); currentPage = page(); notices = []; model = null;
   teamReply = async () => currentPage;
-  invoke = vi.fn(async (request: { operation: string }) => {
+  invoke = vi.fn(async (request: { operation: string; cursor?: string }) => {
     if (request.operation === "status") return STATUS;
     if (request.operation === "dispatches") return { dispatches: rows };
-    if (request.operation === "teamRuns") return teamReply();
+    if (request.operation === "teamRuns") return teamReply(request.cursor);
     throw new Error(`Unexpected mutation: ${request.operation}`);
   });
   vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
@@ -109,6 +118,69 @@ describe("task progress recovery", () => {
     expect(cachedPage()).toEqual(currentPage);
     expect(host.querySelector('article[data-task-kind="team_run"]')?.getAttribute("data-task-state")).toBe("awaiting_verification");
     expect(host.textContent).toContain("已结束 5");
+  });
+
+  it("keeps same-page ready aliases with conflicting statuses visible until a consistent manual refresh", async () => {
+    currentPage = page([team(), team({ requestId: "request-2", originAction: "flow_start", status: "failed", revision: "r2" })]);
+    await render();
+    expect(cachedPage()).toEqual(currentPage);
+    expect(cachedPage().teamRuns.every(row => row.readState === "ready")).toBe(true);
+    expectConflictWarning();
+    await refresh();
+    expectConflictWarning();
+    expectReadOnly();
+
+    currentPage = page([team(), team({ requestId: "request-2", originAction: "flow_start" })]);
+    invoke.mockClear();
+    await refresh();
+    expect(operations().sort()).toEqual(["dispatches", "status", "teamRuns"]);
+    expectReadOnly();
+    expect(notices).toEqual([]);
+    expect(model!.partial).toBe(false);
+    expect(model!.tasks.filter(task => task.kind === "team_run")).toHaveLength(1);
+    expect(model!.tasks.find(task => task.kind === "team_run")).toMatchObject({
+      state: "awaiting_verification", conflictingObservations: false, receiptBound: true,
+      sourceRefs: [{ requestId: "request-1", originAction: "team_run" }, { requestId: "request-2", originAction: "flow_start" }],
+    });
+    expect(cachedPage()).toEqual(currentPage);
+  });
+
+  it("detects conflicting revisions across native cursor pages and clears them only after consistent refresh", async () => {
+    const nextCursor = btoa(JSON.stringify({ snapshot: "a".repeat(64), offset: 1 }))
+      .replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
+    const firstPage = { ...page([team()]), total: 2, nextCursor };
+    let secondPage = { ...page([team({ requestId: "request-2", originAction: "flow_start", revision: "r2" })]), offset: 1, total: 2 };
+    teamReply = async cursor => {
+      if (cursor === undefined) return firstPage;
+      if (cursor !== nextCursor) throw new Error("Unexpected team cursor");
+      return secondPage;
+    };
+    await render();
+    expect(notices).toEqual([]);
+    expect(model!.hasNextPage).toBe(true);
+    const more = [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "显示更多");
+    expect(more).toBeTruthy();
+    await act(async () => more!.click()); await settle();
+    expect(invoke).toHaveBeenCalledWith({ operation: "teamRuns", cursor: nextCursor });
+    expect(client.getQueryState(TEAM_KEY)?.status).toBe("success");
+    expect(client.getQueryData<InfiniteData<AssistantTeamRunObservationPage>>(TEAM_KEY)?.pages).toEqual([firstPage, secondPage]);
+    expectConflictWarning();
+    await refresh();
+    expectConflictWarning();
+    expectReadOnly();
+
+    secondPage = { ...page([team({ requestId: "request-2", originAction: "flow_start" })]), offset: 1, total: 2 };
+    invoke.mockClear();
+    await refresh();
+    expect(operations().sort()).toEqual(["dispatches", "status", "teamRuns", "teamRuns"]);
+    expectReadOnly();
+    expect(notices).toEqual([]);
+    expect(model!.partial).toBe(false);
+    expect(model!.tasks.filter(task => task.kind === "team_run")).toHaveLength(1);
+    expect(model!.tasks.find(task => task.kind === "team_run")).toMatchObject({
+      state: "awaiting_verification", conflictingObservations: false, receiptBound: true,
+    });
+    expect(client.getQueryData<InfiniteData<AssistantTeamRunObservationPage>>(TEAM_KEY)?.pages).toEqual([firstPage, secondPage]);
   });
 
   it.each(["unknown", "invalid"] as const)("retains a real %s warning until manual refresh obtains ready observations", async reason => {

@@ -144,7 +144,7 @@ export function LauncherAssistantTaskCards({onReview,onApproval,onOpenConversati
   const tasks: AssistantTask[] = [...feed.tasks.map(task => ({ ...task, kind: "dispatch" as const })), ...teamFeed.tasks]
     .sort((left, right) => taskTime(right) - taskTime(left) || left.id.localeCompare(right.id));
   const teamPartial = teamPages.some(assistantTeamRunPageNeedsRefresh)
-    || teamFeed.invalidRecords > 0;
+    || teamFeed.invalidRecords > 0 || teamFeed.tasks.some(task => task.conflictingObservations);
   const historyIncomplete = teamPages.some(page => !page.coverage.historyComplete);
   const legacyUnrecoverable = Math.max(0, ...teamPages.map(page => page.coverage.legacyUnrecoverable));
   const refreshing = status.isFetching || dispatches.isFetching || (teamEnabled && teamRuns.isFetching);
