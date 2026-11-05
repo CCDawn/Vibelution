@@ -16,7 +16,7 @@ function event(patch: Partial<LauncherAssistantSessionEvent> = {}): LauncherAssi
 }
 function append(baseLength: number, appendedText: string, patch: Partial<SessionStreamAppendEntry> = {}): SessionStreamAppendEntry {
   return { kind: "append", itemId: "answer", itemType: "agent_message", baseLength,
-    appendedLength: appendedText.length, appendedText, ...patch };
+    appendedLength: Array.from(appendedText).length, appendedText, ...patch };
 }
 function appendEvent(deltaSeq: number, baseLength: number, appendedText: string, patch: Partial<LauncherAssistantSessionEvent> = {}) {
   return event({ deltaSeq, deltaSeqFrom: deltaSeq, turnItems: [], streamEncoding: "append-v1",
@@ -32,6 +32,156 @@ function detail(items: SessionTurnItem[] = [], patch: Partial<SessionDetail> = {
 }
 
 describe("launcher assistant native stream", () => {
+  it.each(["你好🐳", "🧑🏽‍💻一起工作", "𠮷野家"])("continues native codepoint appends after %s", seed => {
+    const stream = createLauncherAssistantStream("session-1");
+    stream.apply(event({ turnItems: [item(seed)] }));
+    const next = stream.apply(appendEvent(2, Array.from(seed).length, "继续🚀"));
+    expect(next.needsRefresh).toBe(false);
+    expect(next.layer?.turnItems[0]).toMatchObject({ text: seed + "继续🚀" });
+    const last = stream.apply(appendEvent(3, Array.from(seed + "继续🚀").length, "完成"));
+    expect(last.needsRefresh).toBe(false);
+    expect(last.layer?.turnItems[0]).toMatchObject({ text: seed + "继续🚀完成" });
+  });
+
+  it("handles an emoji appended before the next fragment, including two fragments in one frame", () => {
+    const stream = createLauncherAssistantStream("session-1");
+    stream.apply(event({ turnItems: [item("你好")] }));
+    const next = stream.apply(appendEvent(2, 2, "🐳", { turnItemAppends: [append(2, "🐳"), append(3, "继续")] }));
+    expect(next.needsRefresh).toBe(false);
+    expect(next.layer?.turnItems[0]).toMatchObject({ text: "你好🐳继续" });
+  });
+
+  it("continues an append from an emoji-bearing canonical detail baseline", () => {
+    const stream = createLauncherAssistantStream("session-1");
+    stream.reconcile(detail([item("你好🐳")]));
+    const next = stream.apply(appendEvent(1, 3, "继续"));
+    expect(next.needsRefresh).toBe(false);
+    expect(next.layer?.turnItems[0]).toMatchObject({ text: "你好🐳继续" });
+  });
+
+  it("lets a full row supersede redundant appends and preserves Unicode progress across lagging detail", () => {
+    const stream = createLauncherAssistantStream("session-1");
+    const initial = detail([item("你好🐳")]);
+    stream.reconcile(initial);
+    const full = stream.apply(event({ turnItems: [item("你好🐳")], streamEncoding: "append-v1",
+      turnItemAppends: [append(99, "redundant", { appendedLength: 0 })] }));
+    expect(full.needsRefresh).toBe(false);
+    expect(stream.apply(appendEvent(2, 3, "继续")).needsRefresh).toBe(false);
+    stream.reconcile(initial);
+    const next = stream.apply(appendEvent(3, 5, "🚀"));
+    expect(next.needsRefresh).toBe(false);
+    expect(next.layer?.turnItems[0]).toMatchObject({ text: "你好🐳继续🚀" });
+  });
+
+  it("normalizes reasoning independently from answer items after canonical coverage", () => {
+    const stream = createLauncherAssistantStream("session-1");
+    const reasoning = item("想🐳", { type: "reasoning", itemId: "reason", id: "reason-r1" });
+    stream.apply(event({ turnItems: [item("答🚀"), reasoning] }));
+    stream.reconcile(detail([reasoning]));
+    const next = stream.apply(appendEvent(2, 2, "案", { turnItemAppends: [append(2, "案"),
+      append(2, "好", { itemId: "reason", itemType: "reasoning" })] }));
+    expect(next.needsRefresh).toBe(false);
+    expect(next.layer?.turnItems).toEqual(expect.arrayContaining([
+      expect.objectContaining({ itemId: "answer", text: "答🚀案" }),
+      expect.objectContaining({ itemId: "reason", text: "想🐳好" }),
+    ]));
+  });
+
+  it("rejects real length gaps and incorrect native appended lengths", () => {
+    for (const entry of [append(4, "继续"), append(3, "继续", { appendedLength: 3 })]) {
+      const stream = createLauncherAssistantStream("session-1");
+      const initial = stream.apply(event({ turnItems: [item("你好🐳")] })).layer;
+      expect(stream.apply(appendEvent(2, entry.baseLength, entry.appendedText, { turnItemAppends: [entry] })))
+        .toEqual({ layer: initial, needsRefresh: true });
+    }
+  });
+
+  it("renders a complete same-turn terminal snapshot after a gap while detail recovery is pending", () => {
+    const stream = createLauncherAssistantStream("session-1");
+    stream.apply(event());
+    expect(stream.apply(appendEvent(3, 5, " lost", { ledgerSeq: 12 })).needsRefresh).toBe(true);
+    const final = stream.apply(event({ deltaSeq: 4, deltaSeqFrom: 4, ledgerSeq: 13, done: true,
+      turnItems: [item("hello recovered", { status: "completed", terminal: true, revision: 2 })] }));
+    expect(final.needsRefresh).toBe(true);
+    expect(final.layer?.status).toBe("completed");
+    expect(final.layer?.turnItems[0]).toMatchObject({ text: "hello recovered" });
+  });
+
+  it("does not release recovery with a terminal snapshot behind a held newer-turn watermark", () => {
+    const stream = createLauncherAssistantStream("session-1");
+    const initial = stream.apply(event()).layer;
+    stream.apply(appendEvent(3, 5, " lost", { ledgerSeq: 12 }));
+    stream.apply(event({ turnId: "turn-2", deltaSeq: 4, deltaSeqFrom: 4, ledgerSeq: 20,
+      turnItems: [item("new turn", { turnId: "turn-2" })] }));
+    expect(stream.apply(event({ deltaSeq: 5, deltaSeqFrom: 5, ledgerSeq: 13, done: true,
+      turnItems: [item("obsolete terminal", { status: "completed", terminal: true })] })))
+      .toEqual({ layer: initial, needsRefresh: true });
+  });
+
+  it("requires a terminal snapshot to cover the highest observed same-turn sequence", () => {
+    const stream = createLauncherAssistantStream("session-1");
+    const initial = stream.apply(event()).layer;
+    stream.apply(appendEvent(3, 5, " lost"));
+    stream.apply(appendEvent(5, 10, " newer"));
+    for (const deltaSeq of [undefined, 0, 4]) {
+      expect(stream.apply(event({ deltaSeq, deltaSeqFrom: deltaSeq, done: true,
+        turnItems: [item("obsolete", { terminal: true, status: "completed" })] })))
+        .toEqual({ layer: initial, needsRefresh: true });
+    }
+    const covered = stream.apply(event({ deltaSeq: 6, deltaSeqFrom: 6, done: true,
+      turnItems: [item("complete", { terminal: true, status: "completed" })] }));
+    expect(covered.layer?.turnItems[0]).toMatchObject({ text: "complete" });
+    expect(covered.layer?.status).toBe("completed");
+  });
+
+  it("does not treat terminal reasoning or tool rows as a completed answer", () => {
+    for (const type of ["reasoning", "tool_call"] as const) {
+      const stream = createLauncherAssistantStream("session-1");
+      const extra = item("process", { type, itemId: "process", id: "process-r1",
+        ...(type === "tool_call" ? { callId: "call-1", toolName: "read_file", input: "path" } : {}) });
+      const initial = stream.apply(event({ turnItems: [item(), extra] })).layer;
+      stream.apply(appendEvent(3, 5, " lost"));
+      expect(stream.apply(event({ deltaSeq: 4, deltaSeqFrom: 4, done: true,
+        turnItems: [item(), { ...extra, terminal: true, status: "completed" }] })))
+        .toEqual({ layer: initial, needsRefresh: true });
+    }
+  });
+
+  it("does not let a rejected stale-ledger frame poison terminal recovery sequence coverage", () => {
+    const stream = createLauncherAssistantStream("session-1");
+    const initial = stream.apply(event()).layer;
+    expect(stream.apply(event({ deltaSeq: 100, deltaSeqFrom: 100, ledgerSeq: 9 })))
+      .toEqual({ layer: initial, needsRefresh: false });
+    stream.apply(appendEvent(3, 5, " lost"));
+    expect(stream.apply(event({ deltaSeq: 4, deltaSeqFrom: 4, done: true,
+      turnItems: [item("complete", { terminal: true, status: "completed" })] })).layer?.status)
+      .toBe("completed");
+  });
+
+  it("requires canonical detail after a capped frame with unknown sequence coverage", () => {
+    const stream = createLauncherAssistantStream("session-1");
+    const initial = stream.apply(event()).layer;
+    stream.apply({ type: "assistant_delta", sessionId: "session-1", turnId: "turn-1", at: 2,
+      ledgerSeq: 10, needsRefresh: true });
+    expect(stream.apply(event({ deltaSeq: 4, deltaSeqFrom: 4, done: true,
+      turnItems: [item("complete", { terminal: true, status: "completed" })] })))
+      .toEqual({ layer: initial, needsRefresh: true });
+  });
+
+  it("keeps epoch recovery and incomplete terminal frames behind a fresh detail read", () => {
+    const stream = createLauncherAssistantStream("session-1");
+    const reasoning = item("think", { type: "reasoning", itemId: "reason", id: "reason-r1" });
+    const initial = stream.apply(event({ turnItems: [item(), reasoning] })).layer;
+    stream.apply(appendEvent(3, 5, " lost", { ledgerSeq: 12 }));
+    expect(stream.apply(event({ deltaSeq: 4, deltaSeqFrom: 4, ledgerSeq: 13, done: true,
+      turnItems: [item("partial", { terminal: true, status: "completed" })] })))
+      .toEqual({ layer: initial, needsRefresh: true });
+    stream.apply({ type: "heartbeat", sessionId: "session-1", at: 1, connectionEpoch: 1 });
+    expect(stream.apply(event({ connectionEpoch: 1, deltaSeq: 1, ledgerSeq: 14, done: true,
+      turnItems: [item("new epoch", { terminal: true, status: "completed" }), reasoning] })))
+      .toEqual({ layer: initial, needsRefresh: true });
+  });
+
   it("reuses native full → append → append → done with reasoning and tool rows intact", () => {
     const stream = createLauncherAssistantStream("session-1");
     const reasoning = item("think", { type: "reasoning", id: "reason-r1", itemId: "reason", sequence: 2, status: "pending" });
@@ -108,6 +258,32 @@ describe("launcher assistant native stream", () => {
     const grown = stream.apply(appendEvent(2, 13, "!", { connectionEpoch: 2 }));
     expect(grown.needsRefresh).toBe(false);
     expect(grown.layer?.turnItems[0]).toMatchObject({ text: "hello restart!" });
+  });
+
+  it("normalizes the first new-epoch append against fresh authority rather than the retired decoder layer", () => {
+    const stream = createLauncherAssistantStream("session-1");
+    stream.apply({ type: "heartbeat", sessionId: "session-1", at: 1, connectionEpoch: 1 });
+    stream.reconcile(detail());
+    stream.apply(event({ connectionEpoch: 1, turnItems: [item("seed")] }));
+    stream.apply({ type: "heartbeat", sessionId: "session-1", at: 2, connectionEpoch: 2 });
+    stream.reconcile(detail([item("🐳abc")]));
+    const next = stream.apply(appendEvent(1, 4, "继续", { connectionEpoch: 2 }));
+    expect(next.needsRefresh).toBe(false);
+    expect(next.layer?.turnItems[0]).toMatchObject({ text: "🐳abc继续" });
+  });
+
+  it.each([false, true])("keeps retired-epoch text out of the baseline after a non-answer delta (reasoning=%s)", reasoning => {
+    const stream = createLauncherAssistantStream("session-1");
+    stream.apply({ type: "heartbeat", sessionId: "session-1", at: 1, connectionEpoch: 1 });
+    stream.reconcile(detail());
+    stream.apply(event({ connectionEpoch: 1, turnItems: [item("seed")] }));
+    stream.apply({ type: "heartbeat", sessionId: "session-1", at: 2, connectionEpoch: 2 });
+    stream.reconcile(detail([item("🐳abc")]));
+    stream.apply(event({ connectionEpoch: 2, turnItems: reasoning
+      ? [item("think", { type: "reasoning", itemId: "reason", id: "reason-r1" })] : [] }));
+    const next = stream.apply(appendEvent(2, 4, "继续", { connectionEpoch: 2 }));
+    expect(next.needsRefresh).toBe(false);
+    expect(next.layer?.turnItems).toContainEqual(expect.objectContaining({ itemId: "answer", text: "🐳abc继续" }));
   });
 
   it("validates and preserves only positive bounded connection epochs at the IPC boundary", () => {
