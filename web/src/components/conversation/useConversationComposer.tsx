@@ -70,6 +70,7 @@ import {
 import { shouldApplyComposerFocusRequest } from "./conversationComposerFocus";
 import { scheduleComposerFocusAttempts } from "./conversationComposerFocusSchedule";
 import { extractComposerPastedTextOverflow } from "./conversationComposerPastePayload";
+import { conversationComposerResponsiveStyles } from "./conversationComposerResponsive.styles";
 import {
   composerAttachmentAcceptAttribute,
   isComposerAttachableFile,
@@ -854,7 +855,7 @@ export function useConversationComposer({
   ) : null;
 
   const composerActions = (
-    <div className={`${styles.composerActionStack}${composerVariant === "codex" ? " shrink-0" : ""}`}>
+    <div className={`${styles.composerActionStack} ${composerVariant === "codex" ? conversationComposerResponsiveStyles.actionStack : ""}`}>
       {resolvedActionMode === "stop" && composerPending ? (
         <span
           className={styles.composerStopPendingFeedback}
@@ -1514,7 +1515,7 @@ export function useConversationComposer({
                 />
               ) : null}
             </div>
-            <div className={`${styles.composerToolbarEnd}${composerVariant === "codex" ? " flex-wrap" : ""}`}>
+            <div className={`${styles.composerToolbarEnd} ${composerVariant === "codex" ? conversationComposerResponsiveStyles.toolbarEnd : ""}`}>
               {composerModelControl ?? (turnModelControl ? <ConversationTurnModelControl {...turnModelControl} /> : null)}
               {llmControl ? <ConversationInferenceControl {...llmControl} /> : null}
               {composerContextRing ? (
