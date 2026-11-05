@@ -96,28 +96,29 @@ def _root_failure(error: str, message: str) -> dict:
 
 
 def _resolve_integration_root(runtime: dict | None) -> tuple[Path | None, dict | None]:
-    """Resolve the managed integration checkout without trusting model input.
+    """Resolve the managed main-line integration checkout without model input.
 
     The tool ``runtime`` carries only agent/session/turn identity (no project
     root), so the root comes from the host-authorized dispatch project registry
-    first, then from the machine instances registry as a last fallback. Zero or
-    ambiguous roots stay fail-closed with a readable error; the redirected
-    assistant profile ``PROJECT_ROOT`` is never guessed as a workspace.
+    first (main-line registrations only), then from the machine instances
+    registry as a last fallback (main-line rows only). Zero or ambiguous roots
+    stay fail-closed with a readable error; the redirected assistant profile
+    ``PROJECT_ROOT`` is never guessed as a workspace.
     """
     roots = _dispatch_registered_roots()
     if len(roots) == 1:
         return roots[0], None
     if len(roots) > 1:
         return None, _root_failure("project_root_ambiguous",
-            "宿主登记了多个项目根，无法确定要查看哪个工作台的分支实例；请先在 Launcher 聚焦目标项目后重试，不自动猜测。")
+            "宿主登记了多个主线项目根（真多项目工作台），无法确定要查看哪个工作台的分支实例；请先在 Launcher 聚焦目标项目后重试，不自动猜测。")
     roots = _registry_project_roots()
     if len(roots) == 1:
         return roots[0], None
     if len(roots) > 1:
         return None, _root_failure("project_root_ambiguous",
-            "本机实例注册表存在多个候选项目根，无法确定目标工作台；请先在 Launcher 打开目标项目后重试，不自动猜测。")
+            "本机实例注册表存在多个主线候选项目根，无法确定目标工作台；请先在 Launcher 打开目标项目后重试，不自动猜测。")
     return None, _root_failure("project_root_unavailable",
-        "无法确定当前工作台项目根：宿主进程没有已登记的项目根可用；请先在 Launcher 打开项目后重试，不把助理目录当作 Git 工作区。")
+        "无法确定当前工作台项目根：宿主进程没有已登记的主线项目根可用；请先在 Launcher 打开项目后重试，不把助理目录当作 Git 工作区。")
 
 
 def _dispatch_registered_roots() -> tuple[Path, ...]:
@@ -135,7 +136,12 @@ def _dispatch_registered_roots() -> tuple[Path, ...]:
 
 
 def _registry_project_roots() -> tuple[Path, ...]:
-    """Last-resort roots from machine instances registry rows, git-proven."""
+    """Last-resort roots from machine instances registry main-line rows.
+
+    Only rows whose ``projectRoot`` classifies as a Git main-line checkout
+    qualify; branch worktrees, retired pools, and cross-project residue never
+    become deletion candidates through this fallback.
+    """
     from core.infrastructure.branch_workspace import resolve_branch_workspace
     from core.runtime_manager import instances_registry as registry
 
@@ -152,7 +158,8 @@ def _registry_project_roots() -> tuple[Path, ...]:
             continue
         try:
             resolved = Path(raw).expanduser().resolve()
-            resolve_branch_workspace(resolved)
+            if resolve_branch_workspace(resolved).role != "main":
+                continue
         except (OSError, RuntimeError, ValueError):
             continue
         if resolved not in roots:
