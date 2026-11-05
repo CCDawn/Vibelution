@@ -15,10 +15,11 @@ _ROUTINE = frozenset({
     "authorization_reduce", "authorization_revoke",
     "agent_parameters_update", "agent_prompt_update",
 })
-_DESTRUCTIVE = frozenset({"agent_archive", "agent_purge", "agent_purge_batch", "team_archive", "project_lifecycle"})
+_DESTRUCTIVE = frozenset({"agent_archive", "agent_purge", "agent_purge_batch", "team_archive", "project_lifecycle",
+                          "branch_cleanup_execute"})
 _EXPLICIT = frozenset({"authorization_upgrade", "agent_tool_policy_update", "knowledge_acl_grant",
                        "config_update", "reminder_handoff_recover"})
-_READS = frozenset({"delegation_goal_get", "delegation_goal_list"})
+_READS = frozenset({"delegation_goal_get", "delegation_goal_list", "branch_cleanup_plan"})
 
 
 def parse_arguments(raw: str) -> dict:
@@ -61,7 +62,11 @@ def _risk(action: str, parameters: dict) -> str:
     elif action == "reminder_handoff_recover":
         model = actions.HistoryImport
     else:
-        raise ValueError("Unclassified management action")
+        if action not in {"branch_cleanup_plan", "branch_cleanup_execute"}:
+            raise ValueError("Unclassified management action")
+        from core.web.services.local_assistant import branch_cleanup_actions
+        model = branch_cleanup_actions.BranchCleanupPlan if action == "branch_cleanup_plan" \
+            else branch_cleanup_actions.BranchCleanupExecute
     values = model.model_validate(parameters, strict=True).model_dump()
     # These existing projections additionally validate complete, displayable
     # identities and exact cascade scopes before any mode can skip a prompt.
