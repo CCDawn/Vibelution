@@ -81,6 +81,62 @@ async function choose(preset: string) {
 const calls = (operation: string) => invoke.mock.calls.filter(([request]) => request.operation === operation);
 
 describe("Launcher permission composer toolbar integration", () => {
+  const providerSummary = () => ({ argumentKeys: ["action", "arguments_json"], assistantAction: "provider_model_resolve",
+    assistantProviderPreviewVersion: 1, assistantParametersDigest: "a".repeat(64), assistantDetailsOmitted: false,
+    assistantTargets: { provider_id: "relay-1", model_query: "Opus 5.5", upstream_id: "vendor/claude-opus-5.5", verify: "true", offset: "0", limit: "20" } });
+  it("allows a complete native provider-model request and sends its original approval ID once", async () => {
+    await renderRoute({ approval: true, summary: providerSummary() });
+    const approval = container.querySelector<HTMLElement>('[data-chat-tool-approval-variant="composer"]')!;
+    expect(approval.textContent).toContain("relay-1");
+    expect(approval.textContent).toContain("Opus 5.5");
+    expect(approval.textContent).toContain("vendor/claude-opus-5.5");
+    expect(approval.textContent).toContain("可能产生费用");
+    const accept = [...approval.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent?.includes("允许本次"))!;
+    expect(accept.disabled).toBe(false);
+    await act(async () => accept.click()); await settle();
+    expect(calls("resolveApproval").map(([request]) => request)).toEqual([{ operation: "resolveApproval", requestId: "original-approval", decision: "accept" }]);
+  });
+  it.each(["legacy", "omitted", "wrong-type"])("keeps %s provider-model previews unapprovable", async kind => {
+    const summary: Record<string, unknown> = providerSummary();
+    if (kind === "legacy") delete summary.assistantProviderPreviewVersion;
+    if (kind === "omitted") summary.assistantDetailsOmitted = true;
+    if (kind === "wrong-type") summary.assistantTargets = { ...providerSummary().assistantTargets, verify: true };
+    await renderRoute({ approval: true, summary });
+    const approval = container.querySelector<HTMLElement>('[data-chat-tool-approval-variant="composer"]')!;
+    expect(approval.textContent).toContain("参数无法核对");
+    const accept = [...approval.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent?.includes("允许本次"))!;
+    expect(accept.disabled).toBe(true);
+    await act(async () => accept.click()); await settle();
+    expect(calls("resolveApproval")).toHaveLength(0);
+  });
+  const configSummary = (action: string) => ({ argumentKeys: ["action", "arguments_json"], assistantAction: action,
+    assistantPlatformPreviewVersion: 1, assistantParametersDigest: "a".repeat(64), assistantDetailsOmitted: false,
+    assistantContentOmitted: action === "agent_prompt_update",
+    assistantTargets: { project_id: "project-a", request_id: "config-request", agent_id: "agent-a", expected_config_revision: "3",
+      ...(action === "agent_prompt_update" ? { expected_template_id: "role-a", expected_content_hash: `sha256:${"b".repeat(64)}` } : { kind: "budget" }) },
+    assistantChangedFields: action === "agent_prompt_update" ? ["promptContent", "promptTemplateId"] : ["budget"],
+    assistantDelta: action === "agent_prompt_update" ? { scope: "single_agent_copy_on_write", contentChars: "40", contentDigest: "c".repeat(64), activation: "next_submission" }
+      : { maxCallsPerTurn: null } });
+  it.each(["agent_parameters_update", "agent_prompt_update"])("allows complete %s native approvals", async action => {
+    await renderRoute({ approval: true, summary: configSummary(action) });
+    const approval = container.querySelector<HTMLElement>('[data-chat-tool-approval-variant="composer"]')!;
+    expect(approval.textContent).toContain("agent-a");
+    if (action === "agent_prompt_update") expect(approval.textContent).toContain("下一次新提交");
+    const accept = [...approval.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent?.includes("允许本次"))!;
+    expect(accept.disabled).toBe(false);
+    await act(async () => accept.click()); await settle();
+    expect(calls("resolveApproval").map(([request]) => request)).toEqual([{ operation: "resolveApproval", requestId: "original-approval", decision: "accept" }]);
+  });
+  it.each(["agent_parameters_update", "agent_prompt_update"])("blocks incomplete %s native approvals", async action => {
+    const input = configSummary(action); input.assistantDetailsOmitted = true;
+    await renderRoute({ approval: true, summary: input });
+    const approval = container.querySelector<HTMLElement>('[data-chat-tool-approval-variant="composer"]')!;
+    expect(approval.textContent).toContain("参数无法核对");
+    const accept = [...approval.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent?.includes("允许本次"))!;
+    expect(accept.disabled).toBe(true);
+    await act(async () => accept.click()); await settle();
+    expect(calls("resolveApproval")).toHaveLength(0);
+  });
   it.each([false, true])("saves while busy=%s, preserves the mounted composer and leaves existing approvals undecided", async busy => {
     await renderRoute({ busy, approval: true, holdWrite: true });
     await act(async () => conversation!.onComposerChange!("保留这份草稿")); await settle();
