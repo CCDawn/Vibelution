@@ -346,6 +346,52 @@ class ReminderReceiptStore:
         verify()
         return {"created": created, "retained": len(captured) - created}
 
+    def abandon_attempt(self, event_id: str, attempt_token: str) -> None:
+        """Durably destroy one still-pending attempt's settlement capability.
+
+        The bearer token is verified against the hash persisted with the
+        pending row, so the call works for a replacement host that never made
+        the reservation. The stored hash is then replaced: the receipt row
+        stays pending (the delivery outcome remains unknown, state and
+        channel are untouched, and no resend is authorized) while the attempt
+        can provably never settle, fall back, or be re-opened later. An
+        already submitted/opened attempt is refused - settlement cannot be
+        undone by abandoning afterwards.
+        """
+        event_id = _token(event_id)
+        token = attempt_token
+        if not isinstance(token, str) or not _HEX.fullmatch(token):
+            raise ReminderReceiptError("receipt_invalid_attempt")
+        digest = hashlib.sha256(token.encode("ascii")).hexdigest()
+        with self._transaction() as conn:
+            rows = list(conn.execute("SELECT token_hash,state FROM reminder_receipts WHERE event_id=?", (event_id,)))
+            if (not rows or rows[0][1] != "pending"
+                    or not secrets.compare_digest(rows[0][0], digest)):
+                raise ReminderReceiptError("receipt_attempt_owner_required")
+            conn.execute("UPDATE reminder_receipts SET token_hash=? WHERE event_id=?",
+                         (hashlib.sha256(secrets.token_bytes(32)).hexdigest(), event_id))
+
+    def retire_pending_attempts(self) -> int:
+        """Destroy settlement capabilities of every still-pending attempt.
+
+        One-time startup recovery for a day directory that predates the
+        current day: no in-flight notification can still be settling there,
+        because reservations and their settlements happen inside the event's
+        own day. Each pending row keeps its state, channel and inflight
+        registration - the ledger keeps recording an unknown, never-delivered
+        attempt - but the stored token hash is replaced so even a retained
+        bearer token can never confirm it late. Returns the number of rows
+        retired.
+        """
+        with self._transaction() as conn:
+            count = list(conn.execute("SELECT count(*) FROM reminder_receipts WHERE state='pending'"))[0][0]
+            if count:
+                # One shared dead hash is sufficient: it must only never match
+                # a submitted token, and it is derived from fresh randomness.
+                conn.execute("UPDATE reminder_receipts SET token_hash=? WHERE state='pending'",
+                             (hashlib.sha256(secrets.token_bytes(32)).hexdigest(),))
+            return int(count)
+
     def begin_closing(self) -> None:
         """Permanently close admission for this ledger's upgraded senders.
 

@@ -79,9 +79,7 @@ Launcher 权限按钮位于消息输入框圆角内部的底部工具栏，在�
 保存可在对话忙碌或等待审批时进行，不锁定草稿、发送或任务卡片。保存中禁用重复选择；成功按 revision 单调收敛并失效原 status，晚到旧轮询不能覆盖新回执；冲突只回读，不重试提权。失败保留当前值并显示行内提示。旧宿主缺少管理权限字段时禁用并说明更新 Launcher，不假设任何默认选中档。
 展开聊天始终以 `--vui-surface-panel` 提供不透明的浅色/深色窗口底色，由 Launcher route 样式明确持有，不依赖 VUI 默认透明背景与工具类的加载顺序；自定义壁纸只叠加 background-image，透明图片、未加载或清除图片均保留该底色。原有圆角不变，收起形象仍使用透明根节点。
 聊天标题栏使用文本 VButton「打开 Launcher」，托盘提供同名入口；默认只显示助理，首次打开由 main 原生目录选择器选择现有项目，并复用项目管理窗口。renderer 不传入路径，打开入口不启动模型。
-Launcher 的“待你回答”提示在原问题下说明“请在下方输入回答，再点击发送”，并通过既有 `VStateSurface.actions` 提供 `VButton`「去回答」。点击只通过 `ConversationView.composerFocusSignal` 将焦点交给当前问题所属会话的输入框，保留草稿和附件，不自动发送、继续或作出审批。普通会话提示和后台追问识别规则不在此交互职责内。
-会话的 `lastTurnError` 直接交给 ConversationView 已有错误面板，展示原生失败摘要和可展开诊断；清除或更新均跟随会话读回，不增加错误分类、自动重试或另一份错误状态。
-操作者名称和头像预设通过同一 status 的可选 `operatorProfile` 两字段投影传给 ConversationView 已有用户显示参数；同一终态刷新会自动读回，缺损时沿用普通显示默认值，不把用户名称混作助理名。原始只读配置不返回 bio、偏好、头像文件路径或凭据；不增加 writer、独立缓存或轮询。
+Launcher 待回答区改用独立输入并临时隐藏普通聊天框；具体样式、草稿和发送边界见 [LauncherAssistantQuestionCard](#launcherassistantquestioncard)。
 status 明确声明 `operatorAssetsVersion: 1` 时，展开且可见的聊天通过固定 kind 的 `operatorAsset` IPC 独立读取头像和背景；旧宿主不读资源。图片只接收受限 MIME、大小和严格 base64 的封闭响应，renderer 不接收路径、任意 URL，不回退 HTTP。头像复用 ConversationView 的 `userAvatarImageUrl`；仅 Launcher 自定义头像用户行恢复普通会话头像的双列几何，无自定义图仍沿用 compact 布局，助理头像不变。背景仅在展开根设置既有 `--workbench-theme-background-image`，复用工作台背景合成与 soft 18% / standard 44% / strong 60% 可读性遮罩 token；收起形象保持透明。原生终态与既有配置刷新共用去重边界，收起时只标记资源失效，重开读取当前选择；删除图片或取消选择恢复默认。资源失败在聊天旁复用 VStateSurface/VButton 提示与重试，保留聊天、身份和发送能力，无独立设置 writer 或 raw 图片缓存。展开可见时复用现有状态轮询读取不含图片内容的外观变更标记，仅对应标记改变时重读该图片；旧宿主沿用原有刷新行为。
 可读性渐变沿用 `tokens.css` 的同一公式，在 Launcher 自定义背景根重新绑定，让依赖的局部遮罩变量在同一节点解析，避免继承已失效的根级渐变导致整组背景丢失；通用主题 token 不变。
 沿用已存在的浮窗形象与聊天布局，形象、名称、状态提示和标题显示读取 Launcher status 的 settings 偏好；明确的原生终态会按 session/turn 去重刷新，收起聊天也生效，不要求用户手动刷新。重新展开、窗口恢复可见与显式刷新仍可重读。自身会话在可见时启动读一次，以原生活动、已受理轮次、队列或待确认原请求维持观察；任务收口后停止轮询，隐藏后停止 UI 轮询。审批与派遣面板继续只在展开时读取。VUI 控件覆盖加载、连接错误、保留输入后的重试、收起和隐藏；没有实现的管理动作不显示可点击占位按钮。发送确认绑定原生 turnId，旧 ready 和旧终态不能结束新请求的等待；未知发送/继续只按原 requestId 回读原生接受证据，不重发、不换 ID、不把 queue ID 当 turnId。清理输入仅作用于仍等于原提交快照的草稿，新草稿保持。未确认输入与原 requestId 留在窗口内存缓存，组件卸载不清除；长期续租仍归宿主。
@@ -198,3 +196,23 @@ Launcher 自身导航的“任务”进入 `?panel=tasks`，在现有 `VDialog` 
 ### 反冗余
 
 沿用现有助理身份、派遣回执、原生审批与对话入口，不复制 Host 监护循环、团队恢复、审批表单或任务持久化。平台普通会话的组件和路由保持零差异。
+
+## LauncherAssistantQuestionCard
+
+### 功能
+
+Launcher 的待回答问题使用用户批准的 ZCode 问答结构（`ElicitationDialog`，固定参考 `872ad960de7ec172591f7e1952f7849229f94521`），由既有 `VSurface`、`VTextarea` 和 `VButton` 组合。卡片圆角 16px、内边距与区块间距 12px；问题下方是带序号的透明回答行，单行起步、最多五行内部滚动，不再套描边输入框。底部左侧键盘提示，右侧黑白提交按钮；桌面高 32px、窄屏高 44px。聚焦以回答行底色和文本光标表达，输入本身不保留独立阴影或 focus ring。
+
+### 适用范围
+
+仅用于 Launcher 个人助理当前 Session 的待回答问题；普通会话默认输入器不受影响。
+
+### 使用方式
+
+由 `LauncherAssistantRoute` 传入当前问题、独立草稿、发送状态及回调，复用既有发送接受与恢复流程。
+
+待回答时以 `ConversationView.composerHidden` 隐藏普通输入器的视觉壳，保留挂载、普通草稿、附件与引用。回答草稿独立按 Session 和问题身份保存；Enter 提交、Shift+Enter 换行，组合输入期间不提交。发送复用原请求确认链，不传新的后端协议字段；只有 ACK 或原生接受回读才能清理对应答案并恢复普通输入。明确拒绝保留可编辑答案，结果未知保留同一 requestId 并提供核对重试，不能换 ID 重发。切换会话或新问题时，旧答案和迟到回执不能覆盖新的输入。
+
+不凭问题文本生成选项，也不引入 ZCode 的忽略、空答案继续或倒计时语义。普通 Session 的接收、Journal、worker、SSE 和追问识别规则保持原契约。
+会话的 `lastTurnError` 直接交给 ConversationView 已有错误面板，展示原生失败摘要和可展开诊断；清除或更新均跟随会话读回，不增加错误分类、自动重试或另一份错误状态。
+操作者名称和头像预设通过同一 status 的可选 `operatorProfile` 两字段投影传给 ConversationView 已有用户显示参数；同一终态刷新会自动读回，缺损时沿用普通显示默认值，不把用户名称混作助理名。原始只读配置不返回 bio、偏好、头像文件路径或凭据；不增加 writer、独立缓存或轮询。

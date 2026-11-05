@@ -239,4 +239,46 @@ describe("Launcher assistant reminders", () => {
     expect(host.settleReminder).toHaveBeenCalledWith(event, "attention_fallback", false);
     await stop();
   });
+
+  it("reports a native notification failure immediately", async () => {
+    vi.useFakeTimers();
+    const { host } = fixture();
+    const onError = vi.fn();
+    let failure!: () => void;
+    const notify = vi.fn((_notice, _recovered, _click, onFailure: () => void) =>
+      new Promise<"system_notification">(resolve => { failure = () => { onFailure(); resolve("system_notification"); }; }));
+    const pump = startAssistantReminderPump({ host, available: () => true, notify, openAssistant: vi.fn(), onError });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(onError).not.toHaveBeenCalled();
+    failure();
+    expect(onError).toHaveBeenCalledWith("notification");
+    await pump();
+  });
+
+  it("reports transport success when reminder RPCs resolve", async () => {
+    vi.useFakeTimers();
+    const { host } = fixture();
+    const onSuccess = vi.fn();
+    const pump = startAssistantReminderPump({ host, available: () => true,
+      notify: vi.fn(async () => "system_notification" as const), openAssistant: vi.fn(), onError: vi.fn(), onSuccess });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(host.nextReminder).toHaveBeenCalled();
+    expect(onSuccess).toHaveBeenCalled();
+    await pump();
+  });
+
+  it("reports every failed tick so the shell can count a transport streak", async () => {
+    vi.useFakeTimers();
+    const { host } = fixture();
+    host.nextReminder.mockReset().mockRejectedValue(new Error("rpc down"));
+    const onError = vi.fn();
+    const pump = startAssistantReminderPump({ host, available: () => true, notify: vi.fn(), openAssistant: vi.fn(), onError });
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(onError).toHaveBeenCalledTimes(3);
+    expect(onError).toHaveBeenNthCalledWith(1, "transport");
+    expect(onError).toHaveBeenNthCalledWith(3, "transport");
+    await pump();
+  });
 });

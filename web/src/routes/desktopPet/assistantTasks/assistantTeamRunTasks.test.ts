@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LauncherAssistantTeamRun, LauncherAssistantTeamRunsPage } from "../../../api/launcherAssistant";
-import { projectAssistantTeamRunTasks, retainAssistantTeamRunDisplay } from "./assistantTeamRunTasks";
+import { assistantTeamRunPageNeedsRefresh, projectAssistantTeamRunTasks, retainAssistantTeamRunDisplay } from "./assistantTeamRunTasks";
 
 function run(overrides: Partial<LauncherAssistantTeamRun> = {}): LauncherAssistantTeamRun {
   return { projectId: "project-1", requestId: "request-1", originAction: "team_run", teamId: "team-1", flowId: "flow-1",
@@ -20,6 +20,26 @@ function unknown(overrides: Partial<LauncherAssistantTeamRun> = {}): LauncherAss
 }
 
 describe("assistant team run projection", () => {
+  it.each([
+    { name: "ready empty source", state: "ready", rows: [], legacy: 0, invalid: 0, needsRefresh: false },
+    { name: "ready current observation", state: "ready", rows: [run()], legacy: 0, invalid: 0, needsRefresh: false },
+    { name: "unexplained partial empty source", state: "partial", rows: [], legacy: 0, invalid: 0, needsRefresh: true },
+    { name: "unexplained partial current observation", state: "partial", rows: [run()], legacy: 0, invalid: 0, needsRefresh: true },
+    { name: "only a legacy gap with no team rows", state: "partial", rows: [], legacy: 2, invalid: 0, needsRefresh: false },
+    { name: "only a legacy gap with ready rows", state: "partial", rows: [run()], legacy: 2, invalid: 0, needsRefresh: false },
+    { name: "unknown row despite ready page state", state: "ready", rows: [unknown()], legacy: 2, invalid: 0, needsRefresh: true },
+    { name: "unknown row alongside a legacy gap", state: "partial", rows: [unknown()], legacy: 2, invalid: 0, needsRefresh: true },
+    { name: "mixed ready and unknown rows", state: "partial", rows: [run(), unknown({ requestId: "request-2" })], legacy: 2, invalid: 0, needsRefresh: true },
+    { name: "invalid record despite ready page state", state: "ready", rows: [], legacy: 0, invalid: 1, needsRefresh: true },
+    { name: "invalid record alongside a legacy gap", state: "partial", rows: [run()], legacy: 2, invalid: 1, needsRefresh: true },
+  ] as const)("classifies $name without changing native coverage", ({ state, rows, legacy, invalid, needsRefresh }) => {
+    const observed = { ...page([...rows]), state,
+      coverage: { kind: "local_associations" as const, historyComplete: false as const, legacyUnrecoverable: legacy, invalidRecords: invalid } };
+    const before = structuredClone(observed);
+    expect(assistantTeamRunPageNeedsRefresh(observed)).toBe(needsRefresh);
+    expect(observed).toEqual(before);
+  });
+
   it.each([
     ["running", "running", true], ["waiting", "waiting_input", true],
     ["completed", "awaiting_verification", false], ["failed", "failed", false],

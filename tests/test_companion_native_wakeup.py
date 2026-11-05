@@ -1,5 +1,6 @@
 """Real native directory/admission regression for Companion work isolation."""
 
+import logging
 import threading
 from datetime import datetime, timedelta, timezone
 
@@ -345,3 +346,63 @@ def test_archive_and_purge_manage_worker_pair_with_rollback(native_world):
         )
         is None
     )
+
+
+def test_prompt_provider_stays_silent_for_agent_without_virtual_human(native_world, caplog):
+    import uuid
+
+    service, owner_id, _now, _scheduled = native_world
+    silent_agent = directory.ensure_agent_for_session(
+        f"session-silent-{uuid.uuid4().hex[:8]}",
+        display_name="普通对话 Agent",
+    )
+    silent_agent_id = silent_agent["agentId"]
+    assert silent_agent_id != owner_id
+    assert service.binding_for(silent_agent_id) is None
+    assert (
+        directory.get_agent(silent_agent_id, include_archived=True)["metadata"].get(
+            "virtualHumanSelfWake"
+        )
+        is not True
+    )
+    assert not directory.get_agent(silent_agent_id, include_archived=True)[
+        "metadata"
+    ].get("lifeStewardForAgentId")
+    with caplog.at_level(logging.WARNING, logger=facade.__name__):
+        segments = facade.build_virtual_human_prompt_segments(silent_agent_id)
+    assert segments == []
+    assert not [
+        record
+        for record in caplog.records
+        if "Virtual human prompt provider failed" in record.getMessage()
+    ]
+
+
+def test_prompt_provider_still_warns_when_steward_pair_is_broken(native_world, caplog):
+    service, owner_id, _now, _scheduled = native_world
+    runtime_agent = directory.ensure_agent_for_session(
+        "session-steward-broken",
+        display_name="失效 steward 运行体",
+    )
+    runtime_agent_id = runtime_agent["agentId"]
+    assert service.binding_for(runtime_agent_id) is None
+    directory.update_agent_instance(
+        runtime_agent_id,
+        metadata={"lifeStewardForAgentId": owner_id},
+    )
+    from core.web.services.virtual_human_life_service import VirtualHumanLifeError
+
+    with pytest.raises(
+        VirtualHumanLifeError, match="Life steward pair validation failed."
+    ):
+        facade.resolve_virtual_human_runtime_target(runtime_agent_id)
+    with caplog.at_level(logging.WARNING, logger=facade.__name__):
+        segments = facade.build_virtual_human_prompt_segments(runtime_agent_id)
+    assert segments == []
+    matching = [
+        record
+        for record in caplog.records
+        if "Virtual human prompt provider failed" in record.getMessage()
+    ]
+    assert len(matching) == 1
+    assert matching[0].levelno == logging.WARNING

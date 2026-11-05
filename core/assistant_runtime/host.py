@@ -713,6 +713,24 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
     migration = {"gate": False, "writers": 0, "changed": asyncio.Event(),
                  "task": None, "release": None, "state": "idle", "committing": False}
 
+    # Receipt store outcomes, split so the desktop and recovery flows can
+    # distinguish "retry the identical request" from "reconcile instead".
+    _LEGACY_UNKNOWN_OUTCOME_CODES = {"receipt_commit_outcome_unknown", "receipt_close_unavailable",
+                                     "legacy_reminder_owner_closed"}
+    _LEGACY_TRANSIENT_CODES = {"receipt_store_busy", "receipt_store_unavailable",
+                               "receipt_open_unavailable", "receipt_leaf_unavailable",
+                               "receipt_journal_unavailable", "receipt_sync_unavailable"}
+    # Permit lease states a caller may wait out and retry (bounded capacity or
+    # a transiently failed release whose pins stay attested), versus states
+    # that need a different permit id, a changed source, or owner recovery.
+    _PERMIT_RETRYABLE_CODES = {"reminder_lease_capacity", "reminder_lease_release_unavailable"}
+
+    def permit_failure(error):
+        from .migration_io import MigrationIOError
+        code = str(error) if isinstance(error, MigrationIOError) else "reminder_lease_unavailable"
+        return HTTPException(409, detail={"code": code,
+                                          "retryable": code in _PERMIT_RETRYABLE_CODES})
+
     async def hold_migration_barrier():
         started = time.monotonic()
         stage = "http_writers"
@@ -1050,6 +1068,7 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
         return {"schemaVersion": 1, "receipt": result}
 
     async def legacy_reminder_call(method, payload, request):
+        from .reminder_receipts import ReminderReceiptError
         if request.query_params:
             raise HTTPException(422, detail="Invalid legacy reminder request")
         if not hasattr(app.state, "legacy_reminder_receipts"):
@@ -1059,9 +1078,25 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                 app.state.legacy_reminder_executor,
                 partial(getattr(app.state.legacy_reminder_receipts, method), *(() if method == "inventory" else (payload.model_dump(),))))
             return JSONResponse(result, headers={"Cache-Control": "no-store"})
+        except ReminderReceiptError as error:
+            code = str(error)
+            if code in _LEGACY_UNKNOWN_OUTCOME_CODES:
+                # A committed write whose outcome cannot be known. Retrying
+                # could double-apply it, so the caller must reconcile instead.
+                raise HTTPException(503, detail={"code": code, "retryable": False}) from None
+            if code in _LEGACY_TRANSIENT_CODES:
+                # Nothing committed; the same request may be retried once the
+                # transient store condition clears.
+                raise HTTPException(503, detail={"code": code, "retryable": True}) from None
+            # A request-level refusal (invalid input, wrong or destroyed
+            # attempt token, settled attempt, capacity). Retrying the same
+            # request cannot change this verdict; recovery or a fresh attempt
+            # must decide the next step.
+            raise HTTPException(409, detail={"code": code, "retryable": False}) from None
         except Exception:
             # The RPC result may be unknown after a committed write. Do not retry.
-            raise HTTPException(503, detail={"code": "legacy_reminder_unavailable"}) from None
+            raise HTTPException(503, detail={"code": "legacy_reminder_unavailable",
+                                             "retryable": False}) from None
 
     @app.post("/api/assistant/legacy-reminders/reserve")
     async def legacy_reminder_reserve(payload: LegacyReminderReservation, request: Request):
@@ -1252,31 +1287,34 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
         @app.post("/api/assistant/legacy-reminders/permit/acquire")
         async def acquire_legacy_source_permit(payload: LegacyReminderPermitAcquire, request: Request):
             if request.query_params or source_permits is None:
-                raise HTTPException(409, detail="Legacy source permit unavailable")
+                raise HTTPException(409, detail={"code": "reminder_lease_unavailable", "retryable": False})
             try:
                 result = await asyncio.to_thread(source_permits.acquire_permit, payload.projectId, payload.revision, payload.permitId)
-            except Exception:
-                raise HTTPException(409, detail="Legacy source permit unavailable") from None
+            except Exception as error:
+                raise permit_failure(error) from None
             return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
         @app.post("/api/assistant/legacy-reminders/permit/check")
         async def check_legacy_source_permit(payload: LegacyReminderPermit, request: Request):
             if request.query_params or source_permits is None:
-                raise HTTPException(409, detail="Legacy source permit unavailable")
+                raise HTTPException(409, detail={"code": "reminder_lease_unavailable", "retryable": False})
             try:
                 result = await asyncio.to_thread(source_permits.check_permit, payload.permitId)
-            except Exception:
-                raise HTTPException(409, detail="Legacy source permit unavailable") from None
+            except Exception as error:
+                raise permit_failure(error) from None
             return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
         @app.post("/api/assistant/legacy-reminders/permit/release")
         async def release_legacy_source_permit(payload: LegacyReminderPermit, request: Request):
             if request.query_params or source_permits is None:
-                raise HTTPException(409, detail="Legacy source permit unavailable")
+                raise HTTPException(409, detail={"code": "reminder_lease_unavailable", "retryable": False})
             try:
                 await asyncio.to_thread(source_permits.release_permit, payload.permitId)
-            except Exception:
-                raise HTTPException(409, detail="Legacy source permit unavailable") from None
+            except Exception as error:
+                # A transiently failed release keeps the pins attested and the
+                # id retired; the caller's retry loop completes it. A gate
+                # that cannot certify release reports non-retryable instead.
+                raise permit_failure(error) from None
             return JSONResponse({"schemaVersion": 1, "released": True}, headers={"Cache-Control": "no-store"})
 
         @app.post("/api/assistant/legacy-reminders/source")

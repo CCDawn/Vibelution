@@ -19,6 +19,8 @@ export function startAssistantReminderPump(options: {
     onLateFallback: (show: () => Promise<boolean>) => void, signal: AbortSignal): Promise<AssistantReminderChannel>;
   openAssistant(): void;
   onError(reason: "notification" | "transport"): void;
+  /** Any successful reminder RPC clears the transport warning streak. */
+  onSuccess?: () => void;
   intervalMs?: number;
 }): AssistantReminderPump {
   let stopped = false;
@@ -37,7 +39,6 @@ export function startAssistantReminderPump(options: {
   let claiming: Promise<AssistantReminder | null> | undefined;
   const pendingClicks = new Set<Promise<void>>();
   const pendingDialogs = new Set<Promise<boolean>>();
-  let failureReported = false;
   const delay = options.intervalMs ?? 30_000;
   const schedule = (ms: number) => {
     if (!stopped) timer = setTimeout(() => {
@@ -64,7 +65,7 @@ export function startAssistantReminderPump(options: {
       try { event = await claiming; }
       finally { claiming = undefined; }
       if (permanentStop || !current()) return;
-      failureReported = false;
+      options.onSuccess?.();
       if (!event) { schedule(delay); return; }
       let clicked = false;
       let acknowledgement: Promise<void> | undefined;
@@ -82,7 +83,7 @@ export function startAssistantReminderPump(options: {
         clickHandled = true;
         const confirmedChannel = channel;
         const recording = acknowledgement.then(() => options.host.settleReminder(event, confirmedChannel, true))
-          .then(() => { unconfirmed.delete(event.id); })
+          .then(() => { unconfirmed.delete(event.id); options.onSuccess?.(); })
           .catch(() => { unconfirmed.set(event.id, event); options.onError("transport"); });
         track(recording);
       };
@@ -101,7 +102,7 @@ export function startAssistantReminderPump(options: {
         let converted = false;
         const recording = claimDone.then(() => acknowledgement ?? Promise.resolve()).catch(() => undefined)
           .then(() => options.host.fallbackReminder(event))
-          .then(() => { converted = true; })
+          .then(() => { converted = true; options.onSuccess?.(); })
           .catch(() => { unconfirmed.set(event.id, event); options.onError("transport"); });
         track(recording);
         void decision.then(opened => {
@@ -109,6 +110,7 @@ export function startAssistantReminderPump(options: {
           if (!current()) return;
           if (opened) options.openAssistant();
           track(recording.then(() => converted ? options.host.settleReminder(event, "attention_fallback", true) : undefined)
+            .then(() => { if (converted) options.onSuccess?.(); })
             .catch(() => { unconfirmed.set(event.id, event); options.onError("transport"); }));
         }).catch(() => { pendingDialogs.delete(decision); if (current()) options.onError("notification"); });
       };
@@ -137,16 +139,16 @@ export function startAssistantReminderPump(options: {
       acknowledgement = options.host.settleReminder(event, channel, false);
       recordClick();
       await acknowledgement;
+      options.onSuccess?.();
       schedule(0);
     } catch (error) {
       if (stopped) return;
       // The owner never returns an already reserved event. Continue scanning
       // later for other reminders, without replaying an uncertain submission.
-      if (!failureReported) {
-        const notificationFailure = error instanceof Error && error.message.startsWith("ASSISTANT_REMINDER_NOTIFICATION_");
-        options.onError(notificationFailure ? "notification" : "transport");
-        failureReported = true;
-      }
+      // Every failed tick reports once so the shell-side warning gate can
+      // count a consecutive transport streak; success on any RPC clears it.
+      const notificationFailure = error instanceof Error && error.message.startsWith("ASSISTANT_REMINDER_NOTIFICATION_");
+      options.onError(notificationFailure ? "notification" : "transport");
       if (error instanceof Error && error.message === "ASSISTANT_REMINDER_BLOCKED") stopped = true;
       else schedule(delay);
     }
@@ -197,4 +199,40 @@ export function startAssistantReminderPump(options: {
     return drainForMigration();
   };
   return Object.assign(stop, { drainForMigration, resumeAfterMigration, tryDrainForLifecycle });
+}
+
+/** Mirror of the assistant host control-failure guard for the shell-side
+ * reminder warning dialog: the host now survives single control failures, so
+ * one transient transport failure stays silent. Only a consecutive streak
+ * warns (the returned count is the streak length); any successful reminder
+ * RPC clears the streak, and the streak stays latched after the first
+ * warning so a continuing outage cannot spam dialogs. An already open
+ * warning dialog never duplicates before recovery re-arms the gate. */
+export const REMINDER_TRANSPORT_FAILURE_LIMIT = 3;
+
+export function createReminderTransportWarningGate(options: {
+  warn(): Promise<unknown> | undefined;
+  limit?: number;
+}): { transportFailure(): number; transportSuccess(): void } {
+  const limit = options.limit ?? REMINDER_TRANSPORT_FAILURE_LIMIT;
+  let failures = 0;
+  let warned = false;
+  let dialogOpen = false;
+  return {
+    transportFailure(): number {
+      failures += 1;
+      if (warned || dialogOpen || failures < limit) return failures;
+      warned = true;
+      const shown = options.warn();
+      if (shown) {
+        dialogOpen = true;
+        void shown.finally(() => { dialogOpen = false; });
+      }
+      return failures;
+    },
+    transportSuccess() {
+      failures = 0;
+      warned = false;
+    },
+  };
 }

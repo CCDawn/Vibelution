@@ -38,7 +38,7 @@ import { verifyInitialMigrationResult } from "./assistant/initialMigrationJob.js
 import { recoverInitialMigrations } from "./assistant/initialMigrationStartup.js";
 import { PrehostRecoveryDrainedUnknown, startPrehostRecoveryJob } from "./assistant/prehostRecoveryJob.js";
 import { unknownAffairsSyncResult, unknownEpisodicSyncResult } from "./assistant/mainControlTransport.js";
-import { startAssistantReminderPump, type AssistantReminderPump } from "./assistant/reminderPump.js";
+import { createReminderTransportWarningGate, REMINDER_TRANSPORT_FAILURE_LIMIT, startAssistantReminderPump, type AssistantReminderPump } from "./assistant/reminderPump.js";
 import { AssistantProjectRegistryConnection } from "./assistant/projectRegistryConnection.js";
 import { createAssistantAppearanceMainControl } from "./assistant/appearanceMainControl.js";
 import { createAssistantProjectMainControl } from "./assistant/projectMainControl.js";
@@ -1641,6 +1641,20 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
           reminderDialogTail = shown.then(() => undefined, () => undefined);
           return shown;
         };
+        // The host now survives single control failures, so transient reminder
+        // transport failures converge behind the same consecutive-failure gate
+        // instead of a dialog per failed RPC; any successful reminder RPC
+        // clears the streak and re-arms the warning.
+        const reminderTransportGate = createReminderTransportWarningGate({
+          warn: () => {
+            if (shutdownApproved || launcherAssistantStopping) return undefined;
+            return dialog.showMessageBox({
+              type: "warning", title: "个人助理提醒暂不可用",
+              message: "助理暂时无法连接提醒服务，已有事务和发送记录仍会保留。",
+              buttons: ["确定"], noLink: true,
+            }).catch(() => console.warn("ASSISTANT_REMINDER_WARNING_FAILED"));
+          },
+        });
         stopLauncherAssistantReminders = startAssistantReminderPump({
           host,
           available: () => !shutdownApproved,
@@ -1704,15 +1718,19 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
           }),
           openAssistant: () => { void launcherAssistantWindow?.open({ show: true }).then(() => flushAssistantMigrationFeedback?.()).catch(() => console.warn("ASSISTANT_WINDOW_FAILED")); },
           onError: reason => {
-            console.warn(reason === "notification" ? "ASSISTANT_REMINDER_NOTIFICATION_FAILED" : "ASSISTANT_REMINDER_TRANSPORT_FAILED");
+            if (reason !== "notification") {
+              const failures = reminderTransportGate.transportFailure();
+              console.warn(`ASSISTANT_REMINDER_TRANSPORT_FAILED failures=${failures} limit=${REMINDER_TRANSPORT_FAILURE_LIMIT}`);
+              return;
+            }
+            console.warn("ASSISTANT_REMINDER_NOTIFICATION_FAILED");
             if (!shutdownApproved && !launcherAssistantStopping) void dialog.showMessageBox({
               type: "warning", title: "个人助理提醒暂不可用",
-              message: reason === "notification"
-                ? "系统通知未能显示，已有事务和发送记录仍会保留。"
-                : "助理暂时无法连接提醒服务，已有事务和发送记录仍会保留。",
+              message: "系统通知未能显示，已有事务和发送记录仍会保留。",
               buttons: ["确定"], noLink: true,
             }).catch(() => console.warn("ASSISTANT_REMINDER_WARNING_FAILED"));
           },
+          onSuccess: () => reminderTransportGate.transportSuccess(),
         });
         // The character can show starting/error state while native readiness
         // remains queued ahead of every authorization update.

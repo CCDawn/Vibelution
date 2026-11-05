@@ -19,6 +19,14 @@ export type AssistantTeamRunObservationPage = Omit<LauncherAssistantTeamRunsPage
   teamRuns: AssistantTeamRunObservation[];
 };
 
+/** Native `partial` includes historical coverage gaps as well as current read
+ * failures. Re-reading cannot restore legacy references; preserve that metadata
+ * without presenting a successful current read as a connection failure. */
+export function assistantTeamRunPageNeedsRefresh(page: AssistantTeamRunObservationPage): boolean {
+  if (page.coverage.invalidRecords > 0 || page.teamRuns.some(row => row.readState !== "ready")) return true;
+  return page.state === "partial" && page.coverage.legacyUnrecoverable === 0;
+}
+
 export type AssistantTeamRunTask = AssistantTaskMetadata & {
   kind: "team_run";
   id: string;

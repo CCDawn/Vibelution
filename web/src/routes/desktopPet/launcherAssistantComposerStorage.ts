@@ -1,5 +1,6 @@
 import type { ComposerImageAttachment } from "../chat/chatComposerSubmitModel";
-import type { LauncherAssistantQueuedAcceptance, LauncherAssistantSubmission } from "./launcherAssistantModel";
+import type { SessionPendingQuestion } from "../../api/types";
+import type { LauncherAssistantQuestionDraft, LauncherAssistantQueuedAcceptance, LauncherAssistantSubmission } from "./launcherAssistantModel";
 
 /** Recoverable attachment metadata only: id plus the uploaded backend artifact.
  * The File/Blob body and its local blob: preview URL are not serializable, so
@@ -20,6 +21,7 @@ export type PersistedLauncherComposer = {
   acceptedTurnId: string;
   queuedAcceptance: LauncherAssistantQueuedAcceptance | null;
   attachments: PersistedLauncherComposerAttachment[];
+  questionDraft?: LauncherAssistantQuestionDraft | null;
 };
 
 /** Write-side input: the Route's richer snapshot (full tray chips, continuation)
@@ -31,20 +33,24 @@ export type LauncherComposerPersistenceInput = {
   acceptedTurnId: string;
   queuedAcceptance: LauncherAssistantQueuedAcceptance | null;
   attachments?: readonly (ComposerImageAttachment | PersistedLauncherComposerAttachment)[] | undefined;
+  questionDraft?: LauncherAssistantQuestionDraft | null;
 };
 
 type ComposerSurface = "floating" | "embedded";
 const VERSION = 1;
 const MAX_TEXT_CHARS = 64_000;
-// Three bounded text fields may each require six JSON characters per character.
-const MAX_JSON_CHARS = 1_200_000;
+// Four 64k text fields may each require six JSON characters per character;
+// leave room for two bounded question records and uploaded attachment metadata.
+const MAX_JSON_CHARS = 1_800_000;
 const MAX_ATTACHMENT_IDS = 32;
 const SNAPSHOT_FIELDS = ["draft", "outstanding", "acceptedTurnId", "queuedAcceptance"];
 // `attachments` is optional so envelopes written before attachment persistence
 // (same VERSION) still load; new writes always include the field.
-const SNAPSHOT_ALLOWED = [...SNAPSHOT_FIELDS, "attachments"];
-const SUBMISSION_FIELDS = ["message", "requestId", "draftSnapshot", "attachmentIds", "attachmentSnapshotIds", "preserveDraft"];
+// `questionDraft` is also optional in VERSION 1; null explicitly clears it.
+const SNAPSHOT_ALLOWED = [...SNAPSHOT_FIELDS, "attachments", "questionDraft"];
+const SUBMISSION_FIELDS = ["message", "requestId", "draftSnapshot", "attachmentIds", "attachmentSnapshotIds", "preserveDraft", "answerQuestion"];
 const ATTACHMENT_FIELDS = ["id", "artifactId", "filename", "contentType", "sizeBytes", "kind"];
+const QUESTION_FIELDS = ["id", "questionText", "askedAt", "turnId"];
 const MAX_FILENAME_CHARS = 255;
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -73,6 +79,20 @@ function ids(value: unknown, artifact: boolean): value is string[] {
     id(item) && (!artifact || (/^[A-Za-z0-9_.-]+$/.test(item) && item !== "." && item !== "..")));
 }
 
+function pendingQuestion(value: unknown): SessionPendingQuestion | null {
+  if (!record(value) || !fields(value, QUESTION_FIELDS) || !id(value.id)
+    || typeof value.questionText !== "string" || value.questionText.length > 4_000
+    || typeof value.askedAt !== "string" || value.askedAt.length > 64
+    || (value.turnId !== "" && !id(value.turnId))) return null;
+  return { id: value.id, questionText: value.questionText, askedAt: value.askedAt, turnId: value.turnId as string };
+}
+
+function pendingQuestionDraft(value: unknown): LauncherAssistantQuestionDraft | null {
+  if (!record(value) || !fields(value, ["question", "value"]) || !text(value.value)) return null;
+  const question = pendingQuestion(value.question);
+  return question ? { question, value: value.value } : null;
+}
+
 function submission(value: unknown): LauncherAssistantSubmission | null {
   if (!record(value) || !fields(value, ["message", "requestId"], SUBMISSION_FIELDS)
     || !text(value.message) || !id(value.requestId, 128)
@@ -81,12 +101,15 @@ function submission(value: unknown): LauncherAssistantSubmission | null {
     || (value.attachmentSnapshotIds !== undefined && !ids(value.attachmentSnapshotIds, false))
     || (value.preserveDraft !== undefined && value.preserveDraft !== true)
     || (!value.message.trim() && !(value.attachmentIds as string[] | undefined)?.length)) return null;
+  const answerQuestion = value.answerQuestion === undefined ? null : pendingQuestion(value.answerQuestion);
+  if (value.answerQuestion !== undefined && (!answerQuestion || value.preserveDraft !== true)) return null;
   return {
     message: value.message, requestId: value.requestId,
     ...(value.draftSnapshot !== undefined ? { draftSnapshot: value.draftSnapshot as string } : {}),
     ...(value.attachmentIds !== undefined ? { attachmentIds: [...value.attachmentIds as string[]] } : {}),
     ...(value.attachmentSnapshotIds !== undefined ? { attachmentSnapshotIds: [...value.attachmentSnapshotIds as string[]] } : {}),
     ...(value.preserveDraft === true ? { preserveDraft: true } : {}),
+    ...(answerQuestion ? { answerQuestion } : {}),
   };
 }
 
@@ -142,6 +165,8 @@ function snapshot(value: unknown): PersistedLauncherComposer | null {
   if (!attachments) return null;
   const outstanding = submission(value.outstanding);
   if (value.outstanding !== null && !outstanding) return null;
+  const questionDraft = value.questionDraft == null ? null : pendingQuestionDraft(value.questionDraft);
+  if (value.questionDraft !== undefined && value.questionDraft !== null && !questionDraft) return null;
   let queuedAcceptance: LauncherAssistantQueuedAcceptance | null = null;
   if (value.queuedAcceptance !== null) {
     const receipt = value.queuedAcceptance;
@@ -149,7 +174,8 @@ function snapshot(value: unknown): PersistedLauncherComposer | null {
       || !id(receipt.id) || !id(receipt.clientSubmissionId, 128) || typeof receipt.observed !== "boolean") return null;
     queuedAcceptance = { id: receipt.id, clientSubmissionId: receipt.clientSubmissionId, observed: receipt.observed };
   }
-  return { draft: value.draft, outstanding, acceptedTurnId: value.acceptedTurnId as string, queuedAcceptance, attachments };
+  return { draft: value.draft, outstanding, acceptedTurnId: value.acceptedTurnId as string, queuedAcceptance, attachments,
+    ...(value.questionDraft !== undefined ? { questionDraft } : {}) };
 }
 
 function key(sessionId: string, surface: ComposerSurface): string | null {
@@ -186,7 +212,7 @@ export function saveLauncherComposer(
     if (!storageKey || !record(value)) return false;
     const saved = snapshot({ draft: value.draft, outstanding: value.outstanding,
       acceptedTurnId: value.acceptedTurnId, queuedAcceptance: value.queuedAcceptance,
-      attachments: persistedAttachments(value.attachments) });
+      attachments: persistedAttachments(value.attachments), questionDraft: value.questionDraft });
     if (!saved) return false;
     const raw = JSON.stringify({ version: VERSION, sessionId, surface, snapshot: saved });
     if (raw.length > MAX_JSON_CHARS) return false;

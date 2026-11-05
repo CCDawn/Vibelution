@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from copy import deepcopy
@@ -77,6 +78,7 @@ def _identity_recovery(exc: BackendClientError, project_id: str) -> dict[str, An
     }
 
 _DISPATCH_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,119}\Z")
+_CLEANUP_SCOPE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}\Z")
 _DRAIN_ADMISSION_TIMEOUT = 5.0
 _DRAIN_RECORD_TIMEOUT = 20.0
 _DRAIN_OBSERVE_TIMEOUT = 60.0
@@ -98,6 +100,53 @@ class DispatchError(RuntimeError):
         # Set only when a registered Launcher action that bypasses the project
         # backend can clear this failure; it never carries backend detail.
         self.recovery = recovery
+
+
+def _dispatch_metadata_stat(path: Path, *, directory=False):
+    row = path.lstat()
+    if (getattr(row, "st_file_attributes", 0) & 0x400
+            or not (stat.S_ISDIR(row.st_mode) if directory else stat.S_ISREG(row.st_mode))):
+        raise ValueError("dispatch_metadata_invalid")
+    return row
+
+
+def _read_dispatch_metadata(path: Path, limit: int) -> bytes:
+    before = _dispatch_metadata_stat(path)
+    if before.st_size > limit:
+        raise ValueError("dispatch_metadata_invalid")
+    with path.open("rb") as stream:
+        opened = os.fstat(stream.fileno())
+        raw = stream.read(limit + 1)
+    after = _dispatch_metadata_stat(path)
+    if len(raw) > limit or any(getattr(before, key) != getattr(row, key)
+            for row in (opened, after) for key in ("st_dev", "st_ino", "st_size", "st_mtime_ns")):
+        raise ValueError("dispatch_metadata_invalid")
+    return raw
+
+
+def _read_dispatch_cleanup_marker(path: Path, dispatch_id: str) -> dict[str, Any]:
+    """Read the cleanup writer's bounded identity marker, without authorizing a task."""
+    root = _dispatch_metadata_stat(path.parent.parent, directory=True)
+    parent = _dispatch_metadata_stat(path.parent, directory=True)
+    try:
+        data = json.loads(_read_dispatch_metadata(path, 4096))
+    except (ValueError, RecursionError):
+        raise ValueError("cleanup_completion_unconfirmed") from None
+    current_parent = _dispatch_metadata_stat(path.parent, directory=True)
+    current_root = _dispatch_metadata_stat(path.parent.parent, directory=True)
+    if ((parent.st_dev, parent.st_ino) != (current_parent.st_dev, current_parent.st_ino)
+            or (root.st_dev, root.st_ino) != (current_root.st_dev, current_root.st_ino)):
+        raise ValueError("cleanup_completion_unconfirmed")
+    if (not isinstance(data, dict) or type(data.get("schemaVersion")) is not int or data["schemaVersion"] != 1
+            or data.get("kind") != "dispatch" or type(data.get("localOnly")) is not bool
+            or not isinstance(dispatch_id, str) or not _DISPATCH_ID.fullmatch(dispatch_id)
+            or path.name != dispatch_id + ".json" or data.get("dispatchId") != dispatch_id
+            or any(not isinstance(data.get(key), str) or not _CLEANUP_SCOPE_ID.fullmatch(data[key])
+                   for key in ("projectId", "agentId", "directSessionId"))
+            or any(not isinstance(data.get(key), str) or not re.fullmatch(r"[a-f0-9]{64}", data[key])
+                   for key in ("projectBinding", "requestDigest"))):
+        raise ValueError("cleanup_completion_unconfirmed")
+    return data
 
 
 class _ActiveProjectClient:
@@ -372,20 +421,37 @@ class DispatchService:
     def _drain_record_paths(self) -> list[Path] | None:
         directory = self._root / "records"
         try:
-            if directory.is_symlink():
-                return None
-            if not directory.exists():
+            try:
+                _dispatch_metadata_stat(self._root, directory=True)
+                _dispatch_metadata_stat(directory, directory=True)
+            except FileNotFoundError:
                 return []
-            if not directory.is_dir():
-                return None
             paths = sorted(directory.iterdir())
             names = {path.name for path in paths}
-            # atomic_write_json retains lock sidecars. An orphaned sidecar is
-            # ambiguous and must not disappear from the proof.
-            return [path for path in paths if not (
-                path.name.endswith(".json.lock") and path.name[:-5] in names
-                and path.is_file() and not path.is_symlink())]
-        except OSError:
+            records = []
+            for path in paths:
+                row = _dispatch_metadata_stat(path)
+                lock = path.name.endswith(".json.lock")
+                temp = re.fullmatch(r"\.(.+)\.json\.[a-z0-9_]{8}\.tmp", path.name)
+                dispatch_id = path.name[:-10] if lock else temp[1] if temp else ""
+                if (not _DISPATCH_ID.fullmatch(dispatch_id)
+                        or row.st_size != (1 if lock else 0)
+                        or _read_dispatch_metadata(path, 1 if lock else 0) != (b"\0" if lock else b"")):
+                    records.append(path)
+                    continue
+                original = directory / (dispatch_id + ".json")
+                try:
+                    original.lstat()
+                except FileNotFoundError:
+                    # Cleanup persists this permanent ID fence before removing
+                    # the record. Only its exact, empty atomic byproducts can
+                    # leave the inventory; source task terminal proof is separate.
+                    _read_dispatch_cleanup_marker(self._root / "deleted" / original.name, dispatch_id)
+                else:
+                    if not lock or original.name not in names:
+                        records.append(path)
+            return records
+        except (OSError, ValueError, TypeError):
             return None
 
     @asynccontextmanager

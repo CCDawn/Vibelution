@@ -10,9 +10,9 @@ export const useLauncherTasks=()=>useContext(LauncherTaskContext);
 export function usePublishLauncherTaskNotices(model:LauncherTaskModel,lang:"zh"|"en"){
  const warning=model.unavailable||model.teamUnavailable||model.partial||model.invalid>0;
  usePublishLauncherNotices(warning?[{
-  id:"assistant-task-status",kind:"connection",tone:"warning",
-  title:lang==="zh"?"任务状态未更新":"Task status is out of date",
-  description:lang==="zh"?"暂时无法核对部分任务的最新状态。":"The latest status of some tasks could not be verified.",
-  actions:[{id:"refresh",label:lang==="zh"?"刷新":"Refresh",pending:model.refreshing,run:model.refresh}],
+  id:"assistant-task-status",kind:"connection",tone:"warning",features:["tasks"],
+  title:lang==="zh"?"暂时查不到任务进度":"Task progress is unavailable",
+  description:lang==="zh"?"稍后再试一次。":"Try again in a moment.",
+  actions:[{id:"refresh",label:lang==="zh"?"再试一次":"Try again",pending:model.refreshing,run:model.refresh}],
  }]:[]);
 }

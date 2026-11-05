@@ -140,3 +140,111 @@ def test_client_owned_permit_id_drains_lost_acquire_and_blocks_late_delivery(set
     with pytest.raises(MigrationIOError):
         owner.acquire_permit("registered:1", 1, new_token)
     owner.close()
+
+
+def test_release_cycles_keep_working_across_the_retired_capacity_threshold(setup_preview, monkeypatch):
+    """A lifetime of releases must not make acquire permanently capacity-bound.
+
+    Released ids stay rejected (the anti-replay contract above), but the
+    memory is a bounded most-recent window: after more releases than the
+    retention bound, ordinary acquire/release cycles must keep succeeding.
+    """
+    import core.assistant_runtime.reminder_source_lease as module
+    dispatch, workspace, _ = setup_preview
+    prepare(dispatch, workspace)
+    owner = ReminderSourceLeaseOwner(dispatch, dispatch.history_preview)
+    # Simulate a host lifetime that has already released the full bound.
+    owner._retired_permit_ids.update(("%064x" % index, None) for index in range(module._MAX_RETIRED_PERMITS))
+    for cycle in range(4):
+        permit = owner.acquire_permit("registered:1", 1)
+        assert owner.check_permit(permit["permitId"])["ledgerKey"] == permit["ledgerKey"]
+        owner.release_permit(permit["permitId"])
+        assert len(owner._retired_permit_ids) <= module._MAX_RETIRED_PERMITS
+    # A still-remembered released id stays rejected by the anti-replay rule.
+    with pytest.raises(MigrationIOError):
+        owner.acquire_permit("registered:1", 1, "%064x" % (module._MAX_RETIRED_PERMITS - 1))
+    owner.close()
+
+
+def test_failed_release_is_retryable_and_keeps_pins_attested(setup_preview, monkeypatch):
+    """One transient close failure must not fail the permit forever."""
+    import core.assistant_runtime.reminder_source_lease as module
+    dispatch, workspace, _ = setup_preview
+    prepare(dispatch, workspace)
+    root = dispatch._admitted_projects()["registered:1"]
+    owner = ReminderSourceLeaseOwner(dispatch, dispatch.history_preview)
+    original = module.ExitStack
+    class FlakyStack(original):
+        closes = 0
+        def close(self):
+            FlakyStack.closes += 1
+            if FlakyStack.closes == 1:
+                raise OSError("transient unlock failure")
+            return original.close(self)
+    # Patched before acquire so the permit's own pin stack is a FlakyStack.
+    monkeypatch.setattr(module, "ExitStack", FlakyStack)
+    permit = owner.acquire_permit("registered:1", 1)
+    token = permit["permitId"]
+    with pytest.raises(MigrationIOError, match="reminder_lease_release_unavailable"):
+        owner.release_permit(token)
+    # The failed close keeps the permit row and every pin attested as held.
+    assert token in owner._permits
+    assert owner.check_permit(token)["ledgerKey"] == permit["ledgerKey"]
+    blocked = "from pathlib import Path; import sys; Path(sys.argv[1]).write_text('blocked')"
+    assert _child(blocked, root / "agents" / "agent-pa" / "plugins" / "personal-affairs" / "affairs" / "items.jsonl").returncode != 0
+    sandbox = "from pathlib import Path; import sys; from core.infrastructure.developer_sandbox import _ensure_active_state; _ensure_active_state(Path(sys.argv[1]))"
+    assert _child(sandbox, root).returncode != 0
+    # The retry completes the remaining close steps and frees the source.
+    owner.release_permit(token)
+    assert token not in owner._permits
+    assert _child("from pathlib import Path; import sys; Path(sys.argv[1]).write_text('free')", root / "agents" / "agent-pa" / "plugins" / "personal-affairs" / "affairs" / "items.jsonl").returncode == 0
+    assert _child(sandbox, root).returncode == 0
+    # The id stays retired: a late acquire must never re-bind, and a late
+    # release stays an idempotent no-op.
+    with pytest.raises(MigrationIOError):
+        owner.acquire_permit("registered:1", 1, token)
+    owner.release_permit(token)
+    owner.close()
+
+
+def test_shutdown_close_force_drops_still_held_permits_after_bounded_wait(setup_preview, caplog):
+    """close() must never hang forever on a sender that never releases."""
+    import logging
+    dispatch, workspace, _ = setup_preview
+    _, ledger = prepare(dispatch, workspace)
+    owner = ReminderSourceLeaseOwner(dispatch, dispatch.history_preview)
+    permit = owner.acquire_permit("registered:1", 1)
+    import time
+    started = time.monotonic()
+    with caplog.at_level(logging.WARNING, logger="core.assistant_runtime.reminder_source_lease"):
+        owner.close(timeout=0.2)
+    assert time.monotonic() - started < 5
+    assert any("force-dropped 1 held permit" in row.getMessage() for row in caplog.records)
+    assert not owner._permits
+    assert _child("from pathlib import Path; import sys; Path(sys.argv[1]).write_text('free')", ledger).returncode == 0
+
+
+def test_host_permit_errors_carry_distinguishable_codes(tmp_path, setup_preview):
+    from fastapi.testclient import TestClient
+    from core.assistant_runtime.history_host import HistoryHost
+    from core.assistant_runtime.host import create_app
+    from tests.test_assistant_runtime_host import Native
+    dispatch, workspace, _ = setup_preview
+    prepare(dispatch, workspace)
+    profile = tmp_path / "assistant-profile"
+    profile.mkdir(exist_ok=True)
+    history = HistoryHost(profile, "generation-1", dispatch, dispatch.history_preview)
+    app = create_app(native=Native(), token="private-test-token", dispatch=dispatch,
+                     history_control=history, on_shutdown=lambda: None)
+    auth = {"Authorization": "Bearer private-test-token"}
+    prefix = "/api/assistant/legacy-reminders/permit/"
+    with TestClient(app, base_url="http://127.0.0.1", headers=auth) as client:
+        response = client.post(prefix + "acquire", json={"projectId": "registered:1", "revision": 99, "permitId": "a" * 64})
+        assert response.status_code == 409
+        assert response.json()["detail"] == {"code": "reminder_lease_request_invalid", "retryable": False}
+        acquired = client.post(prefix + "acquire", json={"projectId": "registered:1", "revision": 1, "permitId": "b" * 64})
+        assert acquired.status_code == 200
+        token = {"permitId": acquired.json()["permitId"]}
+        client.post(prefix + "release", json=token)
+        released = client.post(prefix + "release", json=token)
+        assert released.status_code == 200 and released.json() == {"schemaVersion": 1, "released": True}

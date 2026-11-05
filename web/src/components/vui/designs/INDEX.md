@@ -4,6 +4,7 @@
 | --- | --- |
 | `LauncherAssistantBrowserWorkspace` | [product/personal-assistant.md](./product/personal-assistant.md#launcherassistantbrowserworkspace) |
 | `LauncherAssistantRoute` | [product/personal-assistant.md](./product/personal-assistant.md#launcherassistantroute) |
+| `LauncherAssistantQuestionCard` | [product/personal-assistant.md](./product/personal-assistant.md#launcherassistantquestioncard) |
 | `LauncherAssistantWorkspaceRoute` / `LauncherAssistantWelcome` | [product/personal-assistant.md](./product/personal-assistant.md#launcherassistantworkspaceroute) |
 | `LauncherShell` / `LauncherNavigation` / `LauncherTitlebar` / `LauncherProjectRoute` | [product/personal-assistant.md](./product/personal-assistant.md#launchershell--launchernavigation) |
 | `LauncherNotificationTopbar` | [product/launcher-notifications.md](./product/launcher-notifications.md#launchernotificationtopbar) |

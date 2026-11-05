@@ -240,6 +240,7 @@ export const ConversationView = React.memo(function ConversationView({
   headerActions,
   supplementalContent,
   composerPrecedingContent,
+  composerHidden = false,
   showHeader = true,
   showSessionOverview = true,
   showMentalSnapshots = true,
@@ -1823,7 +1824,10 @@ export const ConversationView = React.memo(function ConversationView({
       ) : null}
 
       {composerPrecedingContent != null ? <div className={styles.composerPrecedingContent} data-conversation-composer-preceding>{composerPrecedingContent}</div> : null}
-      {composerSurface}
+      <div hidden={composerHidden} aria-hidden={composerHidden || undefined}
+        className={composerHidden ? "hidden" : "contents"} data-conversation-composer-host>
+        {composerSurface}
+      </div>
       {previewImage ? (
         <React.Suspense fallback={null}>
           <ConversationImagePreviewDialog image={previewImage} lang={lang} onClose={closeImagePreview} />

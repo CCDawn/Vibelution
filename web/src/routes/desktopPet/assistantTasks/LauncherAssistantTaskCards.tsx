@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { getLauncherAssistantDispatches, getLauncherAssistantStatus, getLauncherAssistantTeamRuns } from "../../../api/launcherAssistant";
 import { projectAssistantDispatchTasks, type AssistantDispatchTask } from "./assistantDispatchTasks";
-import { projectAssistantTeamRunTasks, retainAssistantTeamRunDisplay, type AssistantTask, type AssistantTeamRunObservationPage } from "./assistantTeamRunTasks";
+import { assistantTeamRunPageNeedsRefresh, projectAssistantTeamRunTasks, retainAssistantTeamRunDisplay, type AssistantTask, type AssistantTeamRunObservationPage } from "./assistantTeamRunTasks";
 import { assistantTaskErrorProbeInterval } from "./assistantTaskProbes";
 import { taskCleanupTargets, taskGroup, taskTime, useAssistantTaskCleanup, type AssistantCleanupCollection, type AssistantCleanupSourceError } from "./assistantTaskCleanup";
 import { LauncherTaskCleanupDialog } from "./LauncherTaskCleanupDialog";
@@ -143,8 +143,8 @@ export function LauncherAssistantTaskCards({onReview,onApproval,onOpenConversati
   const teamFeed = projectAssistantTeamRunTasks(teamPages.flatMap(page => page.teamRuns), { sourceAvailable: !status.isError && !teamRuns.isError });
   const tasks: AssistantTask[] = [...feed.tasks.map(task => ({ ...task, kind: "dispatch" as const })), ...teamFeed.tasks]
     .sort((left, right) => taskTime(right) - taskTime(left) || left.id.localeCompare(right.id));
-  const teamPartial = teamPages.some(page => page.state === "partial" || page.coverage.invalidRecords > 0)
-    || teamFeed.invalidRecords > 0;
+  const teamPartial = teamPages.some(assistantTeamRunPageNeedsRefresh)
+    || teamFeed.invalidRecords > 0 || teamFeed.tasks.some(task => task.conflictingObservations);
   const historyIncomplete = teamPages.some(page => !page.coverage.historyComplete);
   const legacyUnrecoverable = Math.max(0, ...teamPages.map(page => page.coverage.legacyUnrecoverable));
   const refreshing = status.isFetching || dispatches.isFetching || (teamEnabled && teamRuns.isFetching);

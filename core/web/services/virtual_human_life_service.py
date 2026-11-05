@@ -1568,11 +1568,24 @@ def build_virtual_human_prompt_segments(
     run_id: str = "",
 ) -> list[dict[str, Any]]:
     try:
+        service = get_virtual_human_life_service()
+        normalized_agent_id = str(agent_id or "").strip()
+        direct_binding = service.binding_for(normalized_agent_id)
+        if direct_binding is None:
+            agent = service.require_agent(normalized_agent_id, include_archived=True)
+            metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+            if (
+                metadata.get("virtualHumanSelfWake") is not True
+                and not str(metadata.get("lifeStewardForAgentId") or "").strip()
+            ):
+                # No virtual-human presence at all is a normal Agent state;
+                # stay silent instead of warning on every turn.
+                return []
         resolved = resolve_virtual_human_runtime_target(
             agent_id,
             session_id=session_id,
         )
-        return get_virtual_human_life_service().build_prompt_segments(
+        return service.build_prompt_segments(
             str(resolved.get("targetAgentId") or ""),
             session_id=session_id,
             run_id=run_id,
