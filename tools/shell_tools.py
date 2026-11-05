@@ -812,7 +812,7 @@ def shell_command_dialect_guidance(*, host_system: str | None = None) -> str:
                 "2. PowerShell cmdlet/语法（`Get-*`、`Select-Object`、`$var`、`$env:`、`[Type]::`、`;` 多语句）→ 直接 `powershell -NoProfile -Command \"...\"`，**避免** `cmd /c \"powershell ...\"` 双层包装（内层引号会被 cmd 拆碎）。",
                 "3. 不要用 `findstr` 搜 UTF-8 无 BOM 配置文件（系统代码页 GBK 会漏匹配）；文件内容搜索用 `grep_search_tool` / `rg -n`。",
                 "4. Unix 管道片段（`| head`、`grep -n`、`xargs`、`/dev/null`）→ 拦截；需要 bash 时显式 `bash -c \"...\"`。",
-                "5. 本轮选定一种写法后不要再探路；**cmd 方言下跑裸 PowerShell** 失败 1 次后改 `code_symbol_tool`/`grep_search_tool`。PowerShell 路径/引号 EXEC 失败只拦截同一条命令，改写后的 Get-Item/Get-Content 可继续。",
+                "5. 本轮选定一种写法后不要再探路；**cmd 方言下跑裸 PowerShell** 同一错误连续 2 次后改 `code_symbol_tool`/`grep_search_tool`。PowerShell 路径/引号 EXEC 失败只拦截同一条命令，改写后的 Get-Item/Get-Content 可继续；纯退出码非零（rg 无命中、git diff、pytest 红测）不算失败。",
                 "推荐：`rg -n \"pattern\" path`（无管道）；读取文件内容用 `read_file_tool`。",
             ]
         )
@@ -823,7 +823,7 @@ def shell_command_dialect_guidance(*, host_system: str | None = None) -> str:
                 f"=== Shell 方言（{label} 宿主）===",
                 "1. 默认 bash/Unix；不要使用 Windows 专用命令或裸 PowerShell cmdlet。",
                 "2. 输出保持有界；优先 `rg -n` 与结构化工具。",
-                "3. 同类失败 1 次后改结构化工具，不要换壳硬试。",
+                "3. 同一失败连续 2 次后改结构化工具，不要换壳硬试；修复后重跑成功会自动解除冷却。",
             ]
         )
     return "=== Shell 方言（宿主未归类）===\n优先结构化工具；确需 shell 时只用短、无管道、无平台特有语法命令。"
@@ -831,9 +831,11 @@ def shell_command_dialect_guidance(*, host_system: str | None = None) -> str:
 
 # 同一进程内按「命令意图 / 失败类别」计数的 shell 失败冷却（测试可 reset）。
 # exact: 同一规范化命令；class:*: 方言/路由同类连撞（Flash 常见：换写法仍 PS-on-cmd）。
+# 限制=2：同一失败特征连续出现 2 次才拦截（首跑失败只给提示，给「修完重跑」留一次机会）；
+# 后续同命令成功执行会清零计数（见 record_shell_success），不永久封死合法重试。
 _SHELL_FAIL_COOLDOWN_LOCK = threading.Lock()
 _SHELL_FAIL_COUNTS: dict[str, int] = {}
-_SHELL_FAIL_COOLDOWN_LIMIT = 1
+_SHELL_FAIL_COOLDOWN_LIMIT = 2
 
 
 def _normalize_shell_command_key(command: str) -> str:
@@ -841,7 +843,13 @@ def _normalize_shell_command_key(command: str) -> str:
 
 
 def is_shell_execution_failure(result_text: str) -> bool:
-    """Whether a shell/cli result should count as a failed intent for cooldown."""
+    """Whether a shell/cli result should count as a failed intent for cooldown.
+
+    纯退出码非零（``[WARNING | Exit Code ...]``）是 shell 工具的正常语义——
+    ``rg`` 无命中、``git diff --exit-code`` 返回 1、pytest 红测都是合法观察
+    结果，不计入失败冷却；只有错误输出特征（错误关键字档位 EXEC FAILURE、
+    方言不匹配、路由拦截、结构化 status=failed/error）才算失败意图。
+    """
 
     text = str(result_text or "")
     if not text:
@@ -850,9 +858,9 @@ def is_shell_execution_failure(result_text: str) -> bool:
     return (
         text.startswith("[跨平台警告]")
         or text.startswith("[EXEC FAILURE")
-        or text.startswith("[WARNING | Exit Code")
         or "shell_route_blocked" in lowered
         or "os error 123" in lowered
+        or "traceback (most recent call last)" in lowered
         or "不是内部或外部命令" in text
         or "is not recognized as an internal or external command" in lowered
         or "is not recognized as a name of a cmdlet" in lowered
@@ -976,15 +984,30 @@ def record_shell_failure(command: str, result_text: str = "") -> int:
     return max_count
 
 
+def record_shell_success(command: str) -> None:
+    """同一命令成功执行后清零其冷却计数。
+
+    成功（包括修完代码后的合法重跑、退出码非零但属正常语义的命令）是纠错
+    信号而不是持续封禁的理由；冷却只约束「连续重复同一失败」，不永久封死。
+    """
+
+    exact = _normalize_shell_command_key(command)
+    if not exact:
+        return
+    with _SHELL_FAIL_COOLDOWN_LOCK:
+        _SHELL_FAIL_COUNTS.pop(f"exact:{exact}", None)
+
+
 def shell_failure_cooldown_message(command: str, fail_count: int) -> str:
     preview = _normalize_shell_command_key(command)
     if len(preview) > 160:
         preview = preview[:157] + "..."
     return (
-        f"[工具纪律] 同一 shell 命令意图/方言类别已失败 {fail_count} 次，禁止继续用同类写法重试。\n"
+        f"[工具纪律] 同一 shell 命令意图/方言类别已连续失败 {fail_count} 次，已暂停同类重试。\n"
         f"命令: {preview}\n"
         "请改用 code_symbol_tool / grep_search_tool / glob_tool，"
         "或换完全不同的策略；不要在 cmd/PowerShell/bash 之间来回探路。"
+        "若已修复根因，修正后的重跑成功会自动解除该冷却。"
     )
 
 
@@ -1374,8 +1397,8 @@ def _is_command_dangerous(command: str) -> tuple[bool, str]:
         or "c:/" in cmd_lower
     ):
         return True, "危险命令拦截: del system path"
-    if re.search(r"\b(cd|pushd|set-location)\s+\.\.(?:\\|/|\s|$)", cmd_lower):
-        return True, "危险命令拦截: path traversal"
+    # `cd ..`/`pushd ..`/`Set-Location ..` 属目录导航，无破坏力也不扩大权限
+    # 边界（真正的越界防护在 _is_path_allowed/_resolve_tool_path），不再判危险。
     for pattern in DANGEROUS_PATTERNS:
         normalized_pattern = pattern.lower().strip()
         if re.fullmatch(r"[a-z0-9_.-]+", normalized_pattern):

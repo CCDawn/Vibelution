@@ -425,12 +425,12 @@ def _tool_budget_lines(max_calls_per_turn: int) -> list[str]:
     budget = _coerce_nonnegative_int(max_calls_per_turn)
     if budget <= 0:
         return [
-            "- 工具调用预算: 未从策略解析到上限；仍按「失败 1 次换路」执行。",
+            "- 工具调用预算: 未从策略解析到上限；仍按「同一失败连续 2 次换路」执行。",
         ]
     return [
         f"- 工具调用预算: 本回合最多 {budget} 次（maxCallsPerTurn）；用尽即停，下一用户消息重新计数。",
         "  - 额度用尽后禁止再调工具，也不要额外探查或长篇收束；直接结束本轮即可。",
-        "  - shell 同类失败 1 次后改用 code_symbol_tool/grep_search_tool，避免把额度耗在换壳重试。",
+        "  - shell 同一失败连续 2 次后改用 code_symbol_tool/grep_search_tool；纯退出码非零（rg 无命中、pytest 红测）不算失败，修复后重跑成功会自动解除冷却。",
     ]
 
 

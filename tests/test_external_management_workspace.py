@@ -338,8 +338,30 @@ def test_session_list_private_marker_never_hides_identity_or_binding_damage(list
 
 
 def test_session_list_never_silently_rewrites_an_identifier_during_model_projection(env, monkeypatch):
+    """句级过滤收窄后，普通词（如 "please"）标识符合法可投影；仍会触发
+    改写守卫的是运行时标签前缀（行级 nextaction: 等），守卫语义不变。"""
     from core.chat.conversation_store import ConversationStore
     with ConversationStore(env.root / "list-id.sqlite3") as store:
+        revision = store.repository.create_agent(agent_id="agent-a", display_name="A", kind="persistent",
+            config={}, source="test").result(timeout=3)["configRevisionId"]
+        store.repository.create_session(session_id="nextaction:demo", agent_id="agent-a", agent_config_revision_id=revision,
+            title="Visible fact", conversation_index_kind="personal_agent",
+            conversation_index_visibility="user_visible").result(timeout=3)
+        store.repository.upsert_session_runtime_state("nextaction:demo", {"conversation_id": "nextaction:demo", "agent_id": "agent-a",
+            "session_kind": "main", "conversation_index_kind": "personal_agent"}).result(timeout=3)
+        env.agent["directSessionId"] = "nextaction:demo"
+        env.save()
+        monkeypatch.setattr(env.directory_runtime, "get_open_directory_store", lambda: store)
+        monkeypatch.setattr(store.writer, "submit", lambda *args, **kwargs: pytest.fail("read submitted a write"))
+        response = env.client.get(URL.rsplit("/", 1)[0], headers=env.headers)
+        assert response.status_code == 503
+        assert response.json() == {"detail": {"code": "SESSION_LIST_UNAVAILABLE"}}
+
+
+def test_session_list_accepts_ordinary_word_identifier_after_sentence_filter_narrowing(env, monkeypatch):
+    """回归：句首动词不再触发投影删剪，"please" 这样的普通词标识符可正常列出。"""
+    from core.chat.conversation_store import ConversationStore
+    with ConversationStore(env.root / "list-id-word.sqlite3") as store:
         revision = store.repository.create_agent(agent_id="agent-a", display_name="A", kind="persistent",
             config={}, source="test").result(timeout=3)["configRevisionId"]
         store.repository.create_session(session_id="please", agent_id="agent-a", agent_config_revision_id=revision,
@@ -352,8 +374,8 @@ def test_session_list_never_silently_rewrites_an_identifier_during_model_project
         monkeypatch.setattr(env.directory_runtime, "get_open_directory_store", lambda: store)
         monkeypatch.setattr(store.writer, "submit", lambda *args, **kwargs: pytest.fail("read submitted a write"))
         response = env.client.get(URL.rsplit("/", 1)[0], headers=env.headers)
-        assert response.status_code == 503
-        assert response.json() == {"detail": {"code": "SESSION_LIST_UNAVAILABLE"}}
+        assert response.status_code == 200, response.text
+        assert any(row["id"] == "please" for row in response.json()["sessions"])
 
 
 @pytest.mark.parametrize("patch", [

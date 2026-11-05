@@ -1251,17 +1251,30 @@ class TestSecurityFeatures:
             assert ("错误" in result or "失败" in result or 
                     "危险" in result or "不允许" in result), f"应阻止: {cmd}"
 
-    def test_path_traversal_blocked(self, temp_test_dir):
-        """测试路径遍历攻击被阻止"""
-        # 尝试访问上级目录
+    def test_cd_parent_navigation_allowed(self, temp_test_dir):
+        """回归：`cd ..` 及变体是目录导航，不再被判危险命令。"""
+        for cmd in ("cd ..", "cd ..\\sibling", "cd ../sibling", "pushd ..", "Set-Location .."):
+            is_dangerous, reason = shell_tools_module._is_command_dangerous(cmd)
+            assert is_dangerous is False, f"{cmd} 不应判危险: {reason}"
+            assert "path traversal" not in reason
+        # 放行后真正执行：目录导航成功返回（无「危险命令」拦截标记）。
         result = execute_shell_command(
-            command="cd .. && dir",
+            command="cd ..",
             cwd=temp_test_dir
         )
-        # 安全模块应该限制路径
-        assert ("错误" in result or "失败" in result or 
-                "超出" in result or "不允许" in result or "沙箱" in result or
-                "安全拦截" in result or "危险命令" in result)
+        assert "危险命令" not in result
+        assert "path traversal" not in result
+
+    def test_real_path_escape_still_blocked_by_boundary(self, monkeypatch, temp_test_dir):
+        """回归：真正的路径逃逸（workspace 外路径访问）仍被 _is_path_allowed 拦。"""
+        # 把允许根固定到测试目录，模拟 workspace 边界。
+        monkeypatch.setattr(
+            shell_tools_module, "_tool_path_roots", lambda: [Path(temp_test_dir).resolve()]
+        )
+        inside = Path(temp_test_dir) / "ok.txt"
+        assert shell_tools_module._is_path_allowed(str(inside)) is True
+        outside = Path(temp_test_dir).resolve().parent / "escape.txt"
+        assert shell_tools_module._is_path_allowed(str(outside)) is False
 
     def test_forbidden_extensions(self, temp_test_dir):
         """测试禁止的文件扩展名"""

@@ -93,16 +93,11 @@ MODEL_HIDDEN_TEXT_PREFIXES = (
     "recommendednextaction:",
 )
 
-MODEL_HIDDEN_SENTENCE_PREFIX = re.compile(
-    r"^\s*(?:"
-    r"\[(?:建议|阅读导航|续读)\]|"
-    r"(?:请|建议|下一步(?:建议)?|后续|如需)|"
-    r"继续(?:调用|使用|执行|读取)|"
-    r"调用\s+(?!成功|失败|结果)|"
-    r"(?:next\s*(?:step)?|please|recommended|retry|use|call)\b"
-    r")",
-    re.IGNORECASE,
-)
+# 句级过滤只匹配本项目运行时注入的导航/续读标签（tools/search_tools.py 等
+# 发射 `[阅读导航]`/`[续读]`），不再按自然语言句首动词（请/建议/Use/Call/next…）
+# 匹配——那些开头的句子是工具结果正常正文（README、网页、搜索摘要），按动词
+# 删剪会静默裁掉真实内容。结构化工作流字段仍走 MODEL_HIDDEN_RESULT_KEYS 剥离。
+MODEL_HIDDEN_SENTENCE_PREFIX = re.compile(r"^\s*\[(?:阅读导航|续读)\]")
 
 
 def _normalize_text_payload(text: str) -> str:
@@ -570,21 +565,40 @@ def _project_structured_result_for_model(value: Any) -> Any:
     return value
 
 
-def _project_text_for_model(text: str) -> str:
-    """保留文本事实，剥离同一行中附带的下一步执行指令。"""
+def _project_text_for_model_with_hints(text: str) -> tuple[str, bool]:
+    """剥离运行时注入的导航/续读标签；返回 (投影文本, 是否删过运行时提示)。
+
+    文本级只剥离运行时标签，不按自然语言句首动词匹配（README/网页/搜索摘要
+    的「请/Use/Call」句首是正常正文）。删剪本身保持静默，让调用方决定如何
+    呈现「有删减」：ToolMessage 投影处追加末尾标记；结构化旗标面（如文档
+    分页 textFiltered）已用旗标表达，无需正文标记。
+    """
     visible_lines: list[str] = []
+    dropped_runtime_hint = False
     for line in str(text or "").splitlines():
         if line.lstrip().lower().startswith(MODEL_HIDDEN_TEXT_PREFIXES):
+            dropped_runtime_hint = True
             continue
+        segments = re.split(r"(?<=[。！？!?])", line)
         visible_segments = [
             segment
-            for segment in re.split(r"(?<=[。！？!?])", line)
+            for segment in segments
             if not MODEL_HIDDEN_SENTENCE_PREFIX.match(segment)
         ]
+        if len(visible_segments) != len(segments):
+            dropped_runtime_hint = True
         projected = "".join(visible_segments).strip()
         if projected:
             visible_lines.append(projected)
-    return "\n".join(visible_lines)
+    return "\n".join(visible_lines), dropped_runtime_hint
+
+
+def _project_text_for_model(text: str) -> str:
+    """保留文本事实，剥离运行时注入的导航/续读标签（静默版）。"""
+    return _project_text_for_model_with_hints(text)[0]
+
+
+RUNTIME_HINT_OMITTED_MARKER = "(运行时提示已省略)"
 
 
 def project_tool_result_for_model(content: str) -> str:
@@ -593,17 +607,30 @@ def project_tool_result_for_model(content: str) -> str:
     运行时可保留 continuation/retry 等元数据用于 UI、审计或 Team 工作流；
     对话 Agent 的 ToolMessage 只收到本次调用已经发生的结果。
     """
+    return project_tool_result_for_model_with_hints(content)[0]
+
+
+def project_tool_result_for_model_with_hints(content: str) -> tuple[str, bool]:
+    """同 project_tool_result_for_model，并返回是否删减过运行时文本提示。
+
+    结构化 JSON 的 key 剥离按既有设计保持静默（只返回 False）；只有文本
+    正文确实删掉了运行时提示行/句才返回 True，供 ToolMessage 投影处追加
+    删减标记。全部内容被剥离时投影保持空串，不给纯标签结果伪造正文。
+    """
     normalized = str(content or "")
     parsed = _try_parse_json_object(normalized)
     if parsed is not None:
-        return json.dumps(
-            _project_structured_result_for_model(parsed),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
+        return (
+            json.dumps(
+                _project_structured_result_for_model(parsed),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            False,
         )
 
-    return _project_text_for_model(normalized)
+    return _project_text_for_model_with_hints(normalized)
 
 
 # source_collection_context_tool 的分派查询投影参数：assignments[].assignedQueries[]
@@ -1341,10 +1368,21 @@ def package_tool_result_facts(
 
         contract_content = project_action_contract(packaged.content, tool_name=tool_name)
         directory_content = project_directory_labels(packaged.content, tool_name=tool_name)
+    content = (
+        contract_content if contract_content is not None
+        else directory_content if directory_content is not None
+        else None
+    )
+    runtime_hint_trimmed = False
+    if content is None:
+        # ToolMessage 投影处：文本正文删掉了运行时提示时，末尾追加轻量标记，
+        # 让模型知道相对原始结果有删减（结构化 key 剥离仍按设计静默）。
+        content, runtime_hint_trimmed = project_tool_result_for_model_with_hints(packaged.content)
+        if runtime_hint_trimmed and content:
+            content = f"{content}\n{RUNTIME_HINT_OMITTED_MARKER}"
     return ToolResultFacts(
         tool_name=str(tool_name or "").strip(),
-        content=(contract_content if contract_content is not None else directory_content
-                 if directory_content is not None else project_tool_result_for_model(packaged.content)),
+        content=content,
         truncated=packaged.truncated,
         original_length=packaged.original_length,
         result_kind=packaged.result_kind,

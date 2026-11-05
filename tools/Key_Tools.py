@@ -271,7 +271,7 @@ def _exec_command_tool_docstring() -> str:
 
 === 调用纪律 ===
 1. 写清与路由匹配的 `cmd`，按当前宿主 Shell 方言书写；勿混用 bash/PowerShell 探路。
-2. 同类失败 1 次换结构化工具或不同策略。
+2. 同一失败连续 2 次换结构化工具或不同策略；纯退出码非零（rg 无命中、git diff、pytest 红测）不算失败，修复后重跑成功会自动解除冷却。
 3. `max_output_chars` 默认 6000；续写用 `write_stdin`。
 
 Args:
@@ -1392,6 +1392,7 @@ def _build_key_tools() -> List[BaseTool]:
         from tools.shell_tools import (
             is_shell_execution_failure,
             record_shell_failure,
+            record_shell_success,
             shell_failure_cooldown_hit,
             shell_failure_cooldown_message,
         )
@@ -1422,8 +1423,11 @@ def _build_key_tools() -> List[BaseTool]:
                 result_text = (
                     f"{result_text}\n\n"
                     f"[工具纪律] 此 shell 意图/方言类别已失败 {count} 次；"
-                    "下一跳请改用 code_symbol_tool / grep_search_tool，不要换壳或改写同方言命令重试。"
+                    "下一跳请改用 code_symbol_tool / grep_search_tool，不要换壳或改写同方言命令重试；"
+                    "修复根因后重跑成功会自动清零冷却。"
                 )
+        else:
+            record_shell_success(command)
         if max_output_chars > 0 and len(result_text) > max_output_chars:
             head_size = max(1200, max_output_chars // 2)
             tail_size = max(1200, max_output_chars - head_size)
@@ -1452,6 +1456,7 @@ def _build_key_tools() -> List[BaseTool]:
         from tools.shell_tools import (
             is_shell_execution_failure,
             record_shell_failure,
+            record_shell_success,
             shell_failure_cooldown_hit,
             shell_failure_cooldown_message,
         )
@@ -1489,6 +1494,10 @@ def _build_key_tools() -> List[BaseTool]:
                 or is_shell_execution_failure(combined)
             ):
                 record_shell_failure(cmd, message or combined)
+            else:
+                record_shell_success(cmd)
+        else:
+            record_shell_success(cmd)
         return json.dumps(result, ensure_ascii=False)
 
     def _write_stdin_impl(

@@ -478,7 +478,7 @@ def make_reading_rules_section() -> SystemPromptSection:
             "- **默认定位**走 `code_symbol_tool` / `grep_search_tool` / `glob_tool`，不要一上来连串 shell 探查。\n"
             "- 需要命令行搜索时用有界 `rg -n \"关键词\" 路径`（无 Unix 管道）；Windows 上 `rg ... | head` 会被拦截。\n"
             "- 读取文件内容用 `read_file_tool`。只查看时可以分页；要修改已有文件时，先用 offset=0、max_lines=0 把该文件从头读到尾。\n"
-            "- 同类 shell 失败 1 次后回到结构化工具，禁止换壳重试同一意图。\n"
+            "- 同一 shell 失败连续 2 次后回到结构化工具，禁止换壳重试同一意图；纯退出码非零（rg 无命中、pytest 红测）不算失败，修复后重跑成功会自动解除冷却。\n"
         )
 
     return SystemPromptSection(
