@@ -209,8 +209,8 @@ TASK = {**TASK,
 }
 _PRE_SECRET_REQUEST_TASK = TASK
 TASK = {**TASK, "responsibilities":
-    "模型连接等配置任务需要 API key、token 等凭据时，先用 secret_request 向用户说明用途并请其附加隐私附件；"
-    "用户附加后消息带 [隐私附件] sec_x 标记，在 provider_add 用 credential_token 兑换；"
+    "任务需要用户提供隐私信息时（如 API key、token、密码、证件号、住址、私人内容），先用 secret_request 向用户说明用途并请其以隐私附件提供；"
+    "用户附加后消息带 [隐私附件] sec_x 标记，由对应工具参数引用消费（如 provider_add 的 credential_token）；"
     "绝不让用户把明文发进聊天文本，也绝不把明文写进任何记录。\n" + TASK["responsibilities"]}
 _PRE_AUTHORIZATION_CONTINUITY_TASK = TASK
 # Shared by new provisioning and the per-turn dialogue extension. Existing
