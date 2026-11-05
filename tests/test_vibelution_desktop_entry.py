@@ -695,6 +695,145 @@ def test_launcher_api_bridge_freshness_preserves_owner_error_envelope(monkeypatc
     ]
 
 
+@pytest.mark.parametrize(
+    "query",
+    ["runtimeOnly=1", "runtimeOnly=true&cleanupMetadata=0", "runtimeOnly=yes&cleanupMetadata=false"],
+)
+def test_launcher_api_bridge_runtime_inventory_does_not_import_service_or_filter_rows(monkeypatch, query):
+    entry = _load_desktop_entry_py()
+    monkeypatch.setattr(entry, "_append_log", lambda *a, **k: None)
+    monkeypatch.setitem(sys.modules, "core.launcher", types.ModuleType("core.launcher"))
+    lifecycle_module = types.ModuleType("core.launcher.branch_instance_lifecycle")
+    rows = [{"id": "main", "current": True}]
+    rows.extend(
+        {"id": f"worktree:{state}", "current": False, "runtime": {"status": state}}
+        for state in ("live", "closed", "unknown", "inflight", "legacy", "unregistered")
+    )
+    inventories = [{"items": rows, "observation": observation} for observation in (1, 2)]
+    snapshots = [json.dumps(payload, sort_keys=True) for payload in inventories]
+    calls = []
+
+    def list_overlayed_branch_instances(**kwargs):
+        calls.append(kwargs)
+        return inventories[len(calls) - 1]
+
+    lifecycle_module.list_overlayed_branch_instances = list_overlayed_branch_instances
+    monkeypatch.setitem(sys.modules, "core.launcher.branch_instance_lifecycle", lifecycle_module)
+    original_import = builtins.__import__
+
+    def reject_service_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "core.launcher.service" or (name == "core.launcher" and "service" in fromlist):
+            pytest.fail("runtime inventory must not import the Launcher service")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", reject_service_import)
+
+    for expected in inventories:
+        payload = entry._run_launcher_api_bridge(
+            argparse.Namespace(
+                launcher_api_path=f"branch-instances?{query}",
+                launcher_api_method="GET", launcher_api_body="",
+            )
+        )
+        assert payload == {"schemaVersion": 1, "ok": True, "payload": expected}
+        assert payload["payload"] is expected
+
+    assert calls == [{"include_dirty": False}, {"include_dirty": False}]
+    assert [json.dumps(payload, sort_keys=True) for payload in inventories] == snapshots
+
+
+@pytest.mark.parametrize("failure_stage", ["import", "call"])
+def test_launcher_api_bridge_runtime_inventory_preserves_owner_error_envelope(monkeypatch, failure_stage):
+    entry = _load_desktop_entry_py()
+    logs = []
+    monkeypatch.setattr(entry, "_append_log", lambda event, **fields: logs.append((event, fields)))
+    monkeypatch.setitem(sys.modules, "core.launcher", types.ModuleType("core.launcher"))
+    lifecycle_module = types.ModuleType("core.launcher.branch_instance_lifecycle")
+
+    def fail_inventory(**kwargs):
+        assert kwargs == {"include_dirty": False}
+        raise ValueError("runtime inventory owner failed")
+
+    lifecycle_module.list_overlayed_branch_instances = fail_inventory
+    monkeypatch.setitem(sys.modules, "core.launcher.branch_instance_lifecycle", lifecycle_module)
+    monkeypatch.setitem(sys.modules, "core.launcher.service", _fake_launcher_service_module())
+    original_import = builtins.__import__
+
+    def fail_owner_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "core.launcher.branch_instance_lifecycle":
+            raise ImportError("runtime inventory owner failed")
+        return original_import(name, globals, locals, fromlist, level)
+
+    if failure_stage == "import":
+        monkeypatch.setattr(builtins, "__import__", fail_owner_import)
+
+    payload = entry._run_launcher_api_bridge(
+        argparse.Namespace(
+            launcher_api_path="branch-instances?runtimeOnly=1",
+            launcher_api_method="GET", launcher_api_body="",
+        )
+    )
+    assert payload == {
+        "schemaVersion": 1,
+        "ok": False,
+        "code": "launcher_api_bridge_failed",
+        "message": "runtime inventory owner failed",
+    }
+    assert logs == [
+        ("desktop_entry_python.launcher_api.started", {"method": "GET", "path": "branch-instances?runtimeOnly=1"}),
+        (
+            "desktop_entry_python.launcher_api.failed",
+            {
+                "level": "error",
+                "method": "GET",
+                "path": "branch-instances",
+                "error_type": "ImportError" if failure_stage == "import" else "ValueError",
+                "error": "runtime inventory owner failed",
+            },
+        ),
+    ]
+
+
+@pytest.mark.parametrize(
+    "path,method,marker",
+    [
+        ("branch-instances?runtimeOnly=1", "POST", None),
+        ("status?runtimeOnly=1", "GET", "status"),
+        ("branch-instances/cleanup-metadata?runtimeOnly=1", "POST", "cleanup_merge"),
+        ("branch-instances/cleanup?runtimeOnly=1", "POST", "branch_cleanup"),
+    ],
+)
+def test_launcher_api_bridge_runtime_inventory_shortcut_requires_exact_get_path(monkeypatch, path, method, marker):
+    entry = _load_desktop_entry_py()
+    monkeypatch.setattr(entry, "_append_log", lambda *a, **k: None)
+    monkeypatch.setitem(sys.modules, "core.launcher", types.ModuleType("core.launcher"))
+    monkeypatch.setitem(sys.modules, "core.launcher.service", _fake_launcher_service_module())
+    original_import = builtins.__import__
+    service_imports = []
+
+    def record_service_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "core.launcher" and "service" in fromlist:
+            service_imports.append(name)
+        if name == "core.launcher.branch_instance_lifecycle":
+            pytest.fail("other API paths must retain the Launcher service")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", record_service_import)
+    payload = entry._run_launcher_api_bridge(
+        argparse.Namespace(launcher_api_path=path, launcher_api_method=method, launcher_api_body="{}")
+    )
+    assert service_imports == ["core.launcher"]
+    if marker is None:
+        assert payload == {
+            "schemaVersion": 1,
+            "ok": False,
+            "code": "launcher_api_bridge_failed",
+            "message": "Unsupported launcher api path: POST branch-instances",
+        }
+    else:
+        assert payload == {"schemaVersion": 1, "ok": True, "payload": {"marker": marker}}
+
+
 def test_launcher_api_bridge_branch_instances_cleanup_metadata_is_opt_in(monkeypatch):
     entry = _load_desktop_entry_py()
     monkeypatch.setattr(entry, "_append_log", lambda *a, **k: None)
@@ -708,6 +847,15 @@ def test_launcher_api_bridge_branch_instances_cleanup_metadata_is_opt_in(monkeyp
     launcher_module.list_launcher_branch_instances = capture_list
     monkeypatch.setitem(sys.modules, "core.launcher", types.ModuleType("core.launcher"))
     monkeypatch.setitem(sys.modules, "core.launcher.service", launcher_module)
+    lifecycle_module = types.ModuleType("core.launcher.branch_instance_lifecycle")
+    overlay_calls = []
+
+    def capture_overlay(**kwargs):
+        overlay_calls.append(kwargs)
+        return {"items": [], "runtimeInventory": True}
+
+    lifecycle_module.list_overlayed_branch_instances = capture_overlay
+    monkeypatch.setitem(sys.modules, "core.launcher.branch_instance_lifecycle", lifecycle_module)
 
     default_payload = entry._run_launcher_api_bridge(
         argparse.Namespace(launcher_api_path="branch-instances", launcher_api_method="GET", launcher_api_body="")
@@ -726,8 +874,8 @@ def test_launcher_api_bridge_branch_instances_cleanup_metadata_is_opt_in(monkeyp
 
     for query, expected_kwargs in [
         ("runtimeOnly=0&cleanupMetadata=0", {}),
-        ("runtimeOnly=true", {"runtime_only": True}),
         ("runtimeOnly=1&cleanupMetadata=1", {"include_cleanup_metadata": True}),
+        ("runtimeOnly=true&cleanupMetadata=yes", {"include_cleanup_metadata": True}),
     ]:
         runtime_payload = entry._run_launcher_api_bridge(
             argparse.Namespace(
@@ -739,6 +887,17 @@ def test_launcher_api_bridge_branch_instances_cleanup_metadata_is_opt_in(monkeyp
         assert runtime_payload["payload"] == {"items": []}
         assert seen[-1]["kwargs"] == expected_kwargs
 
+    assert overlay_calls == []
+    service_calls = len(seen)
+    runtime_payload = entry._run_launcher_api_bridge(
+        argparse.Namespace(
+            launcher_api_path="branch-instances?runtimeOnly=true", launcher_api_method="GET", launcher_api_body="",
+        )
+    )
+    assert runtime_payload == {"schemaVersion": 1, "ok": True, "payload": {"items": [], "runtimeInventory": True}}
+    assert len(seen) == service_calls
+    assert overlay_calls == [{"include_dirty": False}]
+
     merge_payload = entry._run_launcher_api_bridge(
         argparse.Namespace(
             launcher_api_path="branch-instances/cleanup-metadata",
@@ -748,6 +907,7 @@ def test_launcher_api_bridge_branch_instances_cleanup_metadata_is_opt_in(monkeyp
     )
     assert merge_payload["ok"] is True
     assert merge_payload["payload"]["marker"] == "cleanup_merge"
+    assert overlay_calls == [{"include_dirty": False}]
 
 
 def test_launcher_api_bridge_rejects_unknown_paths(monkeypatch):
