@@ -422,6 +422,65 @@ class NativeAgentGateway:
                 metadata={**agent.get("metadata", {}), "externalManagementMutation": marker},
                 expected_updated_at=agent["updatedAt"])
 
+    def _archive_identity_reason(self, state, raw, directory):
+        """One read-only identity check shared by discovery and admission."""
+        metadata = raw.get("metadata", {})
+        role = raw.get("roleKey")
+        creation = (metadata.get("creationSpec") or {}) if isinstance(metadata, dict) else None
+        if not isinstance(metadata, dict) or not isinstance(creation, dict) or not isinstance(role, str):
+            return "invalid_identity"
+        if (raw.get("kind") != directory.DEFAULT_AGENT_KIND
+            or role == "personal_assistant" or role.startswith(("challenge_cup_", "knowledge_expansion_"))
+            or any(metadata.get(key) for key in ("personalAssistantProfile", "protected", "systemRole", "researchOrgRole",
+                "teamId", "challengeCupTeamId", "knowledgeExpansionTeamId", "virtualHumanCompanion",
+                "virtualHumanSelfWake", "lifeStewardForAgentId"))
+            or (raw.get("createdBy") or creation.get("source")) in
+                directory.TEAM_PRIVATE_DIRECT_SESSION_CREATED_BY | directory.INTERNAL_RECOVERY_DIRECT_SESSION_CREATED_BY
+            or directory._agent_archive_protected(raw)):
+            return "protected_agent"
+        for record in (raw, metadata):
+            for field, allowed in (("conversationIndexKind", {"", "personal_agent"}),
+                                   ("conversation_index_kind", {"", "personal_agent"}),
+                                   ("conversationIndexVisibility", {"", "user_visible"}),
+                                   ("conversation_index_visibility", {"", "user_visible"})):
+                if field in record and (not isinstance(record[field], str) or record[field] not in allowed):
+                    return "private_agent"
+            for field in ("hiddenFromIndex", "hidden_from_index"):
+                if field in record and record[field] is not False:
+                    return "private_agent"
+        # Historical personal Agents legitimately store an empty role. Require
+        # explicit public identity instead of inventing or persisting a role.
+        if not role and not (
+            any(record.get(key) == "personal_agent" for record in (raw, metadata)
+                for key in ("conversationIndexKind", "conversation_index_kind"))
+            and any(record.get(key) == "user_visible" for record in (raw, metadata)
+                for key in ("conversationIndexVisibility", "conversation_index_visibility"))
+        ):
+            return "invalid_identity"
+        if raw["agentId"] in state.team_member_ids():
+            return "protected_agent"
+        binding = state.binding(raw["agentId"])
+        if binding is not None and (binding.get("enabled") is not False or binding.get("agentId") not in (None, raw["agentId"])):
+            return "protected_agent"
+        return None
+
+    def read_archive_eligibility(self, agent_id):
+        from .archive_state import ArchiveState
+        directory = self._owners()
+        try:
+            with directory._STATE_LOCK:
+                state = ArchiveState(self.project_root, directory)
+                raw = state.agent(agent_id)
+            # Discovery is advisory; admission rechecks identity and CAS. Do
+            # not hold the Agent lock while reading Team authority, whose
+            # writers acquire Team -> Agent locks in the opposite order.
+            if not isinstance(raw, dict) or raw.get("status") != "active":
+                return {"eligible": False, "reason": "agent_inactive"}
+            reason = self._archive_identity_reason(state, raw, directory)
+            return {"eligible": reason is None, "reason": reason or "ordinary_agent"}
+        except (OSError, ValueError, TypeError, KeyError):
+            return {"eligible": False, "reason": "authority_unavailable"}
+
     def archive(self, parameters: dict, marker: dict):
         from core.web.routes.agents import _archive_agent_with_session_lifecycle
         from core.web.services import session_service as sessions
@@ -445,38 +504,8 @@ class NativeAgentGateway:
                     if not isinstance(raw, dict) or raw.get("status") != "active":
                         raise ManagementError("AGENT_UNAVAILABLE", 404)
                     try:
-                        # Agent ownership is independent of Session index
-                        # classification: configured Agents need not have a
-                        # conversationIndexKind. Reuse the ordinary identity
-                        # boundaries without inventing Session visibility.
-                        metadata = raw.get("metadata", {})
-                        role = raw.get("roleKey")
-                        creation = (metadata.get("creationSpec") or {}) if isinstance(metadata, dict) else None
-                        if (raw.get("kind") != directory.DEFAULT_AGENT_KIND or not isinstance(role, str) or not role
-                            or role == "personal_assistant" or role.startswith(("challenge_cup_", "knowledge_expansion_"))
-                            or not isinstance(metadata, dict) or not isinstance(creation, dict)
-                            or any(metadata.get(key) for key in ("personalAssistantProfile", "protected", "systemRole", "researchOrgRole",
-                                "teamId", "challengeCupTeamId", "knowledgeExpansionTeamId", "virtualHumanCompanion",
-                                "virtualHumanSelfWake", "lifeStewardForAgentId"))
-                            or (raw.get("createdBy") or creation.get("source")) in
-                                directory.TEAM_PRIVATE_DIRECT_SESSION_CREATED_BY | directory.INTERNAL_RECOVERY_DIRECT_SESSION_CREATED_BY
-                            or directory._agent_archive_protected(raw)):
-                            raise ValueError("Private Agent")
-                        for record in (raw, metadata):
-                            for field, allowed in (("conversationIndexKind", {"", "personal_agent"}),
-                                                   ("conversation_index_kind", {"", "personal_agent"}),
-                                                   ("conversationIndexVisibility", {"", "user_visible"}),
-                                                   ("conversation_index_visibility", {"", "user_visible"})):
-                                if field in record and (not isinstance(record[field], str) or record[field] not in allowed):
-                                    raise ValueError("Private or damaged Agent classification")
-                            for field in ("hiddenFromIndex", "hidden_from_index"):
-                                if field in record and record[field] is not False:
-                                    raise ValueError("Hidden or damaged Agent marker")
-                        if agent_id in state.team_member_ids():
-                            raise ValueError("Private team Agent")
-                        binding = state.binding(agent_id)
-                        if binding is not None and (binding.get("enabled") is not False or binding.get("agentId") not in (None, agent_id)):
-                            raise ValueError("Companion binding")
+                        if self._archive_identity_reason(state, raw, directory) is not None:
+                            raise ValueError("Private or damaged Agent identity")
                     except (ManagementError, OSError, ValueError, TypeError, KeyError):
                         raise ManagementError("AGENT_PROTECTED", 403) from None
                     revision = raw.get("configRevision")

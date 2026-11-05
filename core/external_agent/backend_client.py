@@ -470,7 +470,15 @@ class ManagedAgentBackendClient:
         agent = result.get("agent")
         if not isinstance(agent, dict) or agent.get("agentId") != agent_id:
             raise BackendClientError("Invalid Agent projection.", code="BACKEND_PROTOCOL_ERROR")
-        return {"agent": self._management_agent_view(agent)}
+        public = {"agent": self._management_agent_view(agent)}
+        if result.get("archiveEligibility") is not None:
+            from pydantic import ValidationError
+            from core.web.services.external_management.contracts import ArchiveEligibility
+            try:
+                public["archiveEligibility"] = ArchiveEligibility.model_validate(result["archiveEligibility"]).model_dump()
+            except ValidationError as exc:
+                raise BackendClientError("Invalid Agent archive eligibility.", code="BACKEND_PROTOCOL_ERROR") from exc
+        return public
 
     async def management_agent_purge_preview(self, *, agent_id: str) -> dict[str, Any]:
         from pydantic import ValidationError

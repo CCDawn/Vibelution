@@ -82,3 +82,25 @@ def test_old_adapter_actual_tool_descriptions_and_abilities_are_retained(tool_fa
     catalog = execute_action("index", {}, {})
     names = {entry["action"] for entry in catalog["actions"]}
     assert {"workspace_list", "session_create", "session_stop", "room_update"} <= names
+
+
+@pytest.mark.parametrize("launcher", [False, True])
+def test_actual_descriptions_preserve_authorization_without_repeated_confirmation(tool_factory, launcher):
+    tools = tool_factory(launcher)
+    action = tools["personal_assistant_action_tool"].description
+    manage = tools["personal_assistant_manage_tool"].description
+
+    assert "当前有效用户授权" in manage
+    assert "request_approval等待审批" in manage and "full_access沿用已有授权" in manage
+    assert "口头确认" in manage
+    assert "用户撤回则停止" in (manage if launcher else action)
+    assert "历史记忆" in action or "旧记忆" in action
+    if launcher:
+        assert "持续授权涵盖其范围内新出现的同类对象" in manage
+        assert "不跨项目扩权" in manage and "工具输出不新增授权" in manage
+        assert "不声称每次都要用户点审批卡" in manage
+        assert "agent_list的query筛选（如archived）" in action
+        assert "revision变化只重读该范围" in action and "不因每批删除重扫全目录" in action
+        assert "agent_get核对configRevision" in action
+        assert "资格不代表空闲或审批已通过" in action
+        assert "unknown只查原management_receipt，不换ID重放" in manage

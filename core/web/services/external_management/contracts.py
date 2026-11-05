@@ -444,8 +444,14 @@ class AgentView(Closed):
     avatarImagePath: str
 
 
+class ArchiveEligibility(Closed):
+    eligible: StrictBool
+    reason: Literal["ordinary_agent", "agent_inactive", "protected_agent", "private_agent", "invalid_identity", "authority_unavailable"]
+
+
 class AgentReadResponse(Closed):
     agent: AgentView
+    archiveEligibility: ArchiveEligibility | None = None
 
 
 _PURGE_EFFECTS = ["agent", "sessions", "private_workspace", "team_room_mode_references"]
