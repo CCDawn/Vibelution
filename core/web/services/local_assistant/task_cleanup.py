@@ -175,9 +175,10 @@ def _cleanup_scope(service, owner_id, task_id):
 def _session_plan(service, record, native):
     session_id = record.get("sessionId")
     if not session_id:
-        return [], []
+        return [], [], False, None
     raw = native.load_session_chat_state(native.PROJECT_ROOT, session_id)
     retry = record.get("localCleanupSessionDeleted") is True
+    absent = raw is None and not retry
     if raw is not None:
         metadata = raw.get("metadata") or {}
         if (not isinstance(metadata, dict) or metadata.get("source") != "external_agent_task"
@@ -188,8 +189,10 @@ def _session_plan(service, record, native):
             raise ValueError("session_ownership_unproven")
         if session_activity_policy({"status": _delete_session_control_phase(session_id, raw)})["blocksMutation"]:
             raise ValueError("session_active")
-    elif not retry:
+    elif absent and not service.cleanup_absent_sessions:
         raise ValueError("session_ownership_unproven")
+    if absent and session_activity_policy({"status": _delete_session_control_phase(session_id, {})})["blocksMutation"]:
+        raise ValueError("session_active")
     from core.web.services.session.admission_lock import session_has_active_work_run
     if session_has_active_work_run(native, session_id, record.get("turnId") or ""):
         raise ValueError("session_active")
@@ -201,9 +204,16 @@ def _session_plan(service, record, native):
            for item in conversations):
         raise ValueError("session_family_shared")
     from core.web.services.session import directory_runtime
-    directory_store = directory_runtime.get_open_directory_store()
+    directory_pin = directory_runtime.pin_open_directory_store(service.project_root) if absent else None
+    directory_store = (directory_pin.store if directory_pin else None) if absent else directory_runtime.get_open_directory_store()
+    if absent and directory_store is None:
+        raise ValueError("session_ownership_unproven")
     if directory_store is not None:
+        if absent and directory_store.repository.get_session_runtime_state(session_id) is not None:
+            raise ValueError("session_ownership_unproven")
         row = directory_store.repository.get_session(session_id, include_archived=True)
+        if absent and row is not None:
+            raise ValueError("session_ownership_unproven")
         if (row and (row.get("agentId") != record["agentId"] or row.get("parentSessionId"))
                 or directory_store.repository.list_child_sessions(session_id)):
             raise ValueError("session_directory_shared")
@@ -230,7 +240,13 @@ def _session_plan(service, record, native):
         directories.append(path)
         if path.exists():
             files.extend(item for item in tree if item[0].relative_to(path).as_posix() not in _SESSION_GUARDS)
-    return directories, files
+    # Missing legacy runtime and directory rows prove there is no native
+    # Session to mutate, but cannot authorize deleting orphan content.
+    if absent and files:
+        raise ValueError("session_ownership_unproven")
+    if directory_pin and not directory_runtime.directory_store_pin_is_current(directory_pin):
+        raise ValueError("session_ownership_unproven")
+    return directories, files, absent, directory_pin
 
 
 def _git(root, *args):
@@ -289,9 +305,13 @@ def _workspace_plan(service, record):
 def _plan(service, record, native):
     retained, failures = [], []
     directories, session_files, workspace, workspace_files = [], [], None, []
+    session_absent = False
+    directory_pin = None
     if record.get("sessionId"):
         try:
-            directories, session_files = _session_plan(service, record, native)
+            directories, session_files, session_absent, directory_pin = _session_plan(service, record, native)
+            if session_absent:
+                retained.append({"kind": "session_guards", "reason": "native_recovery_and_admission_guards"})
         except (ValueError, OSError) as exc:
             failures.append({"kind": "session", "reason": str(exc) if isinstance(exc, ValueError) else type(exc).__name__})
     try:
@@ -311,9 +331,12 @@ def _plan(service, record, native):
     retained.append({"kind": "cleanup_guard", "reason": "cross_process_cleanup_lock",
                      "bytes": (service.store.root / "cleanup.lock").stat().st_size})
     internal = {"directories": directories, "sessionFiles": session_files, "workspace": workspace,
-                "workspaceFiles": workspace_files, "taskFiles": task_files, "failures": failures}
+                "workspaceFiles": workspace_files, "taskFiles": task_files, "failures": failures,
+                "sessionAbsent": session_absent, "sessionDirectoryPin": directory_pin}
     fingerprint = _digest({"record": record, "files": [[str(path), size, modified, inode] for files in
-        (task_files, session_files, workspace_files) for path, size, modified, inode in files], "retained": retained, "failures": failures})
+        (task_files, session_files, workspace_files) for path, size, modified, inode in files], "retained": retained,
+        "failures": failures, "sessionAbsent": session_absent,
+        "sessionDirectoryGeneration": directory_pin.generation if directory_pin else None})
     return {"schemaVersion": 1, "taskId": record["taskId"], "revision": record["revision"],
             "status": "blocked" if failures else "ready",
             "fingerprint": fingerprint, "estimatedBytes": 0 if failures else sum(item["bytes"] for item in resources),
@@ -449,7 +472,11 @@ def _cleanup_task(service, *, owner_id, task_id, revision, fingerprint):
             return {"schemaVersion": 1, "taskId": task_id, "status": "blocked", "releasedBytes": 0,
                 "retained": retained, "failures": failures + [
                     {"kind": "accounting", "reason": "cleanup_accounting_unavailable"}]}
-        if not failures and record.get("sessionId"):
+        if plan["sessionDirectoryPin"] is not None:
+            from core.web.services.session import directory_runtime
+            if not directory_runtime.directory_store_pin_is_current(plan["sessionDirectoryPin"]):
+                raise ExternalAgentConflictError("Native Session owner changed", code="CLEANUP_OWNER_CHANGED")
+        if not failures and record.get("sessionId") and not plan["sessionAbsent"]:
             progress = {"released": 0, "guardBytes": 0}
             try:
                 # Persist recovery proof before native deletion: a failed file

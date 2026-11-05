@@ -31,6 +31,7 @@ class LocalAssistantTaskService(ExternalAgentTaskService):
     """Only authenticated transport may select this policy; DTOs cannot."""
 
     cleanup_workspaces = True
+    cleanup_absent_sessions = False
 
     def __init__(self, store, *, project_root, authority_fingerprint=None, workspace_factory=None, **kwargs):
         from core.infrastructure.launcher_assistant_authority import launcher_authority_fingerprint
