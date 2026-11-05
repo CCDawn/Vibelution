@@ -161,6 +161,41 @@ def read_team_result(intents, request_id: str, project_root: Path) -> dict:
         return _unavailable()
 
 
+def read_attempt_result(state, root, attempt, *, verify_source):
+    """Read one exact workflow attempt's final Journal answer, without repair.
+
+    Callers own request/run/roster validation. Their existing-only verifier runs
+    before the final Session and Journal recheck, preserving the one-shot
+    reader's authority-check order.
+    """
+    store = directory_runtime.get_open_directory_store()
+    if store is None or directory_runtime.directory_store_project_root() is None or Path(directory_runtime.directory_store_project_root()).resolve() != root:
+        raise ValueError("session store unavailable")
+    row = store.repository.get_session(attempt["sessionId"], include_archived=False)
+    runtime = store.repository.get_session_runtime_state(attempt["sessionId"])
+    from .workspace import _session_identity
+    if not isinstance(row, dict) or not isinstance(runtime, dict) or _session_identity(row, runtime, attempt["sessionId"]) != attempt["agentId"]:
+        raise ValueError("session owner mismatch")
+    metadata = runtime.get("metadata")
+    if (not isinstance(metadata, dict) or metadata.get("source") != "generic_team_workflow"
+            or metadata.get("externalTaskId") != attempt["key"] or runtime.get("archived") is True
+            or runtime.get("read_only") or runtime.get("readOnly")):
+        raise ValueError("session task mismatch")
+    journal_path = state.path("sessions", _safe_session_workspace_token(attempt["sessionId"]), "turn_journal.jsonl")
+    events, stamp = _journal(journal_path)
+    terminal, user_sequence = _lineage(events, attempt)
+    answer = _answer(events, attempt, terminal, user_sequence)
+    verify_source()
+    state.verify_workspace()
+    if (store is not directory_runtime.get_open_directory_store()
+            or Path(directory_runtime.directory_store_project_root()).resolve() != root
+            or store.repository.get_session(attempt["sessionId"], include_archived=False) != row
+            or store.repository.get_session_runtime_state(attempt["sessionId"]) != runtime
+            or ExistingStateSnapshot._path_token(journal_path)[1:] != stamp):
+        raise ValueError("answer authority changed")
+    return answer
+
+
 def _read_team_result(intents, request_id, root):
     if not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}", request_id):
         raise ValueError("invalid request")
@@ -208,30 +243,9 @@ def _read_team_result(intents, request_id, root):
             or attempt["key"] != "gw-" + workflows.digest([str(run_path), run_id, step["id"], attempt["number"]])[:48]
             or any(not isinstance(attempt[k], str) or not _TOKEN.fullmatch(attempt[k]) for k in ("agentId", "sessionId", "turnId", "originTurnId"))):
         raise ValueError("attempt mismatch")
-    store = directory_runtime.get_open_directory_store()
-    if store is None or directory_runtime.directory_store_project_root() is None or Path(directory_runtime.directory_store_project_root()).resolve() != root:
-        raise ValueError("session store unavailable")
-    row = store.repository.get_session(attempt["sessionId"], include_archived=False)
-    runtime = store.repository.get_session_runtime_state(attempt["sessionId"])
-    from .workspace import _session_identity
-    if not isinstance(row, dict) or not isinstance(runtime, dict) or _session_identity(row, runtime, attempt["sessionId"]) != attempt["agentId"]:
-        raise ValueError("session owner mismatch")
-    metadata = runtime.get("metadata")
-    if (not isinstance(metadata, dict) or metadata.get("source") != "generic_team_workflow"
-            or metadata.get("externalTaskId") != attempt["key"] or runtime.get("archived") is True
-            or runtime.get("read_only") or runtime.get("readOnly")):
-        raise ValueError("session task mismatch")
-    journal_path = state.path("sessions", _safe_session_workspace_token(attempt["sessionId"]), "turn_journal.jsonl")
-    events, stamp = _journal(journal_path)
-    terminal, user_sequence = _lineage(events, attempt)
-    answer = _answer(events, attempt, terminal, user_sequence)
-    state.verify_workspace()
-    if (state.read_json(record_path, strict=True, max_bytes=64 * 1024) != record or state.read_json(teams_path, strict=True) != teams
-            or state.read_json(run_path, strict=True) != raw
-            or store is not directory_runtime.get_open_directory_store()
-            or Path(directory_runtime.directory_store_project_root()).resolve() != root
-            or store.repository.get_session(attempt["sessionId"], include_archived=False) != row
-            or store.repository.get_session_runtime_state(attempt["sessionId"]) != runtime
-            or ExistingStateSnapshot._path_token(journal_path)[1:] != stamp):
-        raise ValueError("authority changed")
-    return answer
+    def verify_source():
+        state.verify_workspace()
+        if (state.read_json(record_path, strict=True, max_bytes=64 * 1024) != record
+                or state.read_json(teams_path, strict=True) != teams or state.read_json(run_path, strict=True) != raw):
+            raise ValueError("authority changed")
+    return read_attempt_result(state, root, attempt, verify_source=verify_source)

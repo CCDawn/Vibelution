@@ -9,7 +9,7 @@ import unicodedata
 from pydantic import ValidationError
 from .team_management_approval import TEAM_MANAGEMENT_ACTIONS, team_management_approval_summary
 
-PLATFORM_MANAGEMENT_ACTIONS = frozenset({"dispatch_cancel", "runtime_command", "team_update",
+PLATFORM_MANAGEMENT_ACTIONS = frozenset({"dispatch_cancel", "runtime_command", "team_update", "team_recovery_confirm_deployment",
     "agent_parameters_update", "agent_prompt_update",
     "agent_tool_policy_update", "knowledge_acl_grant", "knowledge_acl_revoke", "flow_save", "flow_start", "agent_dispatch_access_set", *TEAM_MANAGEMENT_ACTIONS})
 
@@ -63,7 +63,7 @@ def platform_management_approval_summary(action, parameters):
         "expected_config_revision", "expected_agent_updated_at", "expected_policy_fingerprint",
         "expected_registry_version", "expected_registry_fingerprint", "expected_team_fingerprint",
         "expected_acl_fingerprint", "expectedRevision", "expected_public_config_hash", "expected_eligibility_fingerprint",
-        "expected_template_id", "expected_content_hash"}
+        "expected_template_id", "expected_content_hash", "run_id"}
     targets = {key: str(value) for key, value in values.items() if key in target_keys and value not in (None, "")}
     for key, value in targets.items():
         if not _displayable(value):
@@ -76,6 +76,10 @@ def platform_management_approval_summary(action, parameters):
         changed, delta = ["stopRequested"], {"operation": "request_stop"}
     elif action == "runtime_command":
         changed, delta = ["command"], {"command": values["command"]}
+    elif action == "team_recovery_confirm_deployment":
+        changed, delta = ["deploymentEvidence"], {"evidenceRef": values["evidence_ref"],
+            "evidenceDigest": _digest(values["evidence_ref"]), "verificationRequired": True,
+            "resumesOriginalRunOnly": True}
     elif action == "agent_dispatch_access_set":
         changed, delta = ["enabled"], {"enabled": values["enabled"]}
     elif action == "agent_parameters_update":

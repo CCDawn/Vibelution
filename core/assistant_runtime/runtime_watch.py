@@ -28,7 +28,7 @@ _TERMINAL = _FAILURES | {"done", "completed", "succeeded", "success", "stopped",
                        "closed", "dropped", "exited", "stale", "superseded", "archived", "settled"}
 _ACTIVE = {"created", "queued", "sent", "running", "waiting_external", "stopping", "cancelling",
            "pausing", "pause_requested", "stop_unconfirmed"}
-_ATTENTION = {"blocked", "reconciliation_required", "waiting_human", "awaiting_approval"}
+_ATTENTION = {"blocked", "reconciliation_required", "waiting", "waiting_human", "awaiting_approval"}
 _ISSUES = {"terminal", "blocked", "attention_required", "no_progress", "read_failed", "coverage_unavailable", "control_settled"}
 _FIELDS = ("runtimeKind", "resourceId", "sessionId", "teamId", "flowId")
 _PAGE_SIZE = 3
@@ -237,7 +237,7 @@ class RuntimeWatchObserver:
         for event_id, observation in list(self._fresh.items()):
             if all(observation[0].get(field) == ref.get(field) for field in ("projectId", *_FIELDS)):
                 self._fresh.pop(event_id, None)
-        terminal_unchanged = bool(previous and status == previous["status"] and status in _TERMINAL)
+        terminal_unchanged = bool(previous and not changed and status in _TERMINAL)
         item = {"projectId": project, "runtimeKind": ref["runtimeKind"], "binding": binding,
                 "ref": ref, "status": status, "fingerprint": fingerprint,
                 "changedAt": now if changed and not terminal_unchanged else previous["changedAt"], "lastSeen": now,

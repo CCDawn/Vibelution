@@ -41,6 +41,12 @@ Launcher 的 `agent_list` 由客户端根据本地 authority 固定选择 `dispa
 
 控制使用对象当前返回的 `commands`、精确 owner 引用及 revision。`revisionCheck=preflight_only` 只代表预检，原生 owner 仍决定能否执行。`accepted`、`stopRequested`、`restart_queued`、外层管理 `completed` 均不等于业务终态，之后读取原对象核验。
 
+团队 `waiting` 纳入需要人工处理的监护状态，沿用等待阈值和原事件去重；提醒不会自动确认。原生修复阶段的变化参与进展指纹，心跳和控制版本变化不算新进展。
+
+`team_recovery_get` 以原 team/flow/run 读取有界修复状态、版本及可用命令，沿用 `operations:read`，不读取修复会话正文或触发恢复。模型投影用 `repairState` 保留阶段事实，证据只返回数量和摘要。`team_recovery_confirm_deployment` 在 `awaiting_deployment` 时提交明确的部署证据引用和原版本，沿用 `operations:control`、原生审批、原运行 CAS 及持久回执；只安排独立复验，原步骤仍须按原生规则重跑成功。未知结果查询同一 action/request ID，不换 ID 重放。此为追加动作，旧 runtime command 和旧运行读取的闭合协议不变。
+
+`flow_result` 使用原 `flow_start` 请求及精确 team/flow/run 读取最终交付，沿用独立 `teams:results:read`，不创建或补绑历史主体。仅读完成运行最终执行节点的已验证 Journal 答案；未完成返回 `partial`，来源不足返回 `unavailable`，不读取先前步骤正文或推进运行。正文有界、分页以 `resultHash` 绑定，作为不可信内容处理，`businessAcceptance` 始终为 `not_evaluated`；用户目标仍需验收。旧 `team_result` 保持原临时团队任务语义。
+
 当前清单还包括 `session_queue`：以 Session ID 和 queue ID 定位持久排队项，区分用户消息、任务通知、子 Agent 消息与控制通知，仅返回队列类型、位置、暂停和分支版本。它尚未成为 Turn；`stop` 只撤回该项，执行时在原 ConversationWriter 事务内检查完整元数据及版本，不停止当前 Turn、不解除队列暂停；`starting` 不可撤回。成功的 `cancelled` 原生应答证明该条删除已经提交。
 
 Session 来源的 `coverage.details` 分别说明运行控制器、调度器、持久队列、Journal 和 work run 覆盖。Journal-only 未闭合记录标为 `unknown`，不证明 worker 正在运行；链接、损坏、变化或读取预算不足均保留不完整状态。监督进化及自主进化通过已验证进程身份的只读元数据通道发现实际控制器，命令在原生锁内执行 CAS。断线后只读取原稳定命令的持久结果，不按当前暂停标志猜成功，也不重放未确认的旧 processing。

@@ -17,7 +17,6 @@ import {
 } from "../../api/launcherAssistant";
 import { openLauncherModelConnection } from "../../api/launcher";
 import type { ConversationMessage, SessionDetail, SessionReferenceAttachment } from "../../api/types";
-import type { SessionContinuationExpectation } from "../../api/chat";
 import { queryKeys } from "../../api/queryKeys";
 import type { SessionToolApprovalRequest } from "../../api/types";
 import { LazyConversationView } from "../../components/conversation/LazyConversationView";
@@ -66,7 +65,7 @@ import {
 import { activeTurnLayerToConversationMessage, createLauncherAssistantStream } from "./launcherAssistantStream";
 import type { ActiveTurnLayerState } from "../chatActiveTurnLayer";
 import { mergeSessionDetailMessageWindow } from "../chatSessionState";
-import { loadLauncherComposer, restoreLauncherComposerAttachments, saveLauncherComposer } from "./launcherAssistantComposerStorage";
+import { loadLauncherComposer, restoreLauncherComposerAttachments, saveLauncherComposer, type PersistedLauncherContinuation } from "./launcherAssistantComposerStorage";
 import { readLauncherAssistantTaskSource } from "./launcherAssistantTaskReads";
 import { readLauncherManagementStatus, useLauncherManagementPermission } from "./useLauncherManagementPermission";
 import { LauncherManagementPermissionControl } from "./LauncherManagementPermissionControl";
@@ -76,6 +75,7 @@ import { agentPurgeBatchPreviewIsValid, launcherAgentPurgeBatchActionPreview } f
 import { usePublishLauncherNotices } from "../../app/LauncherNotifications";
 import { launcherAssistantPageNotices, launcherNoticeReadFailed } from "./launcherAssistantPageNotices";
 import { useLauncherTasks } from "./assistantTasks/LauncherTaskContext";
+import { resolveLauncherApprovalTarget, useLauncherApprovalTarget } from "./launcherAssistantApprovalTarget";
 
 const COPY = {
   zh: {
@@ -150,8 +150,7 @@ function readableApprovalJson(source: string): string {
     .replace(/[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, char => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`));
 }
 
-type ContinueAttempt = { requestId: string; expected: SessionContinuationExpectation; accepted: boolean };
-type ComposerSnapshot = { draft: string; outstanding: LauncherAssistantSubmission | null; acceptedTurnId: string; queuedAcceptance: LauncherAssistantQueuedAcceptance | null; continuation?: ContinueAttempt; attachments?: ComposerImageAttachment[]; references?: SessionReferenceAttachment[]; questionDraft?: LauncherAssistantQuestionDraft | null };
+type ComposerSnapshot = { draft: string; outstanding: LauncherAssistantSubmission | null; acceptedTurnId: string; queuedAcceptance: LauncherAssistantQueuedAcceptance | null; continuation?: PersistedLauncherContinuation; attachments?: ComposerImageAttachment[]; references?: SessionReferenceAttachment[]; questionDraft?: LauncherAssistantQuestionDraft | null };
 
 /** One assistant tool receipt asking the operator to attach a private
  * credential (a `secret_request` action result). */
@@ -201,6 +200,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   const { lang } = useShellI18n();
   const copy = COPY[lang];
   const taskNoticeOwner = useLauncherTasks();
+  const approvalNavigation = useLauncherApprovalTarget();
   // The Launcher control surface embeds the assistant page fully expanded; the
   // native floating window keeps its collapsed pet stage until the operator
   // explicitly expands it.
@@ -217,6 +217,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   const epochRef = useRef(0);
   const mounted = useRef(true);
   const sending = useRef<{ submission: LauncherAssistantSubmission } | null>(null);
+  const requestReadbackGate = useRef(false);
   const resizing = useRef(false);
   const outstanding = useRef<LauncherAssistantSubmission | null>(null);
   const [draft, setDraft] = useState("");
@@ -239,6 +240,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   const [sendPending, setSendPending] = useState(false);
   const [resizePending, setResizePending] = useState(false);
   const [sendUnconfirmed, setSendUnconfirmed] = useState(false);
+  const [continuationUnconfirmed, setContinuationUnconfirmed] = useState(false);
+  const [recoverySaveFailed, setRecoverySaveFailed] = useState(false);
   // The unknown-outcome state keeps the backend's own message (bounded) next to
   // the conservative banner instead of silently discarding it.
   const [sendUnknownDetail, setSendUnknownDetail] = useState("");
@@ -346,11 +349,12 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   const composerKey = ["launcher-assistant", "composer", sessionId];
   function saveComposer(patch: Partial<ComposerSnapshot>) {
     client.setQueryDefaults(composerKey, { gcTime: Infinity });
-    client.setQueryData<ComposerSnapshot>(composerKey, previous => {
-      const next = { draft: "", outstanding: null, acceptedTurnId: "", queuedAcceptance: null, ...previous, ...patch };
-      saveLauncherComposer(sessionId, embedded ? "embedded" : "floating", next);
-      return next;
-    });
+    const previous = client.getQueryData<ComposerSnapshot>(composerKey);
+    const next = { draft: "", outstanding: null, acceptedTurnId: "", queuedAcceptance: null, ...previous, ...patch };
+    const persisted = saveLauncherComposer(sessionId, embedded ? "embedded" : "floating", next);
+    client.setQueryData<ComposerSnapshot>(composerKey, next);
+    setRecoverySaveFailed(!persisted);
+    return persisted;
   }
   function acceptQuestionAnswer(submission: LauncherAssistantSubmission): Partial<ComposerSnapshot> {
     const question = submission.answerQuestion;
@@ -395,6 +399,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     setQuestionDraft(questionDraftRef.current);
     setAnsweredQuestion(null);
     setSendUnconfirmed(Boolean(saved?.outstanding));
+    setContinuationUnconfirmed(Boolean(saved?.continuation && !saved.continuation.accepted));
+    setRecoverySaveFailed(false);
     setAcceptedTurnId(saved?.acceptedTurnId || "");
     setQueuedAcceptance(saved?.queuedAcceptance || null);
   }, [client, sessionId, embedded]);
@@ -524,6 +530,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       setSendPending(false);
     }
     clearAcceptedAttachments(submission);
+    clearAcceptedReferences(submission);
     const remainingDraft = !submission.preserveDraft && draftRef.current === (submission.draftSnapshot ?? submission.message) ? "" : draftRef.current;
     draftRef.current = remainingDraft;
     saveComposer({ draft: remainingDraft, outstanding: null, acceptedTurnId: recovered.turnId,
@@ -585,9 +592,9 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     const evidence = findSubmitAcceptanceEvidence(detail.data, attempt.requestId);
     const turnId = evidence ? exactAcceptedSubmitTurnId(detail.data, attempt.requestId, evidence) : "";
     if (!turnId) return;
-    client.setQueryData<ComposerSnapshot>(["launcher-assistant", "composer", sessionId], previous => previous
-      && previous.continuation?.requestId === attempt.requestId
-      ? { ...previous, continuation: { ...attempt, accepted: true }, acceptedTurnId: turnId } : previous);
+    if (attempt.expected.agentId !== assistantAgentId) return;
+    saveComposer({ continuation: { ...attempt, accepted: true }, acceptedTurnId: turnId });
+    setContinuationUnconfirmed(false);
     setAcceptedTurnId(turnId);
     setFeedback("");
   }, [client, detail.data, sessionId]);
@@ -612,10 +619,13 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   });
   // The native approval dialog owns global shortcuts, so show exactly one
   // request at a time and give the assistant's own session priority.
-  const dispatchApproval = approval ? undefined : dispatches.data?.flatMap(row =>
-    (row.receipt?.pendingApprovals ?? []).map(request => ({ row, request })))[0];
+  const selectedApprovalTarget = embedded ? approvalNavigation?.target : null;
+  const dispatchApproval = approval ? undefined : selectedApprovalTarget
+    ? resolveLauncherApprovalTarget(selectedApprovalTarget, dispatches.isError ? [] : dispatches.data ?? [], assistantAgentId, sessionId)
+    : dispatches.data?.flatMap(row => (row.receipt?.pendingApprovals ?? []).map(request => ({ row, request })))[0];
   const dispatchPreviewKey = dispatchApproval && reading ? JSON.stringify([epoch, dispatchApproval.row.dispatchId,
-    dispatchApproval.row.nativeTaskId, dispatchApproval.row.agentId, dispatchApproval.request.approvalId, dispatchApproval.request.toolName]) : "";
+    dispatchApproval.row.nativeTaskId, dispatchApproval.row.agentId, dispatchApproval.request.approvalId, dispatchApproval.request.toolName,
+    selectedApprovalTarget?.nonce]) : "";
   useEffect(() => {
     let active = true;
     setBoundPreview(null);
@@ -978,7 +988,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   }
 
   async function submit(prepared?: LauncherAssistantSubmission): Promise<boolean> {
-    if (sending.current || uploadGate.current || controlGate.current || !sessionId
+    if (sending.current || requestReadbackGate.current || uploadGate.current || controlGate.current || continuationUnconfirmed || !sessionId
       || (prepared && outstanding.current)
       || (!prepared && attachmentsRef.current.length > 0 && status.data?.attachmentVersion !== 1)) return false;
     // Pre-flight checks only gate a NEW submission: an unconfirmed retry resends
@@ -995,13 +1005,28 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       }
     }
     if (!prepared && !outstanding.current && attachmentsRef.current.length && !(await uploadAttachments())) return false;
+    const priorSubmission = outstanding.current;
+    if (priorSubmission) {
+      requestReadbackGate.current = true;
+      try {
+        const readback = await detail.refetch();
+        if (!mounted.current || sessionIdRef.current !== sessionId || outstanding.current !== priorSubmission) return true;
+        if (readback.isError || launcherAssistantRequestReadback(readback.data, priorSubmission.requestId)) return false;
+      } finally { requestReadbackGate.current = false; }
+    }
     const snapshot = attachmentsRef.current;
     const submission = prepared ?? launcherAssistantSubmission(outstanding.current, draftRef.current, undefined,
       snapshot.map(item => item.artifactId || "").filter(Boolean), snapshot.map(item => item.id),
       composerReferencesRef.current);
     if (!submission) return false;
     outstanding.current = submission;
-    saveComposer({ draft: draftRef.current, outstanding: submission });
+    if (!saveComposer({ draft: draftRef.current, outstanding: submission })) {
+      outstanding.current = priorSubmission;
+      saveComposer({ outstanding: priorSubmission });
+      // Restoring the smaller prior snapshot does not recover the rejected send.
+      setRecoverySaveFailed(true);
+      return false;
+    }
     const flight = { submission };
     sending.current = flight;
     setSendPending(true);
@@ -1106,6 +1131,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     try {
       if (preview) await decideLauncherDispatchApproval(selected.row, selected.request, preview, decision);
       else await declineLauncherDispatchSummary(selected.row, selected.request);
+      if (selectedApprovalTarget) approvalNavigation?.dismiss(selectedApprovalTarget.nonce);
     } catch {
       // A failed decision releases the dialog lock immediately: both buttons
       // recover for a direct retry while the error card keeps explaining the
@@ -1142,8 +1168,18 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   }
 
   async function continueTurn() {
-    if (controlGate.current || sending.current || draft.trim() || outstanding.current) return;
+    if (controlGate.current || requestReadbackGate.current || sending.current || draft.trim() || outstanding.current) return;
     const previous = client.getQueryData<ComposerSnapshot>(composerKey)?.continuation;
+    if (previous && !previous.accepted) {
+      if (previous.expected.agentId !== assistantAgentId) return;
+      requestReadbackGate.current = true;
+      try {
+        const readback = await detail.refetch();
+        if (!mounted.current || sessionIdRef.current !== sessionId || readback.isError) return;
+        const evidence = findSubmitAcceptanceEvidence(readback.data, previous.requestId);
+        if (evidence && exactAcceptedSubmitTurnId(readback.data, previous.requestId, evidence)) return;
+      } finally { requestReadbackGate.current = false; }
+    }
     const expected = resolveConversationContinuation(detail.data, sessionId);
     if (!expected && (!previous || previous.accepted)) return;
     // A lost ACK is reconciled before considering any newer eligible head.
@@ -1152,16 +1188,18 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     const attempt = previous && (!previous.accepted || (expected && continuationSnapshotKey(previous.expected) === continuationSnapshotKey(expected)))
       ? previous : { requestId: crypto.randomUUID(), expected: expected!, accepted: false };
     if (attempt.accepted) return;
-    saveComposer({ continuation: attempt });
+    if (!saveComposer({ continuation: attempt })) return;
     controlGate.current = true;
     setControlPending(true);
     setFeedback("");
     try {
       const accepted = await continueLauncherAssistantTurn(attempt.expected, attempt.requestId);
+      if (!mounted.current || sessionIdRef.current !== sessionId) return;
       saveComposer({ continuation: { ...attempt, accepted: true }, acceptedTurnId: accepted.turnId });
+      setContinuationUnconfirmed(false);
       if (mounted.current) setAcceptedTurnId(accepted.turnId);
     } catch (error) {
-      if (mounted.current) setFeedback(errorMessage(error));
+      if (mounted.current && sessionIdRef.current === sessionId) { setContinuationUnconfirmed(true); setFeedback(errorMessage(error)); }
     } finally {
       controlGate.current = false;
       if (mounted.current) { setControlPending(false); void detail.refetch(); }
@@ -1279,7 +1317,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   const activity = resolveSessionActivity(detail.data || {});
   const busy = hasExecutionOwnership(activity.execution);
   const stopping = Boolean(detail.data?.stopRequested);
-  const canContinue = !draft.trim() && !attachments.length && !sendUnconfirmed && Boolean(resolveConversationContinuation(detail.data, sessionId));
+  const canContinue = !draft.trim() && !attachments.length && !sendUnconfirmed && (continuationUnconfirmed || Boolean(resolveConversationContinuation(detail.data, sessionId)));
   const actionMode = busy || stopping ? "stop" : canContinue ? "continue" : "send";
   const queueEnabled = status.data?.followupQueueVersion === 1;
   const followupQueue = useLauncherAssistantFollowupQueue({
@@ -1635,6 +1673,10 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       ? <VStateSurface tone="error" title={lang === "zh" ? "部分任务结果暂未汇报，可在对话中让助理查询" : "Some task results have not been reported. Ask the assistant to check in chat."} /> : null}
     {dispatchApproval && activePreviewError ? <VStateSurface tone="error" title={activePreviewError}
       actions={<VButton onClick={() => { setPreviewAttempt(value => value + 1); void dispatches.refetch(); }}>{copy.retry}</VButton>} /> : null}
+    {selectedApprovalTarget && !approval ? <VStateSurface tone={dispatchApproval ? "info" : "unavailable"}
+      title={dispatchApproval ? (lang === "zh" ? "正在处理所选任务审批" : "Reviewing the selected task approval")
+        : (lang === "zh" ? "所选任务审批已失效或暂不可用，请刷新回执核对。" : "The selected task approval is unavailable; refresh its receipt.")}
+      actions={<><VButton onClick={() => void dispatches.refetch()}>{copy.refresh}</VButton><VButton onClick={() => approvalNavigation?.dismiss(selectedApprovalTarget.nonce)}>{lang === "zh" ? "关闭定位" : "Close selection"}</VButton></>} /> : null}
     {approvalError || !notificationsHosted && approvals.isError ? <VStateSurface tone="error" title={approvalError || (lang === "zh" ? "待授权查询暂不可用" : "Pending approvals unavailable")}
       actions={<VButton onClick={() => { setApprovalError(""); setDecidedDispatchKey(""); setPreviewAttempt(value => value + 1); void approvals.refetch(); void dispatches.refetch(); }}>{copy.retry}</VButton>}>{notificationsHosted ? null : approvals.error?.message}</VStateSurface> : null}
     {(!queueEnabled && detail.data?.queuedTurns?.length) || detail.data?.queueHold
@@ -1652,6 +1694,9 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     </section> : null}
     {sendUnconfirmed && !outstanding.current?.answerQuestion ? <VStateSurface tone="error" title={copy.unknownSend}
       actions={<VButton onClick={() => void submit()} isDisabled={sendPending || controlPending || stopping}>{copy.retry}</VButton>}>{sendUnknownDetail}</VStateSurface> : null}
+    {continuationUnconfirmed ? <VStateSurface tone="unavailable" title={lang === "zh" ? "尚未确认继续请求是否收到，将先核对原请求。" : "Continuation is unconfirmed; the original request will be checked first."}
+      actions={<VButton onClick={() => void continueTurn()} isDisabled={controlPending || sendPending || stopping}>{copy.retry}</VButton>} /> : null}
+    {recoverySaveFailed ? <VStateSurface tone="error" title={lang === "zh" ? "恢复记录未能保存，请保留当前页面并重试。" : "Recovery could not be saved; keep this page open and retry."} /> : null}
     {!notificationsHosted && detail.isError && detail.data && statusDegradeTone !== "error" ? <VStateSurface tone="error" title={copy.unavailable}
       actions={<VButton onClick={() => void detail.refetch()}>{copy.retry}</VButton>}>{detail.error.message}</VStateSurface> : null}
     {!notificationsHosted && dispatches.isError ? <VStateSurface tone="error" title={copy.receipts}

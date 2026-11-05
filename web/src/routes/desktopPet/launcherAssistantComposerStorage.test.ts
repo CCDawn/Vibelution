@@ -38,6 +38,43 @@ function chip(overrides: Partial<ComposerImageAttachment> = {}): ComposerImageAt
 afterEach(() => vi.unstubAllGlobals());
 
 describe("launcher assistant composer recovery storage", () => {
+  it("round-trips reference-only original requests and a continuation snapshot without replacing their IDs", () => {
+    const storage = memoryStorage();
+    const references = [{ kind: "message", referenceId: "message:m1", sourceSessionId: "source-session", sourceMessageId: "m1", quote: "原引用" }];
+    const continuation = { requestId: "continue-original", expected: { turnId: "t1", headId: "h1", ledgerSeq: 4, agentId: "a1" }, accepted: false };
+    const value = { ...empty(), references, outstanding: { message: "", requestId: "reference-original", references }, continuation };
+    expect(saveLauncherComposer("session", "embedded", value, storage)).toBe(true);
+    expect(loadLauncherComposer("session", "embedded", storage)).toEqual(value);
+  });
+
+  it.each([
+    { kind: "message", sourceMessageId: "m1", path: "C:/private" },
+    { kind: "message", sourceMessageId: "m1", token: "private" },
+    { kind: "message", sourceMessageId: "../m1" },
+    { kind: "message", sourceMessageId: "m1", quote: "x".repeat(64_001) },
+  ])("rejects unsafe recovery references without overwriting the last snapshot", reference => {
+    const storage = memoryStorage();
+    saveLauncherComposer("session", "embedded", empty(), storage);
+    expect(saveLauncherComposer("session", "embedded", { ...empty(), outstanding: {
+      message: "request", requestId: "original", references: [reference],
+    } }, storage)).toBe(false);
+    expect(loadLauncherComposer("session", "embedded", storage)).toEqual(empty());
+  });
+
+  it.each([
+    { requestId: "invalid request" }, { accepted: "yes" }, { token: "secret" },
+    { expected: { turnId: "t", headId: "h", agentId: "../agent", ledgerSeq: 1 } },
+    { expected: { turnId: "t", headId: "h", agentId: "a", ledgerSeq: 0 } },
+    { expected: { turnId: "t", headId: "h", agentId: "a", ledgerSeq: 1, path: "C:/private" } },
+  ])("rejects an invalid continuation without replacing the previous recovery envelope", patch => {
+    const storage = memoryStorage();
+    saveLauncherComposer("session", "embedded", empty(), storage);
+    const continuation = { requestId: "original", expected: { turnId: "t", headId: "h", agentId: "a", ledgerSeq: 1 }, accepted: false, ...patch };
+    // Exercise the runtime boundary with data that did not pass TypeScript.
+    expect(saveLauncherComposer("session", "embedded", { ...empty(), continuation } as Parameters<typeof saveLauncherComposer>[2], storage)).toBe(false);
+    expect(loadLauncherComposer("session", "embedded", storage)).toEqual(empty());
+  });
+
   it("round-trips the exact outstanding request and unsent text without sending or replacing IDs", () => {
     const storage = memoryStorage();
     const value = pending();
@@ -198,7 +235,7 @@ describe("launcher assistant composer recovery storage", () => {
       chip({ id: "chip-failed", uploadStatus: "failed" }),
       chip({ id: "chip-uploading", uploadStatus: "uploading", artifactId: undefined }),
     ];
-    const value = { ...pending(), attachments, continuation: forbidden, token: forbidden };
+    const value = { ...pending(), attachments, token: forbidden };
     expect(saveLauncherComposer("session", "floating", value, storage)).toBe(true);
     expect(loadLauncherComposer("session", "floating", storage)).toEqual({ ...pending(),
       attachments: [{ id: "chip-uploaded", artifactId: "user-image-1.png", filename: "shot.png",
@@ -275,7 +312,7 @@ describe("launcher assistant composer recovery storage", () => {
     ["invalid request ID", (row: any) => { row.snapshot.outstanding.requestId = "new request"; }],
     ["oversized request ID", (row: any) => { row.snapshot.outstanding.requestId = "x".repeat(129); }],
     ["attachment body", (row: any) => { row.snapshot.outstanding.attachments = [{ dataBase64: "body" }]; }],
-    ["submission references outside the recovery whitelist", (row: any) => { row.snapshot.outstanding.references = []; }],
+    ["submission references outside the recovery whitelist", (row: any) => { row.snapshot.outstanding.references = [{ kind: "message", sourceMessageId: "m1", token: "secret" }]; }],
     ["artifact path", (row: any) => { row.snapshot.outstanding.attachmentIds = ["../artifact"]; }],
     ["invalid attachment snapshot ID", (row: any) => { row.snapshot.outstanding.attachmentSnapshotIds = [1]; }],
     ["too many attachments", (row: any) => { row.snapshot.outstanding.attachmentIds = Array(33).fill("artifact"); }],

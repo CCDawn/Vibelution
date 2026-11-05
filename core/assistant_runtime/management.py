@@ -304,6 +304,31 @@ class ManagementAdapter:
         result = await self._call(project_id, lambda client: client.management_receipt(action=action, request_id=request_id))
         return {**result, "projectId": project_id}
 
+    async def flow_result(self, project_id: str, *, request_id: str, team_id: str, flow_id: str,
+                          run_id: str, offset: int = 0, expected_hash: str | None = None):
+        from .management_projection import project_flow_result
+        if self._read_binding is None:
+            raise DispatchError("Project authorization cannot be checked.", code="FLOW_RESULT_UNAVAILABLE")
+        binding = self._read_binding(project_id)
+        key = self._key(project_id, "flow_start", request_id)
+        self._check_cleanup_fence(key)
+        path = self._root / (key + ".json")
+        record = self._read(path)
+        if record.get("reference") != {"projectId": project_id, "action": "flow_start", "requestId": request_id}:
+            raise DispatchError("Original flow association is unavailable.", code="MANAGEMENT_STATE_INVALID")
+        result = await self._call(project_id, lambda client: client.management_flow_result(
+            request_id=request_id, team_id=team_id, flow_id=flow_id, run_id=run_id))
+        if any(result.get(field) != expected for field, expected in (
+                ("requestId", request_id), ("teamId", team_id), ("flowId", flow_id), ("runId", run_id))):
+            raise DispatchError("Flow result identity changed.", code="FLOW_RESULT_UNAVAILABLE")
+        page = project_flow_result(result, project_id, offset=offset, expected_hash=expected_hash)
+        if self._read_binding(project_id) != binding:
+            raise DispatchError("Project authorization changed during the result read.", code="PROJECT_REGISTRY_RECONCILE_REQUIRED")
+        self._check_cleanup_fence(key)
+        if self._read(path) != record:
+            raise DispatchError("Original flow association changed during the result read.", code="MANAGEMENT_STATE_INVALID")
+        return page
+
     async def team_result(self, project_id: str, *, request_id: str, offset: int = 0, expected_hash: str | None = None):
         # Reuse the original local association and target subject; reading a
         # result never admits or resumes a team run.
@@ -391,6 +416,9 @@ class ManagementAdapter:
 
     async def runtime(self, project_id: str, operation: str, **parameters):
         return await self._bound_read(project_id, lambda client: client.management_runtime(operation, **parameters))
+
+    async def team_recovery(self, project_id: str, **parameters):
+        return await self._bound_read(project_id, lambda client: client.management_team_recovery(**parameters))
 
     async def _bound_read(self, project_id, reader):
         if project_id not in self._projects:

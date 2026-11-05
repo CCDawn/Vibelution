@@ -1,5 +1,5 @@
 import { useMutationState, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import {
@@ -19,6 +19,7 @@ import { LauncherNotificationProvider } from "./LauncherNotifications";
 import { LauncherNavigation } from "./LauncherNavigation";
 import {LauncherAssistantTaskCards} from "../routes/desktopPet/assistantTasks/LauncherAssistantTaskCards";
 import {LauncherTaskNavigationSlot} from "../routes/desktopPet/assistantTasks/LauncherTaskNavigationSlot";
+import { LauncherApprovalTargetContext, type LauncherApprovalTarget } from "../routes/desktopPet/launcherAssistantApprovalTarget";
 import { VDialog, VSplitWorkspace, VWorkbenchFrame } from "../components/vui";
 import { isElectronDesktopShell } from "./projectCloseGuard";
 import styles from "./LauncherShell.styles";
@@ -32,9 +33,19 @@ export function LauncherShell() {
   const lang = useLauncherLanguage();
   const [theme, setTheme] = useState(() => readStoredWorkbenchTheme());
   const [navigationOpen,setNavigationOpen] = useState(false);
+  const [approvalTarget, setApprovalTarget] = useState<LauncherApprovalTarget | null>(null);
   const queryClient = useQueryClient();
   const location = useLocation();
   const navigate = useNavigate();
+  const previousPath = useRef(location.pathname);
+  useEffect(() => {
+    if (previousPath.current.replace(/\/+$/, "").endsWith("/assistant")
+      && !location.pathname.replace(/\/+$/, "").endsWith("/assistant")) setApprovalTarget(null);
+    previousPath.current = location.pathname;
+  }, [location.pathname]);
+  const approvalNavigation = useMemo(() => ({ target: approvalTarget, dismiss: (nonce: string) => {
+    setApprovalTarget(current => current?.nonce === nonce ? null : current);
+  } }), [approvalTarget]);
   const watchUpdates = !location.pathname.replace(/\/+$/, "").endsWith("/updates");
   useUpdateFreshnessFocus(queryClient, watchUpdates);
   const freshnessQuery = useQuery({ ...UPDATE_FRESHNESS_QUERY_OPTIONS, queryKey:queryKeys.launcherFreshness(), queryFn:getLauncherFreshness,
@@ -106,8 +117,8 @@ export function LauncherShell() {
     });
   }, []);
 
-  return (<LauncherNotificationProvider>
-   <LauncherAssistantTaskCards lang={lang} routePath={location.pathname} onOpenConversation={()=>{setNavigationOpen(false);void navigate("/launcher/assistant");}}>
+  return (<LauncherNotificationProvider><LauncherApprovalTargetContext.Provider value={approvalNavigation}>
+   <LauncherAssistantTaskCards lang={lang} routePath={location.pathname} onApproval={(_task, target) => setApprovalTarget(target)} onOpenConversation={()=>{setNavigationOpen(false);void navigate("/launcher/assistant");}}>
     <div
       className={styles.root}
       data-theme={theme}
@@ -130,6 +141,6 @@ export function LauncherShell() {
         <div className={styles.mobileNavigation}><LauncherNavigation lang={lang} items={branchInstancesQuery.data?.items ?? []} onNavigate={() => setNavigationOpen(false)} updateAvailable={updateAvailable} updateFailed={updateFailed} taskContent={<LauncherTaskNavigationSlot lang={lang} onNavigate={()=>setNavigationOpen(false)}/>}/></div>
       </VDialog>
     </div>
-   </LauncherAssistantTaskCards></LauncherNotificationProvider>
+   </LauncherAssistantTaskCards></LauncherApprovalTargetContext.Provider></LauncherNotificationProvider>
   );
 }

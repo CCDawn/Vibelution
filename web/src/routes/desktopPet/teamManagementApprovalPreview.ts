@@ -4,6 +4,7 @@ const TEAM_ACTION_LABELS = {
   team_member_add: ["添加团队成员", "Add a team member"],
   team_member_remove: ["移除团队成员", "Remove a team member"],
   team_archive: ["归档团队及成员 Agent", "Archive a team and its member agents"],
+  team_recovery_confirm_deployment: ["确认团队部署并复验", "Confirm team deployment and verify"],
 } as const;
 
 export type LauncherTeamAction = keyof typeof TEAM_ACTION_LABELS;
@@ -72,6 +73,11 @@ function summaryIsValid(summary: unknown): boolean {
     const targets = summary.assistantTargets as Record<string, unknown>;
     const delta = summary.assistantDelta as Record<string, unknown>;
     const targetRules: Record<string, Rule> = { project_id: id, request_id: requestId };
+    if (action === "team_recovery_confirm_deployment") return exact(targets, { ...targetRules,
+      team_id: id, flow_id: id, run_id: id, expected_revision: value => decimal(value) && String(value).length <= 19 })
+      && sameFields(summary.assistantChangedFields, ["deploymentEvidence"])
+      && summary.assistantContentOmitted === false
+      && exact(delta, { evidenceRef: text(500), evidenceDigest: digest, verificationRequired: oneOf(true), resumesOriginalRunOnly: oneOf(true) });
     if (action !== "team_create") Object.assign(targetRules, { team_id: id, expected_team_fingerprint: digest });
     if (action === "team_member_remove") targetRules.agent_id = id;
     if (action === "team_archive" && delta.linkedChatRoomId !== "") targetRules.expected_linked_chat_room_id = id;
@@ -125,6 +131,17 @@ function memberLines(delta: MemberDelta, lang: Language): string[] {
 
 function renderSummary(checked: Summary, lang: Language): string {
   const zh = lang === "zh";
+  if (checked.assistantAction === "team_recovery_confirm_deployment") {
+    const target = checked.assistantTargets, delta = checked.assistantDelta;
+    return [launcherTeamActionTitle(checked.assistantAction, lang),
+      `${zh ? "项目" : "Project"}: ${target.project_id}`, `${zh ? "原请求" : "Request"}: ${target.request_id}`,
+      `${zh ? "团队" : "Team"}: ${target.team_id}`, `${zh ? "流程" : "Flow"}: ${target.flow_id}`,
+      `${zh ? "原运行" : "Original run"}: ${target.run_id}`, `${zh ? "版本" : "Revision"}: ${target.expected_revision}`,
+      `${zh ? "部署证据" : "Deployment evidence"}: ${JSON.stringify(delta.evidenceRef)}`,
+      `${zh ? "证据摘要" : "Evidence digest"}: ${delta.evidenceDigest}`,
+      zh ? "确认后安排独立复验，原流程根据复验结果继续。" : "Confirmation schedules independent verification; its result determines continuation of the original run.",
+      `${zh ? "参数摘要" : "Parameters digest"}: ${checked.assistantParametersDigest}`].join("\n");
+  }
   const { assistantAction: action, assistantDelta: delta, assistantTargets: targets } = checked;
   const lines = [launcherTeamActionTitle(action, lang), `${zh ? "项目" : "Project"}: ${targets.project_id}`,
     `${zh ? "请求 ID" : "Request ID"}: ${targets.request_id}`];

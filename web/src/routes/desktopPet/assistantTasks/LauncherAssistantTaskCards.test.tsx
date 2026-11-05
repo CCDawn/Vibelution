@@ -720,7 +720,9 @@ describe("Launcher assistant task cards", () => {
     expect(dialog.textContent).not.toContain("同意");
     expect(dialog.textContent).not.toContain("拒绝");
     await click("处理授权");
-    expect(onApproval).toHaveBeenCalledWith(expect.objectContaining({ projectId: "project-1", dispatchId: "dispatch-1", state: "waiting_user" }));
+    expect(onApproval).toHaveBeenCalledWith(expect.objectContaining({ projectId: "project-1", dispatchId: "dispatch-1", state: "waiting_user" }),
+      expect.objectContaining({ assistantAgentId: "assistant-1", sessionId: "session-1", projectId: "project-1",
+        dispatchId: "dispatch-1", nativeTaskId: "native-1", agentId: "worker-1", approvalId: "approval-1", nonce: expect.any(String) }));
     expect(onReview).not.toHaveBeenCalled();
     onlyReads();
   });

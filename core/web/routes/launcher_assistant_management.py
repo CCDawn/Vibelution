@@ -40,6 +40,7 @@ from core.web.services.external_management.agent_configuration_contracts import 
 from core.web.services.external_management.configuration_discovery_contracts import (AgentPromptQuery, AgentPromptResponse,
     ToolPolicyInspectQuery, ToolPolicyInspectResponse)
 from core.web.services.external_management.flow_contracts import FlowListQuery, FlowListResponse, FlowReadQuery, FlowReadResponse
+from core.web.services.external_management.contracts import FlowResultQuery, FlowResultResponse
 from core.web.services.external_management.platform_actions import PLATFORM_ACTIONS
 from core.web.services.external_management.service import (
     ManagementError,
@@ -163,6 +164,14 @@ async def runtime_item(request: Request):
 
 from core.web.services.external_management.knowledge_catalog_contracts import KnowledgeCatalogQuery, KnowledgeCatalogResponse
 from core.web.services.external_management.research_contracts import ResearchReadQuery, ResearchReadResponse
+from core.web.services.external_management.team_recovery_contracts import TeamRecoveryQuery, TeamRecoveryResponse
+
+
+@router.get("/team-runs/recovery", response_model=TeamRecoveryResponse)
+async def team_recovery(request: Request):
+    _require_control(request)
+    query = _closed_query(request, TeamRecoveryQuery)
+    return await _operator_call(request, lambda: _service().read_team_recovery(*_credentials(request), query))
 
 
 @router.get("/knowledge-bases", response_model=KnowledgeCatalogResponse)
@@ -502,6 +511,13 @@ async def team_result(original_request_id: str, request: Request):
     if request.query_params:
         raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"})
     return await _call(lambda: _service().team_result(*_credentials(request), original_request_id))
+
+
+@router.get("/flow-runs/requests/{original_request_id}/result", response_model=FlowResultResponse)
+async def flow_result(original_request_id: str, request: Request):
+    _require_control(request)
+    query = _closed_query(request, FlowResultQuery)
+    return await _call(lambda: _service().flow_result(*_credentials(request), original_request_id, query))
 
 
 @router.get("/api-documentation/catalog", response_model=DocumentationResponse, response_model_exclude_none=True)

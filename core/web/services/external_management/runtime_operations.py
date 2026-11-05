@@ -103,6 +103,13 @@ def _progress_fingerprint(kind, raw):
                 facts.append([_token(attempt.get("nodeId")), attempt["number"], attempt["status"]])
             except ValueError:
                 return None
+        if raw.get("recovery") is not None:
+            from .team_recovery_control import metadata
+            try:
+                recovery = metadata(raw)
+            except (ValueError, TypeError):
+                return None
+            return _fingerprint([kind, raw["current"], facts, recovery])
         return _fingerprint([kind, raw["current"], facts])
     if kind == "research_run" and counter(raw.get("lastEventSequence")):
         node = raw.get("activeNodeId") or ""

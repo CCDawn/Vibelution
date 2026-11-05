@@ -5,20 +5,23 @@ from .team_lifecycle_contracts import TEAM_LIFECYCLE_ACTION_MODELS
 from .flow_contracts import FLOW_ACTION_MODELS, FlowMutationResponse
 from .runtime_contracts import RuntimeCommandResponse
 from .research_contracts import ResearchCommandResponse
+from .team_recovery_contracts import TeamRecoveryDeploymentResponse
 
 
-PLATFORM_ACTIONS = frozenset({"runtime_command", "research_command", *ASSET_ACTION_MODELS, *CONFIGURATION_ACTION_MODELS, *TEAM_LIFECYCLE_ACTION_MODELS, *FLOW_ACTION_MODELS})
+PLATFORM_ACTIONS = frozenset({"runtime_command", "research_command", "team_recovery_confirm_deployment", *ASSET_ACTION_MODELS, *CONFIGURATION_ACTION_MODELS, *TEAM_LIFECYCLE_ACTION_MODELS, *FLOW_ACTION_MODELS})
 RESULT_FIELDS = {"runtime_command": "operation", **{key: "asset" for key in {*ASSET_ACTION_MODELS, *CONFIGURATION_ACTION_MODELS, *TEAM_LIFECYCLE_ACTION_MODELS}},
-                 **{key: "flow" for key in FLOW_ACTION_MODELS}, "research_command": "research"}
+                 **{key: "flow" for key in FLOW_ACTION_MODELS}, "research_command": "research",
+                 "team_recovery_confirm_deployment": "recovery"}
 
 
 def native_result(action, raw):
     if action not in PLATFORM_ACTIONS:
         raise ValueError("Unknown platform action")
-    model = (RuntimeCommandResponse if action == "runtime_command" else ResearchCommandResponse if action == "research_command" else
+    model = (TeamRecoveryDeploymentResponse if action == "team_recovery_confirm_deployment" else
+             RuntimeCommandResponse if action == "runtime_command" else ResearchCommandResponse if action == "research_command" else
              AssetMutationResponse if action in {*ASSET_ACTION_MODELS, *CONFIGURATION_ACTION_MODELS, *TEAM_LIFECYCLE_ACTION_MODELS} else FlowMutationResponse)
     result = model.model_validate(raw).model_dump(exclude_none=True)
-    if action not in {"runtime_command", "research_command"} and (result["action"] != action or result["verified"] is not True):
+    if action not in {"runtime_command", "research_command", "team_recovery_confirm_deployment"} and (result["action"] != action or result["verified"] is not True):
         raise ValueError("Native acknowledgement is not verified for this action")
     if action == "runtime_command":
         # Historical command receipts keep their closed SDK operation shape.
@@ -27,7 +30,13 @@ def native_result(action, raw):
 
 
 def verify_target(action, result, parameters, marker=None):
-    if action == "runtime_command":
+    if action == "team_recovery_confirm_deployment":
+        from .runtime_operations import _fingerprint
+        valid = ((result["teamId"], result["flowId"], result["runId"]) ==
+            (parameters["team_id"], parameters["flow_id"], parameters["run_id"])
+            and result["evidenceDigest"] == _fingerprint(parameters["evidence_ref"])
+            and int(result["revision"]) > int(parameters["expected_revision"]))
+    elif action == "runtime_command":
         operation = result["operation"]
         valid = (operation["kind"] == parameters["kind"] and operation["resourceId"] == parameters["resource_id"]
             and result["command"] == parameters["command"]
@@ -73,7 +82,10 @@ def execute(native, action, parameters, marker):
         previous = outcome.read(action, parameters, marker)
         if previous is not None:
             return previous
-    if action == "runtime_command":
+    if action == "team_recovery_confirm_deployment":
+        from .team_recovery_control import confirm_deployment
+        raw = confirm_deployment(native, parameters)
+    elif action == "runtime_command":
         raw = native.runtime_command(parameters, marker)
     elif action == "research_command":
         from .research_control import command
@@ -167,7 +179,7 @@ def public_receipt(payload, action, request_id, parameters=None):
     elif receipt.verified is not False or receipt.code != "OPERATION_UNCONFIRMED" or result is not None:
         raise ValueError("Unconfirmed request cannot carry a success result")
     if any(getattr(receipt, key) is not None for key in
-           ("agent", "session", "authorization", "purge", "operation", "asset", "flow", "research", "teamRun", "phase", "resumeAllowed") if key != field):
+           ("agent", "session", "authorization", "purge", "operation", "asset", "flow", "research", "recovery", "teamRun", "phase", "resumeAllowed") if key != field):
         raise ValueError("Unexpected native result for this action")
     result = receipt.model_dump(exclude_none=True)
     if action == "runtime_command" and "operation" in result:

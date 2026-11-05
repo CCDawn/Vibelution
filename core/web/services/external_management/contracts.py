@@ -8,6 +8,7 @@ import unicodedata
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 from .runtime_contracts import RuntimeCommand, RuntimeCommandResponse
+from .team_recovery_contracts import TeamRecoveryConfirmDeployment, TeamRecoveryDeploymentResponse
 from .research_contracts import ResearchCommand, ResearchCommandResponse
 from .authorization_reduction_contracts import (AUTHORIZATION_REDUCTION_MODELS, AUTHORIZATION_REDUCTION_SCOPES,
     AUTHORIZATION_REDUCTION_HELP, AuthorizationReductionResult)
@@ -61,6 +62,43 @@ class TeamResultResponse(UntrustedResponse):
                 raise ValueError("Available result requires text")
         elif self.text or self.truncated:
             raise ValueError("Unavailable or empty result cannot contain text")
+        return self
+
+
+class FlowResultQuery(Closed):
+    team_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$")
+    flow_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
+    run_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,159}$")
+
+
+class FlowResultResponse(UntrustedResponse):
+    requestId: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$")
+    teamId: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$")
+    flowId: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
+    runId: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,159}$")
+    status: Literal["available", "empty", "partial", "unavailable"]
+    runStatus: Literal["running", "waiting", "completed", "failed", "stopped", "unknown"]
+    terminal: StrictBool
+    businessAcceptance: Literal["not_evaluated"] = "not_evaluated"
+    text: str = Field(max_length=12000)
+    truncated: StrictBool
+    textFiltered: StrictBool = False
+
+    @model_validator(mode="after")
+    def consistent_result(self):
+        if self.terminal is not (self.runStatus in {"completed", "failed", "stopped"}):
+            raise ValueError("Terminal describes only the original native run")
+        if self.status in {"available", "empty"} and self.runStatus != "completed":
+            raise ValueError("Final results require a completed original run")
+        if self.status == "partial" and self.runStatus not in {"running", "waiting", "failed", "stopped"}:
+            raise ValueError("Partial results require an unfinished original run")
+        if self.status == "unavailable" and self.runStatus != "unknown":
+            raise ValueError("Unavailable authority cannot assert a run state")
+        if self.status == "available":
+            if not self.text.strip():
+                raise ValueError("Available results require visible text")
+        elif self.text or self.truncated:
+            raise ValueError("Nonavailable results cannot contain text")
         return self
 
 
@@ -261,6 +299,10 @@ ACTION_MODELS.update(AUTHORIZATION_REDUCTION_MODELS)
 ACTION_SCOPES.update(AUTHORIZATION_REDUCTION_SCOPES)
 
 
+ACTION_MODELS["team_recovery_confirm_deployment"] = TeamRecoveryConfirmDeployment
+ACTION_SCOPES["team_recovery_confirm_deployment"] = "operations:control"
+
+
 def contracts() -> dict:
     descriptions = {
         "runtime_command": "按 runtime_list/runtime_get 的精确 kind、resourceId、owner引用和 revision 控制原生工作。command仅允许该对象返回的commands；沿用独立operations:control及当前原生管理审批策略，full_access可自动批准。稳定request_id，unknown只查询原management_receipt，不换ID重放。外层completed仅证明原生控制应答；stopRequested/accepted不是实际终态，后续用runtime_get复核。revisionCheck=preflight_only表示版本只作预检，原生owner继续决定当前状态是否可执行。",
@@ -274,6 +316,7 @@ def contracts() -> dict:
         "session_pin": "经原生审批置顶或取消置顶普通可见 Session；不改变当前选择。verified 表示首次确认时原生元数据符合目标状态，不证明某次调用的因果；完成回执保留历史状态，当前状态用 session_get 查询。未知结果查询原 action/request_id，不能换 ID 重放。",
         "authorization_upgrade": "通过 personal_assistant_manage_tool 按助理当前原生权限策略显式增加当前Launcher原主体的指定缺失权限；full_access 可能自动批准。先authorization_status读取当前scopes，expected_scopes和add_scopes必须分别排序、唯一、不重叠。不能默认升级到全部权限，查询只选所需读取权；写权另行明确选择。保留client/subject/capability和任务关联，不支持撤销或换主体。unknown或异常保持同一request_id查询management_receipt(action=authorization_upgrade)，不更换ID重试。需要operator control，旧读取scope本身不授予升级权。完成回执为历史证明，当前状态另查。",
     }
+    descriptions["team_recovery_confirm_deployment"] = "使用team_recovery_get的原团队、流程、运行、revision和明确部署证据安排独立复验；沿用operations:control和原生审批，受理不等于复验通过。unknown只查原action/request_id回执，不换ID重放。"
     descriptions.update(ASSET_ACTION_HELP)
     descriptions.update(CONFIGURATION_ACTION_HELP)
     descriptions.update(TEAM_LIFECYCLE_ACTION_HELP)
@@ -281,7 +324,7 @@ def contracts() -> dict:
     descriptions.update(AUTHORIZATION_REDUCTION_HELP)
     descriptions["research_command"] = "使用research_get返回的精确run/team/flow/node/task/checkpoint引用与revision推进研究任务；支持失败节点重试、人工任务裁决及运行对账。沿用真实operator、operations:control和原生CAS/稳定request_id；unknown只读原management_receipt，不换ID重放。人工裁决须有明确依据，受理不等于业务完成。"
     return {name: {"action": name, "description": descriptions[name], "parameters": model.model_json_schema(),
-                   "governed": name in {"team_run", "session_pin", "agent_archive", "agent_purge", "agent_purge_batch", "authorization_upgrade", "runtime_command", "research_command", *ASSET_ACTION_MODELS, *CONFIGURATION_ACTION_MODELS, *TEAM_LIFECYCLE_ACTION_MODELS, *FLOW_ACTION_MODELS, *AUTHORIZATION_REDUCTION_MODELS}, "scope": ACTION_SCOPES[name] or "operator:control"} for name, model in ACTION_MODELS.items()}
+                   "governed": name in {"team_run", "session_pin", "agent_archive", "agent_purge", "agent_purge_batch", "authorization_upgrade", "runtime_command", "research_command", "team_recovery_confirm_deployment", *ASSET_ACTION_MODELS, *CONFIGURATION_ACTION_MODELS, *TEAM_LIFECYCLE_ACTION_MODELS, *FLOW_ACTION_MODELS, *AUTHORIZATION_REDUCTION_MODELS}, "scope": ACTION_SCOPES[name] or "operator:control"} for name, model in ACTION_MODELS.items()}
 
 
 # --- Launcher-canonical PA managed writes ------------------------------------
@@ -1151,7 +1194,7 @@ class AuthorizationStateResponse(Closed):
 
 class ReceiptResponse(Closed):
     status: Literal["completed", "unknown"]
-    action: Literal["agent_create", "agent_update", "agent_avatar", "agent_archive", "agent_purge", "agent_purge_batch", "team_run", "session_pin", "authorization_upgrade", "runtime_command", "team_update", "agent_tool_policy_update", "knowledge_acl_grant", "knowledge_acl_revoke", "flow_save", "flow_start", "research_command", "authorization_reduce", "authorization_revoke", "agent_dispatch_access_set", "team_create", "team_member_add", "team_member_remove", "team_archive", "agent_parameters_update", "agent_prompt_update"]
+    action: Literal["agent_create", "agent_update", "agent_avatar", "agent_archive", "agent_purge", "agent_purge_batch", "team_run", "session_pin", "authorization_upgrade", "runtime_command", "team_recovery_confirm_deployment", "team_update", "agent_tool_policy_update", "knowledge_acl_grant", "knowledge_acl_revoke", "flow_save", "flow_start", "research_command", "authorization_reduce", "authorization_revoke", "agent_dispatch_access_set", "team_create", "team_member_add", "team_member_remove", "team_archive", "agent_parameters_update", "agent_prompt_update"]
     requestId: str
     verified: bool
     reused: bool
@@ -1161,6 +1204,7 @@ class ReceiptResponse(Closed):
     purge: AgentPurgeResult | None = None
     purgeBatch: AgentPurgeBatchResult | None = None
     operation: RuntimeCommandResponse | None = None
+    recovery: TeamRecoveryDeploymentResponse | None = None
     asset: AssetMutationResponse | None = None
     flow: FlowMutationResponse | None = None
     research: ResearchCommandResponse | None = None

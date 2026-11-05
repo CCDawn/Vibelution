@@ -287,6 +287,14 @@ class ManagementService:
             raise ManagementError("AUTHORIZATION_CONFLICT", 409)
         return result
 
+    def read_team_recovery(self, subject, capability, parameters):
+        from .team_recovery_control import read
+        grant = self._authorize(subject, capability, "operations:read")
+        result = read(self.native, parameters)
+        if self._authorize(subject, capability, "operations:read") != grant:
+            raise ManagementError("AUTHORIZATION_CONFLICT", 409)
+        return result
+
     def read_research(self, subject, capability, parameters):
         from .research_contracts import ResearchReadQuery, ResearchReadResponse
         from .research_control import read
@@ -804,6 +812,21 @@ class ManagementService:
         if self._authorize(subject, capability, ACTION_SCOPES[action]) != grant:
             raise ManagementError("AUTHORIZATION_CONFLICT", 409)
         return result
+
+    def flow_result(self, subject: str, capability: str, request_id: str, parameters: dict) -> dict:
+        from .contracts import FlowResultQuery, FlowResultResponse
+        from .flow_result import read_flow_result
+
+        grant = self._authorize(subject, capability, "teams:results:read")
+        self._request_key(subject, "flow_start", request_id)
+        try:
+            query = FlowResultQuery.model_validate(parameters)
+        except ValidationError:
+            raise ManagementError("INVALID_INPUT", 422) from None
+        result = read_flow_result(self.native, self.store, grant, request_id, query)
+        if self._authorize(subject, capability, "teams:results:read") != grant:
+            raise ManagementError("AUTHORIZATION_CONFLICT", 409)
+        return FlowResultResponse.model_validate(result).model_dump()
 
     def team_result(self, subject: str, capability: str, request_id: str) -> dict:
         from .contracts import TeamResultResponse

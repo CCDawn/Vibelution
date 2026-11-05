@@ -1,5 +1,6 @@
 import type { ComposerImageAttachment } from "../chat/chatComposerSubmitModel";
-import type { SessionPendingQuestion } from "../../api/types";
+import type { SessionPendingQuestion, SessionReferenceAttachment } from "../../api/types";
+import type { SessionContinuationExpectation } from "../../api/chat";
 import type { LauncherAssistantQuestionDraft, LauncherAssistantQueuedAcceptance, LauncherAssistantSubmission } from "./launcherAssistantModel";
 
 /** Recoverable attachment metadata only: id plus the uploaded backend artifact.
@@ -24,7 +25,11 @@ export type PersistedLauncherComposer = {
   queuedAcceptance: LauncherAssistantQueuedAcceptance | null;
   attachments: PersistedLauncherComposerAttachment[];
   questionDraft?: LauncherAssistantQuestionDraft | null;
+  references?: SessionReferenceAttachment[];
+  continuation?: PersistedLauncherContinuation;
 };
+
+export type PersistedLauncherContinuation = { requestId: string; expected: SessionContinuationExpectation; accepted: boolean };
 
 /** Write-side input: the Route's richer snapshot (full tray chips, continuation)
  * is accepted and reduced to recovery fields. Already-persisted metadata rows
@@ -36,6 +41,8 @@ export type LauncherComposerPersistenceInput = {
   queuedAcceptance: LauncherAssistantQueuedAcceptance | null;
   attachments?: readonly (ComposerImageAttachment | PersistedLauncherComposerAttachment)[] | undefined;
   questionDraft?: LauncherAssistantQuestionDraft | null;
+  references?: SessionReferenceAttachment[];
+  continuation?: PersistedLauncherContinuation;
 };
 
 type ComposerSurface = "floating" | "embedded";
@@ -49,8 +56,8 @@ const SNAPSHOT_FIELDS = ["draft", "outstanding", "acceptedTurnId", "queuedAccept
 // `attachments` is optional so envelopes written before attachment persistence
 // (same VERSION) still load; new writes always include the field.
 // `questionDraft` is also optional in VERSION 1; null explicitly clears it.
-const SNAPSHOT_ALLOWED = [...SNAPSHOT_FIELDS, "attachments", "questionDraft"];
-const SUBMISSION_FIELDS = ["message", "requestId", "draftSnapshot", "attachmentIds", "attachmentSnapshotIds", "preserveDraft", "answerQuestion"];
+const SNAPSHOT_ALLOWED = [...SNAPSHOT_FIELDS, "attachments", "questionDraft", "references", "continuation"];
+const SUBMISSION_FIELDS = ["message", "requestId", "draftSnapshot", "attachmentIds", "attachmentSnapshotIds", "preserveDraft", "answerQuestion", "references"];
 const ATTACHMENT_FIELDS = ["id", "artifactId", "filename", "contentType", "sizeBytes", "kind"];
 const QUESTION_FIELDS = ["id", "questionText", "askedAt", "turnId"];
 const MAX_FILENAME_CHARS = 255;
@@ -95,14 +102,47 @@ function pendingQuestionDraft(value: unknown): LauncherAssistantQuestionDraft | 
   return question ? { question, value: value.value } : null;
 }
 
+/** Closed DTO metadata only. Native submit remains the reference/ACL authority;
+ * recovery must not add paths, tokens, Blob bodies or unknown extension fields. */
+function references(value: unknown): SessionReferenceAttachment[] | null {
+  const identityFields = ["referenceId", "sessionId", "agentId", "knowledgeItemId", "knowledgeBaseId", "artifactId", "sourceSessionId", "sourceMessageId"];
+  const displayFields = ["title", "agentCode", "agentDisplayName", "summary", "createdAt", "filename", "quote"];
+  if (!Array.isArray(value) || value.length > 8) return null;
+  const rows: SessionReferenceAttachment[] = [];
+  for (const item of value) {
+    if (!record(item) || !fields(item, ["kind"], ["kind", ...identityFields, ...displayFields])
+      || typeof item.kind !== "string" || !/^[A-Za-z0-9_-]{1,40}$/.test(item.kind)
+      || !["referenceId", "sessionId", "knowledgeItemId", "knowledgeBaseId", "artifactId", "sourceMessageId"].some(key => id(item[key]))
+      || identityFields.some(key => item[key] !== undefined && !id(item[key]))
+      || displayFields.some(key => item[key] !== undefined && !text(item[key]))) return null;
+    const row = { ...item } as SessionReferenceAttachment;
+    // Match the native bridge's per-reference envelope ceiling.
+    if (JSON.stringify(row).length > 16_000) return null;
+    rows.push(row);
+  }
+  return rows;
+}
+
+function continuation(value: unknown): PersistedLauncherContinuation | null {
+  if (!record(value) || !fields(value, ["requestId", "expected", "accepted"]) || !id(value.requestId, 128)
+    || typeof value.accepted !== "boolean" || !record(value.expected)
+    || !fields(value.expected, ["turnId", "headId", "ledgerSeq", "agentId"])
+    || !id(value.expected.turnId) || !id(value.expected.headId) || !id(value.expected.agentId)
+    || !Number.isSafeInteger(value.expected.ledgerSeq) || (value.expected.ledgerSeq as number) < 1) return null;
+  return { requestId: value.requestId, expected: { turnId: value.expected.turnId, headId: value.expected.headId,
+    ledgerSeq: value.expected.ledgerSeq as number, agentId: value.expected.agentId }, accepted: value.accepted };
+}
+
 function submission(value: unknown): LauncherAssistantSubmission | null {
+  const savedReferences = record(value) && value.references !== undefined ? references(value.references) : undefined;
   if (!record(value) || !fields(value, ["message", "requestId"], SUBMISSION_FIELDS)
     || !text(value.message) || !id(value.requestId, 128)
     || (value.draftSnapshot !== undefined && !text(value.draftSnapshot))
     || (value.attachmentIds !== undefined && !ids(value.attachmentIds, true))
     || (value.attachmentSnapshotIds !== undefined && !ids(value.attachmentSnapshotIds, false))
     || (value.preserveDraft !== undefined && value.preserveDraft !== true)
-    || (!value.message.trim() && !(value.attachmentIds as string[] | undefined)?.length)) return null;
+    || savedReferences === null
+    || (!value.message.trim() && !(value.attachmentIds as string[] | undefined)?.length && !savedReferences?.length)) return null;
   const answerQuestion = value.answerQuestion === undefined ? null : pendingQuestion(value.answerQuestion);
   if (value.answerQuestion !== undefined && (!answerQuestion || value.preserveDraft !== true)) return null;
   return {
@@ -112,6 +152,7 @@ function submission(value: unknown): LauncherAssistantSubmission | null {
     ...(value.attachmentSnapshotIds !== undefined ? { attachmentSnapshotIds: [...value.attachmentSnapshotIds as string[]] } : {}),
     ...(value.preserveDraft === true ? { preserveDraft: true } : {}),
     ...(answerQuestion ? { answerQuestion } : {}),
+    ...(savedReferences ? { references: savedReferences } : {}),
   };
 }
 
@@ -169,6 +210,9 @@ function snapshot(value: unknown): PersistedLauncherComposer | null {
   if (value.outstanding !== null && !outstanding) return null;
   const questionDraft = value.questionDraft == null ? null : pendingQuestionDraft(value.questionDraft);
   if (value.questionDraft !== undefined && value.questionDraft !== null && !questionDraft) return null;
+  const savedReferences = value.references === undefined ? undefined : references(value.references);
+  const savedContinuation = value.continuation === undefined ? undefined : continuation(value.continuation);
+  if (savedReferences === null || savedContinuation === null) return null;
   let queuedAcceptance: LauncherAssistantQueuedAcceptance | null = null;
   if (value.queuedAcceptance !== null) {
     const receipt = value.queuedAcceptance;
@@ -177,7 +221,9 @@ function snapshot(value: unknown): PersistedLauncherComposer | null {
     queuedAcceptance = { id: receipt.id, clientSubmissionId: receipt.clientSubmissionId, observed: receipt.observed };
   }
   return { draft: value.draft, outstanding, acceptedTurnId: value.acceptedTurnId as string, queuedAcceptance, attachments,
-    ...(value.questionDraft !== undefined ? { questionDraft } : {}) };
+    ...(value.questionDraft !== undefined ? { questionDraft } : {}),
+    ...(savedReferences ? { references: savedReferences } : {}),
+    ...(savedContinuation ? { continuation: savedContinuation } : {}) };
 }
 
 function key(sessionId: string, surface: ComposerSurface): string | null {
@@ -203,7 +249,7 @@ export function loadLauncherComposer(
   }
 }
 
-/** Pick only recovery fields; File/Blob bodies, blob: previews, continuation and
+/** Pick only validated recovery fields; File/Blob bodies, blob: previews and
  * other Route state never enter storage. Uploaded attachment metadata is kept so
  * a reload can rebuild the tray without re-uploading. */
 export function saveLauncherComposer(
@@ -214,7 +260,8 @@ export function saveLauncherComposer(
     if (!storageKey || !record(value)) return false;
     const saved = snapshot({ draft: value.draft, outstanding: value.outstanding,
       acceptedTurnId: value.acceptedTurnId, queuedAcceptance: value.queuedAcceptance,
-      attachments: persistedAttachments(value.attachments), questionDraft: value.questionDraft });
+      attachments: persistedAttachments(value.attachments), questionDraft: value.questionDraft,
+      references: value.references, continuation: value.continuation });
     if (!saved) return false;
     const raw = JSON.stringify({ version: VERSION, sessionId, surface, snapshot: saved });
     if (raw.length > MAX_JSON_CHARS) return false;

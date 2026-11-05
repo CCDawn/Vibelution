@@ -15,6 +15,21 @@ default:
     - "No focused rule matched; use the runner smoke as a small signal and decide broader validation from the changed surface."
 
 rules:
+  - id: assistant-team-loop-completion
+    description: "Launcher waiting notices, native deployment recovery, and original Flow results."
+    executionLayers:
+      - "focused"
+    paths:
+      - "core/web/services/external_management/team_recovery_*.py"
+      - "core/web/services/external_management/flow_result.py"
+      - "tests/test_assistant_team_loop_completion.py"
+      - "tests/test_assistant_team_recovery_transport.py"
+      - "tests/test_assistant_flow_result.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_assistant_team_loop_completion.py tests/test_assistant_team_recovery_transport.py tests/test_assistant_flow_result.py tests/test_generic_workflow_recovery.py::test_deployment_confirmation_requires_evidence_and_fresh_reviewer_verification tests/test_generic_workflow_code_repair.py::test_deployment_confirmation_runs_only_reviewer_then_source_still_must_succeed -q"
+    notes:
+      - "Reads never admit or reconcile work; deployment acknowledgement is separate from business acceptance."
+
   - id: launcher-task-card-cleanup
     description: "Readable Launcher task metadata and identity-bound permanent task cleanup."
     executionLayers:

@@ -826,6 +826,38 @@ class ManagedAgentBackendClient:
         except ValidationError:
             raise BackendClientError("Invalid Team result.", code="BACKEND_PROTOCOL_ERROR") from None
 
+    async def management_flow_result(self, *, request_id: str, team_id: str, flow_id: str, run_id: str):
+        from pydantic import ValidationError
+        from core.web.services.external_management.contracts import FlowResultQuery, FlowResultResponse
+        try:
+            if not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}", request_id):
+                raise ValueError("Invalid original request")
+            query = FlowResultQuery.model_validate({"team_id": team_id, "flow_id": flow_id, "run_id": run_id})
+        except (ValidationError, ValueError):
+            raise BackendClientError("Invalid Flow result reference.", code="INVALID_MANAGEMENT_REQUEST") from None
+        grant = await self._original_management_grant(require_original=True, require_complete=True)
+        payload = await self._request_json("GET", f"{_MANAGEMENT_PREFIX}/flow-runs/requests/{quote(request_id, safe='')}/result?" +
+            urlencode(query.model_dump()), management_auth=(grant["subjectId"], grant["capability"]))
+        try:
+            result = FlowResultResponse.model_validate(payload).model_dump()
+        except ValidationError:
+            raise BackendClientError("Invalid Flow result.", code="BACKEND_PROTOCOL_ERROR") from None
+        if (result["requestId"], result["teamId"], result["flowId"], result["runId"]) != (request_id, team_id, flow_id, run_id):
+            raise BackendClientError("Flow result identity changed.", code="BACKEND_PROTOCOL_ERROR")
+        return result
+
+    async def management_team_recovery(self, **parameters):
+        from pydantic import ValidationError
+        from core.web.services.external_management.team_recovery_contracts import TeamRecoveryQuery, TeamRecoveryResponse
+        try:
+            query = TeamRecoveryQuery.model_validate(parameters)
+        except ValidationError:
+            raise BackendClientError("Invalid Team recovery reference.", code="INVALID_MANAGEMENT_REQUEST") from None
+        result = await self._management_directory_read("/team-runs/recovery?" + urlencode(query.model_dump()), TeamRecoveryResponse)
+        if (result["teamId"], result["flowId"], result["runId"]) != (query.team_id, query.flow_id, query.run_id):
+            raise BackendClientError("Team recovery identity changed.", code="BACKEND_PROTOCOL_ERROR")
+        return result
+
     async def management_room_list(self, **parameters):
         return await self._management_directory_list("rooms", parameters)
 
@@ -997,7 +1029,7 @@ class ManagedAgentBackendClient:
                 return _platform_receipt(payload, action, request_id)
             except (ValidationError, ValueError, TypeError, KeyError):
                 raise BackendClientError("Invalid platform management receipt.", code="BACKEND_PROTOCOL_ERROR") from None
-        if any(payload.get(key) is not None for key in ("operation", "asset", "flow", "research")):
+        if any(payload.get(key) is not None for key in ("operation", "asset", "flow", "research", "recovery")):
             raise BackendClientError("Unexpected platform management result.", code="BACKEND_PROTOCOL_ERROR")
         if action in {"authorization_reduce", "authorization_revoke"}:
             from core.web.services.external_management.authorization_reduction_contracts import AuthorizationReductionResponse

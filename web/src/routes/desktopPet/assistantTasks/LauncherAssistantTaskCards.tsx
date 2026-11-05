@@ -11,9 +11,10 @@ import { LauncherTaskContext, usePublishLauncherTaskNotices, type TaskReviewRequ
 import { LauncherAssistantTaskSidebar } from "./LauncherAssistantTaskSidebar";
 import { readLauncherAssistantTaskSource } from "../launcherAssistantTaskReads";
 import { launcherNoticeReadFailed } from "../launcherAssistantPageNotices";
+import { createLauncherApprovalTarget, type LauncherApprovalTarget } from "../launcherAssistantApprovalTarget";
 
 const PAGE_SIZE=10;
-type Props={lang?:"zh"|"en";routePath?:string;children?:ReactNode;onReview?:(task:AssistantTask)=>void;onApproval?:(task:AssistantDispatchTask)=>void;onOpenConversation?:()=>void};
+type Props={lang?:"zh"|"en";routePath?:string;children?:ReactNode;onReview?:(task:AssistantTask)=>void;onApproval?:(task:AssistantDispatchTask,target:LauncherApprovalTarget)=>void;onOpenConversation?:()=>void};
 type TaskFocus = { identity: string; id: string | null; action: "open" | "cleanup"; prior: HTMLElement | null };
 
 /** One Launcher owner for identity-scoped reads, selection and guarded cleanup.
@@ -244,7 +245,9 @@ export function LauncherAssistantTaskCards({onReview,onApproval,onOpenConversati
  };
  const approve=(task:AssistantDispatchTask)=>{
   if(!activeView.current.canAct || activeView.current.identity!==identity)return;
-  setReviewRequest(null);closeTask();onApproval?.(task);onOpenConversation?.();
+  const target=createLauncherApprovalTarget(task,dispatches.data??[],agentId,sessionId);
+  if(!target)return;
+  setReviewRequest(null);closeTask();onApproval?.(task,target);onOpenConversation?.();
  };
  const remove=(task:AssistantTask)=>{if(reading&&!cleanup.busy){
   cleanupFocus.current={identity,id:task.id,action:"cleanup",prior:document.activeElement instanceof HTMLElement?document.activeElement:null};
