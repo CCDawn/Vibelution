@@ -14,7 +14,7 @@ Security fixes are applied on the default branch (`main`) of this repository. If
 ## What is out of scope (by design)
 
 - Abuse of a **user-configured** model provider or tools the operator explicitly enabled
-- Secrets the operator pastes into chat, commits, or puts in tracked files
+- Secrets the operator pastes into ordinary chat message text, commits, or puts in tracked files. Secrets submitted through the chat privacy attachment channel (user_secret) are controlled credential input: plaintext is staged in-process behind a closed IPC hop with a 10-minute TTL and pop-on-read consumption, never logged or persisted, and only a one-shot `sec_` reference reaches the model context
 - General phishing or social engineering against repository users
 
 ## Reporting a vulnerability
