@@ -9,6 +9,8 @@ from core.web.services.external_agent.service import ExternalAgentAccessError, E
 from core.web.services.external_agent.store import ExternalAgentTaskStore
 from vibelution_storage import resolve_project_runtime_home
 
+from .eligibility import local_assistant_eligibility
+
 
 route_service: ContextVar[ExternalAgentTaskService | None] = ContextVar("local_assistant_task_service", default=None)
 
@@ -64,10 +66,12 @@ class LocalAssistantTaskService(ExternalAgentTaskService):
         profile = self._profile(requested or "workspace_write")
         return "read_only" if profile == "read_only" else "workspace_write"
 
-    def _require_eligible(self, agent):
-        if isinstance(agent, dict) and (agent.get("protected") or agent.get("isProtected")):
-            raise ExternalAgentAccessError("Agent is protected", code="AGENT_NOT_FOUND")
-        super()._require_eligible(agent)
+    def _eligibility(self, agent, *, gateway=None):
+        return local_assistant_eligibility(agent, active_team_lookup=self.dependencies.active_team_lookup,
+            operator_enabled=self._operator_agent_enabled)
+
+    def list_agents(self, *, limit=50):
+        return {**super().list_agents(limit=limit), "dispatchContext": "launcher_local"}
 
     def _admit_start_task(self, **kwargs):
         record, created, agent_id, task, effective = super()._admit_start_task(**kwargs)
