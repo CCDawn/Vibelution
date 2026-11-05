@@ -74,6 +74,7 @@ export type AssistantHostRequest =
   | { operation: "decideDispatchApproval"; dispatchId: string; taskId: string; approvalId: string; revision: string; decision: "accept" | "decline" }
   | { operation: "send"; message: string; requestId: string; attachmentIds?: string[]; references?: unknown[] }
   | { operation: "uploadAttachment"; filename: string; contentType: string; dataBase64: string }
+  | { operation: "upload_attachment"; kind: "user_secret"; value: string; secretKind: "api_key" | "token" | "password" | "secret"; label?: string }
   | { operation: "readAttachment"; artifactId: string }
   | { operation: "stop"; turnId: string }
   | { operation: "continue"; requestId: string; continuation: { turnId: string; headId: string; ledgerSeq: number; agentId: string } }
@@ -1272,6 +1273,27 @@ export class AssistantHost {
           || result.artifactId === "." || result.artifactId === ".." || typeof result.filename !== "string"
           || typeof result.contentType !== "string" || result.sizeBytes !== bytes.length
           || !["user_image", "user_document"].includes(String(result.kind)) || result.status !== "ready")
+          throw new HostError("ASSISTANT_RESPONSE_INVALID");
+        return result;
+      }
+      case "upload_attachment": {
+        // Privacy attachment staging: the secret value crosses only this
+        // main-process dispatch and the host's closed HTTP link, is never
+        // logged, and only the opaque sec_ reference comes back.
+        if ((!ownKeys(payload, ["operation", "kind", "value", "secretKind"])
+            && !ownKeys(payload, ["operation", "kind", "value", "secretKind", "label"]))
+          || payload.kind !== "user_secret"
+          || typeof payload.value !== "string" || !payload.value.trim() || payload.value.length > 8192
+          || !["api_key", "token", "password", "secret"].includes(String(payload.secretKind))
+          || (payload.label !== undefined
+            && (typeof payload.label !== "string" || payload.label.length > 160 || /[\u0000-\u001f\u007f]/.test(payload.label))))
+          throw new HostError("ASSISTANT_REQUEST_INVALID");
+        const result = await this.rpc(generation, "/api/assistant/attachments/upload", "POST",
+          { kind: "user_secret", value: payload.value, secretKind: payload.secretKind,
+            ...(payload.label !== undefined && payload.label !== "" ? { label: payload.label } : {}) });
+        if (!object(result) || Object.keys(result).length !== 2
+          || !ownKeys(result, ["attachmentId", "kind"]) || result.kind !== "user_secret"
+          || typeof result.attachmentId !== "string" || !/^sec_[A-Za-z0-9_-]{16,64}$/.test(result.attachmentId))
           throw new HostError("ASSISTANT_RESPONSE_INVALID");
         return result;
       }

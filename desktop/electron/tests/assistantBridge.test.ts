@@ -12,7 +12,7 @@ const HOST_REQUEST_OPERATIONS: readonly AssistantHostRequest["operation"][] = [
   "previewTaskCleanup", "executeTaskCleanup", "teamRuns", "setModel", "setManagementPermissionPreset", "budgetParameters", "setBudgetParameters", "usageSummary",
   "detail", "status", "dispatches", "config", "approvals", "assistantAvatar",
   "resolveApproval", "previewDispatchApproval", "declineDispatchApproval", "decideDispatchApproval",
-  "send", "uploadAttachment", "readAttachment", "stop", "continue", "switchHead", "regenerate", "guidance",
+  "send", "uploadAttachment", "upload_attachment", "readAttachment", "stop", "continue", "switchHead", "regenerate", "guidance",
   "curation", "curate", "operatorAsset",
   "computerState", "computerWindows", "computerGrant", "computerControl", "computerConfirm",
 ];

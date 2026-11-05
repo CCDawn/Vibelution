@@ -35,7 +35,7 @@ const READ_OPERATIONS = new Set(["status", "detail", "dispatches", "teamRuns", "
  * Every member is dispatched after a full host.start() recovery except the
  * READ_OPERATIONS subset, which gets a bounded grace instead.
  */
-export const ASSISTANT_BRIDGE_OPERATIONS = ["status", "detail", "dispatches", "teamRuns", "setModel", "setManagementPermissionPreset", "budgetParameters", "setBudgetParameters", "usageSummary", "previewTaskCleanup", "executeTaskCleanup", "config", "send", "uploadAttachment", "readAttachment", "stop", "continue", "switchHead", "regenerate", "guidance", "curation", "curate", "approvals", "resolveApproval", "previewDispatchApproval", "decideDispatchApproval", "declineDispatchApproval", "operatorAsset", "assistantAvatar", "computerState", "computerWindows", "computerGrant", "computerControl", "computerConfirm"];
+export const ASSISTANT_BRIDGE_OPERATIONS = ["status", "detail", "dispatches", "teamRuns", "setModel", "setManagementPermissionPreset", "budgetParameters", "setBudgetParameters", "usageSummary", "previewTaskCleanup", "executeTaskCleanup", "config", "send", "uploadAttachment", "upload_attachment", "readAttachment", "stop", "continue", "switchHead", "regenerate", "guidance", "curation", "curate", "approvals", "resolveApproval", "previewDispatchApproval", "decideDispatchApproval", "declineDispatchApproval", "operatorAsset", "assistantAvatar", "computerState", "computerWindows", "computerGrant", "computerControl", "computerConfirm"];
 
 function delay(ms: number): Promise<void> {
   return new Promise(done => {

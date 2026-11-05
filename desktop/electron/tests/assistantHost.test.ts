@@ -604,6 +604,37 @@ describe("AssistantHost", () => {
     await expect(host.request({ operation: "readAttachment", artifactId: "../file" })).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
     await expect(host.request({ operation: "uploadAttachment", filename: "note.txt", contentType: "text/plain", dataBase64: "!!!!" })).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
   });
+  it("stages a privacy secret through the closed native upload link", async () => {
+    const { host, fetchImpl } = fixture();
+    await host.start();
+    fetchImpl.mockImplementationOnce(async (url, options) => {
+      expect(String(url)).toContain("/api/assistant/attachments/upload");
+      expect(JSON.parse(String(options?.body))).toEqual({ kind: "user_secret", value: "secret-value", secretKind: "api_key", label: "中转站" });
+      return Response.json({ attachmentId: "sec_" + "a".repeat(32), kind: "user_secret" });
+    });
+    const staged = await host.request({ operation: "upload_attachment", kind: "user_secret", value: "secret-value", secretKind: "api_key", label: "中转站" });
+    expect(staged).toEqual({ attachmentId: "sec_" + "a".repeat(32), kind: "user_secret" });
+    fetchImpl.mockImplementationOnce(async (_url, options) => {
+      // Empty label stays out of the host body; the secret never echoes back.
+      expect(JSON.parse(String(options?.body))).toEqual({ kind: "user_secret", value: "v", secretKind: "token" });
+      return Response.json({ attachmentId: "sec_" + "b".repeat(32), kind: "user_secret" });
+    });
+    await expect(host.request({ operation: "upload_attachment", kind: "user_secret", value: "v", secretKind: "token", label: "" }))
+      .resolves.toMatchObject({ kind: "user_secret" });
+    await expect(host.request({ operation: "upload_attachment", kind: "user_secret", value: "v", secretKind: "other" } as unknown as AssistantHostRequest))
+      .rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    await expect(host.request({ operation: "upload_attachment", kind: "image", value: "v", secretKind: "api_key" } as unknown as AssistantHostRequest))
+      .rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    await expect(host.request({ operation: "upload_attachment", kind: "user_secret", value: " ", secretKind: "api_key" } as unknown as AssistantHostRequest))
+      .rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    await expect(host.request({ operation: "upload_attachment", kind: "user_secret", value: "v", secretKind: "api_key", extra: 1 } as unknown as AssistantHostRequest))
+      .rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    await expect(host.request({ operation: "upload_attachment", kind: "user_secret", value: "v", secretKind: "api_key", label: "x\ny" } as unknown as AssistantHostRequest))
+      .rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    fetchImpl.mockImplementationOnce(async () => Response.json({ attachmentId: "file-1", kind: "user_secret" }));
+    await expect(host.request({ operation: "upload_attachment", kind: "user_secret", value: "v", secretKind: "api_key" }))
+      .rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
+  });
   it("retries the same migration host after a pre-spawn restart failure", async () => {
     const { host, native, root } = fixture({ graceful: true });
     Object.assign(native, { exitCode: vi.fn(() => 0) });
