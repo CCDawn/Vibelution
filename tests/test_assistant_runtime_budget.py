@@ -102,10 +102,29 @@ def test_native_budget_rejects_identity_changes_without_service_calls(native_own
         monkeypatch.setattr(sessions, "_session_agent_id_snapshot", lambda _sid: "foreign-agent")
     monkeypatch.setattr(sessions, "get_session_budget_parameters_view", lambda *_a: pytest.fail("Foreign read"))
     monkeypatch.setattr(sessions, "update_session_budget_parameters", lambda *_a, **_k: pytest.fail("Foreign write"))
+    # All three branches are identity breaks; they surface the rebuild code,
+    # not the retryable budget-unavailable fold.
+    with pytest.raises(native.AssistantSessionError, match="^ASSISTANT_IDENTITY_INVALID$"):
+        native.budget_parameters()
+    with pytest.raises(native.AssistantSessionError, match="^ASSISTANT_IDENTITY_INVALID$"):
+        native.set_budget_parameters(0, 0)
+
+
+def test_budget_identity_break_and_owner_failure_stay_distinguishable(native_owner, monkeypatch):
+    """Regression: an identity break and a generic owner failure used to share
+    ASSISTANT_BUDGET_UNAVAILABLE; the desktop must be able to tell rebuild
+    (identity) apart from retry-later (owner failure)."""
+    monkeypatch.setattr(sessions, "_session_agent_id_snapshot", lambda _sid: "foreign-agent")
+    with pytest.raises(native.AssistantSessionError, match="^ASSISTANT_IDENTITY_INVALID$"):
+        native.budget_parameters()
+    monkeypatch.setattr(sessions, "_session_agent_id_snapshot", lambda _sid: native_owner["agentId"])
+
+    def unavailable(*_args, **_kwargs):
+        raise RuntimeError("PRIVATE_CONFIGURATION_SENTINEL")
+
+    monkeypatch.setattr(sessions, "get_session_budget_parameters_view", unavailable)
     with pytest.raises(native.AssistantSessionError, match="^ASSISTANT_BUDGET_UNAVAILABLE$"):
         native.budget_parameters()
-    with pytest.raises(native.AssistantSessionError, match="^ASSISTANT_BUDGET_UNAVAILABLE$"):
-        native.set_budget_parameters(0, 0)
 
 
 def test_native_budget_serializes_generic_identity_writers(native_owner, monkeypatch):
@@ -136,7 +155,8 @@ def test_native_budget_serializes_generic_identity_writers(native_owner, monkeyp
         writers[0].result(timeout=5)
     assert finished.is_set()
     assert directory.get_agent(aid)["metadata"]["sessionBudgetParameters"] == {"maxCallsPerTurn": 0}
-    with pytest.raises(native.AssistantSessionError, match="^ASSISTANT_BUDGET_UNAVAILABLE$"):
+    # The replaced direct Session is an identity break, not a busy endpoint.
+    with pytest.raises(native.AssistantSessionError, match="^ASSISTANT_IDENTITY_INVALID$"):
         native.set_budget_parameters(200, revision + 1)
 
 

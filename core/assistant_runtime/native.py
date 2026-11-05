@@ -88,6 +88,23 @@ class AssistantSessionError(RuntimeError):
         super().__init__(code)
 
 
+def _settings_identity_error(exc: AssistantSessionError) -> AssistantSessionError:
+    """Converge settings-command identity breaks onto one rebuild code.
+
+    Settings reads/writes bind to the fixed singleton identity. When that
+    binding can no longer be resolved (projection mismatch, or the singleton
+    lost its direct Session), the only remedy is refreshing status or
+    rebuilding the native assistant — never replaying the command. The bare
+    unprefixed SESSION_NOT_FOUND would fall through the desktop's structured
+    passthrough into its status-only fallback, which folds it back into a
+    retryable "unavailable" code; ASSISTANT_IDENTITY_INVALID survives the
+    whole transport and the desktop routes it to refresh/rebuild.
+    """
+    if exc.code == "SESSION_NOT_FOUND":
+        return AssistantSessionError("ASSISTANT_IDENTITY_INVALID")
+    return exc
+
+
 def _services():
     from core.web.services import (
         agent_directory_service,
@@ -337,8 +354,13 @@ def set_management_permission(preset: str, expected_revision: int) -> dict[str, 
                     expected_agent_id=expected_agent_id, expected_session_id=expected_session_id)
     except management_permissions.ManagementPermissionError as exc:
         raise AssistantSessionError(exc.code) from None
-    except AssistantSessionError:
-        raise AssistantSessionError("ASSISTANT_PERMISSION_UNAVAILABLE") from None
+    except AssistantSessionError as exc:
+        # Every AssistantSessionError here already names its root cause
+        # (identity break, stopping, quiescing, session conflict). Folding
+        # them into ASSISTANT_PERMISSION_UNAVAILABLE made the desktop treat a
+        # terminal identity break as a retryable permission outage; only an
+        # unclassified infrastructure failure keeps that generic code below.
+        raise _settings_identity_error(exc) from None
     except Exception:
         raise AssistantSessionError("ASSISTANT_PERMISSION_UNAVAILABLE") from None
 
@@ -352,12 +374,17 @@ def _budget_parameters_command():
             with personal._LOCK, sessions.session_agent_lifecycle_transaction(), directory._STATE_LOCK:
                 assistant_settings()
                 if sessions._session_agent_id_snapshot(session_id) != _AGENT_ID:
-                    raise AssistantSessionError("ASSISTANT_BUDGET_UNAVAILABLE")
+                    # The Session's bound agent moved: an identity break, not a
+                    # busy budget endpoint. A retryable code here made the
+                    # desktop loop a write that can never bind again.
+                    raise AssistantSessionError("ASSISTANT_IDENTITY_INVALID")
                 yield sessions, session_id
     except AssistantSessionError as exc:
-        if exc.code in {"ASSISTANT_BUDGET_CONFLICT", "ASSISTANT_BUDGET_UNAVAILABLE"}:
-            raise
-        raise AssistantSessionError("ASSISTANT_BUDGET_UNAVAILABLE") from None
+        # Real codes pass through: ASSISTANT_BUDGET_CONFLICT (refresh and
+        # re-save), ASSISTANT_BUDGET_INVALID, lifecycle states, and the
+        # identity code above. Only unclassified failures keep the generic
+        # budget-unavailable fold below.
+        raise _settings_identity_error(exc) from None
     except Exception:
         raise AssistantSessionError("ASSISTANT_BUDGET_UNAVAILABLE") from None
 
@@ -378,8 +405,13 @@ def usage_summary() -> dict[str, Any]:
                 if (not agent or agent.get("agentId") != _AGENT_ID
                         or agent.get("directSessionId") != session_id
                         or sessions._session_agent_id_snapshot(session_id) != _AGENT_ID):
-                    raise AssistantSessionError("ASSISTANT_USAGE_UNAVAILABLE")
+                    # The fixed Agent/Session binding no longer resolves: an
+                    # identity break, reported as such instead of a retryable
+                    # usage outage.
+                    raise AssistantSessionError("ASSISTANT_IDENTITY_INVALID")
                 return read_usage_summary(project_root=root, session_id=session_id, agent_id=_AGENT_ID)
+    except AssistantSessionError as exc:
+        raise _settings_identity_error(exc) from None
     except Exception:
         raise AssistantSessionError("ASSISTANT_USAGE_UNAVAILABLE") from None
 
@@ -421,34 +453,51 @@ def set_model(model_id: str) -> dict[str, str]:
     if (not isinstance(model_id, str) or not 1 <= len(model_id) <= 200
             or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in model_id)):
         raise AssistantSessionError("ASSISTANT_MODEL_INVALID")
-    with _session_command() as (sessions, session_id):
-        _, personal, _, _ = _services()
-        with personal._LOCK:
-            # Recheck under the singleton owner's lock before any mutation.
-            assistant_settings()
-            lock = SessionAdmissionLock(sessions.PROJECT_ROOT, session_id)
-            try:
-                lock.acquire(timeout=0.1)
-            except sessions.SessionBusyError:
-                raise AssistantSessionError("ASSISTANT_MODEL_BUSY") from None
-            try:
+    # Unlike the budget endpoint — whose write is scoped to future turns by
+    # update_session_budget_parameters, so running turns keep their snapshotted
+    # parameters — a model rebind takes effect for the running turn's next LLM
+    # call. Rebinding mid-turn could mix providers inside one turn, so this
+    # endpoint deliberately fences on a fully idle Session. That asymmetry is
+    # intentional; do not "align" it with the budget endpoint.
+    try:
+        with _session_command() as (sessions, session_id):
+            _, personal, _, _ = _services()
+            with personal._LOCK:
+                # Recheck under the singleton owner's lock before any mutation.
+                assistant_settings()
+                lock = SessionAdmissionLock(sessions.PROJECT_ROOT, session_id)
                 try:
-                    _assert_session_idle(sessions, session_id)
-                except AssistantSessionError as exc:
-                    code = "ASSISTANT_MODEL_BUSY" if exc.code == "ASSISTANT_QUIESCENCE_BUSY" else "ASSISTANT_MODEL_UNAVAILABLE"
-                    raise AssistantSessionError(code) from None
+                    lock.acquire(timeout=0.1)
+                except sessions.SessionBusyError:
+                    raise AssistantSessionError("ASSISTANT_MODEL_BUSY") from None
                 try:
-                    personal.update_personal_assistant_model(model_id)
-                except directory.AgentStateConflictError:
-                    raise AssistantSessionError("ASSISTANT_MODEL_UNAVAILABLE") from None
-                except directory.AgentDirectoryError:
-                    raise AssistantSessionError("ASSISTANT_MODEL_INVALID") from None
-                observed = assistant_settings()["modelId"]
-                if observed != model_id:
-                    raise AssistantSessionError("ASSISTANT_MODEL_UNAVAILABLE")
-                return {"modelId": observed}
-            finally:
-                lock.release()
+                    try:
+                        _assert_session_idle(sessions, session_id)
+                    except AssistantSessionError as exc:
+                        # Busy keeps the dedicated 409; a stop already requested
+                        # surfaces its real lifecycle code; only an unverifiable
+                        # idle state keeps the retryable unavailable fold.
+                        if exc.code == "ASSISTANT_QUIESCENCE_BUSY":
+                            raise AssistantSessionError("ASSISTANT_MODEL_BUSY") from None
+                        if exc.code == "ASSISTANT_QUIESCENCE_UNAVAILABLE":
+                            raise AssistantSessionError("ASSISTANT_STOPPING") from None
+                        raise AssistantSessionError("ASSISTANT_MODEL_UNAVAILABLE") from None
+                    try:
+                        personal.update_personal_assistant_model(model_id)
+                    except directory.AgentStateConflictError:
+                        # The agent document moved underneath the rebind:
+                        # refresh and re-pick, not a retryable outage.
+                        raise AssistantSessionError("ASSISTANT_MODEL_CONFLICT") from None
+                    except directory.AgentDirectoryError:
+                        raise AssistantSessionError("ASSISTANT_MODEL_INVALID") from None
+                    observed = assistant_settings()["modelId"]
+                    if observed != model_id:
+                        raise AssistantSessionError("ASSISTANT_MODEL_UNAVAILABLE")
+                    return {"modelId": observed}
+                finally:
+                    lock.release()
+    except AssistantSessionError as exc:
+        raise _settings_identity_error(exc) from None
 
 
 def _assistant_avatar_agent() -> dict[str, Any]:

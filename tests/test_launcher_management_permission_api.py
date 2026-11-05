@@ -351,6 +351,9 @@ def test_native_permission_write_rechecks_fixed_subject_after_settings_read(pers
         monkeypatch.setattr(native, "assistant_settings", settings_then_replace)
         with pytest.raises(native.AssistantSessionError) as error:
             native.set_management_permission("full_access", 0)
+    # The replaced subject trips management_permissions' own fail-closed
+    # profile check, which keeps its unavailable code; the identity-projection
+    # fold removed from native.set_management_permission is not on this path.
     assert error.value.code == "ASSISTANT_PERMISSION_UNAVAILABLE"
     for agent_id in (aid, other):
         assert permissions.METADATA_KEY not in directory.get_agent(agent_id)["metadata"]
@@ -385,10 +388,26 @@ def test_native_setting_allows_busy_and_pending_but_rechecks_identity(tmp_path):
         try:
             native.set_management_permission("request_approval", 1)
         except native.AssistantSessionError as exc:
-            assert exc.code == "ASSISTANT_PERMISSION_UNAVAILABLE", exc.code
+            # Identity break: the rebuild code, distinguishable from a generic
+            # permission-infrastructure failure (asserted right below).
+            assert exc.code == "ASSISTANT_IDENTITY_INVALID", exc.code
         else:
             raise AssertionError("foreign identity accepted")
         native._AGENT_ID = aid
+        from core.web.services.local_assistant import management_permissions
+        real_update = management_permissions.update
+
+        def owner_failure(*args, **kwargs):
+            raise RuntimeError("PRIVATE_INFRASTRUCTURE_SENTINEL")
+
+        management_permissions.update = owner_failure
+        try:
+            native.set_management_permission("full_access", 0)
+        except native.AssistantSessionError as exc:
+            assert exc.code == "ASSISTANT_PERMISSION_UNAVAILABLE", exc.code
+        else:
+            raise AssertionError("owner failure was admitted")
+        management_permissions.update = real_update
         with sessions._RUNNING_SESSIONS_LOCK:
             sessions._SESSION_ACTIVE_TURN_IDS.pop(sid)
         native.shutdown()
