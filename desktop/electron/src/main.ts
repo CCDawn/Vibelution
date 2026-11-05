@@ -1612,6 +1612,7 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
           runtimeRoot: join(paths.userDataRoot, "assistant", "runtime"),
           sourceRoot: resources.sourceRoot, pythonPath: resources.pythonPath, pythonArguments: resources.pythonArguments,
           env: resources.env, projects: snapshot.projects, projectSnapshot: snapshot, projectsSuspended,
+          startupSignal: launcherAssistantStartupAbort.signal,
           mainControl, mainControlSettled: (request, result, accepted, hostContext) => {
             if (isConfigurationReferenceRequest(request)) configurationReferences.settled(request, result, accepted, hostContext);
           }, appearanceControl: true, browserControl: true, initialMigrationControl,
@@ -1854,7 +1855,10 @@ ipcMain.handle(IPC_CHANNELS.browserInvoke, async (event, payload: unknown) => {
 });
 
 ipcMain.handle(IPC_CHANNELS.assistantInvoke, async (event, payload: unknown) => {
-  if (shutdownApproved) throw new Error("ASSISTANT_NOT_READY");
+  // Renderer polling must not recover a new host behind the owner being
+  // retired. The abort remains sealed even if that retirement fails and retries.
+  if (shutdownApproved || launcherAssistantStopping || launcherAssistantStartupAbort.signal.aborted)
+    throw new Error("ASSISTANT_NOT_READY");
   const sender: unknown = event.sender;
   // Full-size surfaces — the registered workbench main and launcher control
   // windows (exact webContents identity) — land on the resident host directly,
