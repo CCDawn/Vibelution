@@ -510,7 +510,8 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
             ref={captureComposerAnchor}
             type="button"
             isIconOnly
-            variant="secondary"
+            variant="ghost"
+            className={styles.trigger}
             aria-label={lang === "zh" ? "更多操作" : "More actions"}
             icon={<Plus size={16} />}
           />

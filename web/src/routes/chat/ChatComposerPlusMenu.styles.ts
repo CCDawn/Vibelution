@@ -1,4 +1,5 @@
 const styles: Record<string, string> = {
+  trigger: "vui-routes-chatcomposerplusmenu trigger !size-7 !min-h-7 !min-w-7 !rounded-full !border-0 !bg-transparent !p-0 !text-[var(--fg-secondary)] !shadow-none hover:!bg-[var(--vui-control-muted)] hover:!text-[var(--fg-primary)] focus-visible:!ring-2 focus-visible:!ring-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] data-[state=open]:!bg-[var(--vui-control-muted)]",
   popoverContent: "vui-routes-chatcomposerplusmenu popoverContent !min-w-0 !max-w-[calc(100vw-1.5rem)] !rounded-2xl !p-0",
   composerWidth: "vui-routes-chatcomposerplusmenu composerWidth !w-[var(--radix-popover-trigger-width)]",
   standaloneWidth: "vui-routes-chatcomposerplusmenu standaloneWidth !w-80",
