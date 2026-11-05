@@ -54,7 +54,7 @@ import {
   launcherAssistantActivity, launcherAssistantMessageOverLimit, launcherAssistantPollInterval, launcherAssistantSubmission,
   launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
   launcherAssistantLifecycleClosing, launcherAssistantSendBusyCode, launcherAssistantSendDefinitelyRejected, launcherAssistantSendRetryableBusy,
-  launcherAssistantSessionEventRefreshesDetail, launcherAssistantSseHealthy,
+  launcherAssistantSseHealthy,
   launcherAssistantStatusDegradeTone, launcherAssistantWaitInterval, launcherAssistantContextRing, launcherAssistantModelDisplay,
   launcherAssistantEditBackfillDraft,
   type LauncherAssistantSubmission, type LauncherAssistantQueuedAcceptance, type LauncherAssistantQuestionDraft,
@@ -432,6 +432,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   useEffect(() => {
     if (!observingOwnSession) return;
     let active = true;
+    let refreshEpoch = 0;
     // Capability-detected: an older shell yields null and nothing changes. Any
     // frame proves the channel alive; only this session's authoritative snapshot
     // (or a delta that explicitly finished) invalidates detail, after which the
@@ -440,10 +441,25 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     const unsubscribe = subscribeLauncherAssistantSessionEvent(event => {
       if (!active) return;
       sseAliveAt.current = Date.now();
+      if (event.sessionId !== sessionId) return;
+      const incomingEpoch = event.connectionEpoch ?? 0;
+      const changedEpoch = incomingEpoch > refreshEpoch;
+      refreshEpoch = Math.max(refreshEpoch, incomingEpoch);
       const result = sessionStream.apply(event, latestDetail.current);
       setActiveLayer(result.layer);
-      if (!result.needsRefresh && !launcherAssistantSessionEventRefreshesDetail(event, sessionId)) return;
-      void client.invalidateQueries({ queryKey: ["launcher-assistant", "detail", sessionId] });
+      // The stream owns stale/retired-epoch rejection as well as refresh needs.
+      if (!result.needsRefresh) return;
+      const filter = { queryKey: ["launcher-assistant", "detail", sessionId], exact: true };
+      const refresh = () => client.invalidateQueries(filter, { cancelRefetch: false });
+      if (changedEpoch) {
+        // Even the initial no-cache read predates this connection. Discard its
+        // result before starting a new read; same-epoch bursts reuse that read.
+        void client.cancelQueries(filter).then(() => {
+          if (active && refreshEpoch === incomingEpoch) return refresh();
+        });
+      } else {
+        void refresh();
+      }
     });
     if (!unsubscribe) return;
     return () => { active = false; unsubscribe(); };
