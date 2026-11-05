@@ -54,6 +54,22 @@ class LocalAssistantCleanupTaskStore(ExternalAgentTaskStore):
     def tombstone_path(self, task_id):
         return self.root / "cleanup_tombstones" / self.task_path(task_id).name
 
+    def cleanup_completion(self, task_id):
+        path = self.tombstone_path(task_id)
+        if self.task_path(task_id).exists() or not path.is_file():
+            return None
+        _safe_tree(path)
+        return self._read_path(path)
+
+    def finish_cleanup(self, record, tombstone):
+        path = self.tombstone_path(record["taskId"])
+        _atomic_json(path, tombstone)
+        record_path = self.task_path(record["taskId"])
+        _safe_tree(record_path)
+        record_bytes = record_path.stat().st_size
+        record_path.unlink()
+        return record_bytes
+
     def _check_request(self, owner_id, client_request_id):
         if not str(client_request_id or "").strip():
             return
@@ -122,12 +138,11 @@ def _native_session_service(service):
 def _owned_record(service, owner_id, task_id):
     service._require_gateway_enabled()
     record = service._owned_task(owner_id, task_id)
-    authority = service.authority_fingerprint()
-    proofs = [record.get(key) for key in ("localAuthorityFingerprint", "localCleanupAuthorityFingerprint") if record.get(key)]
-    if not authority or not proofs or any(proof != authority for proof in proofs):
-        raise ExternalAgentAccessError("Task does not belong to current Launcher", code="TASK_NOT_FOUND")
+    service._require_cleanup_ownership(record)
     if record.get("status") not in TASK_TERMINAL_STATUSES:
         raise ExternalAgentConflictError("Only stopped terminal tasks can be cleaned", code="TASK_NOT_TERMINAL")
+    if record.get("localCleanupComplete") is True:
+        raise ExternalAgentAccessError("Task was cleaned", code="TASK_NOT_FOUND")
     return record
 
 
@@ -153,7 +168,8 @@ def _cleanup_scope(service, owner_id, task_id):
             raise ExternalAgentConflictError("Task Session changed", code="CLEANUP_STALE")
         if native is not None and _native_session_service(service) is not native:
             raise ExternalAgentConflictError("Native Session owner changed", code="CLEANUP_OWNER_CHANGED")
-        yield current, native
+        authority = service.request_authority_fingerprint or service.authority_fingerprint()
+        yield current, native, authority
 
 
 def _session_plan(service, record, native):
@@ -195,8 +211,10 @@ def _session_plan(service, record, native):
            native.agent_directory_service.list_agents(include_archived=True, detail="full")):
         raise ValueError("session_direct_binding")
     from vibelution_storage import resolve_project_runtime_home
-    external = ExternalAgentTaskStore(resolve_project_runtime_home(service.project_root) / "external_agents")
-    for store in (service.store, external):
+    runtime = resolve_project_runtime_home(service.project_root)
+    stores = {store.root: store for store in (service.store,
+        ExternalAgentTaskStore(runtime / "external_agents"), ExternalAgentTaskStore(runtime / "local_assistant_tasks"))}
+    for store in stores.values():
         for path in store.tasks_dir.glob("eat-*.json"):
             other = store._read_path(path)
             if other.get("sessionId") == session_id and (store.root != service.store.root or other.get("taskId") != record["taskId"]):
@@ -220,6 +238,8 @@ def _git(root, *args):
 
 
 def _workspace_plan(service, record):
+    if not service.cleanup_workspaces:
+        return None, [], "legacy_workspace_not_owned"
     if record.get("localCleanupWorkspaceState") == "preparing":
         return None, [], "workspace_preparation_active"
     if record.get("localCleanupWorkspaceState") == "unknown":
@@ -280,7 +300,7 @@ def _plan(service, record, native):
             # Shared resources intentionally outlive this task. An exclusive
             # workspace we cannot safely finish cleaning must keep its task
             # record reachable, rather than leave an orphan after deletion.
-            destination = retained if reason in {"shared_project_source", "workspace_shared_by_task"} else failures
+            destination = retained if reason in {"shared_project_source", "workspace_shared_by_task", "legacy_workspace_not_owned"} else failures
             destination.append({"kind": "workspace", "reason": reason})
     except (ValueError, OSError, RuntimeError) as exc:
         failures.append({"kind": "workspace", "reason": str(exc) if isinstance(exc, ValueError) else type(exc).__name__})
@@ -304,13 +324,10 @@ def _completed_cleanup(service, owner_id, task_id):
     """An authenticated retry may finish unlinking its host association."""
     service._require_gateway_enabled()
     with service.store.cleanup_lock():
-        if service.store.task_path(task_id).exists():
-            return None
         path = service.store.tombstone_path(task_id)
-        if not path.is_file():
+        record = service.store.cleanup_completion(task_id)
+        if record is None:
             return None
-        _safe_tree(path)
-        record = service.store._read_path(path)
         if (record.get("taskId") != task_id or not service.store.owner_matches(record, owner_id)
                 or record.get("localAuthorityFingerprint") != service.authority_fingerprint()):
             return None
@@ -324,7 +341,7 @@ def _completed_cleanup(service, owner_id, task_id):
 
 def preview_task_cleanup(service, *, owner_id, task_id):
     try:
-        with _cleanup_scope(service, owner_id, task_id) as (record, native):
+        with _cleanup_scope(service, owner_id, task_id) as (record, native, _authority):
             return _plan(service, record, native)[0]
     except ExternalAgentAccessError:
         completed = _completed_cleanup(service, owner_id, task_id)
@@ -421,7 +438,7 @@ def _accounting_bytes(surfaces):
 
 
 def _cleanup_task(service, *, owner_id, task_id, revision, fingerprint):
-    with _cleanup_scope(service, owner_id, task_id) as (record, native):
+    with _cleanup_scope(service, owner_id, task_id) as (record, native, authority):
         preview, plan = _plan(service, record, native)
         if type(revision) is not int or revision != record["revision"] or fingerprint != preview["fingerprint"]:
             raise ExternalAgentConflictError("Cleanup preview changed", code="CLEANUP_STALE")
@@ -465,16 +482,11 @@ def _cleanup_task(service, *, owner_id, task_id, revision, fingerprint):
         if not failures:
             tombstone = {"schemaVersion": 1, "taskId": task_id, "ownerSubjectHash": record["ownerSubjectHash"],
                 "requestKeyHash": _digest([record["ownerSubjectHash"], record.get("clientRequestId") or ""]),
-                "localAuthorityFingerprint": record.get("localAuthorityFingerprint") or record["localCleanupAuthorityFingerprint"],
+                "localAuthorityFingerprint": authority,
                 "cleanupRevision": revision, "cleanupFingerprint": fingerprint}
             path = service.store.tombstone_path(task_id)
             try:
-                _atomic_json(path, tombstone)
-                record_path = service.store.task_path(task_id)
-                _safe_tree(record_path)
-                record_bytes = record_path.stat().st_size
-                record_path.unlink()
-                released += record_bytes
+                released += service.store.finish_cleanup(record, tombstone)
                 retained.append({"kind": "request_tombstone", "reason": "prevent_request_replay", "bytes": path.stat().st_size})
             except OSError as exc:
                 failures.append({"kind": "task_record", "reason": type(exc).__name__})
