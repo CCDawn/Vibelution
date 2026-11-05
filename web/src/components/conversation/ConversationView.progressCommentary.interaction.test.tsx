@@ -159,7 +159,7 @@ describe("ConversationView visible progress flow", () => {
     expect(section.querySelector("button[aria-expanded]")).toBeNull();
     expect(section.querySelector('[data-codex-progress-clamped="true"]')).toBeNull();
     expect(section.closest("[inert], [aria-hidden=true]")).toBeNull();
-    expect(container?.querySelector('[data-codex-process-presentation="flow"] button')).toBeNull();
+    expect(container?.querySelector('[data-codex-process-thought-toggle]')).toBeNull();
 
     await act(async () => {
       updateMessages?.([progressMessage("running", 1, `${LONG_PROGRESS} 仍在输出。`)]);
@@ -178,7 +178,7 @@ describe("ConversationView visible progress flow", () => {
   it("reveals thoughts with one toggle, remembers the choice across updates and settlement, and keeps tools expandable", async () => {
     await mount([mixedMessage("running")]);
     const flow = () => container!.querySelector<HTMLElement>('[data-codex-process-presentation="flow"]')!;
-    const thoughtToggle = () => flow().querySelector<HTMLButtonElement>("button[aria-expanded]")!;
+    const thoughtToggle = () => flow().querySelector<HTMLButtonElement>("[data-codex-process-thought-toggle]")!;
     expect(flow().querySelector('[data-codex-transcript-cell-kind="reasoning_summary"]')?.closest("[hidden][inert]")).not.toBeNull();
     expect(thoughtToggle().getAttribute("aria-expanded")).toBe("false");
     expect(progressSection().textContent).toBe(LONG_PROGRESS);
@@ -189,7 +189,7 @@ describe("ConversationView visible progress flow", () => {
     expect(tool?.querySelector('[data-codex-tool-detail-body="true"]')).toBeNull();
     expect(Array.from(flow().querySelectorAll("[data-codex-transcript-cell-kind]"))
       .map((cell) => cell.getAttribute("data-codex-transcript-cell-kind")))
-      .toEqual(["reasoning_summary", "assistant_markdown", "tool_call", "assistant_markdown"]);
+      .toEqual(["assistant_markdown", "tool_call", "assistant_markdown", "reasoning_summary"]);
     await act(async () => tool?.querySelector("summary")?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
     expect(tool?.open).toBe(true);
     expect(tool?.querySelector('[data-codex-tool-detail-body="true"]')).not.toBeNull();

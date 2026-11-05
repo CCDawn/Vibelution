@@ -1,8 +1,11 @@
 import {
   BadgeCheck,
+  Bot,
   FileSearch,
   GitBranch,
   Network,
+  ListFilter,
+  MonitorSmartphone,
   PencilLine,
   Search,
   TerminalSquare,
@@ -10,6 +13,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import { assistantActionKindForTool, type AssistantActionKind } from "./assistantActionLabels";
 import {
   conversationToolPresentationLabel,
   type ConversationToolPresentationLanguage,
@@ -80,7 +84,29 @@ const TOOL_RENDERER_REGISTRY: Record<ConversationToolRendererFamily, Conversatio
   },
 };
 
-function familyForToolName(name: string): ConversationToolRendererFamily {
+const ASSISTANT_ACTION_RENDERER_FAMILIES: Record<AssistantActionKind, ConversationToolRendererFamily> = {
+  inspect: "conversation",
+  source: "files",
+  search: "search",
+  change: "edit",
+  dispatch: "conversation",
+  browser: "generic",
+  execute: "command",
+  verify: "verify",
+};
+
+const ASSISTANT_ACTION_RENDERERS: Partial<Record<AssistantActionKind, ConversationToolRendererDescriptor>> = {
+  inspect: { family: "conversation", icon: ListFilter, groupLabel: { zh: "平台查询", en: "Platform queries" } },
+  dispatch: { family: "conversation", icon: Bot, groupLabel: { zh: "任务派遣", en: "Delegation" } },
+  browser: { family: "generic", icon: MonitorSmartphone, groupLabel: { zh: "浏览器操作", en: "Browser actions" } },
+  change: { family: "edit", icon: PencilLine, groupLabel: { zh: "修改", en: "Changes" } },
+};
+
+function familyForToolName(name: string, toolArguments?: unknown): ConversationToolRendererFamily {
+  const actionKind = assistantActionKindForTool(name, toolArguments);
+  if (actionKind) {
+    return ASSISTANT_ACTION_RENDERER_FAMILIES[actionKind];
+  }
   const normalized = name.trim().toLowerCase();
   if (["get_git_status_summary_tool", "get_recent_changes_tool", "explain_current_worktree_tool"].includes(normalized)) {
     return "git";
@@ -128,8 +154,11 @@ function familyForToolName(name: string): ConversationToolRendererFamily {
   return "generic";
 }
 
-export function conversationToolRendererFor(name: string) {
-  return TOOL_RENDERER_REGISTRY[familyForToolName(name)];
+export function conversationToolRendererFor(name: string, toolArguments?: unknown) {
+  const kind = assistantActionKindForTool(name, toolArguments);
+  const actionRenderer = kind ? ASSISTANT_ACTION_RENDERERS[kind] : undefined;
+  if (actionRenderer) return actionRenderer;
+  return TOOL_RENDERER_REGISTRY[familyForToolName(name, toolArguments)];
 }
 
 export function conversationToolRendererForPresentationLabel(
@@ -158,6 +187,7 @@ export function conversationToolRendererForPresentationLabel(
 export function conversationToolRendererLabel(
   name: string,
   language: ConversationToolPresentationLanguage,
+  toolArguments?: unknown,
 ) {
-  return conversationToolPresentationLabel(name, language);
+  return conversationToolPresentationLabel(name, language, toolArguments);
 }

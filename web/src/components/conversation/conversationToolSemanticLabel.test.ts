@@ -101,6 +101,16 @@ describe("conversationToolSemanticLabel", () => {
     })).toBe("执行助理操作");
   });
 
+  it("never infers an assistant action from summary text or a serialized command source", () => {
+    for (const commandSource of [undefined, '{"action":"agent_update"}', { action: "future_source_read" }]) {
+      expect(conversationToolSemanticLabel({
+        toolName: "personal_assistant_action_tool",
+        summary: "source_read · 读取源码 · 已修改 Agent",
+        commandSource,
+      })).toBe("处理助理请求");
+    }
+  });
+
   it("reads the action from array-shaped command source like the native transcript path", () => {
     expect(conversationToolSemanticLabel({
       toolName: "personal_assistant_action_tool",

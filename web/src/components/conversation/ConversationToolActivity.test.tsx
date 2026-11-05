@@ -263,7 +263,7 @@ describe("ConversationToolActivity", () => {
     expect(styles.actionLabel).not.toContain("rounded-full");
     expect(styles.actionPill).not.toContain("rounded-full");
     expect(styles.statusPill).not.toContain("rounded-full");
-    expect(styles.itemPreview).toContain("text-[color-mix(in_srgb,var(--fg-tertiary)");
+    expect(styles.itemPreview).toContain("text-[var(--fg-secondary)]");
   });
 
   it("keeps a small activity on the same direct-row contract", () => {

@@ -93,6 +93,64 @@ describe("conversationToolCategory", () => {
     expect(conversationToolCategoryForCell(cellWithToolName("unknown_thing_tool"))).toBeNull();
   });
 
+  it.each([
+    ["source_read", "explore"],
+    ["source_search", "explore"],
+    ["projects", "explore"],
+    ["session_list", "explore"],
+    ["management_reconcile", "explore"],
+    ["agent_update", "changes"],
+    ["session_config_get", "explore"],
+    ["session_budget_update", "changes"],
+    // Discovery persists a derived catalog; cached model reads remain read-only.
+    ["provider_discover", "changes"],
+    ["provider_models", "explore"],
+    ["dispatch", "agent"],
+    ["dispatch_write", "agent"],
+    ["dispatch_cancel", "agent"],
+    ["browser_read", "cua"],
+    ["browser_interact", "cua"],
+    ["runtime_command", "execute"],
+    ["provider_test", "execute"],
+  ])("classifies assistant action %s using its actual meaning", (action, category) => {
+    for (const name of ["personal_assistant_action_tool", "personal_assistant_manage_tool"]) {
+      expect(conversationToolCategoryForName(name, { action })).toBe(category);
+      expect(conversationToolCategoryForCell(cellWithToolName(name, { action }))).toBe(category);
+    }
+  });
+
+  it("falls back to lifecycle arguments only when a cell action is missing", () => {
+    const cell = cellWithToolName("personal_assistant_manage_tool", {});
+    cell.toolLifecycleModel = {
+      toolCalls: [{
+        toolCallId: "call-assistant",
+        rawOperationId: "op-assistant",
+        status: "completed",
+        title: "personal_assistant_manage_tool",
+        rawToolName: "personal_assistant_manage_tool",
+        runtimeKind: "tool",
+        arguments: { action: "agent_update" },
+      }],
+      terminalOperations: [],
+      terminalSessions: [],
+      modelObservations: [],
+    };
+    expect(conversationToolCategoryForCell(cell)).toBe("changes");
+    cell.toolArguments = { action: "session_list" };
+    expect(conversationToolCategoryForCell(cell)).toBe("explore");
+    cell.toolArguments = { action: "future_source_read" };
+    expect(conversationToolCategoryForCell(cell)).toBeNull();
+  });
+
+  it("leaves missing and unknown assistant actions ungrouped without guessing from summaries", () => {
+    const cell = cellWithToolName("personal_assistant_action_tool");
+    cell.summary = "source_read · 搜索源码 · 派遣任务";
+    expect(conversationToolCategoryForCell(cell)).toBeNull();
+    expect(conversationToolCategoryForName("personal_assistant_action_tool", { action: "future_source_read" })).toBeNull();
+    expect(conversationToolCategoryForName("personal_assistant_manage_tool", { action: "constructor" })).toBeNull();
+    expect(conversationToolCategoryForName("read_file_tool", { action: "agent_update" })).toBe("explore");
+  });
+
   it("labels categories for both presentation languages", () => {
     expect(conversationToolCategoryLabel("explore", "zh")).toBe("探索");
     expect(conversationToolCategoryLabel("explore", "en")).toBe("Explore");
@@ -107,6 +165,8 @@ describe("conversationToolCategory", () => {
   it("extracts the stable subagent display name from spawn arguments", () => {
     expect(conversationAgentDisplayName(cellWithToolName("spawn_agent_tool", { task_type: "research" })))
       .toBe("research");
+    expect(conversationAgentDisplayName(cellWithToolName("personal_assistant_action_tool", { action: "dispatch", agent_id: "research-agent" })))
+      .toBe("research-agent");
     const lifecycleCell = cellWithToolName("spawn_agent_tool");
     lifecycleCell.toolArguments = undefined;
     lifecycleCell.toolLifecycleModel = {

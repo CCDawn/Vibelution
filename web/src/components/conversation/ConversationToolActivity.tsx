@@ -5,7 +5,6 @@ import {
   CircleSlash,
   Copy,
   FileSearch,
-  LoaderCircle,
   MonitorSmartphone,
   PencilLine,
   TerminalSquare,
@@ -18,6 +17,7 @@ import "./ConversationToolActivity.css";
 import type { CodexTranscriptCell } from "./codexTranscriptCells";
 import {
   codexTranscriptToolDurationSeconds,
+  codexTranscriptToolArguments,
   codexTranscriptToolRawName,
   formatCodexTranscriptDuration,
   type CodexTranscriptToolActivity,
@@ -368,7 +368,7 @@ function buildToolActivityPills(
     resultPreview: toolCall?.resultPreview || cell.text,
     displayCommand,
     // Names the target while the tool runs, before any result can be summarized.
-    toolArguments: cell.toolArguments ?? toolCall?.arguments,
+    toolArguments: codexTranscriptToolArguments(cell),
     timedOut: cellLooksTimedOut(cell) || Boolean(terminal?.result?.timedOut),
     noMatch: Boolean(options?.noMatch),
     nonzeroExit,
@@ -389,6 +389,8 @@ function ToolStatusIcon({
   language: ConversationToolPresentationLanguage;
 }) {
   const descriptor = conversationToolActivityRendererForCell(cell, language);
+  const category = conversationToolCategoryForCell(cell);
+  const Icon = category === "agent" ? Bot : category === "cua" ? MonitorSmartphone : descriptor.icon;
   if (isSettledFailedCell(cell)) {
     return <CircleAlert className={`${styles.itemIcon} ${styles.itemIconFailed}`} size={15} />;
   }
@@ -396,7 +398,7 @@ function ToolStatusIcon({
     // ZCode-aligned: icons stay static while running; the action word's shimmer
     // carries the live state. A spinning icon burns animation cost across the
     // long stream of tool rows and shouts louder than the quiet tool rail.
-    return <LoaderCircle className={`${styles.itemIcon} ${styles.itemIconRunning}`} size={15} />;
+    return <Icon className={`${styles.itemIcon} ${styles.itemIconRunning}`} size={15} />;
   }
   if (conversationToolActivityHasNonzeroTerminalExit(cell)) {
     return <CircleAlert className={`${styles.itemIcon} ${styles.itemIconWarning}`} size={15} />;
@@ -409,7 +411,6 @@ function ToolStatusIcon({
   if (cell.status === "cancelled") {
     return <CircleSlash className={styles.itemIcon} size={15} />;
   }
-  const Icon = descriptor.icon;
   return <Icon className={styles.itemIcon} size={15} />;
 }
 
@@ -720,7 +721,7 @@ function ToolActivityCategoryGroup({
         }}
       >
         {item.running ? (
-          <LoaderCircle className={`${styles.itemIcon} ${styles.itemIconRunning}`} size={15} />
+          <Icon className={`${styles.itemIcon} ${styles.itemIconRunning}`} size={15} />
         ) : item.failedCount > 0 ? (
           <CircleAlert className={`${styles.itemIcon} ${styles.itemIconFailed}`} size={15} />
         ) : item.attentionCount > 0 ? (

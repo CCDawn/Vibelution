@@ -24,6 +24,23 @@ function toolCell(
 }
 
 describe("buildConversationToolActivityPresentation", () => {
+  it("keeps distinct assistant actions separate and names repeated actions specifically", () => {
+    const assistant = (id: string, action: string): CodexTranscriptCell => ({
+      ...toolCell(id, { title: "personal_assistant_action_tool" }), toolArguments: { action },
+    });
+    const items = buildConversationToolActivityPresentation([
+      assistant("read-1", "source_read"), assistant("read-2", "source_read"),
+      assistant("search-1", "source_search"), assistant("dispatch-1", "dispatch"),
+      assistant("unknown-1", "future_action"), assistant("unknown-2", "different_action"),
+    ], "zh");
+    expect(items).toHaveLength(5);
+    expect(items[0]).toMatchObject({ kind: "batch", title: "读取源码", count: 2 });
+    expect(items.slice(1).map((item) => item.kind === "single" ? item.cell.id : item.title))
+      .toEqual(["search-1", "dispatch-1", "unknown-1", "unknown-2"]);
+    expect(buildConversationToolActivityDigestPresentation([assistant("read", "source_read"), assistant("search", "source_search")], "zh").meta)
+      .toBe("文件浏览 1 · 搜索 1");
+  });
+
   it("folds a short contiguous semantic family into one work stage", () => {
     const items = buildConversationToolActivityPresentation([
       toolCell("tool-1"),

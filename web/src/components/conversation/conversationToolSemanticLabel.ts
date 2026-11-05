@@ -1,4 +1,3 @@
-import { assistantActionLabel } from "./assistantActionLabels";
 import { conversationToolPresentationLabel } from "./conversationToolPresentation";
 
 export type ConversationToolSemanticLabelLanguage = "zh" | "en";
@@ -9,18 +8,6 @@ export type ConversationToolSemanticLabelInput = {
   commandSource?: unknown;
   lang?: ConversationToolSemanticLabelLanguage;
 };
-
-/**
- * Single-tool-multi-action assistant tools: the backend folds dozens of
- * actions into one tool and distinguishes them by `arguments.action`, so the
- * generic tool-level label ("处理助理请求") would repeat for every step.
- * These resolve the specific action label first and fall back to the static
- * tool label when the action is missing or unknown.
- */
-const ACTION_AWARE_ASSISTANT_TOOLS = new Set([
-  "personal_assistant_action_tool",
-  "personal_assistant_manage_tool",
-]);
 
 const CLI_TOOL_LABELS = {
   gitStatus: "检查 Git 状态",
@@ -59,14 +46,8 @@ export function conversationToolSemanticLabel(
   const normalizedName = String(input.toolName ?? "").trim();
   const lowerName = normalizedName.toLowerCase();
   const lang: ConversationToolSemanticLabelLanguage = input.lang === "en" ? "en" : "zh";
-  if (ACTION_AWARE_ASSISTANT_TOOLS.has(lowerName)) {
-    const actionLabel = assistantActionLabel(collectAssistantAction(input.commandSource), lang);
-    if (actionLabel) {
-      return actionLabel;
-    }
-  }
   if (lowerName.startsWith("personal_assistant_")) {
-    return conversationToolPresentationLabel(normalizedName, lang);
+    return conversationToolPresentationLabel(normalizedName, lang, input.commandSource);
   }
   if (lowerName === "cli_tool") {
     return cliToolSemanticLabel(input.summary, input.commandSource);
@@ -90,32 +71,6 @@ export function conversationToolSemanticLabel(
     return "图片";
   }
   return normalizedName;
-}
-
-/**
- * Extract `arguments.action` from a tool call's command source. Accepts the
- * arguments object directly (operation.arguments) or an array of native
- * requests (codex transcript path); anything else yields no action.
- */
-function collectAssistantAction(commandSource: unknown): string {
-  if (Array.isArray(commandSource)) {
-    for (const entry of commandSource) {
-      const action = objectAssistantAction(entry);
-      if (action) {
-        return action;
-      }
-    }
-    return "";
-  }
-  return objectAssistantAction(commandSource);
-}
-
-function objectAssistantAction(value: unknown): string {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return "";
-  }
-  const action = (value as Record<string, unknown>).action;
-  return typeof action === "string" ? action.trim() : "";
 }
 
 function cliToolSemanticLabel(summary: string | undefined, commandSource: unknown): string {
