@@ -371,7 +371,7 @@ describe("task card facts and direct cleanup", () => {
     expect(operationCalls("executeTaskCleanup")).toHaveLength(1);
   });
 
-  it("groups bound historical terminal receipts as ended and verifies bulk targets without local-only removal", async () => {
+  it("groups bound historical terminal receipts as ended and degrades bulk unknown targets to record-only removal", async () => {
     rows = [row({ title: "待同步的已结束任务", lastError: { message: "offline" }, receipt: { taskId: "native-1", status: "failed" } }),
       row({ dispatchId: "unbound", receipt: { taskId: "other", status: "succeeded" } })];
     await render();
@@ -380,8 +380,10 @@ describe("task card facts and direct cleanup", () => {
     expect(container.querySelector("article")?.getAttribute("data-task-state")).toBe("unknown");
     await click("清理已结束");
     const targets = (operationCalls("previewTaskCleanup")[0][0] as unknown as { targets: LauncherTaskCleanupTarget[] }).targets;
-    expect(targets).toEqual([{ kind: "dispatch", projectId: "project-1", dispatchId: "dispatch-1" },
-      { kind: "dispatch", projectId: "project-1", dispatchId: "unbound" }]);
+    // Bulk unknown-state targets match single-item removals: verified
+    // record-only degradation, never a silent strict path.
+    expect(targets).toEqual([{ kind: "dispatch", projectId: "project-1", dispatchId: "dispatch-1", localOnly: true },
+      { kind: "dispatch", projectId: "project-1", dispatchId: "unbound", localOnly: true }]);
   });
 
   it.each(["succeeded", "failed", "timed_out", "cancelled"])("keeps a bound %s receipt with a source error in ended tasks", async nativeStatus => {
@@ -457,7 +459,7 @@ describe("task card facts and direct cleanup", () => {
     expect(button("清理已结束").disabled).toBe(false);
     await click("清理已结束");
     expect((operationCalls("previewTaskCleanup")[0][0] as unknown as { targets: unknown[] }).targets)
-      .toEqual([{ kind: "team_run", projectId: "project-1", requestId: "request-1", originAction: "team_run" }]);
+      .toEqual([{ kind: "team_run", projectId: "project-1", requestId: "request-1", originAction: "team_run", localOnly: true }]);
     expect(document.body.textContent).toContain("团队运行仍在执行");
     expect(operationCalls("executeTaskCleanup")).toHaveLength(0);
   });

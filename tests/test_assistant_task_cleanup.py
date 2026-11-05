@@ -240,28 +240,33 @@ async def test_cleaned_dispatch_id_is_consumed_even_without_any_sdk_credentials(
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("cleanup_pending", [False, True])
-async def test_task_not_found_with_bound_capability_does_not_prove_source_deletion(scene, cleanup_pending):
+async def test_confirmed_bound_task_absence_frees_the_reference(scene, cleanup_pending):
+    """The capability ledger answered locally; the source then answered 404 for
+    this exact task under its own credential. That authenticated absence is a
+    confirmed exit: only the local association is removed."""
     row = json.loads(scene.path.read_text())
     row["cleanupPending"] = cleanup_pending
     scene.path.write_text(json.dumps(row))
     async def missing(**kwargs):
-        # Native owner/authority checks also return TASK_NOT_FOUND.
         raise BackendClientError("private native authority mismatch", code="TASK_NOT_FOUND")
 
     assert await scene.client._cleanup_capability("eat-1") == "bound-capability"
     scene.client.preview_task_cleanup = missing
+    payload = scene.payload.model_dump()
     preview = await scene.service.preview(scene.payload)
-    assert preview["items"][0]["status"] == "blocked"
-    result = await scene.service.execute(CleanupExecute(**scene.payload.model_dump(), fingerprint=preview["fingerprint"]))
-    assert result["items"][0]["status"] == "blocked" and scene.path.exists()
-    assert not (scene.root / "deleted" / "dispatch-1.json").exists() and scene.client.calls == 0
-    assert "private" not in json.dumps(preview)
+    item = preview["items"][0]
+    assert item["status"] == "ready" and item["sourceConfirmed"] == "task_absent"
+    assert "源任务已不存在" in json.dumps(item["retained"], ensure_ascii=False)
+    result = await scene.service.execute(CleanupExecute(**payload, fingerprint=preview["fingerprint"]))
+    assert result["items"][0]["status"] == "deleted" and result["items"][0]["sourceConfirmed"] == "task_absent"
+    assert not scene.path.exists() and (scene.root / "deleted" / "dispatch-1.json").is_file()
+    assert scene.client.calls == 0
 
 
 @pytest.mark.anyio
 async def test_lost_sdk_capability_is_not_proof_that_native_source_is_missing(scene):
     async def unavailable(task_id):
-        raise BackendClientError("private capability path", code="TASK_NOT_FOUND")
+        raise BackendClientError("private capability path", code="TASK_CAPABILITY_UNAVAILABLE")
 
     async def preview(**kwargs):
         await scene.client._cleanup_capability(kwargs["task_id"])
@@ -269,9 +274,9 @@ async def test_lost_sdk_capability_is_not_proof_that_native_source_is_missing(sc
 
     scene.client._cleanup_capability = unavailable
     scene.client.preview_task_cleanup = preview
-    preview = await scene.service.preview(scene.payload)
-    assert preview["items"][0]["status"] == "blocked"
-    assert "凭据" in preview["items"][0]["reason"] and "private" not in json.dumps(preview)
+    result = await scene.service.preview(scene.payload)
+    assert result["items"][0]["status"] == "blocked"
+    assert "凭据" in result["items"][0]["reason"] and "private" not in json.dumps(result)
     assert scene.path.exists() and scene.client.calls == 0
 
 
@@ -288,8 +293,8 @@ async def test_malformed_native_preview_is_not_proof_that_source_was_deleted(sce
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("status", ["running", "queued", "stop_unconfirmed", None])
-async def test_missing_source_without_terminal_proof_stays_visible(scene, status):
+@pytest.mark.parametrize("status", ["running", "queued", "stop_unconfirmed"])
+async def test_locally_active_bound_task_keeps_its_association_when_source_denies(scene, status):
     row = json.loads(scene.path.read_text())
     row["receipt"]["status"] = status
     scene.path.write_text(json.dumps(row))
@@ -300,7 +305,24 @@ async def test_missing_source_without_terminal_proof_stays_visible(scene, status
     scene.client.preview_task_cleanup = missing
     preview = await scene.service.preview(scene.payload)
     assert preview["items"][0]["status"] == "blocked"
-    assert "无法确认清理范围" in preview["items"][0]["reason"] and scene.path.exists()
+    assert "结束任务" in preview["items"][0]["reason"] and scene.path.exists()
+
+
+@pytest.mark.anyio
+async def test_bound_task_without_an_active_local_receipt_exits_on_confirmed_absence(scene):
+    row = json.loads(scene.path.read_text())
+    row["receipt"]["status"] = None
+    scene.path.write_text(json.dumps(row))
+
+    async def missing(**kwargs):
+        raise BackendClientError("missing", code="TASK_NOT_FOUND")
+
+    scene.client.preview_task_cleanup = missing
+    preview = await scene.service.preview(scene.payload)
+    assert preview["items"][0]["status"] == "ready"
+    assert preview["items"][0]["sourceConfirmed"] == "task_absent"
+    result = await scene.service.execute(CleanupExecute(**scene.payload.model_dump(), fingerprint=preview["fingerprint"]))
+    assert result["items"][0]["status"] == "deleted" and not scene.path.exists() and scene.client.calls == 0
 
 
 @pytest.mark.anyio
@@ -505,7 +527,7 @@ async def test_team_cleanup_rechecks_resolved_identity_and_terminal_state(team_s
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("code", ["REQUEST_UNAVAILABLE", "OPERATION_UNAVAILABLE", "OPERATION_SOURCE_UNAVAILABLE", "BACKEND_TIMEOUT", "BACKEND_UNAVAILABLE"])
+@pytest.mark.parametrize("code", ["OPERATION_UNAVAILABLE", "OPERATION_SOURCE_UNAVAILABLE", "BACKEND_TIMEOUT", "BACKEND_UNAVAILABLE"])
 async def test_unavailable_team_source_preserves_unknown_association_and_reports_safe_reason(team_scene, code):
     async def unavailable(*args, **kwargs):
         raise BackendClientError("private path and token", code=code)
@@ -515,6 +537,83 @@ async def test_unavailable_team_source_preserves_unknown_association_and_reports
     assert preview["items"][0]["status"] == "blocked" and team_scene.path.exists()
     assert "private" not in json.dumps(preview)
     assert preview["items"][0]["reason"] != "当前无法确认任务身份、终态或删除范围，请刷新后重试。"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("flavor", ["request_missing", "identity_rotated", "unverified", "recipe_unknown"])
+async def test_unconfirmable_team_receipt_degrades_to_reference_only_removal(scene, team_scene, flavor):
+    if flavor == "request_missing":
+        async def missing(*args, **kwargs):
+            raise BackendClientError("private store state", code="REQUEST_UNAVAILABLE")
+        team_scene.management.receipt = missing
+    elif flavor == "identity_rotated":
+        async def rotated(*args, **kwargs):
+            raise BackendClientError("private identity state", code="MANAGEMENT_IDENTITY_ROTATED")
+        team_scene.management.receipt = rotated
+    elif flavor == "unverified":
+        team_scene.response.update(verified=False, status="unknown", teamRun=None)
+    else:
+        team_scene.response.update(verified=False, status="unknown",
+                                   teamRun={"teamId": "team-1", "flowId": "flow-1"})
+    payload = team_scene.payload.model_dump()
+    preview = await team_scene.service.preview(team_scene.payload)
+    item = preview["items"][0]
+    assert item["status"] == "ready" and item["sourceConfirmed"] == "receipt_unverified"
+    assert "源回执未确认" in json.dumps(item["retained"], ensure_ascii=False)
+    assert "private" not in json.dumps(preview)
+    result = await team_scene.service.execute(CleanupExecute(**payload, fingerprint=preview["fingerprint"]))
+    assert result["items"][0]["status"] == "deleted" and result["items"][0]["sourceConfirmed"] == "receipt_unverified"
+    assert not team_scene.path.exists() and scene.client.calls == 0
+    marker = team_scene.service._marker_path(team_scene.payload.targets[0])
+    data = json.loads(marker.read_text())
+    assert data["requestId"] == "request-1" and marker.parent.name == "cleanup_tombstones"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("where", ["receipt", "run"])
+async def test_team_receipt_unknown_but_explicitly_active_still_blocks(team_scene, where):
+    if where == "receipt":
+        team_scene.response.update(verified=False, status="running", teamRun=None)
+    else:
+        team_scene.response.update(verified=False, status="unknown",
+                                   teamRun={"teamId": "team-1", "flowId": "flow-1", "runId": "run-1", "status": "running"})
+    preview = await team_scene.service.preview(team_scene.payload)
+    assert preview["items"][0]["status"] == "blocked" and team_scene.path.exists()
+    assert "结束任务" in preview["items"][0]["reason"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("flavor,expected,phrase", [
+    ("unknown", "ready", None),
+    ("request_missing", "ready", None),
+    ("active_run", "blocked", "结束任务"),
+    ("transport", "blocked", "恢复连接"),
+])
+async def test_team_local_only_observes_the_source_once(scene, team_scene, flavor, expected, phrase):
+    if flavor == "unknown":
+        team_scene.response.update(verified=False, status="unknown", teamRun=None)
+    elif flavor == "request_missing":
+        async def missing(*args, **kwargs):
+            raise BackendClientError("private store state", code="REQUEST_UNAVAILABLE")
+        team_scene.management.receipt = missing
+    elif flavor == "active_run":
+        team_scene.response.update(verified=False, status="unknown",
+                                   teamRun={"teamId": "team-1", "flowId": "flow-1", "runId": "run-1", "status": "running"})
+    else:
+        async def unavailable(*args, **kwargs):
+            raise BackendClientError("private offline state", code="BACKEND_UNAVAILABLE")
+        team_scene.management.receipt = unavailable
+    payload = team_scene.payload.model_dump()
+    payload["targets"][0]["localOnly"] = True
+    payload = CleanupPreview(**payload)
+    preview = await team_scene.service.preview(payload)
+    assert preview["items"][0]["status"] == expected and team_scene.path.exists()
+    if phrase is not None:
+        assert phrase in preview["items"][0]["reason"]
+        return
+    result = await team_scene.service.execute(CleanupExecute(**payload.model_dump(), fingerprint=preview["fingerprint"]))
+    assert result["items"][0]["status"] == "deleted" and not team_scene.path.exists()
+    assert scene.client.calls == 0
 
 
 @pytest.mark.anyio
@@ -663,7 +762,7 @@ async def test_completed_team_cleanup_receipt_still_checks_optional_native_ident
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("kind", ["dispatch", "team_run"])
-async def test_explicit_local_only_removes_proven_reference_and_retries_without_source_reads(scene, team_scene, kind):
+async def test_explicit_local_only_removes_proven_reference_and_retries_without_native_writes(scene, team_scene, kind):
     case = scene if kind == "dispatch" else team_scene
     if kind == "dispatch":
         record = json.loads(case.path.read_text())
@@ -673,9 +772,19 @@ async def test_explicit_local_only_removes_proven_reference_and_retries_without_
     async def unexpected(*args, **kwargs):
         pytest.fail("Explicit local-only removal must leave every native source untouched")
 
+    receipt_reads = []
+
+    async def counted(*args, **kwargs):
+        receipt_reads.append(kwargs)
+        return dict(team_scene.response)
+
     if kind == "team_run":
         scene.service.dispatch._call = unexpected
-    team_scene.management.receipt = unexpected
+        # Local-only still observes the source once so a known-active team run
+        # cannot be silently dropped; the native write path stays untouched.
+        team_scene.management.receipt = counted
+    else:
+        team_scene.management.receipt = unexpected
     payload = case.payload.model_dump()
     payload["targets"][0]["localOnly"] = True
     payload = CleanupPreview(**payload)
@@ -684,10 +793,12 @@ async def test_explicit_local_only_removes_proven_reference_and_retries_without_
     result = await case.service.execute(CleanupExecute(**payload.model_dump(), fingerprint=preview["fingerprint"]))
     assert result["items"][0]["status"] == "deleted" and not case.path.exists()
     assert result["items"][0]["retained"][0]["kind"] == "source_resources" and scene.client.calls == 0
-    reads = list(scene.client.reads)
     if kind == "dispatch":
+        reads = list(scene.client.reads)
         assert reads == [("request", {"client_request_id": "launcher-assistant:dispatch-1"}),
                          ("task", {"task_id": "eat-1"})] * 2
+    else:
+        assert len(receipt_reads) == 2
     marker = json.loads(case.service._marker_path(payload.targets[0]).read_text())
     assert marker["localOnly"] is True and marker["agentId"] == payload.agentId
     if kind == "dispatch":
@@ -697,7 +808,10 @@ async def test_explicit_local_only_removes_proven_reference_and_retries_without_
     assert preview["items"][0]["status"] == "ready"
     result = await recovered.execute(CleanupExecute(**payload.model_dump(), fingerprint=preview["fingerprint"]))
     assert result["items"][0]["alreadyDeleted"] is True and result["releasedBytes"] == 0
-    assert scene.client.reads == reads
+    if kind == "dispatch":
+        assert scene.client.reads == reads
+    else:
+        assert len(receipt_reads) == 2
     normal = await recovered.preview(case.payload)
     assert normal["items"][0]["status"] == "blocked"
 
@@ -940,6 +1054,70 @@ async def test_unregistered_source_project_frees_reference_cleanup(scene, local_
     assert result["items"][0]["sourceConfirmed"] == "project_unregistered"
     marker = json.loads((scene.root / "deleted" / "dispatch-1.json").read_text())
     assert marker["requestDigest"] == "a" * 64 and marker["projectBinding"] == "binding"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("code,evidence,phrase", [
+    ("PROJECT_NOT_AUTHORIZED", "project_unregistered", "源项目已不在授权注册表"),
+    ("PROJECT_BINDING_CHANGED", "project_moved", "源项目路径或绑定已变化"),
+])
+async def test_unobservable_source_project_frees_bound_cleanup(scene, code, evidence, phrase):
+    denied = DispatchError("private registry state", code=code)
+    dispatch = scene.service.dispatch
+    original_read = dispatch._read
+
+    def unregistered(dispatch_id, *, require_authorized=True):
+        if require_authorized:
+            raise denied
+        return original_read(dispatch_id)
+
+    def unregistered_binding(_):
+        raise denied
+
+    async def unregistered_call(project, fn):
+        raise denied
+
+    dispatch._read = unregistered
+    dispatch._project_read_binding = unregistered_binding
+    dispatch._call = unregistered_call
+    preview = await scene.service.preview(scene.payload)
+    item = preview["items"][0]
+    assert item["status"] == "ready" and item["sourceConfirmed"] == evidence
+    assert phrase in json.dumps(item["retained"], ensure_ascii=False)
+    assert "private" not in json.dumps(preview)
+    result = await scene.service.execute(CleanupExecute(**scene.payload.model_dump(), fingerprint=preview["fingerprint"]))
+    assert result["items"][0]["status"] == "deleted" and result["items"][0]["sourceConfirmed"] == evidence
+    assert not scene.path.exists() and (scene.root / "deleted" / "dispatch-1.json").is_file()
+    assert scene.client.calls == 0
+    marker = json.loads((scene.root / "deleted" / "dispatch-1.json").read_text())
+    assert marker["requestDigest"] == "a" * 64 and marker["projectBinding"] == "binding"
+
+
+@pytest.mark.anyio
+async def test_local_only_bound_removal_still_blocks_a_rebound_project(scene):
+    """Local-only removal carries no absence proof: a re-bound project root can
+    still hide an active source task, so the strict exit stays blocked."""
+    row = json.loads(scene.path.read_text())
+    row["projectBinding"] = "moved"
+    scene.path.write_text(json.dumps(row))
+    dispatch = scene.service.dispatch
+    original_read = dispatch._read
+    denied = DispatchError("Project registry binding changed; native references were retained.",
+                           code="PROJECT_BINDING_CHANGED")
+
+    def rebound(dispatch_id, *, require_authorized=True):
+        if require_authorized:
+            raise denied
+        return original_read(dispatch_id)
+
+    dispatch._read = rebound
+    payload = scene.payload.model_dump()
+    payload["targets"][0]["localOnly"] = True
+    payload = CleanupPreview(**payload)
+    preview = await scene.service.preview(payload)
+    assert preview["items"][0]["status"] == "blocked"
+    assert "源项目路径或绑定已变化" in preview["items"][0]["reason"]
+    assert scene.path.exists() and not scene.service._marker_path(scene.payload.targets[0]).exists()
 
 
 @pytest.mark.anyio

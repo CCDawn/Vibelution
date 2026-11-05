@@ -91,7 +91,16 @@ class LocalAssistantBackendClient(ManagedAgentBackendClient):
             raise
 
     async def _cleanup_capability(self, task_id: str) -> str:
-        state = await self._task_state(task_id)
+        try:
+            state = await self._task_state(task_id)
+        except BackendClientError as error:
+            if error.code == "TASK_NOT_FOUND":
+                # Keep the local ledger stage distinguishable from the source's
+                # own authenticated 404: a lost local capability record never
+                # proves that the source task is gone.
+                raise BackendClientError("local cleanup capability record is unavailable",
+                                         code="TASK_CAPABILITY_UNAVAILABLE") from None
+            raise
         capability = state["taskCapability"]
         async with self._state_lock:
             namespace = self._state.get("transportNamespaces", {}).get(

@@ -23,6 +23,10 @@ from core.infrastructure.atomic_io import atomic_write_json
 from .dispatch import DispatchError, _bounded_native_request, _checked_task_receipt
 
 _REQUEST_PROOF_BUDGET = 25.0
+_TEAM_TERMINAL_STATUSES = {"completed", "failed", "stopped"}
+# A source team receipt that can never be re-confirmed: the request record is
+# gone or the management identity rotated away from this association.
+_TEAM_UNOBSERVABLE_RECEIPT_CODES = {"REQUEST_UNAVAILABLE", "MANAGEMENT_IDENTITY_ROTATED"}
 
 
 class _Closed(BaseModel):
@@ -94,7 +98,10 @@ def _failure_reason(error):
         "cleanup_task_active": "任务仍在运行或停止尚未确认，请结束任务后重试。",
         "TASK_NOT_TERMINAL": "任务仍在运行或停止尚未确认，请结束任务后重试。",
         "cleanup_source_unconfirmed": "尚未确认源任务的身份和状态，已保留任务关联。",
+        "PROJECT_NOT_AUTHORIZED": "源项目已不在本机授权注册表，无法核验源资源，已保留任务关联。",
+        "PROJECT_BINDING_CHANGED": "源项目路径或绑定已变化，无法核验源资源，已保留任务关联。",
         "TASK_CLEANUP_UNAVAILABLE": "此任务不属于当前 Launcher 的本地任务，无法清理源资源。",
+        "TASK_CAPABILITY_UNAVAILABLE": "此任务的本地清理凭据已不可用，无法确认清理范围，已保留任务关联。",
         "LAUNCHER_AUTHORITY_REQUIRED": "当前 Launcher 的任务清理权限不可用，请恢复连接后重试。",
         "REQUEST_UNAVAILABLE": "源团队请求记录已缺失，无法确认任务已结束，已保留助理任务关联。",
         "OPERATION_UNAVAILABLE": "源运行记录已缺失，无法确认任务已结束，已保留助理任务关联。",
@@ -179,16 +186,17 @@ class TaskCleanup:
         return scope
 
     def _row(self, dispatch_id):
-        """Read a dispatch record, tolerating a since-unregistered source project.
+        """Read a dispatch record, tolerating an unobservable source project.
 
         Registered reads still verify the registry binding; this fallback only
         unlocks the reference-only exits where the proof itself reports the
-        unregistered project. A changed-but-registered binding keeps raising.
+        unregistered or re-bound project. Local-only removal still re-checks
+        the record's own binding against the registry before deleting anything.
         """
         try:
             return self.dispatch._read(dispatch_id)
         except DispatchError as error:
-            if error.code != "PROJECT_NOT_AUTHORIZED":
+            if error.code not in {"PROJECT_NOT_AUTHORIZED", "PROJECT_BINDING_CHANGED"}:
                 raise
         return self.dispatch._read(dispatch_id, require_authorized=False)
 
@@ -312,6 +320,13 @@ class TaskCleanup:
             if (record.get("projectId") != target.projectId
                     or not re.fullmatch(r"[a-f0-9]{64}", str(record.get("requestDigest", "")))):
                 raise ValueError("cleanup_reference_changed")
+            if binding is not None and record.get("projectBinding") != self.dispatch._binding(binding[1]):
+                # The registry re-admitted the project at another root, so the
+                # source behind this reference is no longer observable. Unlike
+                # the reference exits, local-only removal carries no absence
+                # proof and must not silently drop a possibly-running task.
+                raise DispatchError("Project registry binding changed; native references were retained.",
+                                    code="PROJECT_BINDING_CHANGED")
         else:
             record = self.dispatch.management._read(path)
             if record.get("reference") != {"projectId": target.projectId,
@@ -324,6 +339,26 @@ class TaskCleanup:
         run = receipt.get("teamRun", record.get("teamRun", {}))
         if not isinstance(run, dict):
             raise ValueError("cleanup_source_unconfirmed")
+        if target.kind == "team_run":
+            # A local-only removal must observe the source once: an explicitly
+            # active team run keeps its association, while an unknown or
+            # unobservable receipt degrades exactly like the reference exits.
+            from .team_patrol import TeamPatrolObserver
+            observer = TeamPatrolObserver(self.dispatch)
+            try:
+                observed = await observer._read_receipt({"projectId": target.projectId,
+                    "action": target.originAction, "requestId": target.requestId})
+            except (BackendClientError, DispatchError) as error:
+                if error.code not in _TEAM_UNOBSERVABLE_RECEIPT_CODES:
+                    raise
+                observed = {}
+            observed_run = observed.get("teamRun") if isinstance(observed, dict) else None
+            observed_statuses = [observed.get("status")] if isinstance(observed, dict) else []
+            if isinstance(observed_run, dict):
+                observed_statuses.append(observed_run.get("status"))
+            for status in observed_statuses:
+                if isinstance(status, str) and status != "unknown" and status not in _TEAM_TERMINAL_STATUSES:
+                    raise ValueError("cleanup_task_active")
         statuses = record.get("status"), receipt.get("status"), run.get("status")
         active = {*TASK_ACTIVE_STATUSES, "dispatching", "waiting", "stopping", "preparing"}
         if any(status in active for status in statuses if isinstance(status, str)):
@@ -361,23 +396,60 @@ class TaskCleanup:
         if record.get("reference") != ref:
             raise ValueError("cleanup_reference_changed")
         observer = TeamPatrolObserver(self.dispatch)
-        receipt = await observer._read_receipt(ref)
+        try:
+            receipt = await observer._read_receipt(ref)
+        except (BackendClientError, DispatchError) as error:
+            # A missing source request record or a rotated management identity
+            # can never re-confirm or resume this request; degrade to the
+            # reference-only exit instead of orphaning the association.
+            # Transport failures keep blocking so a retry can read real state.
+            if error.code not in _TEAM_UNOBSERVABLE_RECEIPT_CODES:
+                raise
+            receipt = {}
+        run = receipt.get("teamRun")
+        run = run if isinstance(run, dict) else {}
+        size = _size(path)
         if receipt.get("verified") is not True or receipt.get("status") != "completed":
-            raise ValueError("cleanup_source_unconfirmed")
+            # An unverified receipt carries no authoritative run state: an
+            # explicitly reported active status still blocks, and every other
+            # permanently unconfirmable state degrades to removing only the
+            # local association while the source team resources are retained.
+            for status in (receipt.get("status"), run.get("status")):
+                if isinstance(status, str) and status != "unknown" and status not in _TEAM_TERMINAL_STATUSES:
+                    raise ValueError("cleanup_task_active")
+            if any(getattr(target, name) is not None and isinstance(run.get(name), str)
+                   and run[name] != getattr(target, name) for name in ("teamId", "flowId", "runId")):
+                raise ValueError("cleanup_run_changed")
+            if self.dispatch._project_read_binding(target.projectId) != binding:
+                raise ValueError("cleanup_reference_changed")
+            run_binding = tuple(value if isinstance(value, str) and _ID.fullmatch(value) else None
+                                for value in (run.get("teamId"), run.get("flowId"), run.get("runId")))
+            return {"path": path, "record": record, "binding": binding, "runBinding": run_binding,
+                    "revision": None, "status": receipt.get("status"), "bytes": size,
+                    "referenceOnly": True}, {
+                "status": "ready", "estimatedBytes": size,
+                "resources": [{"kind": "launcher_task_record", "count": 1, "bytes": size}],
+                "retained": [{"kind": "source_resources",
+                              "reason": "源回执未确认，源团队、会话和成果均已保留；本次仅移除助理中的任务关联。"}],
+                "sourceConfirmed": "receipt_unverified"}
         run = await observer._flow_run(ref, receipt) if target.originAction == "flow_start" else receipt.get("teamRun")
-        if (not isinstance(run, dict) or any(not isinstance(run.get(key), str) or not _ID.fullmatch(run[key])
-                for key in ("teamId", "flowId", "runId"))):
+        if (not isinstance(run, dict) or any(not isinstance(run.get(name), str) or not _ID.fullmatch(run[name])
+                for name in ("teamId", "flowId", "runId"))):
             raise ValueError("cleanup_source_unconfirmed")
-        if any(getattr(target, key) is not None and run[key] != getattr(target, key)
-               for key in ("teamId", "flowId", "runId")):
+        if any(getattr(target, name) is not None and run[name] != getattr(target, name)
+               for name in ("teamId", "flowId", "runId")):
             raise ValueError("cleanup_run_changed")
-        if run.get("status") not in {"completed", "failed", "stopped"}:
+        if run.get("status") not in _TEAM_TERMINAL_STATUSES:
             raise ValueError("cleanup_task_active")
         if self.dispatch._project_read_binding(target.projectId) != binding:
             raise ValueError("cleanup_reference_changed")
         return {"path": path, "record": record, "binding": binding,
-                "runBinding": tuple(run[key] for key in ("teamId", "flowId", "runId")),
-                "revision": run.get("revision"), "status": run["status"], "bytes": _size(path)}
+                "runBinding": tuple(run[name] for name in ("teamId", "flowId", "runId")),
+                "revision": run.get("revision"), "status": run["status"], "bytes": size}, {
+            "status": "ready", "estimatedBytes": size,
+            "resources": [{"kind": "launcher_task_record", "count": 1, "bytes": size}],
+            "retained": [{"kind": "shared_team_resources",
+                          "reason": "团队、成员、运行历史和成果供其他功能共用，本次仅删除助理的任务关联记录。"}]}
 
     async def _reference_plan(self, target, row, path):
         receipt = row.get("receipt")
@@ -410,21 +482,47 @@ class TaskCleanup:
         if target.localOnly:
             return await self._local_only_plan(target, path)
         if target.kind == "team_run":
-            plan = await self._team_plan(target)
-            return plan, {"status": "ready", "estimatedBytes": plan["bytes"],
-                          "resources": [{"kind": "launcher_task_record", "count": 1, "bytes": plan["bytes"]}],
-                          "retained": [{"kind": "shared_team_resources", "reason": "团队、成员、运行历史和成果供其他功能共用，本次仅删除助理的任务关联记录。"}]}
+            return await self._team_plan(target)
         row = self._row(target.dispatchId)
         if row.get("projectId") != target.projectId:
             raise ValueError("cleanup_reference_changed")
         path = self.dispatch._path(target.dispatchId)
         if not row.get("nativeTaskId"):
             return await self._reference_plan(target, row, path)
-        # TODO(cleanup): a bound nativeTaskId under a since-unregistered source
-        # still dead-ends on PROJECT_NOT_AUTHORIZED here; freeing it needs a
-        # product decision about silently abandoning source resources.
-        native = await self.dispatch._call(target.projectId,
-            lambda client: client.preview_task_cleanup(task_id=row["nativeTaskId"]))
+        receipt = row.get("receipt")
+        receipt = {} if receipt is None else receipt
+        if not isinstance(receipt, dict):
+            raise ValueError("cleanup_source_unconfirmed")
+        try:
+            native = await self.dispatch._call(target.projectId,
+                lambda client: client.preview_task_cleanup(task_id=row["nativeTaskId"]))
+        except (BackendClientError, DispatchError) as error:
+            # Mirror the unbound reference exits. An unregistered source
+            # project, a re-bound project root and a source-confirmed task
+            # absence can no longer observe the native task, so only the local
+            # association is removed while every source resource is retained
+            # and reported. Unconfirmed transport failures keep blocking so a
+            # retry can still verify the real state.
+            confirmed = {"PROJECT_NOT_AUTHORIZED": "project_unregistered",
+                         "PROJECT_BINDING_CHANGED": "project_moved",
+                         "TASK_NOT_FOUND": "task_absent"}.get(getattr(error, "code", None))
+            if confirmed is None:
+                raise
+            # An absence exit must never remove a locally known active task's
+            # last reference. A prior cleanup attempt still recovers through a
+            # successful source read above, which never reaches this branch.
+            if any(status in TASK_ACTIVE_STATUSES for status in (row.get("status"), receipt.get("status"))):
+                raise ValueError("cleanup_task_active") from None
+            size = _size(path)
+            reason = {"project_unregistered": "源项目已不在授权注册表，源资源无法核验，已保留；本次仅移除助理中的任务关联。",
+                      "project_moved": "源项目路径或绑定已变化，源资源可达性未验证，已保留；本次仅移除助理中的任务关联。",
+                      "task_absent": "源任务已不存在，共用资源已保留；本次仅移除助理中的任务关联。"}[confirmed]
+            return {"path": path, "binding": _dispatch_binding(row), "referenceOnly": True,
+                    "sourceStatus": ("native_absent", confirmed), "bytes": size}, {
+                "status": "ready", "estimatedBytes": size,
+                "resources": [{"kind": "launcher_task_record", "count": 1, "bytes": size}],
+                "retained": [{"kind": "source_resources", "reason": reason}],
+                "sourceConfirmed": confirmed}
         if (not isinstance(native, dict) or native.get("taskId") != row["nativeTaskId"]
                 or not isinstance(native.get("fingerprint"), str)):
             raise ValueError("cleanup_source_unconfirmed")
@@ -578,6 +676,8 @@ class TaskCleanup:
                         current["path"].unlink()
                         item.update(status="deleted", retained=[*summary["retained"],
                             {"kind": "deduplication_marker", "reason": "仅保留任务与身份标识的清理凭据，不保存任务内容。"}])
+                        if summary.get("sourceConfirmed"):
+                            item["sourceConfirmed"] = summary["sourceConfirmed"]
             except Exception as error:
                 item["status"] = "partial" if item["releasedBytes"] else "blocked"
                 item["failures"].append({"code": "TASK_CLEANUP_INCOMPLETE", "message": _failure_reason(error)})

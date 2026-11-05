@@ -39,6 +39,10 @@ describe("Launcher task cleanup batched transport", () => {
       .toContain("无法再被观察或恢复");
     expect(api.launcherTaskCleanupSourceNote("project_unregistered", "en"))
       .toBe("The source project is no longer authorized; the local association was removed.");
+    expect(api.launcherTaskCleanupSourceNote("receipt_unverified", "zh"))
+      .toContain("源回执未确认").toContain("源资源已保留");
+    expect(api.launcherTaskCleanupSourceNote("project_moved", "zh"))
+      .toContain("路径或绑定已变化").toContain("源资源已保留");
     expect(api.launcherTaskCleanupSourceNote("future_code", "zh")).toContain("已移除本地关联");
     expect(api.launcherTaskCleanupSourceNote(undefined, "zh")).toBeNull();
     const input = scope(1), plan = await api.previewLauncherTaskCleanup(input);

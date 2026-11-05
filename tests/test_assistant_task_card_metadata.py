@@ -511,3 +511,18 @@ def test_cleanup_rejects_external_legacy_and_missing_authority_without_network(m
         with pytest.raises(BackendClientError) as error:
             anyio.run(operation, "task/1")
         assert error.value.code == code
+
+
+def test_cleanup_translates_a_lost_local_capability_without_calling_the_source(monkeypatch):
+    """A lost local capability ledger entry is its own stage: it must stay
+    distinguishable from the source's authenticated 404 (a confirmed absence)."""
+    async def forbidden(*args, **kwargs):
+        pytest.fail("a lost local capability must never reach the source")
+
+    monkeypatch.setattr(ManagedAgentBackendClient, "_request_json", forbidden)
+    client = cleanup_client()
+    client._state = {"tasks": {}, "transportNamespaces": {}}
+    for operation in (client.preview_task_cleanup, lambda task: client.cleanup_task(task, "r", "f")):
+        with pytest.raises(BackendClientError) as error:
+            anyio.run(operation, "task/1")
+        assert error.value.code == "TASK_CAPABILITY_UNAVAILABLE"

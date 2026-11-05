@@ -174,6 +174,10 @@ const SOURCE_CONFIRMED_NOTES: Record<string, [string, string]> = {
   credential_unavailable: ["源项目无此请求的访问凭据，任务无法再被观察或恢复，已移除本地关联。",
     "The source project has no credential for this request; the task can no longer be observed or recovered, and the local association was removed."],
   project_unregistered: ["源项目已不在授权注册表中，已移除本地关联。", "The source project is no longer authorized; the local association was removed."],
+  receipt_unverified: ["源回执未确认，任务无法再被核验；已移除本地关联，源资源已保留。",
+    "The source receipt could not be verified and the task can no longer be checked; the local association was removed and source resources were retained."],
+  project_moved: ["源项目路径或绑定已变化，源资源可达性未验证；已移除本地关联，源资源已保留。",
+    "The source project moved or its binding changed; source reachability was not verified. The local association was removed and source resources were retained."],
 };
 
 /** Evidence note for a deletion that succeeded through a confirmed-absence exit. */

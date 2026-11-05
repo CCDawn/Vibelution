@@ -111,7 +111,10 @@ export function useAssistantTaskCleanup(options: {
       const titles: Record<string, string> = {};
       for (const task of eligible) for (const target of taskCleanupTargets(task)) {
         const key = taskCleanupKey(target);
-        targets.set(key, !bulk && task.state === "unknown" ? { ...target, localOnly: true } : target);
+        // Unknown-state targets always degrade to a verified record-only
+        // removal, matching the single-item removals; the host still verifies
+        // each one before deleting anything.
+        targets.set(key, task.state === "unknown" ? { ...target, localOnly: true } : target);
         titles[key] = taskDisplayTitle(task.title, task.kind === "dispatch" ? task.dispatchId : task.requestId, context.lang);
       }
       return { scope: { agentId: context.agentId, directSessionId: context.sessionId, targets: [...targets.values()] }, titles,
