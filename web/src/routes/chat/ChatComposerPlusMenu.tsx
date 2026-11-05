@@ -17,7 +17,7 @@ import {
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import type { SessionReferenceAttachment } from "../../api/types";
-import { VButton, VDialog, VInput, VNativeInput, VPopover, VStringSelect } from "../../components/vui";
+import { VButton, VDialog, VInput, VNativeInput, VPopover } from "../../components/vui";
 import { rankByScore } from "../../components/conversation/conversationFuzzyMatch";
 import { ChatComposerBudgetPopover, type ChatComposerBudgetControl, type ChatComposerBudgetPanelLabels } from "./ChatComposerBudgetPopover";
 import { composerAttachmentAcceptAttribute } from "./chatComposerSubmitModel";
@@ -36,14 +36,12 @@ export type ChatComposerKnowledgeReferenceState = {
   onRequest: () => void;
 };
 
-/** Privacy attachment surface (personal assistant only). The dialog collects a
- * kind, an optional display label and the plaintext; the host stages the value
- * through its closed IPC and receives a `sec_` reference. The plaintext lives
- * only in this dialog's controlled input state and is dropped on success,
- * close or unmount — it never enters a draft, snapshot or storage. */
-export type ChatComposerSecretKind = "api_key" | "token" | "password" | "secret";
+/** Privacy attachment surface (personal assistant only). The dialog collects an
+ * optional display label and the plaintext; the host stages the value through
+ * its closed IPC and receives a `sec_` reference. The plaintext lives only in
+ * this dialog's controlled input state and is dropped on success, close or
+ * unmount — it never enters a draft, snapshot or storage. */
 export type ChatComposerSecretAttachmentInput = {
-  secretType: ChatComposerSecretKind;
   value: string;
   label?: string;
 };
@@ -163,7 +161,6 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
   // Privacy attachment dialog state. `secretValue` is the only place the
   // plaintext ever lives renderer-side; every exit path clears it immediately.
   const [secretDialogOpen, setSecretDialogOpen] = useState(false);
-  const [secretType, setSecretType] = useState<ChatComposerSecretKind>("api_key");
   const [secretLabel, setSecretLabel] = useState("");
   const [secretValue, setSecretValue] = useState("");
   const [secretPending, setSecretPending] = useState(false);
@@ -272,7 +269,6 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
   }
 
   function resetSecretDraft() {
-    setSecretType("api_key");
     setSecretLabel("");
     setSecretValue("");
     setSecretError("");
@@ -293,7 +289,6 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
     const trimmedLabel = secretLabel.trim();
     try {
       await onAttachSecret({
-        secretType,
         value: secretValue,
         ...(trimmedLabel ? { label: trimmedLabel } : {}),
       });
@@ -309,13 +304,6 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
       setSecretPending(false);
     }
   }
-
-  const secretKindOptions = useMemo(() => [
-    { value: "api_key" as const, label: lang === "zh" ? "API 密钥" : "API key" },
-    { value: "token" as const, label: lang === "zh" ? "访问令牌" : "Access token" },
-    { value: "password" as const, label: lang === "zh" ? "密码" : "Password" },
-    { value: "secret" as const, label: lang === "zh" ? "其他隐私" : "Other secret" },
-  ], [lang]);
 
   function renderSection(section: SectionDescriptor, children: ReactNode) {
     return (
@@ -635,15 +623,6 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
         size="md"
       >
         <div className={styles.secretBody}>
-          <label className={styles.secretField}>
-            <span>{lang === "zh" ? "类型" : "Kind"}</span>
-            <VStringSelect
-              ariaLabel={lang === "zh" ? "隐私附件类型" : "Private attachment kind"}
-              value={secretType}
-              options={secretKindOptions}
-              onValueChange={next => setSecretType(next as ChatComposerSecretKind)}
-            />
-          </label>
           <label className={styles.secretField}>
             <span>{lang === "zh" ? "显示名（可选）" : "Display name (optional)"}</span>
             <VInput

@@ -559,7 +559,10 @@ def execute(action: str, parameters: dict, runtime: dict, governed: bool = False
             if args.credential_token:
                 from config.llm_security import validate_llm_api_key_env
                 from config.public_config import _delete_user_env_var, _set_user_env_var
-                from core.assistant_runtime.secret_attachments import resolve_secret_attachment
+                from core.assistant_runtime.secret_attachments import (
+                    SecretCredentialError,
+                    consume_secret_credential,
+                )
                 # Validate the derived name before the one-shot pop so a naming
                 # failure never burns the user's attachment.
                 try:
@@ -567,14 +570,12 @@ def execute(action: str, parameters: dict, runtime: dict, governed: bool = False
                         f"VIBELUTION_LLM_{args.provider_id.upper().replace('-', '_')}_API_KEY", required=True)
                 except ValueError:
                     return _failure("credential_env_name_invalid")
-                secret = resolve_secret_attachment(args.credential_token)
-                if secret is None:
+                try:
+                    value = consume_secret_credential(args.credential_token)
+                except SecretCredentialError:
+                    # The pop already consumed an unknown/expired reference;
+                    # retrying requires the user to attach the secret again.
                     return _failure("credential_token_invalid")
-                value, kind = secret
-                if kind != "api_key":
-                    # The pop already consumed this attachment; retrying
-                    # requires the user to attach the secret again.
-                    return _failure("credential_token_kind")
                 _set_user_env_var(env_name, value)
                 provider.update(auth_kind="api_key", credential_ref=f"env:{env_name}", requires_credential=True)
             candidate = add_llm_provider(before, args.provider_id, provider)

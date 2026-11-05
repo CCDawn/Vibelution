@@ -46,9 +46,12 @@ async function setup(enabled: boolean, statusExtra: Record<string, unknown> = {}
       case "uploadAttachment": if (fail) throw new Error("failure"); else return { artifactId: "user-image-2.png", filename: "new.png", contentType: "image/png", sizeBytes: 2, kind: "user_image", status: "ready" };
       case "upload_attachment": {
         if (request.kind !== "user_secret" || typeof request.value !== "string" || !request.value) throw new Error("ASSISTANT_REQUEST_INVALID");
-        if (!["api_key", "token", "password", "secret"].includes(String(request.secretKind))) throw new Error("ASSISTANT_SECRET_KIND_INVALID");
+        // The unified dialog sends no secretKind; the host echoes the label as a third key when one was sent.
+        if ("secretKind" in request) throw new Error("ASSISTANT_REQUEST_INVALID");
         if (secretFail) throw new Error("Launcher 未确认隐私附件暂存。");
-        return { attachmentId: "sec_test123", kind: "user_secret" };
+        return typeof request.label === "string" && request.label
+          ? { attachmentId: "sec_test123", kind: "user_secret", label: request.label }
+          : { attachmentId: "sec_test123", kind: "user_secret" };
       }
       case "send": if (sendFailure !== null) throw new Error(sendFailure); secretSent = true; return { accepted: true, turnId: "turn" };
       default: throw new Error("unexpected");
@@ -264,14 +267,8 @@ it("stages a private attachment through the closed verb, sends only the sec_ ref
   const password = document.querySelector<HTMLInputElement>('input[type="password"]');
   expect(password).not.toBeNull();
   const labelInput = document.querySelector<HTMLInputElement>('input[aria-label="隐私附件显示名"]')!;
-  // Pick the non-default kind so the request must carry it (secretKind).
-  const kindTrigger = document.querySelector('[role="combobox"][aria-label="隐私附件类型"]');
-  expect(kindTrigger).not.toBeNull();
-  await act(async () => kindTrigger!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
-  const kindOption = [...document.querySelectorAll<HTMLElement>('[role="option"]')]
-    .find(item => item.textContent?.trim() === "访问令牌");
-  expect(kindOption).toBeTruthy();
-  await act(async () => kindOption!.click());
+  // One unified path: the dialog has no kind selector at all.
+  expect(document.querySelector('[role="combobox"]')).toBeNull();
   // Failure first: the error surfaces in the dialog and nothing reaches the tray.
   setSecretFailure(true);
   const setInput = (element: HTMLInputElement, value: string) => {
@@ -291,9 +288,11 @@ it("stages a private attachment through the closed verb, sends only the sec_ ref
   await act(async () => submit.click());
   const upload = invoke.mock.calls.filter(([request]) => request.operation === "upload_attachment");
   expect(upload).toHaveLength(2);
-  // The dialog's type choice rides the request as secretKind (token picked above).
+  // The unified request carries value + label, and no secretKind; the host echoed
+  // the label as the third response key.
   expect(upload[1]![0]).toMatchObject({ operation: "upload_attachment", kind: "user_secret",
-    value: PLAINTEXT, label: "中转站密钥", secretKind: "token" });
+    value: PLAINTEXT, label: "中转站密钥" });
+  expect("secretKind" in (upload[1]![0] as Record<string, unknown>)).toBe(false);
   // Success closes the dialog, burns the plaintext and mounts a masked chip.
   expect(document.querySelector('input[type="password"]')).toBeNull();
   expect(document.body.textContent).not.toContain(PLAINTEXT);

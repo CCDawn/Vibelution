@@ -11,7 +11,7 @@ import {
   stopLauncherAssistantTurn, continueLauncherAssistantTurn, switchLauncherAssistantHead,
   regenerateLauncherAssistantMessage, guideLauncherAssistantTurn,
   getLauncherOperatorAsset, getLauncherAssistantAvatar, openLauncherFromAssistant, uploadLauncherAttachment,
-  uploadLauncherUserSecret, launcherUserSecretKindLabel,
+  uploadLauncherUserSecret,
   readLauncherAttachment, subscribeLauncherAssistantSessionEvent,
   launcherAssistantBudgetQueryKey,
 } from "../../api/launcherAssistant";
@@ -813,8 +813,10 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     if (attachmentsRef.current.filter(item => item.kind === "secret").length >= MAX_SECRET_ATTACHMENTS) {
       throw new Error(lang === "zh" ? `隐私附件最多 ${MAX_SECRET_ATTACHMENTS} 个，请先移除一个再添加。` : `Up to ${MAX_SECRET_ATTACHMENTS} private attachments; remove one first.`);
     }
-    const { attachmentId } = await uploadLauncherUserSecret(input.value, input.secretType, input.label);
-    const displayName = (input.label || "").trim() || launcherUserSecretKindLabel(input.secretType, lang);
+    const { attachmentId } = await uploadLauncherUserSecret(input.value, input.label);
+    // No display name falls back to the same generic mask label the history
+    // bubble side uses for a label-less user_secret attachment.
+    const displayName = (input.label || "").trim() || (lang === "zh" ? "隐私附件" : "Private attachment");
     const chipLabel = lang === "zh" ? `隐私 · ${displayName}` : `Private · ${displayName}`;
     updateAttachments([...attachmentsRef.current, {
       id: crypto.randomUUID(),

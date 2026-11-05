@@ -280,17 +280,18 @@ def test_provider_add_unknown_or_expired_credential_token_fails_without_writes(o
     assert peek_secret_attachment(keep) == "api_key"  # unrelated live attachment untouched
 
 
-def test_provider_add_non_api_key_credential_kind_is_consumed_and_rejected(operator, monkeypatch):
-    from core.assistant_runtime.secret_attachments import resolve_secret_attachment
+def test_provider_add_accepts_any_attachment_kind_as_credential(operator, monkeypatch):
     writes, deletes = _record_env(monkeypatch)
-    before = operator.read_bytes()
     token = _stage_secret("fixture-pass", "password")
     result = call("provider_add", {"provider_id": "tokened", "base_url": "https://tokened.example/v1",
                   "credential_token": token}, governed=True)
-    assert result["error"] == "credential_token_kind"
-    assert writes == [] and deletes == []
-    assert operator.read_bytes() == before
-    assert resolve_secret_attachment(token) is None  # pop-on-read consumed the failed attempt
+    assert result["ok"] and result["verified"], result
+    assert result["credentialState"] == "configured"
+    assert writes == [("VIBELUTION_LLM_TOKENED_API_KEY", "fixture-pass")]
+    assert deletes == []
+    provider = read(operator)["llm"]["providers"]["tokened"]
+    assert provider["auth_kind"] == "api_key"
+    assert provider["requires_credential"] is True
 
 
 def test_provider_add_credential_token_and_source_provider_are_mutually_exclusive(operator, monkeypatch):

@@ -1474,22 +1474,19 @@ def _secret_attachment_prompt_block(rows: list[dict[str, Any]]) -> str:
 
     Mirrors the document prompt block shape (a data marker, never content):
     one line per attachment, naming the one-shot token so configuration tools
-    can consume it, and stating that the model cannot see the value.
+    can consume it, and stating that the model cannot see the value. The
+    display label (bubble name) is echoed when present, otherwise「未命名」;
+    the attachment kind is no longer part of the marker.
     """
-
-    from core.assistant_runtime import secret_attachments
 
     lines: list[str] = []
     for row in rows:
         token = str(row.get("attachmentId") or "").strip()
         if not token:
             continue
-        kind = secret_attachments.peek_secret_attachment(token) or "secret"
-        label = secret_attachments.SECRET_KIND_LABELS.get(
-            kind, secret_attachments.SECRET_KIND_LABELS["secret"],
-        )
+        label = str(row.get("label") or "").strip() or "未命名"
         lines.append(
-            f'[隐私附件] {token}（类型：{label}）已附加，模型不可见其内容；'
+            f'[隐私附件] {token}（{label}）已附加，模型不可见其内容；'
             f'可在配置类工具（如 provider_add）中用 credential_token="{token}" 引用'
         )
     return "\n".join(lines)
