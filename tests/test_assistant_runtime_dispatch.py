@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -681,7 +682,7 @@ async def test_corrupted_reference_is_retained_and_never_recreated(tmp_path):
     path.write_text("{broken", encoding="utf-8")
     with pytest.raises(DispatchError) as corrupt:
         await start(service)
-    assert corrupt.value.code == "DISPATCH_STATE_INVALID"
+    assert corrupt.value.code == "DISPATCH_STATE_CORRUPT"
     assert path.read_text(encoding="utf-8") == "{broken"
     assert [name for name, _ in probe.calls].count("start") == 1
 
@@ -1022,7 +1023,7 @@ async def test_corrupt_reference_does_not_stop_healthy_task_renewal(tmp_path):
     results = await service.heartbeat()
     assert any((row.get("receipt") or {}).get("status") == "succeeded" for row in results)
     failure = next(row for row in service.list_dispatches() if row["dispatchId"] == "broken")
-    assert failure["lastError"]["code"] == "DISPATCH_STATE_INVALID"
+    assert failure["lastError"]["code"] == "DISPATCH_STATE_CORRUPT"
     assert broken.read_text(encoding="utf-8") == "{broken"
 
 
@@ -1305,3 +1306,100 @@ async def test_backend_timeout_without_management_identity_is_not_reconciled(tmp
     assert failure.value.code == "BACKEND_TIMEOUT"
     assert str(failure.value) == _BACKEND_CODE_MESSAGES["BACKEND_TIMEOUT"]
     assert calls == ["list"]
+
+
+@pytest.mark.anyio
+async def test_confirmed_dismiss_archives_corrupt_record_and_frees_the_list(tmp_path):
+    probe = ClientProbe()
+    service = adapter(tmp_path, probe)
+    records = tmp_path / "profile/assistant_dispatch/records"
+    records.mkdir(parents=True, exist_ok=True)
+    corrupt = records / "dispatch-1.json"
+    corrupt.write_text("{broken", encoding="utf-8")
+    sidecar = records / "dispatch-1.json.lock"
+    sidecar.write_bytes(b"\0")
+    with pytest.raises(DispatchError) as unconfirmed:
+        await service.dismiss_corrupt("dispatch-1", confirmed=False)
+    assert unconfirmed.value.code == "DISMISS_CONFIRMATION_REQUIRED"
+    assert corrupt.read_text(encoding="utf-8") == "{broken"
+    result = await service.dismiss_corrupt("dispatch-1", confirmed=True, reason="operator cleanup")
+    assert result["dismissed"] is True and result["invalidCode"] == "DISPATCH_STATE_CORRUPT"
+    assert result["lockSidecarRemoved"] is True
+    corrupt_dir = tmp_path / "profile/assistant_dispatch/records-corrupt"
+    archived = corrupt_dir / "dispatch-1.json"
+    assert archived.read_bytes() == b"{broken"
+    assert not corrupt.exists() and not sidecar.exists()
+    audit = json.loads((corrupt_dir / "dispatch-1.dismiss-audit.json").read_text(encoding="utf-8"))
+    assert audit["kind"] == "dispatch_corrupt_dismissal" and audit["dispatchId"] == "dispatch-1"
+    assert audit["originalPath"] == "records/dispatch-1.json"
+    assert audit["archivePath"] == "records-corrupt/dispatch-1.json"
+    assert audit["invalidCode"] == "DISPATCH_STATE_CORRUPT" and audit["reason"] == "operator cleanup"
+    assert audit["sizeBytes"] == 7 and audit["lockSidecarPresent"] is True
+    assert audit["contentDigest"] == hashlib.sha256(b"{broken").hexdigest()
+    assert audit["dismissedAt"]
+    assert service.list_dispatches() == []
+    assert [name for name, _ in probe.calls] == []
+    with pytest.raises(DispatchError) as gone:
+        await service.dismiss_corrupt("dispatch-1", confirmed=True)
+    assert gone.value.code == "DISPATCH_NOT_FOUND"
+    # Dismissal is a forensic archive, not a permanent fence: the identity is
+    # reusable and the native layer dedupes by client_request_id.
+    await start(service)
+    assert service.list_dispatches()[0]["nativeTaskId"] == "eat-1"
+
+
+@pytest.mark.anyio
+async def test_shape_invalid_record_reports_shape_code_and_is_dismissible(tmp_path):
+    probe = ClientProbe()
+    service = adapter(tmp_path, probe)
+    records = tmp_path / "profile/assistant_dispatch/records"
+    records.mkdir(parents=True, exist_ok=True)
+    (records / "mismatched.json").write_text(
+        json.dumps({"schemaVersion": 1, "dispatchId": "other", "projectId": "project-a"}), encoding="utf-8")
+    (records / "notobject.json").write_text("[1, 2]", encoding="utf-8")
+    rows = {row["dispatchId"]: row for row in service.list_dispatches()}
+    assert rows["mismatched"]["stateInvalid"] is True
+    assert rows["mismatched"]["lastError"]["code"] == "DISPATCH_STATE_SHAPE_INVALID"
+    assert rows["notobject"]["lastError"]["code"] == "DISPATCH_STATE_SHAPE_INVALID"
+    result = await service.dismiss_corrupt("mismatched", confirmed=True)
+    assert result["invalidCode"] == "DISPATCH_STATE_SHAPE_INVALID"
+    archived = tmp_path / "profile/assistant_dispatch/records-corrupt/mismatched.json"
+    assert json.loads(archived.read_text(encoding="utf-8"))["dispatchId"] == "other"
+    remaining = {row["dispatchId"] for row in service.list_dispatches()}
+    assert remaining == {"notobject"}
+
+
+@pytest.mark.anyio
+async def test_dismiss_refuses_healthy_records_even_when_confirmed(tmp_path):
+    probe = ClientProbe()
+    service = adapter(tmp_path, probe)
+    await start(service)
+    record = service._path("dispatch-1").read_text(encoding="utf-8")
+    with pytest.raises(DispatchError) as refused:
+        await service.dismiss_corrupt("dispatch-1", confirmed=True)
+    assert refused.value.code == "DISPATCH_DISMISS_REFUSED"
+    assert service._path("dispatch-1").read_text(encoding="utf-8") == record
+    rows = service.list_dispatches()
+    assert len(rows) == 1 and not rows[0].get("stateInvalid")
+    assert not (tmp_path / "profile/assistant_dispatch/records-corrupt").exists()
+
+
+@pytest.mark.anyio
+async def test_refresh_reports_corrupt_shape_and_binding_change_instead_of_unknown(tmp_path):
+    probe = ClientProbe()
+    service = adapter(tmp_path, probe)
+    await start(service)
+    records = tmp_path / "profile/assistant_dispatch/records"
+    records.mkdir(parents=True, exist_ok=True)
+    (records / "broken.json").write_text("{broken", encoding="utf-8")
+    (records / "mismatched.json").write_text(
+        json.dumps({"schemaVersion": 1, "dispatchId": "other"}), encoding="utf-8")
+    results = {row["dispatchId"]: row["lastError"]["code"]
+               for row in await service._refresh_batch(["broken", "mismatched"], include_terminal=False)}
+    assert results == {"broken": "DISPATCH_STATE_CORRUPT", "mismatched": "DISPATCH_STATE_SHAPE_INVALID"}
+    # A drifted registry binding is a readable reference, not a corrupt one:
+    # the same profile read through a differently-bound registry must stay
+    # distinguishable from the two file defects above.
+    rebound = DispatchService(tmp_path / "profile", {"project-a": tmp_path / "elsewhere"}, client_factory=probe.factory)
+    binding = await rebound._refresh_batch(["dispatch-1"], include_terminal=False)
+    assert binding[0]["lastError"]["code"] == "PROJECT_BINDING_CHANGED"
