@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { Bot, ListFilter, MonitorSmartphone } from "lucide-react";
 
 import {
   conversationToolRendererFor,
@@ -28,5 +29,33 @@ describe("conversation tool renderer registry", () => {
 
   it("uses the displayed semantic label as a fallback for normalized lifecycle names", () => {
     expect(conversationToolRendererForPresentationLabel("代码图谱", "zh").family).toBe("code");
+  });
+
+  it.each([
+    ["source_read", "files", "read_file_tool", "读取源码"],
+    ["source_search", "search", "search_code_tool", "搜索源码"],
+    ["session_list", "conversation", "conversation_log_inspect_tool", "列出会话"],
+    ["agent_update", "edit", "apply_patch_tool", "修改 Agent"],
+    ["dispatch_write", "conversation", "conversation_log_inspect_tool", "派遣 Agent 修改项目"],
+    ["browser_read", "generic", "unregistered_vendor_tool", "读取网页"],
+    ["runtime_command", "command", "exec_command", "控制原生运行"],
+    ["provider_test", "verify", "run_test_for_tool", "测试模型连接"],
+  ])("uses the real assistant action %s for its family, icon and label", (action, family, iconTool, label) => {
+    for (const toolName of ["personal_assistant_action_tool", "personal_assistant_manage_tool"]) {
+      const descriptor = conversationToolRendererFor(toolName, { action });
+      expect(descriptor.family).toBe(family);
+      const actionIcon = action === "session_list" ? ListFilter : action === "dispatch_write" ? Bot : action === "browser_read" ? MonitorSmartphone : null;
+      expect(descriptor.icon).toBe(actionIcon ?? conversationToolRendererFor(iconTool).icon);
+      expect(conversationToolRendererLabel(toolName, "zh", { action })).toBe(label);
+    }
+  });
+
+  it("preserves the original descriptor for missing, unknown and unrelated action arguments", () => {
+    const name = "personal_assistant_action_tool";
+    for (const args of [{}, { action: "future_source_read" }, { action: "constructor" }]) {
+      expect(conversationToolRendererFor(name, args)).toBe(conversationToolRendererFor(name));
+    }
+    expect(conversationToolRendererFor("read_file_tool", { action: "agent_update" }).family).toBe("files");
+    expect(conversationToolRendererLabel(name, "zh", { action: "future_action" })).toBe("处理助理请求");
   });
 });

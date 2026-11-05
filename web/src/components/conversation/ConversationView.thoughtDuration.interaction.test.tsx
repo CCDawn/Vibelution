@@ -368,8 +368,12 @@ describe("thought duration client-clock label", () => {
         type: "agent_message", phase: "final_answer", status: "completed", terminal: true, text: answerText },
     ] }]));
     expectThoughtsHidden();
-    expectVisibleNarrationAndTool();
     expect(container?.querySelector('[data-codex-final-response="true"]')?.textContent).toBe(answerText);
+    expect(narration()?.closest('[hidden][inert]')).not.toBeNull();
+    const workToggle = container?.querySelector<HTMLButtonElement>('[data-codex-process-work-toggle]')!;
+    expect(workToggle.getAttribute("aria-expanded")).toBe("false");
+    await act(async () => workToggle.click());
+    expectVisibleNarrationAndTool();
     await expandThoughts();
     expect(container?.querySelectorAll('[data-thought-section]')).toHaveLength(2);
     expect(container?.textContent?.split(completedText).length).toBe(2);

@@ -1270,6 +1270,69 @@ def test_raw_submit_rejects_live_foreign_work_run_snapshot(tmp_path: Path, monke
         _reset_seeded_session_runtime(session_id)
 
 
+def test_submit_recovers_after_corrupt_chat_turn_index_self_heal(tmp_path: Path, monkeypatch) -> None:
+    """chat_turn 索引损坏时先自愈再判活：提交照常放行，不楔死在项目级 busy。
+
+    回归 10-25 预存红：闸门层裸解析 index.json，形状异常即 suspicious →
+    busy 挡住一切新 turn → 无 persist_snapshot 重建索引 → 死锁到手工修
+    文件。store 的自愈读（隔离损坏文件 + 有界归一）才是唯一权威。
+    """
+
+    session_id = "session-live"
+    store = _prepare_hot_restart_submit_env(tmp_path, monkeypatch, session_id)
+    index_path = store.index_path("chat_turn")
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    index_path.write_text('{"activeRunIds": [not valid json', encoding="utf-8")
+    try:
+        result = submit.submit_session_message_lightweight(
+            session_id,
+            "after corrupt index",
+            mental_model_enabled=False,
+        )
+        assert result["accepted"] is True
+        # The damaged index was quarantined and the admission submit rebuilt a
+        # fresh readable index through the normal persist path.
+        assert list(index_path.parent.glob("index.json.corrupt-*"))
+        assert store.load_active_run_ids("chat_turn")
+    finally:
+        _reset_seeded_session_runtime(session_id)
+
+
+def test_submit_reports_recovery_path_when_work_run_index_self_heal_fails(tmp_path: Path, monkeypatch) -> None:
+    """自愈读本身失败时按保守 busy 拒绝，且文案可区分并指引恢复路径。
+
+    防脑裂内核保留：读不出归属时不放行；出口是可辨识的错误文案，不再把
+    「索引读不出」伪装成「仍有轮在跑」让用户原地等待。
+    """
+
+    from core.runtime_manager.work_run_store import WorkRunStore
+
+    session_id = "session-live"
+    store = _prepare_hot_restart_submit_env(tmp_path, monkeypatch, session_id)
+    original_reader = WorkRunStore.load_active_run_ids
+
+    def broken_self_heal(self, run_kind):
+        if run_kind == "chat_turn":
+            raise TimeoutError("work-run index lock budget exhausted")
+        return original_reader(self, run_kind)
+
+    monkeypatch.setattr(WorkRunStore, "load_active_run_ids", broken_self_heal)
+    try:
+        with pytest.raises(session_service.SessionBusyError) as exc_info:
+            submit.submit_session_message_lightweight(
+                session_id,
+                "during unreadable index",
+                mental_model_enabled=False,
+            )
+        message = str(exc_info.value)
+        assert "索引" in message or "index" in message.lower()
+        assert "index.json.lock" in message or "恢复" in message or "inspect" in message.lower()
+        # Distinguishable from the plain live-turn busy loop.
+        assert "仍在运行" not in message and "still running" not in message.lower()
+    finally:
+        _reset_seeded_session_runtime(session_id)
+
+
 def test_parallel_session_submits_do_not_serialize_on_ledger_io(tmp_path: Path, monkeypatch) -> None:
     from core.web.services import agent_directory_service
 

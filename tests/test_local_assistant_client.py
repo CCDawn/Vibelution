@@ -138,6 +138,45 @@ async def test_management_and_similar_prefixes_are_unchanged(tmp_path, monkeypat
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("capability", [TOKEN, ""])
+async def test_complete_directory_context_is_selected_by_local_identity_not_model(tmp_path, monkeypatch, capability):
+    from tests.test_external_agent_agent_directory_client import directory_page
+
+    payload = directory_page()
+    if capability:
+        payload["dispatchContext"] = "launcher_local"
+    client, _, business = _client(tmp_path, monkeypatch, capability=capability,
+        responder=lambda _request: httpx.Response(200, json=payload))
+    async def grant(**_kwargs):
+        return {"subjectId": "native-subject", "capability": "native-management-capability"}
+    monkeypatch.setattr(client, "_management_grant", grant)
+    result = await client.management_agent_list(dispatch_context="external" if capability else "launcher_local")
+    assert result.get("dispatchContext", "external") == ("launcher_local" if capability else "external")
+    request = business[0]
+    assert request.url.params.get("dispatch_context") == ("launcher_local" if capability else None)
+    assert request.headers["X-Vibelution-Management-Subject"] == "native-subject"
+    assert request.headers["X-Vibelution-Management-Capability"] == "native-management-capability"
+    assert TOKEN not in repr(client._state)
+    assert not client.state_path.exists()
+
+
+@pytest.mark.anyio
+async def test_local_directory_refuses_old_external_only_response_without_retry_or_upgrade(tmp_path, monkeypatch):
+    from tests.test_external_agent_agent_directory_client import directory_page
+
+    client, _, business = _client(tmp_path, monkeypatch,
+        responder=lambda _request: httpx.Response(200, json=directory_page()))
+    async def grant(**_kwargs):
+        return {"subjectId": "native-subject", "capability": "native-management-capability"}
+    monkeypatch.setattr(client, "_management_grant", grant)
+    with pytest.raises(sdk.BackendClientError) as failure:
+        await client.management_agent_list()
+    assert failure.value.code == "BACKEND_PROTOCOL_ERROR"
+    assert len(business) == 1 and business[0].method == "GET"
+    assert not client.state_path.exists()
+
+
+@pytest.mark.anyio
 async def test_control_token_retry_preserves_capability_task_parameters_and_idempotency(tmp_path, monkeypatch):
     client, calls, business = _client(tmp_path, monkeypatch, retry=True)
     client._state["transportNamespaces"] = {_digest("task-cap"): "local"}

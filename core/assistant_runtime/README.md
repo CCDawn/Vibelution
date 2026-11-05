@@ -75,7 +75,7 @@ top-level message summarizes skipped reasons for the existing tool-result UI.
 `agent_list` reads the complete registered Agent directory for an authorized
 project, including active, archived, hidden, system and team identities. It
 returns names, status, public ownership and independently evaluated dispatch
-eligibility; it never grants dispatch rights or reads private configuration,
+eligibility for the caller's transport; it never grants dispatch rights or reads private configuration,
 memory or transcripts. Ownership distinguishes roster-backed `teams` from
 metadata-only `recordedTeams`; a historical reference is not current membership.
 Creation/template provenance and explicit owner-Agent references are public
@@ -85,8 +85,18 @@ through explicit native authorization upgrade. Existing grants do not widen.
 Continue with `nextOffset` and `expected_revision=revision` until `nextOffset`
 is null; a changed source snapshot rejects the continuation. `registryTotal`
 counts the full registry, while `total` counts query matches. The existing
-`agents` action remains the externally dispatchable candidate list and cannot
-establish a project's Agent total. Directory labels stay quoted untrusted data
+`agents` action remains a direct-dispatch candidate list and cannot
+establish a project's Agent total. Launcher authority fixes `agent_list` to
+`dispatch_context=launcher_local`; its returned `dispatchContext`, row eligibility
+and global dispatchable count use the same local policy as discovery and task
+admission. Local discovery reports `scope=launcher_local_dispatchable`. External
+SDK defaults retain their existing gateway/allowlist policy and wire shape.
+Context is read-only metadata, not an execution grant; `agents:directory:read`
+is still required and continuation revisions bind the context. A local request
+rejects an older backend's external-only response. Team members use their
+roster-backed Team and native flows; Companion identities retain their scoped
+Session path. Neither is silently omitted from the complete directory.
+Directory labels stay quoted untrusted data
 through the fixed action tool's closed result projection, so names that resemble
 instructions are preserved without becoming workflow fields.
 

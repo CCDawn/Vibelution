@@ -754,6 +754,63 @@ describe("isolatedInstanceRegistryHost", () => {
     expect(completeStop).not.toHaveBeenCalled();
   });
 
+  it("releases the registration and converges when the reclaim proves the spawn pid was reused by a foreign process", async () => {
+    // Regression 10-25: the registered spawn pid was handed to an unrelated
+    // process after the backend exited while its port stayed free; reclaim
+    // now falsifies that pid as foreign reuse, and the retirement must stop
+    // treating the unrelated live process as an unretired backend.
+    const completeStop = vi.fn(async () => ({ applied: true, entry: { status: "closed" } }));
+    const reclaimBackend = vi.fn(async () => ({
+      reclaimed: true,
+      reason: "port 8003 is already released; registered backend pid 4242 (conhost.exe) was reused by "
+        + "an unrelated process (Windows pid reuse), so its registration was cleared without terminating any process",
+      verifiedPid: 4242,
+      foreignReusePids: [4242]
+    }));
+    const result = await retireIsolatedRuntimeBeforeStart({
+      instanceId: "worktree:task",
+      workspaceRoot: "C:/wt/task",
+      pythonPath: "python",
+      registryPath: "C:/tmp/instances.json",
+      dependencies: {
+        readRegistry: async () => ({
+          schemaVersion: 3,
+          instances: {
+            "worktree:task": {
+              projectRoot: "C:/wt/task",
+              host: "127.0.0.1",
+              port: 8003,
+              spawnPid: 4242,
+              status: "steady",
+              desiredState: "open",
+              generation: 4
+            }
+          }
+        }),
+        claimStopIfGeneration: async () => ({
+          applied: true,
+          entry: {
+            projectRoot: "C:/wt/task",
+            host: "127.0.0.1",
+            port: 8003,
+            spawnPid: 4242,
+            status: "stopping",
+            desiredState: "closed",
+            generation: 5
+          }
+        }),
+        reclaimBackend,
+        clearRuntimeState: () => ({ cleared: true, removedCount: 0, failedCount: 0 }),
+        completeStop,
+        pidAlive: () => true
+      }
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(reclaimBackend).toHaveBeenCalledOnce();
+    expect(completeStop).toHaveBeenCalledOnce();
+  });
+
   it("does not kill a newer runtime when the conditional stop claim loses its generation", async () => {
     const reclaimBackend = vi.fn();
     const claimStopIfGeneration = vi.fn(async () => ({

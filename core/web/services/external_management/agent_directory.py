@@ -6,6 +6,7 @@ import re
 import unicodedata
 
 from core.web.services.external_agent.policy import external_mcp_eligibility
+from core.web.services.local_assistant.eligibility import local_assistant_eligibility
 
 from .contracts import AgentDirectoryItem, AgentDirectoryResponse
 from .service import ManagementError
@@ -133,7 +134,8 @@ def _ownership(agent, kind, mode, teams, team_index, agent_names):
             "ownerAgentName": agent_names.get(owner_id, "")}
 
 
-def _agents(rows, directory, memberships, operator_enabled, operator_explicitly_enabled, team_index):
+def _agents(rows, directory, memberships, operator_enabled, operator_explicitly_enabled, team_index,
+            *, dispatch_context="external"):
     result, seen = [], set()
     agent_names = {_identity(row.get("agentId")): _label(row.get("displayName", ""), 120) for row in rows}
     active_teams = {aid: next((team for team in teams if team["status"] == "active"), None)
@@ -154,8 +156,12 @@ def _agents(rows, directory, memberships, operator_enabled, operator_explicitly_
         index_kind = classification["kind"]
         role = directory._normalize_role_key(row.get("roleKey") or directory._infer_agent_role_key(row))
         projected = {**row, "conversationIndexKind": index_kind, "roleKey": role}
-        decision = external_mcp_eligibility(projected, active_team_lookup=active_teams.get,
-            operator_enabled=operator_enabled, operator_explicitly_enabled=operator_explicitly_enabled)
+        if dispatch_context == "launcher_local":
+            decision = local_assistant_eligibility(projected, active_team_lookup=active_teams.get,
+                operator_enabled=operator_enabled)
+        else:
+            decision = external_mcp_eligibility(projected, active_team_lookup=active_teams.get,
+                operator_enabled=operator_enabled, operator_explicitly_enabled=operator_explicitly_enabled)
         mode = directory._normalize_primary_mode(row.get("primaryMode") or directory._infer_agent_primary_mode(row))
         code = directory._normalize_agent_code(row.get("agentCode")) or directory._fallback_agent_code(aid)
         item = AgentDirectoryItem.model_validate({"agentId": aid, "agentCode": _label(code, 64),
@@ -179,9 +185,19 @@ def read_agents(project_root, directory, query):
         team_payload, teams = _rows(snapshot, paths[1], "teams")
         team_index, memberships = _teams(teams)
         operator_enabled, explicitly_enabled = _gateway(snapshot.config)
-        items = _agents(agents, directory, memberships, operator_enabled, explicitly_enabled, team_index)
-        revision = digest(["all_registered_agents.v1", str(snapshot.path()), agent_payload, team_payload,
-                           snapshot.config.get("external_agent_gateway", {})])
+        context = getattr(query, "dispatch_context", "external")
+        if context == "launcher_local":
+            from config.models import ExternalAgentGatewayConfig
+            denied = frozenset(ExternalAgentGatewayConfig.model_validate(
+                snapshot.config.get("external_agent_gateway", {})).denied_agent_ids)
+            operator_enabled = lambda aid: aid not in denied
+        items = _agents(agents, directory, memberships, operator_enabled, explicitly_enabled, team_index,
+            dispatch_context=context)
+        revision_inputs = ["all_registered_agents.v1", str(snapshot.path()), agent_payload, team_payload,
+                           snapshot.config.get("external_agent_gateway", {})]
+        if context != "external":
+            revision_inputs.append(context)
+        revision = digest(revision_inputs)
         if query.query:
             needle = query.query.casefold()
             matches = [item for item in items if any(needle in value.casefold() for value in
@@ -194,12 +210,13 @@ def read_agents(project_root, directory, query):
         selected = matches[query.offset:query.offset + query.limit]
         end = query.offset + len(selected)
         response = AgentDirectoryResponse.model_validate({"scope": "all_registered_agents", "agents": selected,
+            **({"dispatchContext": context} if context != "external" else {}),
             "total": len(matches), "registryTotal": len(items), "counts": {
                 "active": sum(item["status"] == "active" for item in items),
                 "archived": sum(item["status"] == "archived" for item in items),
                 "dispatchable": sum(item["dispatchable"] for item in items)}, "offset": query.offset,
             "nextOffset": end if end < len(matches) else None, "revision": revision,
-            "untrustedContent": True}).model_dump()
+            "untrustedContent": True}).model_dump(exclude_unset=True)
         snapshot.verify_workspace()
         if tokens != [snapshot._path_token(path) for path in paths]:
             raise ValueError("Agent directory authority changed")

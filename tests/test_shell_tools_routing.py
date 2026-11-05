@@ -237,16 +237,23 @@ class TestShellCommandClassifier:
         assert "Hidden" in ps_argv
 
     def test_shell_failure_cooldown_blocks_second_identical_intent(self):
+        """连续 2 次同一失败才拦截；首跑失败只给提示不封死，成功即清零。"""
         shell_tools.reset_shell_failure_cooldown()
         cmd = 'rg -n "pattern|other" path'
         assert shell_tools.shell_failure_cooldown_hit(cmd) == (False, 0)
         assert shell_tools.record_shell_failure(cmd) == 1
+        # 首次失败：不拦截，给「修完重跑」留一次机会。
+        assert shell_tools.shell_failure_cooldown_hit(cmd) == (False, 1)
+        assert shell_tools.record_shell_failure(cmd) == 2
         hit, count = shell_tools.shell_failure_cooldown_hit(cmd)
         assert hit is True
-        assert count == 1
+        assert count == 2
         message = shell_tools.shell_failure_cooldown_message(cmd, count)
         assert "工具纪律" in message
         assert "code_symbol_tool" in message
+        # 成功执行清零冷却，不永久封死同一命令。
+        shell_tools.record_shell_success(cmd)
+        assert shell_tools.shell_failure_cooldown_hit(cmd) == (False, 0)
         shell_tools.reset_shell_failure_cooldown()
 
     def test_shell_failure_detects_warning_exit_and_command_not_found(self):
@@ -258,18 +265,67 @@ class TestShellCommandClassifier:
         )
         assert not shell_tools.is_shell_execution_failure("ok lines\n1 file matched")
 
+    def test_pure_nonzero_exit_is_normal_semantics_not_failure(self):
+        """退出码非零且无错误特征（rg 无命中 / git diff --exit-code / 空输出）不计失败。"""
+        assert not shell_tools.is_shell_execution_failure("[WARNING | Exit Code: 1]\n")
+        assert not shell_tools.is_shell_execution_failure(
+            "[WARNING | Exit Code: 1]\n[命令执行完成，无输出]"
+        )
+        assert not shell_tools.is_shell_execution_failure(
+            "[WARNING | Exit Code: 129]\n[STDOUT]\nsome rows"
+        )
+        assert not shell_tools.is_shell_execution_failure("[WARNING | Exit Code: 1]\n[STDOUT]\nno matches")
+
+    def test_pytest_red_run_does_not_block_fix_and_rerun(self):
+        """回归：首跑红（Exit Code 1）→ 修完重跑不被拦；重跑成功 → 冷却清零。"""
+        shell_tools.reset_shell_failure_cooldown()
+        cmd = "python -m pytest tests/test_demo.py -q"
+        pytest_red = "[EXEC FAILURE | Exit Code: 1]\n[STDOUT]\n1 failed, 2 passed in 0.42s"
+        assert shell_tools.is_shell_execution_failure(pytest_red)
+        shell_tools.record_shell_failure(cmd, pytest_red)
+        # 二跑（修复后的重跑）不被拦。
+        assert shell_tools.shell_failure_cooldown_hit(cmd) == (False, 1)
+        # 修完代码重跑成功（含退出码非零的正常语义）→ 清零。
+        shell_tools.record_shell_success(cmd)
+        assert shell_tools.shell_failure_cooldown_hit(cmd) == (False, 0)
+        shell_tools.reset_shell_failure_cooldown()
+
+    def test_repeated_traceback_triggers_cooldown(self):
+        """回归：同一命令连续相同 traceback 2 次 → 触发冷却。"""
+        shell_tools.reset_shell_failure_cooldown()
+        cmd = "python scripts/task_brief.py"
+        traceback_failure = (
+            "[EXEC FAILURE | Exit Code: 1]\n"
+            "[STDERR]\nTraceback (most recent call last):\n"
+            '  File "scripts/task_brief.py", line 9, in <module>\n'
+            "ImportError: cannot import name 'missing'"
+        )
+        assert shell_tools.is_shell_execution_failure(traceback_failure)
+        shell_tools.record_shell_failure(cmd, traceback_failure)
+        assert shell_tools.shell_failure_cooldown_hit(cmd) == (False, 1)
+        shell_tools.record_shell_failure(cmd, traceback_failure)
+        hit, count = shell_tools.shell_failure_cooldown_hit(cmd)
+        assert hit is True
+        assert count == 2
+        shell_tools.reset_shell_failure_cooldown()
+
     def test_shell_failure_class_blocks_followup_powershell_variants(self):
         """Flash thrash pattern: bare PS under cmd dialect mismatch still shares a class."""
         shell_tools.reset_shell_failure_cooldown()
         first = "Get-Content log.jsonl | Select-Object -First 20"
         second = "Get-ChildItem logs | Select-Object -First 5"
+        third = "Get-Process | Where-Object CPU"
         failure = "[WARNING | Exit Code: 255]\n[STDERR]\n'Select-Object' 不是内部或外部命令，也不是可运行的程序"
         assert shell_tools.classify_shell_failure_class(first, failure) == "class:windows_ps_syntax_mismatch"
-        assert shell_tools.record_shell_failure(first, failure) >= 1
-        hit, count = shell_tools.shell_failure_cooldown_hit(second)
+        # 第一次同类方言失败：只计数，换写法仍可跑一次。
+        assert shell_tools.record_shell_failure(first, failure) == 1
+        assert shell_tools.shell_failure_cooldown_hit(second) == (False, 1)
+        # 第二次同类方言失败：同类变体进入冷却。
+        assert shell_tools.record_shell_failure(second, failure) == 2
+        hit, count = shell_tools.shell_failure_cooldown_hit(third)
         assert hit is True
-        assert count >= 1
-        assert "工具纪律" in shell_tools.shell_failure_cooldown_message(second, count)
+        assert count >= 2
+        assert "工具纪律" in shell_tools.shell_failure_cooldown_message(third, count)
         shell_tools.reset_shell_failure_cooldown()
 
     def test_shell_failure_ps_exec_does_not_block_corrected_powershell(self):
@@ -284,13 +340,18 @@ class TestShellCommandClassifier:
         )
         cls = shell_tools.classify_shell_failure_class(first, failure)
         assert cls.startswith("exact:"), cls
-        assert shell_tools.record_shell_failure(first, failure) >= 1
+        assert shell_tools.record_shell_failure(first, failure) == 1
         assert shell_tools.shell_failure_cooldown_hit(second) == (False, 0)
         assert shell_tools.shell_failure_cooldown_hit(third) == (False, 0)
-        # Identical broken command still blocked.
+        # Identical broken command blocked only after a second consecutive failure.
+        assert shell_tools.shell_failure_cooldown_hit(first) == (False, 1)
+        assert shell_tools.record_shell_failure(first, failure) == 2
         hit, count = shell_tools.shell_failure_cooldown_hit(first)
         assert hit is True
-        assert count >= 1
+        assert count == 2
+        # 成功重跑清零，不永久封死。
+        shell_tools.record_shell_success(first)
+        assert shell_tools.shell_failure_cooldown_hit(first) == (False, 0)
         shell_tools.reset_shell_failure_cooldown()
 
     def test_windows_command_is_blocked_on_unix(self, monkeypatch):

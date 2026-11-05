@@ -210,9 +210,7 @@ class ExternalAgentTaskService:
         agents = self.dependencies.list_agents(include_archived=False, detail="summary")
         items = list_externally_callable_agents(
             agents,
-            active_team_lookup=self.dependencies.active_team_lookup,
-            operator_enabled=self._operator_agent_enabled,
-            operator_explicitly_enabled=self._operator_agent_explicitly_enabled,
+            eligibility=self._eligibility,
         )[:bounded_limit]
         self._record_gateway_event(
             "external_agent.discovery.completed",
@@ -1196,8 +1194,8 @@ class ExternalAgentTaskService:
             )
         return record
 
-    def _require_eligible(self, agent: dict[str, Any] | None, *, gateway=None) -> None:
-        decision = external_mcp_eligibility(
+    def _eligibility(self, agent: dict[str, Any] | None, *, gateway=None):
+        return external_mcp_eligibility(
             agent,
             active_team_lookup=self.dependencies.active_team_lookup,
             operator_enabled=(self._operator_agent_enabled if gateway is None else lambda aid:
@@ -1206,7 +1204,8 @@ class ExternalAgentTaskService:
             operator_explicitly_enabled=(self._operator_agent_explicitly_enabled if gateway is None else lambda aid:
                 gateway.enabled and aid in gateway.allowed_agent_ids and aid not in gateway.denied_agent_ids),
         )
-        if not decision.eligible:
+    def _require_eligible(self, agent: dict[str, Any] | None, *, gateway=None) -> None:
+        if not self._eligibility(agent, gateway=gateway).eligible:
             raise ExternalAgentAccessError(
                 "Agent is not available for external calls",
                 code="AGENT_NOT_FOUND",

@@ -592,9 +592,11 @@ class DispatchService:
         return tuple(sorted(self._projects))
 
     async def discover(self, project_id: str, *, limit: int = 50) -> dict[str, Any]:
-        """Discover through the native non-team eligibility policy."""
+        """Discover using the native eligibility of the authenticated task transport."""
         payload = await self._call(project_id, lambda client: client.list_agents(limit=limit))
-        return {**payload, "projectId": project_id, "scope": "externally_dispatchable", "catalogComplete": False}
+        context = payload.get("dispatchContext", "external")
+        scope = "launcher_local_dispatchable" if context == "launcher_local" else "externally_dispatchable"
+        return {**payload, "projectId": project_id, "scope": scope, "dispatchContext": context, "catalogComplete": False}
 
     async def available_projects(self, *, offset: int = 0, limit: int = 8,
                                  expected_revision: int | None = None) -> dict[str, Any]:

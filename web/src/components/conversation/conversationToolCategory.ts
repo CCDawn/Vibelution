@@ -1,3 +1,8 @@
+import {
+  assistantActionFromToolArguments,
+  assistantActionKindForTool,
+  type AssistantActionKind,
+} from "./assistantActionLabels";
 import type { CodexTranscriptCell } from "./codexTranscriptCells";
 import { codexTranscriptToolRawName } from "./conversationToolActivityModel";
 import type { ConversationToolPresentationLanguage } from "./conversationToolPresentation";
@@ -112,7 +117,22 @@ function normalizeToolCategoryName(name: string) {
   return String(name ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
 }
 
-export function conversationToolCategoryForName(name: string): ConversationToolCategory | null {
+const ASSISTANT_ACTION_CATEGORIES: Record<AssistantActionKind, ConversationToolCategory> = {
+  inspect: "explore",
+  source: "explore",
+  search: "explore",
+  change: "changes",
+  dispatch: "agent",
+  browser: "cua",
+  execute: "execute",
+  verify: "execute",
+};
+
+export function conversationToolCategoryForName(name: string, toolArguments?: unknown): ConversationToolCategory | null {
+  const actionKind = assistantActionKindForTool(name, toolArguments);
+  if (actionKind) {
+    return ASSISTANT_ACTION_CATEGORIES[actionKind];
+  }
   const normalized = normalizeToolCategoryName(name);
   if (!normalized) {
     return null;
@@ -149,7 +169,13 @@ export function conversationToolCategoryForName(name: string): ConversationToolC
 export function conversationToolCategoryForCell(
   cell: CodexTranscriptCell,
 ): ConversationToolCategory | null {
-  return conversationToolCategoryForName(codexTranscriptToolRawName(cell));
+  const name = codexTranscriptToolRawName(cell);
+  // An unknown explicit action is authoritative too. Only absent actions may
+  // fall back to the canonical lifecycle arguments retained by projections.
+  const args = assistantActionFromToolArguments(name, cell.toolArguments)
+    ? cell.toolArguments
+    : cell.toolLifecycleModel?.toolCalls?.[0]?.arguments ?? cell.toolArguments;
+  return conversationToolCategoryForName(name, args);
 }
 
 export function conversationToolCategoryLabel(
@@ -169,6 +195,8 @@ export function conversationToolCategoryLabel(
 const AGENT_DISPLAY_ARGUMENT_KEYS = [
   "task_type",
   "agent_name",
+  "agentId",
+  "agent_id",
   "agent",
   "subagent",
   "role",

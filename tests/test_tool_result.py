@@ -23,6 +23,7 @@ from core.infrastructure.tool_result import (
     package_tool_result,
     package_tool_result_facts,
     project_runtime_tool_metadata,
+    project_tool_result_for_model,
     tool_result_facts_payload,
     render_tool_result_for_model,
     format_tool_message,
@@ -959,7 +960,9 @@ class TestFormatToolMessage:
         assert "安装依赖后重试" not in rendered
         assert "continuationHint" not in tool_result_facts_payload(facts)
 
-    def test_model_render_strips_inline_recovery_and_structured_action_routes(self):
+    def test_model_render_strips_structured_action_routes_but_keeps_message_text(self):
+        """结构化工作流字段（nextActions/recovery/replacement）仍整键剥离；
+        `message` 是观察正文，句首「请/Use/Call」不再触发句级删剪。"""
         payload = {
             "status": "error",
             "message": "参数校验失败。请按工具描述修正参数名和类型后重试。",
@@ -973,7 +976,7 @@ class TestFormatToolMessage:
         )
 
         assert "参数校验失败" in rendered
-        assert "请按工具描述" not in rendered
+        assert "请按工具描述" in rendered
         assert "nextActions" not in rendered
         assert "source_collection_context_tool" not in rendered
         assert "replacement" not in rendered
@@ -1257,6 +1260,65 @@ class TestTimeoutTextDetection:
         assert semantics["semanticStatus"] == "timeout"
         assert semantics["timedOut"] is True
         assert semantics["failureClass"] == "timeout"
+
+
+class TestModelProjectionSentenceFilter:
+    """回归：模型投影句级过滤只删运行时标签，不再按自然语言句首动词删剪正文。"""
+
+    def test_natural_language_sentences_are_preserved(self):
+        raw = (
+            "# README\n"
+            "请先安装依赖后再运行测试。\n"
+            "Use the CLI to scaffold a new project.\n"
+            "Call this endpoint once per session.\n"
+            "下一步建议查看 docs/configuration.md。\n"
+            "如需更多示例，参见 examples/ 目录。\n"
+            "retry after fixing the config, then check next steps.\n"
+        )
+        projected = project_tool_result_for_model(raw)
+        for line in raw.splitlines():
+            assert line in projected, f"正文被静默删剪: {line}"
+        assert "(运行时提示已省略)" not in projected
+
+    def test_runtime_navigation_label_line_still_filtered_with_marker(self):
+        raw = (
+            "[文件] demo.py\n"
+            "def factual_result():\n"
+            "    return 1\n"
+            "[阅读导航] 继续调用 read_file_tool(offset=20, max_lines=20)。\n"
+        )
+        # 共享清洗保持静默（identity/title/文档分页等 canonical 消费方依赖它）。
+        projected = project_tool_result_for_model(raw)
+        assert "阅读导航" not in projected
+        assert "offset=20" not in projected
+        assert "def factual_result():" in projected
+        assert "(运行时提示已省略)" not in projected
+        # ToolMessage 投影处对有删减的正文追加轻量标记。
+        facts = package_tool_result_facts(raw, tool_name="probe_tool")
+        assert "阅读导航" not in facts.content
+        assert "def factual_result():" in facts.content
+        assert facts.content.endswith("(运行时提示已省略)")
+
+    def test_inline_continuation_label_sentence_filtered_with_marker(self):
+        raw = "事实句子。 [续读] read_file_tool(file_path=\"core/demo.py\")。\n保留行。\n"
+        facts = package_tool_result_facts(raw, tool_name="probe_tool")
+        assert "续读" not in facts.content
+        assert "事实句子。" in facts.content
+        assert "保留行。" in facts.content
+        assert "(运行时提示已省略)" in facts.content
+
+    def test_fully_stripped_label_result_stays_empty(self):
+        raw = "[续读] read_file_tool(offset=20)。\n"
+        assert project_tool_result_for_model(raw) == ""
+
+    def test_structured_key_stripping_unchanged(self):
+        raw = json.dumps(
+            {"ok": True, "nextAction": "调用 retry", "result": "plain value"},
+            ensure_ascii=False,
+        )
+        payload = json.loads(project_tool_result_for_model(raw))
+        assert "nextAction" not in payload
+        assert payload["result"] == "plain value"
 
 
 if __name__ == "__main__":

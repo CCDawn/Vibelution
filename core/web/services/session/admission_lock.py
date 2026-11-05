@@ -14,7 +14,7 @@ import psutil
 from core.chat.conversation_ledger import conversation_ledger_path
 from core.infrastructure.file_lock import cross_process_file_lock
 from core.infrastructure.process_liveness import is_pid_alive
-from core.runtime_manager.work_run_store import ACTIVE_RUN_IDS_LIMIT, active_work_payload_blocks_lifecycle
+from core.runtime_manager.work_run_store import active_work_payload_blocks_lifecycle
 
 from . import journal_bridge
 
@@ -85,17 +85,25 @@ def _session_blocking_work_run_snapshots(
 ) -> tuple[list[dict[str, Any]], bool]:
     """Active chat_turn snapshots that still block a new turn for the session.
 
-    Returns ``(snapshots, suspicious_index)``.  A suspicious index (wrong
-    shape or over the active-id bound) conservatively reports blocking
-    without snapshot evidence, so callers must honor it instead of the
-    snapshot list.
+    Returns ``(snapshots, suspicious_index)``.  The active-id set comes from
+    the store's self-healing reader (``load_active_run_ids``: bounded
+    normalization plus the settled prune that persists its repair), so a
+    damaged index heals here instead of wedging every later submit busy with
+    nobody left to rewrite the index.  Only a self-heal read that still fails
+    is suspicious: it conservatively reports blocking without snapshot
+    evidence, and the submit gate must surface a recovery path instead of a
+    plain busy loop.
     """
 
     if not turn_id:
         turn_id = _latest_user_message_turn_id(s, session_id)
-    index = s._WORK_RUN_STORE.load_run_index("chat_turn")
-    ids = index.get("activeRunIds") or [index.get("activeRunId")]
-    if not isinstance(ids, list) or len(ids) > ACTIVE_RUN_IDS_LIMIT:
+    try:
+        ids = s._WORK_RUN_STORE.load_active_run_ids("chat_turn")
+    except Exception:
+        # The self-heal read itself failed (e.g. the cross-process index lock
+        # budget ran out): nobody can attribute the index right now, so keep
+        # the anti-split-brain busy semantics rather than forking a second
+        # writer into an unknown journal state.
         return [], True
     blocking: list[dict[str, Any]] = []
     for run_id in dict.fromkeys(key for key in [turn_id, *ids] if isinstance(key, str) and key):
@@ -111,6 +119,25 @@ def session_has_active_work_run(s, session_id: str, turn_id: str = "") -> bool:
     return suspicious or bool(blocking)
 
 
+def session_foreign_work_run_block(s, session_id: str, turn_id: str = "") -> tuple[bool, bool]:
+    """``(foreign_owner_alive, work_run_index_unreadable)`` for submit gates.
+
+    ``work_run_index_unreadable`` separates a conservative busy caused by a
+    failed self-heal read from the normal live-writer busy, so the gate can
+    point at the recovery path instead of telling the user to wait for a turn
+    that no readable evidence can prove.
+    """
+
+    blocking, suspicious = _session_blocking_work_run_snapshots(s, session_id, turn_id)
+    if suspicious:
+        # Cannot see who owns the index: assume the worst so the normal busy
+        # semantics, not the exemption, apply.
+        return True, True
+    now = time.time()
+    alive = any(_snapshot_owner_process_alive(row, now=now) for row in blocking)
+    return alive, False
+
+
 def session_active_work_run_owner_alive(s, session_id: str, turn_id: str = "") -> bool:
     """True when a blocking work-run snapshot proves a live foreign writer.
 
@@ -124,13 +151,8 @@ def session_active_work_run_owner_alive(s, session_id: str, turn_id: str = "") -
     exists to bypass.
     """
 
-    blocking, suspicious = _session_blocking_work_run_snapshots(s, session_id, turn_id)
-    if suspicious:
-        # Cannot see who owns the index: assume the worst so the normal busy
-        # semantics, not the exemption, apply.
-        return True
-    now = time.time()
-    return any(_snapshot_owner_process_alive(row, now=now) for row in blocking)
+    foreign_alive, _index_unreadable = session_foreign_work_run_block(s, session_id, turn_id)
+    return foreign_alive
 
 
 def _snapshot_owner_process_alive(snapshot: dict[str, Any], *, now: float) -> bool:

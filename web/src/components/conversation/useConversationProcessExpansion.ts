@@ -188,7 +188,7 @@ export function useConversationProcessExpansion({
     }
     // Process chrome follows the current run state until the user chooses.
     // Caching a settled default would otherwise block the next running edge.
-    if (section === "process") {
+    if (section === "process" || section === "work") {
       return defaultExpanded;
     }
     const messageDefaults = defaultExpansionRef.current[messageId] ?? {};
