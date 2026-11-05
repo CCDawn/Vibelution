@@ -13,7 +13,8 @@ function deferred() {
 }
 
 const fixtures: ReturnType<typeof fixture>[] = [];
-function fixture(startupSignal?: AbortSignal, onShutdown?: () => Promise<void>) {
+function fixture(startupSignal?: AbortSignal, onShutdown?: () => Promise<void>,
+  startupRead?: (url: string, init?: RequestInit) => Promise<Response | undefined>) {
   const root = mkdtempSync(join(tmpdir(), "assistant-shutdown-test-"));
   const pythonPath = join(root, "pythonw.exe");
   writeFileSync(pythonPath, "fake executable - never launched");
@@ -36,7 +37,11 @@ function fixture(startupSignal?: AbortSignal, onShutdown?: () => Promise<void>) 
     exitCode: vi.fn((job: WorkbenchJobHandle) => active.get(job) === 0 ? 0 : null),
     close: vi.fn((job: WorkbenchJobHandle) => { active.delete(job); }),
   };
-  const fetch = vi.fn(async (url: Parameters<typeof globalThis.fetch>[0]): Promise<Response> => {
+  const fetch = vi.fn(async (url: Parameters<typeof globalThis.fetch>[0], init?: RequestInit): Promise<Response> => {
+    if (startupRead && (String(url).endsWith("/health") || String(url).endsWith("/api/assistant"))) {
+      const response = await startupRead(String(url), init);
+      if (response) return response;
+    }
     if (String(url).endsWith("/health")) return Response.json({ status: "ok", protocolVersion: 1, role: "launcher_assistant" });
     if (String(url).endsWith("/api/assistant")) return Response.json({ assistant: { agentId: "a", directSessionId: "s" } });
     if (String(url).endsWith("/shutdown")) {
@@ -132,6 +137,43 @@ describe("assistant owner shutdown admission", () => {
     await vi.advanceTimersByTimeAsync(0);
     controller.abort();
     await vi.advanceTimersByTimeAsync(50);
+    expect(settled).toBe(false);
+    expect(native.close).not.toHaveBeenCalled();
+    setDrained(true);
+    await vi.advanceTimersByTimeAsync(20);
+    expect(await outcome).toBe("ASSISTANT_STOPPED");
+    expect(native.spawn).toHaveBeenCalledOnce();
+    expect(native.close).toHaveBeenCalledOnce();
+    expect(native.terminate).not.toHaveBeenCalled();
+  });
+
+  it.each(["/health", "/api/assistant"])("cancels a pending startup %s read without skipping the captured output drain", async path => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const reading = deferred();
+    let readSignal: AbortSignal | null | undefined;
+    const { host, native, active, setDrained } = fixture(controller.signal, undefined, async (url, init) => {
+      if (!url.endsWith(path)) return undefined;
+      readSignal = init?.signal;
+      reading.resolve();
+      return new Promise<Response>((_resolve, reject) => {
+        const abort = () => reject(readSignal?.reason ?? new Error("fake read aborted"));
+        readSignal?.addEventListener("abort", abort, { once: true });
+        if (readSignal?.aborted) abort();
+      });
+    });
+    let settled = false;
+    const outcome = host.start().then(() => { settled = true; return "ready"; }, error => { settled = true; return error.message; });
+    await reading.promise;
+    // A naturally exited Job still owns its unread output. Cancelling the
+    // startup read must not make that output drain look complete.
+    for (const job of active.keys()) active.set(job, 0);
+    setDrained(false);
+    controller.abort();
+    expect(readSignal?.aborted).toBe(true);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(host.snapshot().state).not.toBe("ready");
+    expect(native.drainStatus).toHaveBeenCalled();
     expect(settled).toBe(false);
     expect(native.close).not.toHaveBeenCalled();
     setDrained(true);

@@ -1417,13 +1417,15 @@ export class AssistantHost {
           generation.hostPid = ready.pid;
           try {
             const timeout = Math.max(1, Math.min(2_000, deadline - Date.now()));
-            const health = await this.rpc(generation, "/health", "GET", undefined, timeout);
+            const health = await this.rpc(generation, "/health", "GET", undefined, timeout,
+              false, MAX_RESPONSE_BYTES, this.options.startupSignal);
             if (!object(health) || health.status !== "ok" || health.role !== "launcher_assistant" || health.protocolVersion !== 1) throw new HostError("ASSISTANT_HEALTH_INVALID");
             if (this.options.mainControl && health.mainControlVersion !== 1) throw new HostError("ASSISTANT_MAIN_CONTROL_UNAVAILABLE");
             if (this.options.appearanceControl && health.appearanceControlVersion !== 1) throw new HostError("ASSISTANT_APPEARANCE_CONTROL_UNAVAILABLE");
             if (this.options.browserControl && health.browserControlVersion !== 1) throw new HostError("ASSISTANT_BROWSER_CONTROL_UNAVAILABLE");
             if (this.options.initialMigrationControl && health.initialMigrationControlVersion !== 1) throw new HostError("ASSISTANT_INITIAL_MIGRATION_UNAVAILABLE");
-            const status = await this.rpc(generation, "/api/assistant", "GET", undefined, Math.max(1, deadline - Date.now()));
+            const status = await this.rpc(generation, "/api/assistant", "GET", undefined, Math.max(1, deadline - Date.now()),
+              false, MAX_RESPONSE_BYTES, this.options.startupSignal);
             generation.sessionId = identity(status);
             generation.agentId = (status as { assistant: { agentId: string } }).assistant.agentId;
             if (this.options.startupSignal?.aborted || revision !== this.revision || generation.abort.signal.aborted) throw new HostError("ASSISTANT_STOPPED");
