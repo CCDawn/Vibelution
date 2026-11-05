@@ -35,8 +35,7 @@ import type { Language, TranslationKey } from "../../i18n/dictionaryTypes";
 import type { ComposerContextRingModel } from "../../routes/chat/composerContextModel";
 import { AgentPermissionPresetControl } from "../vui/product/agent-management";
 import { VButton, VNativeInput, VNativeTextarea } from "../vui";
-import { ComposerContextRing } from "./ComposerContextRing";
-import { ComposerCacheIndicator } from "./ComposerCacheIndicator";
+import { ConversationComposerMetrics } from "./ConversationComposerMetrics";
 import type { ComposerCacheUsageModel } from "./composerCacheUsageModel";
 import { ConversationFollowupQueueBar } from "./ConversationFollowupQueueBar";
 import { ConversationInferenceControl } from "./ConversationInferenceControl";
@@ -1518,15 +1517,13 @@ export function useConversationComposer({
             <div className={`${styles.composerToolbarEnd} ${composerVariant === "codex" ? conversationComposerResponsiveStyles.toolbarEnd : ""}`}>
               {composerModelControl ?? (turnModelControl ? <ConversationTurnModelControl {...turnModelControl} /> : null)}
               {llmControl ? <ConversationInferenceControl {...llmControl} /> : null}
-              {composerContextRing ? (
-                <ComposerContextRing
-                  model={composerContextRing}
-                  lang={lang}
-                  sessionId={sessionId}
-                  onOpenDetail={onOpenComposerContextDetail}
-                />
-              ) : null}
-              {composerCacheUsage ? <ComposerCacheIndicator sessionId={sessionId} model={composerCacheUsage} lang={lang} /> : null}
+              <ConversationComposerMetrics
+                contextModel={composerContextRing}
+                cacheUsage={composerCacheUsage}
+                lang={lang}
+                sessionId={sessionId}
+                onOpenContextDetail={onOpenComposerContextDetail}
+              />
               {composerVariant === "codex" ? composerActions : null}
             </div>
           </div>
