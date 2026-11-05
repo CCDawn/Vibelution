@@ -634,7 +634,7 @@ export async function retireClaimedIsolatedRuntime(input: {
   if (!fenceOpen()) {
     return settleFailed("isolated backend retirement was superseded before health-identity reclaim");
   }
-  let staleReclaim: { reclaimed: boolean; reason: string; verifiedPid?: number };
+  let staleReclaim: { reclaimed: boolean; reason: string; verifiedPid?: number; foreignReusePids?: number[] };
   let verifiedDaemonPid = 0;
   let daemonPid = 0;
   let retirePythonPath = "";
@@ -694,6 +694,14 @@ export async function retireClaimedIsolatedRuntime(input: {
           extraPids: reclaimExtraPids,
           expectedIdentities,
           terminateProcessTree,
+          // The same python-identity bridge the daemon-record reconciliation
+          // uses: reclaim needs it to falsify a registered pid that Windows
+          // handed to an unrelated process while the owned port is free.
+          captureProcessIdentity: (pid: number) => dependencies.captureDaemonIdentity({
+            pythonPath: retirePythonPath,
+            workspaceRoot,
+            pid
+          }),
           gracefulShutdown: requestGracefulWorkbenchShutdown,
           forceRetireOnActiveWorkRefusal: input.forceRetireOnActiveWorkRefusal === true,
           interruptActiveWork: input.interruptActiveWork,
@@ -712,7 +720,13 @@ export async function retireClaimedIsolatedRuntime(input: {
     );
   }
   const stillCurrentAfterReclaim = fenceOpen();
-  const registeredSpawnPidAlive = registeredSpawnPid > 0 && dependencies.pidAlive(registeredSpawnPid);
+  // A reclaim-proven foreign executable plus a released port means the
+  // registered spawn pid was reused by an unrelated process; that live pid is
+  // no longer evidence of an unretired backend, so it must not block closure.
+  const foreignReusedPids = new Set(staleReclaim.foreignReusePids ?? []);
+  const registeredSpawnPidAlive = registeredSpawnPid > 0
+    && !foreignReusedPids.has(registeredSpawnPid)
+    && dependencies.pidAlive(registeredSpawnPid);
   const backendConfirmedClosed = staleReclaim.reclaimed && !registeredSpawnPidAlive;
   if (backendConfirmedClosed && daemonPid > 0) {
     // Retirement-time daemon-record reconciliation, mirroring the main-line

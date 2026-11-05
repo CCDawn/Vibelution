@@ -33,6 +33,7 @@ from .admission_lock import (
     SessionAdmissionLock,
     mark_native_admission_rejected,
     session_active_work_run_owner_alive,
+    session_foreign_work_run_block,
 )
 from .retry import validate_safe_retry, with_retry_receipt
 from .continuation import (
@@ -1685,10 +1686,12 @@ def submit_session_message(
         # parallel resume into the same journal when the backend startup
         # sweep already owns the turn (split-brain; SessionBusyError stays
         # transient for the daemon wake retry).
-        foreign_work_running = (
-            not s._is_session_running(conversation_id)
-            and session_active_work_run_owner_alive(s, conversation_id)
-        )
+        foreign_work_running = False
+        work_run_index_unreadable = False
+        if not s._is_session_running(conversation_id):
+            foreign_work_running, work_run_index_unreadable = session_foreign_work_run_block(
+                s, conversation_id
+            )
         if s._is_session_running(conversation_id) or foreign_work_running:
             if queue_if_busy:
                 raise _SessionTurnQueued(
@@ -1712,6 +1715,21 @@ def submit_session_message(
                         lang=lang,
                     )
                 )
+            if work_run_index_unreadable:
+                # The self-heal read could not attribute the work-run index:
+                # this busy is about unreadable evidence, not a live turn, so
+                # the message must point at the recovery path instead of the
+                # "wait for the current turn" loop that wedged the session.
+                raise mark_native_admission_rejected(s.SessionBusyError(
+                    s.text_for(
+                        lang,
+                        zh="会话工作索引暂时无法读取，无法确认是否仍有进行中的一轮；请稍后重试。"
+                           "若持续失败，请检查项目 work-runs/chat_turn/index.json.lock 是否被残留锁占用。",
+                        en="The session work-run index could not be read, so an in-flight turn cannot be "
+                           "ruled out. Retry in a moment; if it keeps failing, inspect the project's "
+                           "work-runs/chat_turn/index.json.lock sidecar for a stale or stuck lock.",
+                    )
+                ))
             raise _session_still_running_error(s, lang)
         partial_submission_turn_id = (
             _existing_partial_submission_turn_id(
