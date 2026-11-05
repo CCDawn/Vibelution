@@ -27,7 +27,8 @@ export type ConversationComposerAttachment = {
   previewUrl: string;
   sizeBytes: number;
   contentType: string;
-  kind?: "image" | "document";
+  /** "secret" chips carry a masked label plus a backend `sec_` reference only. */
+  kind?: "image" | "document" | "secret";
   /** Per-attachment upload lifecycle; undefined means not attempted yet. */
   uploadStatus?: "pending" | "uploading" | "uploaded" | "failed";
   /** Backend artifact id held by an already-uploaded chip (reused on resubmit). */

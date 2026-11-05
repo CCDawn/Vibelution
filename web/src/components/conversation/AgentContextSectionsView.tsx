@@ -1,4 +1,4 @@
-import { Download, FileText, Link2 } from "lucide-react";
+import { Download, FileText, KeyRound, Link2 } from "lucide-react";
 import React, { ReactNode } from "react";
 
 import type {
@@ -6,7 +6,7 @@ import type {
   AgentReferencePart,
 } from "../../agent-thread/types";
 import { VTooltip } from "../vui";
-import { attachmentSizeLabel, isImageAttachment } from "./attachmentPresentation";
+import { attachmentSizeLabel, isImageAttachment, isUserSecretAttachment } from "./attachmentPresentation";
 import type { AgentMessageContextSection } from "./agentMessageSections";
 import styles from "./AgentContextSectionsView.styles";
 
@@ -73,6 +73,11 @@ export function AgentContextSectionsView({ sections, lang }: AgentContextSection
 
 function renderAgentContextAttachmentPart(part: AgentAttachmentPart, lang: "zh" | "en") {
   const attachment = part.attachment;
+  // Privacy attachments project a masked identity card only: kind/label plus a
+  // fixed mask. No value, no preview, no download, no copy affordance exists.
+  if (isUserSecretAttachment(attachment)) {
+    return renderAgentContextSecretCard(part, attachment, lang);
+  }
   const isImage = isImageAttachment(attachment);
   const filename =
     attachment.filename
@@ -118,6 +123,34 @@ type AgentContextImageAttachmentProps = {
   attachmentLabel: string;
   lang: "zh" | "en";
 };
+
+/** Masked identity card for a staged user secret: 「隐私 · <label> ····」.
+ * The staged value stays server-side behind the `sec_` reference; this card
+ * deliberately exposes no content, preview, download or copy interaction. */
+function renderAgentContextSecretCard(part: AgentAttachmentPart, attachment: AgentAttachmentPart["attachment"], lang: "zh" | "en") {
+  const label = String(attachment.filename || "").trim()
+    || (lang === "zh" ? "隐私附件" : "Private attachment");
+  const secretLabel = lang === "zh" ? `隐私 · ${label}` : `Private · ${label}`;
+  const attachmentLabel = lang === "zh" ? `用户上下文隐私附件 ${label}（内容已遮盖）` : `User context private attachment ${label} (masked)`;
+  return (
+    <figure
+      key={part.id}
+      className={styles.userAttachmentSecret}
+      role="listitem"
+      aria-label={attachmentLabel}
+      data-agent-context-part-id={part.id}
+      data-agent-context-part-type={part.type}
+      data-agent-context-attachment-secret="true"
+      data-agent-context-attachment-name={label}
+    >
+      <span className={styles.userAttachmentFileIcon} aria-hidden="true">
+        <KeyRound size={15} />
+      </span>
+      <span className={styles.userAttachmentSecretLabel}>{secretLabel}</span>
+      <span className={styles.userAttachmentSecretMask} aria-hidden="true">····</span>
+    </figure>
+  );
+}
 
 function AgentContextImageAttachment({
   part,
