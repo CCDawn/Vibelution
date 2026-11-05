@@ -1,5 +1,5 @@
 import {useEffect,useState} from "react";
-import {Bot,LoaderCircle,RefreshCw,Trash2,UsersRound} from "lucide-react";
+import {Bot,LoaderCircle,Trash2,UsersRound} from "lucide-react";
 import {VButton,VTabs,VSkeleton} from "../../../components/vui";
 import {usePublishLauncherNotices} from "../../../app/LauncherNotifications";
 // Approved reuse boundary: use the existing Agent-card recipe as the geometry authority.
@@ -60,15 +60,12 @@ export function LauncherAssistantTaskSidebar({lang="zh",onNavigate}:{lang?:"zh"|
  const group=chosen&&chosen.identity===model.identity?chosen.group:initial;
  const filtered=model.tasks.filter(task=>taskGroup(task)===group);
  return <section className={styles.root} aria-label={copy.label} data-assistant-task-cards>
-  <header className={styles.toolbar}><span>{lang==="zh"?"任务":"Tasks"}</span><VButton variant="ghost" density="compact" isIconOnly aria-label={copy.refresh} tooltip={copy.refresh} data-assistant-task-refresh icon={<RefreshCw size={13}/>} isPending={model.refreshing} onClick={()=>{void model.refresh();}}/>
-   <VButton variant="ghost" density="compact" className={styles.cleanup} data-assistant-task-bulk-cleanup title={copy.cleanupHint} isDisabled={!model.enabled||model.cleanupBusy||!model.canCleanCompleted} isPending={model.cleanupBusy} onClick={model.cleanCompleted}>{copy.cleanup}</VButton>
-  </header>
   <VTabs value={group} onValueChange={value=>setChosen({identity:model.identity,group:value as Group})} aria-label={lang==="zh"?"任务分类":"Task categories"}
    className={styles.tabs} listClassName={styles.tabList} triggerClassName={styles.tab}
    items={groups.map(value=>({id:value,label:(value==="attention"?(lang==="zh"?"待处理":"Needs you"):copy[value])+" "+count(value)}))}/>
   {warning&&!hostedNotices?<div className={styles.notice} role="status"><span>{warning}</span><VButton variant="ghost" density="compact" isPending={model.refreshing} onClick={()=>{void model.refresh();}}>{copy.refresh}</VButton></div>:null}
   {model.loading&&!model.tasks.length?<div role="status" aria-label={copy.loading} className={styles.list}><VSkeleton className="h-12"/><VSkeleton className="h-12"/></div>:null}
-  <div className={styles.list} data-task-group={group}>{filtered.slice(0,model.shown).map(task=><TaskRow key={task.id} task={task} lang={lang} onNavigate={onNavigate}/>)}</div>
+  <div className={filtered.length?styles.list:styles.emptyList} data-task-group={group}>{filtered.slice(0,model.shown).map(task=><TaskRow key={task.id} task={task} lang={lang} onNavigate={onNavigate}/>)}</div>
   {!model.loading&&!warning&&!filtered.length?<p className={styles.empty}>{lang==="zh"?"暂无此类任务":"No tasks in this category"}</p>:null}
   {filtered.length>model.shown||model.hasNextPage?<VButton variant="ghost" density="compact" isPending={model.loadingMore} onClick={()=>{void model.more(group);}}>{copy.more}</VButton>:null}
  </section>;
