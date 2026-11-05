@@ -8,6 +8,7 @@ import { createDesktopShellExitDeadline, withDesktopShellExitTimeout } from "../
 import { isActiveWorkProbeAuthFailure, resolveQuitActiveWorkStatus } from "../src/shutdown/shutdownCoordinator.js";
 import { isWorkbenchCloseControlFetchFailure } from "../src/lifecycle/workbenchCloseFailOpen.js";
 import type { WorkbenchCloseTiming } from "../src/process/fastWorkbenchClose.js";
+import { invokeAssistant, LAUNCHER_ASSISTANT_URL } from "../src/assistant/assistantBridge.js";
 
 const mainSourcePath = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 const closeStoreSource = readFileSync(
@@ -26,6 +27,66 @@ async function flushCloseCallbacks() {
 }
 
 const releaseCloseHarnesses: Array<() => Promise<void>> = [];
+
+function assistantInvocationHarness(role: "workbench" | "launcher" | "pet", options: {
+  approved?: boolean; stopping?: boolean; startupAborted?: boolean;
+} = {}) {
+  const source = readFileSync(mainSourcePath, "utf8");
+  const begin = source.indexOf("ipcMain.handle(IPC_CHANNELS.assistantInvoke,");
+  const end = source.indexOf("\nfunction createDesktopPathsForApp", begin);
+  const compiled = transpileModule(source.slice(begin, end), {
+    compilerOptions: { target: ScriptTarget.ES2022 },
+  }).outputText;
+  const startupAbort = new AbortController();
+  if (options.startupAborted) startupAbort.abort();
+  const senderFrame = { url: LAUNCHER_ASSISTANT_URL };
+  const sender = { mainFrame: senderFrame, getURL: () => LAUNCHER_ASSISTANT_URL, isDestroyed: () => false };
+  const event = { sender, senderFrame };
+  const host = { start: vi.fn(async () => undefined), request: vi.fn(async () => ({ accepted: true })) };
+  const float = {
+    invoke: vi.fn((incoming: typeof event, payload: unknown) => invokeAssistant(incoming, payload, {
+      host, contents: sender, hide: () => undefined, setExpanded: () => undefined,
+    })),
+    hideFloat: vi.fn(), setFloatExpanded: vi.fn(),
+  };
+  let handler!: (incoming: typeof event, payload: unknown) => Promise<unknown>;
+  runInNewContext(compiled, {
+    ipcMain: { handle: (_channel: string, registered: typeof handler) => { handler = registered; } },
+    IPC_CHANNELS: { assistantInvoke: "assistantInvoke" },
+    shutdownApproved: options.approved === true,
+    launcherAssistantStopping: options.stopping ? Promise.resolve() : null,
+    launcherAssistantStartupAbort: startupAbort,
+    launcherAssistantHost: host, launcherAssistantWindow: float,
+    isLauncherControlSender: (candidate: unknown) => role === "launcher" && candidate === sender,
+    isWorkbenchMainSender: (candidate: unknown) => role === "workbench" && candidate === sender,
+    isTrustedLauncherControlFrame: (candidate: unknown) => candidate === event,
+    requestOpenLauncherFromAssistant: vi.fn(), invokeAssistant,
+  });
+  return { invoke: () => handler(event, { operation: "status" }), host, float };
+}
+
+describe("Launcher assistant producer admission during shell exit", () => {
+  it.each(["workbench", "launcher", "pet"] as const)("preserves %s recovery before shutdown", async role => {
+    const harness = assistantInvocationHarness(role);
+    await expect(harness.invoke()).resolves.toEqual({ accepted: true });
+    expect(harness.host.start).toHaveBeenCalledOnce();
+    expect(harness.host.request).toHaveBeenCalledOnce();
+  });
+
+  it.each(["workbench", "launcher", "pet"] as const)("blocks %s polls during and after assistant stop", async role => {
+    for (const options of [
+      { stopping: true },
+      { startupAborted: true },
+      { approved: true },
+    ]) {
+      const harness = assistantInvocationHarness(role, options);
+      await expect(harness.invoke()).rejects.toThrow("ASSISTANT_NOT_READY");
+      expect(harness.host.start).not.toHaveBeenCalled();
+      expect(harness.host.request).not.toHaveBeenCalled();
+      expect(harness.float.invoke).not.toHaveBeenCalled();
+    }
+  });
+});
 
 function closeHarness(options: { platform?: string; owner?: boolean } = {}) {
   const source = readFileSync(mainSourcePath, "utf8");

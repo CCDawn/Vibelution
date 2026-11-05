@@ -234,6 +234,125 @@ def test_provider_cross_origin_can_explicitly_drop_auth(operator):
     assert not provider["requires_credential"]
 
 
+def _stage_secret(value="fixture-secret", kind="api_key"):
+    from core.assistant_runtime.secret_attachments import issue_secret_attachment
+    return issue_secret_attachment(value, kind)
+
+
+def _record_env(monkeypatch):
+    from config import public_config
+    writes, deletes = [], []
+    monkeypatch.setattr(public_config, "_set_user_env_var", lambda name, value: writes.append((name, value)))
+    monkeypatch.setattr(public_config, "_delete_user_env_var", lambda name: deletes.append(name))
+    return writes, deletes
+
+
+def test_provider_add_credential_token_configures_env_credential_without_echo(operator, monkeypatch):
+    from core.assistant_runtime.secret_attachments import resolve_secret_attachment
+    writes, deletes = _record_env(monkeypatch)
+    token = _stage_secret()
+    result = call("provider_add", {"provider_id": "tokened", "base_url": "https://tokened.example/v1",
+                  "credential_token": token}, governed=True)
+    assert result["ok"] and result["verified"], result
+    assert result["credentialState"] == "configured"
+    assert writes == [("VIBELUTION_LLM_TOKENED_API_KEY", "fixture-secret")]
+    assert deletes == []
+    provider = read(operator)["llm"]["providers"]["tokened"]
+    assert provider["auth_kind"] == "api_key"
+    assert provider["credential_ref"] == "env:VIBELUTION_LLM_TOKENED_API_KEY"
+    assert provider["requires_credential"] is True
+    encoded = json.dumps(result)
+    for forbidden in (token, "fixture-secret", "env:", "VIBELUTION_LLM"):
+        assert forbidden not in encoded
+    assert resolve_secret_attachment(token) is None  # one-shot attachment consumed
+
+
+def test_provider_add_unknown_or_expired_credential_token_fails_without_writes(operator, monkeypatch):
+    from core.assistant_runtime.secret_attachments import peek_secret_attachment
+    writes, _ = _record_env(monkeypatch)
+    keep = _stage_secret()
+    before = operator.read_bytes()
+    result = call("provider_add", {"provider_id": "tokened", "base_url": "https://tokened.example/v1",
+                  "credential_token": "sec_unknown_or_expired"}, governed=True)
+    assert result["error"] == "credential_token_invalid"
+    assert writes == []
+    assert operator.read_bytes() == before
+    assert peek_secret_attachment(keep) == "api_key"  # unrelated live attachment untouched
+
+
+def test_provider_add_non_api_key_credential_kind_is_consumed_and_rejected(operator, monkeypatch):
+    from core.assistant_runtime.secret_attachments import resolve_secret_attachment
+    writes, deletes = _record_env(monkeypatch)
+    before = operator.read_bytes()
+    token = _stage_secret("fixture-pass", "password")
+    result = call("provider_add", {"provider_id": "tokened", "base_url": "https://tokened.example/v1",
+                  "credential_token": token}, governed=True)
+    assert result["error"] == "credential_token_kind"
+    assert writes == [] and deletes == []
+    assert operator.read_bytes() == before
+    assert resolve_secret_attachment(token) is None  # pop-on-read consumed the failed attempt
+
+
+def test_provider_add_credential_token_and_source_provider_are_mutually_exclusive(operator, monkeypatch):
+    from core.assistant_runtime.secret_attachments import peek_secret_attachment
+    writes, _ = _record_env(monkeypatch)
+    token = _stage_secret()
+    before = operator.read_bytes()
+    result = call("provider_add", {"provider_id": "copy", "source_provider_id": "pixel_relay",
+                  "credential_token": token}, governed=True)
+    assert result["error"] == "ambiguous_credential_source"
+    assert writes == []
+    assert operator.read_bytes() == before
+    assert peek_secret_attachment(token) == "api_key"  # attachment not consumed
+
+
+def test_provider_add_duplicate_connection_keeps_credential_token_unconsumed(operator, monkeypatch):
+    from core.assistant_runtime.secret_attachments import peek_secret_attachment
+    writes, _ = _record_env(monkeypatch)
+    assert call("provider_add", {"provider_id": "dupbase", "base_url": "https://dup.example/v1"}, governed=True)["ok"]
+    token = _stage_secret()
+    result = call("provider_add", {"provider_id": "other", "base_url": "https://dup.example/v1",
+                  "credential_token": token}, governed=True)
+    assert result == {"ok": True, "status": "existing", "verified": True, "providerId": "dupbase"}
+    assert writes == []
+    assert peek_secret_attachment(token) == "api_key"  # duplicate early return never pops the attachment
+    assert "other" not in read(operator)["llm"]["providers"]
+
+
+def test_provider_add_commit_failure_rolls_back_env_credential(operator, monkeypatch):
+    from core.assistant_runtime.secret_attachments import resolve_secret_attachment
+    writes, deletes = _record_env(monkeypatch)
+    token = _stage_secret()
+    monkeypatch.setattr(actions, "_commit", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("conflict")))
+    result = call("provider_add", {"provider_id": "tokened", "base_url": "https://tokened.example/v1",
+                  "credential_token": token}, governed=True)
+    assert result["ok"] is False
+    assert writes == [("VIBELUTION_LLM_TOKENED_API_KEY", "fixture-secret")]
+    assert deletes == ["VIBELUTION_LLM_TOKENED_API_KEY"]
+    assert "tokened" not in read(operator)["llm"]["providers"]
+    assert resolve_secret_attachment(token) is None  # consumed; retry requires re-attaching
+
+
+def test_provider_add_rejects_overlong_derived_env_name_without_consuming_token(operator, monkeypatch):
+    from core.assistant_runtime.secret_attachments import peek_secret_attachment
+    writes, _ = _record_env(monkeypatch)
+    token = _stage_secret()
+    result = call("provider_add", {"provider_id": "a" * 64, "base_url": "https://long.example/v1",
+                  "credential_token": token}, governed=True)
+    assert result["error"] == "credential_env_name_invalid"
+    assert writes == []
+    assert peek_secret_attachment(token) == "api_key"
+
+
+def test_provider_add_still_rejects_inline_api_key_field(operator):
+    before = operator.read_bytes()
+    result = call("provider_add", {"provider_id": "inline", "base_url": "https://inline.example/v1",
+                  "api_key": "fixture-secret"}, governed=True)
+    assert result["error"] == "invalid_input"
+    assert operator.read_bytes() == before
+    assert "fixture-secret" not in json.dumps(result)
+
+
 def test_provider_update_preserves_models_and_unrelated_provider(operator):
     before = read(operator)
     result = call("provider_update", {"provider_id": "pixel_relay", "label": "New label", "enabled": False}, governed=True)

@@ -7,7 +7,7 @@ import type { ConversationViewProps } from "../../components/conversation/conver
 import type { ConversationMessage, SessionDetail, SessionReferenceAttachment, SessionToolApprovalRequest } from "../../api/types";
 import type { LauncherAssistantSessionEvent } from "../../api/launcherAssistant";
 import {
-  launcherAssistantActivity, launcherAssistantMessageOverLimit, launcherAssistantPollInterval, launcherAssistantSendBusyCode,
+  launcherAssistantActivity, launcherAssistantLifecycleClosing, launcherAssistantMessageOverLimit, launcherAssistantPollInterval, launcherAssistantSendBusyCode,
   launcherAssistantSendDefinitelyRejected, launcherAssistantSendRetryableBusy, launcherAssistantSubmission,
   launcherDispatchLabel, launcherDispatchReceiptLabel, launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
   launcherAssistantSessionEventRefreshesDetail, launcherAssistantSseHealthy, launcherAssistantWaitInterval,
@@ -475,6 +475,29 @@ describe("Launcher assistant state", () => {
   ] as const)("does not classify %s as retryable busy", (_label, error) => {
     expect(launcherAssistantSendRetryableBusy(error)).toBe(false);
     expect(launcherAssistantSendBusyCode(error)).toBe("");
+  });
+
+  it.each([
+    ["bare code", new Error("ASSISTANT_LIFECYCLE_CLOSING")],
+    ["ipc wrap", new Error("Error invoking remote method 'assistant:invoke': Error: ASSISTANT_LIFECYCLE_CLOSING")],
+    ["ipc wrap without second Error", new Error("Error invoking remote method 'assistant:invoke': ASSISTANT_LIFECYCLE_CLOSING")],
+  ] as const)("classifies a %s as a lifecycle-closing refusal", (_label, error) => {
+    expect(launcherAssistantLifecycleClosing(error)).toBe(true);
+    // The closing refusal is neither a pre-admission send rejection nor a
+    // retryable-busy quiescence: it names the resident host's own retirement.
+    expect(launcherAssistantSendDefinitelyRejected(error)).toBe(false);
+    expect(launcherAssistantSendRetryableBusy(error)).toBe(false);
+  });
+
+  it.each([
+    ["cold-boot transport failure", new Error("backend unreachable")],
+    ["not-ready cold start", new Error("ASSISTANT_NOT_READY")],
+    ["prefix must not match", new Error("ASSISTANT_LIFECYCLE_CLOSING_SOON")],
+    ["substring must not match", new Error("retry after ASSISTANT_LIFECYCLE_CLOSING completed")],
+    ["non-error value", "ASSISTANT_LIFECYCLE_CLOSING"],
+    ["undefined", undefined],
+  ] as const)("keeps %s out of the lifecycle-closing classification", (_label, error) => {
+    expect(launcherAssistantLifecycleClosing(error)).toBe(false);
   });
 
   it("polls only a visible initial or active native session", () => {

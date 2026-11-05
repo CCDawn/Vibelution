@@ -123,6 +123,8 @@ credential_ref = "env:DEEPSEEK_API_KEY"
 | xiaomi → `MIMO_API_KEY` / `XIAOMI_MIMO_API_KEY` |
 | minimax → `MINIMAX_API_KEY` 等 |
 
+除「设置 → 模型库」页面外，个人助理聊天的「隐私附件」是与之并列的合法密钥入口：明文经封闭 IPC 暂存进程内存（10 分钟 TTL、读即毁），配置工具凭一次性 `credential_token` 引用兑换后写入 Windows 用户环境变量（`VIBELUTION_LLM_<ID>_API_KEY`），provider 最终同样落 `env:` 引用。
+
 **禁止**把真实 key 写入仓库。
 
 ## 钉选模型

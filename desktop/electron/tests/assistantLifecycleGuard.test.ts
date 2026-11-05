@@ -235,4 +235,20 @@ describe("resident assistant lifecycle admission", () => {
     expect(input.releaseOwner).not.toHaveBeenCalled();
     expect(input.reminders.resumeAfterMigration).not.toHaveBeenCalled();
   });
+
+  it("keeps every gate shutdown-owned while reopen stays false and hands nothing back", async () => {
+    const { input, admission, registry } = fixture();
+    input.reopen = () => false;
+    const lease = await acquireAssistantLifecycleLease(input);
+    await lease.release();
+    await lease.release();
+    // A false reopen is exactly a still-exiting shutdown owner (the exit's
+    // generation signal already aborted): the retained gates stay fenced for
+    // that exit, and only an explicit cancelled-exit recovery may reopen them.
+    expect(input.host.migrationBarrier.mock.calls).toEqual([["prepare"], ["status"], ["release"]]);
+    expect(admission.release).not.toHaveBeenCalled();
+    expect(registry.release).not.toHaveBeenCalled();
+    expect(input.reminders.resumeAfterMigration).not.toHaveBeenCalled();
+    expect(input.releaseOwner).not.toHaveBeenCalled();
+  });
 });

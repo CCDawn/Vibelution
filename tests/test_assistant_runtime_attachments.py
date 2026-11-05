@@ -119,6 +119,63 @@ def test_attachment_validation_and_lifecycle(tmp_path):
     ''', config_text=TEST_MODEL_CONFIG)
 
 
+def test_secret_attachment_stage_submit_and_preflight(tmp_path):
+    _run(tmp_path, r'''
+        import json
+        import os
+        from pathlib import Path
+        from core.assistant_runtime import native, secret_attachments
+        from core.chat.turn_journal import load_turn_events
+        root = Path(os.environ['VIBELUTION_ASSISTANT_NATIVE_ROOT'])
+        try:
+            sid = native.bootstrap(root)['assistant']['directSessionId']
+            staged = native.upload_secret_attachment('sk-live-key-123', kind='api_key', label='Provider Key')
+            assert staged['kind'] == 'user_secret'
+            assert staged['label'] == 'Provider Key'
+            assert staged['attachmentId'].startswith('sec_')
+            assert 'sk-live-key-123' not in json.dumps(staged)
+            token = staged['attachmentId']
+            assert secret_attachments.peek_secret_attachment(token) == 'api_key'
+            # Value stays in memory only; no artifact file exists for it.
+            try:
+                native.read_attachment(token)
+            except native.AssistantSessionError as error:
+                assert error.code == 'ATTACHMENT_NOT_FOUND'
+            else:
+                raise AssertionError('secret token resolved as a stored artifact')
+            import core.web.services.session_service as sessions
+            original_executor_submit = sessions._SESSION_EXECUTOR.submit
+            sessions._SESSION_EXECUTOR.submit = lambda *args, **kwargs: None
+            try:
+                # sec_ ids pass artifact preflight; the submit layer consumes them.
+                receipt = native.submit('配置这个', 'secret-request', [token])
+                assert receipt['turnId']
+                events = [
+                    event for event in load_turn_events(root, sid)
+                    if event.event_type == 'user_message'
+                ]
+                payload = json.dumps(events[-1].payload, ensure_ascii=False)
+                assert token in payload
+                assert 'sk-live-key-123' not in payload
+                assert 'user_secret' in payload
+            finally:
+                sessions._SESSION_EXECUTOR.submit = original_executor_submit
+                sessions._set_session_running(sid, False)
+            # Invalid secret staging is rejected without staging anything.
+            for value, kwargs in (('value', {'kind': 'certificate'}),
+                                  ('', {'kind': 'api_key'}),
+                                  ('   ', {'kind': 'api_key'})):
+                try:
+                    native.upload_secret_attachment(value, **kwargs)
+                except native.AssistantSessionError as error:
+                    assert error.code == 'SESSION_INVALID'
+                else:
+                    raise AssertionError('invalid secret staged')
+        finally:
+            native.shutdown()
+    ''', config_text=TEST_MODEL_CONFIG)
+
+
 def test_upload_rejects_linked_session_directory(tmp_path, monkeypatch):
     import os
     from types import SimpleNamespace

@@ -1580,6 +1580,36 @@ def _stamp_forked_from_on_first_message(
     return [stamped, *list(detail_messages[1:])]
 
 
+def _user_secret_attachment_rows(raw_attachments: Any) -> list[dict[str, str]]:
+    """Value-free privacy rows the generic attachment normalizer drops.
+
+    Journal user payloads may carry ``{attachmentId, kind: "user_secret",
+    label?}`` rows (no artifactId/url), which ``_normalize_message_attachments``
+    would discard; the chat bubble's privacy mask chip needs them after a
+    reload. Reconstruction is a strict field whitelist — id, kind, and the
+    optional bounded display label — so no other payload field (and never a
+    plaintext value) can surface through projection. Ordinary sessions never
+    journal such rows (admission rejects them), so their projection output is
+    unchanged.
+    """
+
+    rows: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in list(raw_attachments or []):
+        if not isinstance(item, dict) or str(item.get("kind") or "").strip() != "user_secret":
+            continue
+        attachment_id = str(item.get("attachmentId") or item.get("artifactId") or "").strip()
+        if not attachment_id or attachment_id in seen:
+            continue
+        seen.add(attachment_id)
+        row: dict[str, str] = {"attachmentId": attachment_id, "kind": "user_secret"}
+        label = str(item.get("label") or "").strip()
+        if label:
+            row["label"] = label[:120]
+        rows.append(row)
+    return rows
+
+
 def _normalize_messages(
     conversation_id: str,
     items: Any,
@@ -1659,7 +1689,13 @@ def _normalize_messages(
         mental_snapshot = s._normalize_mental_snapshot(raw.get("mental_snapshot") or raw.get("mentalSnapshot"))
         tool_calls = s._normalize_message_tool_calls(raw.get("tool_calls") or raw.get("toolCalls") or raw.get("tools") or [])
         feedback_events = s._normalize_message_feedback_events(raw.get("feedback_events") or raw.get("feedbackEvents") or [])
-        attachments = s._normalize_message_attachments(raw.get("attachments") or raw.get("imageAttachments") or [])
+        raw_message_attachments = raw.get("attachments") or raw.get("imageAttachments") or []
+        attachments = [
+            *s._normalize_message_attachments(raw_message_attachments),
+            # Privacy mask rows survive the generic normalizer's drop so a
+            # reloaded bubble can still render the user_secret chip.
+            *_user_secret_attachment_rows(raw_message_attachments),
+        ]
         reference_metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
         raw_references = raw.get("references") or reference_metadata.get("sessionReferences") or []
         references = []

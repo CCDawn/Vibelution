@@ -86,9 +86,12 @@ function harness() {
     app: { quit },
     trayQuitAllInFlight: false, trayRestartAllInFlight: false,
     trayRestartLauncherInFlight: false, shellRefreshInFlight: false,
+    launcherAssistantStartupAbort: new AbortController(),
+    resumeLauncherAssistantAfterCancelledExit: vi.fn(async () => undefined),
     stopLauncherAssistant: vi.fn(async () => {
       hostState = "stopped";
       context.launcherAssistantExitReady = true;
+      context.launcherAssistantStartupAbort.abort();
     }),
   };
   runInNewContext(ts.transpileModule(declarations, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, context);

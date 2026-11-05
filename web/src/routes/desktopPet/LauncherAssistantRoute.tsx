@@ -11,6 +11,7 @@ import {
   stopLauncherAssistantTurn, continueLauncherAssistantTurn, switchLauncherAssistantHead,
   regenerateLauncherAssistantMessage, guideLauncherAssistantTurn,
   getLauncherOperatorAsset, getLauncherAssistantAvatar, openLauncherFromAssistant, uploadLauncherAttachment,
+  uploadLauncherUserSecret, launcherUserSecretKindLabel,
   readLauncherAttachment, subscribeLauncherAssistantSessionEvent,
   launcherAssistantBudgetQueryKey,
 } from "../../api/launcherAssistant";
@@ -23,7 +24,7 @@ import { LazyConversationView } from "../../components/conversation/LazyConversa
 import { LauncherAssistantWelcome } from "./LauncherAssistantWelcome";
 import { LauncherAssistantQuestionCard } from "./LauncherAssistantQuestionCard";
 import { VButton, VDenseOpsPage, VNativeButton, VStateSurface } from "../../components/vui";
-import { ChatComposerPlusMenu } from "../chat/ChatComposerPlusMenu";
+import { ChatComposerPlusMenu, type ChatComposerSecretAttachmentInput } from "../chat/ChatComposerPlusMenu";
 import { LauncherAssistantModelControl } from "./LauncherAssistantModelControl";
 import { useShellI18n } from "../../i18n/useShellI18n";
 import { hasExecutionOwnership, resolveSessionActivity, sessionActivityStatusLabel } from "../sessionActivityState";
@@ -52,7 +53,7 @@ import { classifyComposerFiles, mergeComposerAttachmentsWithRejections, type Com
 import {
   launcherAssistantActivity, launcherAssistantMessageOverLimit, launcherAssistantPollInterval, launcherAssistantSubmission,
   launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
-  launcherAssistantSendBusyCode, launcherAssistantSendDefinitelyRejected, launcherAssistantSendRetryableBusy,
+  launcherAssistantLifecycleClosing, launcherAssistantSendBusyCode, launcherAssistantSendDefinitelyRejected, launcherAssistantSendRetryableBusy,
   launcherAssistantSessionEventRefreshesDetail, launcherAssistantSseHealthy,
   launcherAssistantStatusDegradeTone, launcherAssistantWaitInterval, launcherAssistantContextRing, launcherAssistantModelDisplay,
   launcherAssistantEditBackfillDraft,
@@ -84,6 +85,7 @@ const COPY = {
     imageUnsupported: "当前模型不支持图片输入，请移除图片附件后再发送。",
     receipts: "任务状态暂不可用", checking: "正在连接 Launcher…",
     waitingBackend: "正在等待工作台后端启动…",
+    lifecycleClosing: "助理已随上一次退出停止，正在恢复；若长时间停留请重启应用。",
     statusStale: "个人助理状态轮询暂不可用，会话内容可能未更新",
     statusDelayed: "状态刷新延迟，会话内容可能未更新",
     editAsNew: "编辑为新消息",
@@ -102,6 +104,7 @@ const COPY = {
     imageUnsupported: "The current model does not support image input; remove image attachments before sending.",
     receipts: "Task status unavailable", checking: "Connecting to Launcher…",
     waitingBackend: "Waiting for the workbench backend…",
+    lifecycleClosing: "The assistant stopped with the previous exit and is recovering; restart the app if this persists.",
     statusStale: "Assistant status polling is unavailable; conversation content may be stale",
     statusDelayed: "Status refresh is delayed; conversation content may be stale",
     editAsNew: "Edit as new message",
@@ -352,11 +355,13 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   }, [client, sessionId, embedded]);
   // Restored chips start with an empty preview (the blob: URL is unrecoverable);
   // refill each from its already-uploaded artifact through the read IPC, so a
-  // reload keeps the tray usable without re-uploading anything.
+  // reload keeps the tray usable without re-uploading anything. Secret chips
+  // are skipped: their `sec_` reference has no readable bytes here, and the
+  // read verb must never become a value-fetch channel.
   useEffect(() => {
     if (!sessionId || status.data?.attachmentVersion !== 1) return;
     const targets = attachmentsRef.current.flatMap(item =>
-      item.uploadStatus === "uploaded" && item.artifactId && !item.previewUrl ? [{ id: item.id, artifactId: item.artifactId }] : []);
+      item.uploadStatus === "uploaded" && item.kind !== "secret" && item.artifactId && !item.previewUrl ? [{ id: item.id, artifactId: item.artifactId }] : []);
     if (!targets.length) return;
     let active = true;
     void (async () => {
@@ -796,6 +801,33 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     if (incoming.rejected.length || merged.rejected.length) setFeedback(lang === "zh" ? "部分附件类型不支持、过大或超过数量限制。" : "Some attachments are unsupported, too large, or exceed the limit.");
     else setFeedback("");
   }
+  // Privacy attachments: the dialog plaintext goes straight to the closed IPC
+  // verb and only the `sec_` reference returns. The chip below carries the
+  // masked display name and that reference — never the value — and is already
+  // "uploaded", so submit includes sec_x in attachmentIds without any re-upload.
+  const MAX_SECRET_ATTACHMENTS = 4;
+  async function addSecretAttachment(input: ChatComposerSecretAttachmentInput): Promise<void> {
+    if (status.data?.attachmentVersion !== 1 || sendPending || sendUnconfirmed || uploadGate.current) {
+      throw new Error(lang === "zh" ? "当前不能添加隐私附件，请稍后再试。" : "A private attachment cannot be added right now.");
+    }
+    if (attachmentsRef.current.filter(item => item.kind === "secret").length >= MAX_SECRET_ATTACHMENTS) {
+      throw new Error(lang === "zh" ? `隐私附件最多 ${MAX_SECRET_ATTACHMENTS} 个，请先移除一个再添加。` : `Up to ${MAX_SECRET_ATTACHMENTS} private attachments; remove one first.`);
+    }
+    const { attachmentId } = await uploadLauncherUserSecret(input.value, input.secretType, input.label);
+    const displayName = (input.label || "").trim() || launcherUserSecretKindLabel(input.secretType, lang);
+    const chipLabel = lang === "zh" ? `隐私 · ${displayName}` : `Private · ${displayName}`;
+    updateAttachments([...attachmentsRef.current, {
+      id: crypto.randomUUID(),
+      file: new File([], chipLabel, { type: "application/octet-stream" }),
+      filename: chipLabel,
+      previewUrl: "",
+      sizeBytes: 0,
+      contentType: "application/octet-stream",
+      kind: "secret",
+      uploadStatus: "uploaded",
+      artifactId: attachmentId,
+    }]);
+  }
   function removeAttachment(id: string) {
     if (sendPending || sendUnconfirmed || uploadGate.current) return;
     const item = attachmentsRef.current.find(row => row.id === id);
@@ -1215,8 +1247,11 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   // The very first status read has never succeeded: at a cold boot this is the
   // workbench backend still starting, not a broken assistant. The page shows a
   // waiting state (kept probing by the backoff interval above) instead of a
-  // dead-end unavailable error.
+  // dead-end unavailable error. A CLOSING refusal is different: the resident
+  // assistant was stopped by a shell exit (possibly one Main is still
+  // recovering), so the honest copy names that instead of the backend wait.
   const waitingForBackend = status.isError && !status.data;
+  const lifecycleClosing = waitingForBackend && launcherAssistantLifecycleClosing(status.error);
   // Debounced degradation of the status poll over the mounted conversation: a
   // single failed poll is a weak hint; red requires persistence (two failures
   // or a 30s silence gap) AND a dead push channel, because live push events
@@ -1254,7 +1289,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   // The header keeps the normal session status line for a weakly degraded poll;
   // "unavailable" is reserved for the hard-down case (persistent failure AND a
   // dead push channel), and the cold-boot wait keeps its own wording.
-  const statusText = feedback || queueStatusText || (waitingForBackend ? copy.waitingBackend : statusHardDown ? copy.unavailable
+  const statusText = feedback || queueStatusText || (waitingForBackend ? lifecycleClosing ? copy.lifecycleClosing : copy.waitingBackend : statusHardDown ? copy.unavailable
     : status.isPending ? copy.checking
     : detail.data ? !detail.isError && !approval && !stopping && !acceptedTurnId && !sendPending && !sendUnconfirmed && preferences.idleMessage
         && (activity.execution === "idle" || (activity.execution === "settled" && activity.outcome === "completed"))
@@ -1269,7 +1304,12 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   // the cold-boot backend wait (loading skeleton with pulse lines) unless a
   // prior success proves the identity itself broke; collapsed keeps its status
   // line visible through the wait.
-  if (status.isError && expanded && !detail.data) return waitingForBackend ? <VStateSurface fill tone="loading"
+  if (status.isError && expanded && !detail.data) return waitingForBackend ? lifecycleClosing ?
+    <VStateSurface fill tone="unavailable" data-launcher-assistant-waiting="lifecycle-closing"
+      title={copy.lifecycleClosing}
+      actions={notificationsHosted ? undefined : <VButton onClick={() => void status.refetch()}>{copy.retry}</VButton>}>
+      {notificationsHosted ? null : status.error.message}</VStateSurface>
+    : <VStateSurface fill tone="loading"
     data-launcher-assistant-waiting="backend" title={copy.waitingBackend}>{notificationsHosted ? null : status.error.message}</VStateSurface>
     : <VStateSurface fill tone={notificationsHosted ? "unavailable" : "error"} title={notificationsHosted ? copy.conversationUnavailable : copy.unavailable}
     actions={notificationsHosted ? undefined : <VButton onClick={() => void status.refetch()}>{copy.retry}</VButton>}>{notificationsHosted ? null : status.error.message}</VStateSurface>;
@@ -1284,7 +1324,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
 
   if (!expanded) return <main className={petStyles.root} data-vui-domain-recipe="launcher-assistant"
     data-expanded="false" data-tone={tone} aria-label={displayName}
-    data-waiting={waitingForBackend ? "backend" : undefined}>
+    data-waiting={waitingForBackend ? lifecycleClosing ? "lifecycle-closing" : "backend" : undefined}>
     <div className={petStyles.stage}>
       <div className={petStyles.toolbar}>
         <span className={petStyles.status} role="status" aria-live="polite" hidden={!preferences.showStatus && !feedback && !(waitingForBackend || statusHardDown)}>
@@ -1456,6 +1496,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       composerLeadingControl={<><ChatComposerPlusMenu lang={lang} showCapabilities={false} showReferences={false}
         budget={budget}
         sessionReferences={[]} onAddAttachments={addAttachments}
+        onAttachSecret={input => addSecretAttachment(input)}
         attachmentDisabled={status.data?.attachmentVersion !== 1 || sendPending || sendUnconfirmed || controlPending} />
         <LauncherManagementPermissionControl state={managementPermission} lang={lang} /></>}
       composerModelControl={status.data ? <LauncherAssistantModelControl key={sessionId} lang={lang}

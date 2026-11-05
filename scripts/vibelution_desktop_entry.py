@@ -2017,12 +2017,18 @@ def _run_launcher_api_bridge(args: argparse.Namespace) -> dict[str, object]:
     raw_path = str(args.launcher_api_path or "").strip()
     path, query = _split_launcher_api_path(raw_path)
     method = str(args.launcher_api_method or "GET").strip().upper()
+    runtime_inventory = (
+        path == "branch-instances"
+        and method == "GET"
+        and _query_flag(query.get("runtimeOnly", ""))
+        and not _query_flag(query.get("cleanupMetadata", ""))
+    )
     body: dict[str, object] = {}
     if args.launcher_api_body:
         body = json.loads(args.launcher_api_body) if isinstance(args.launcher_api_body, str) else dict(args.launcher_api_body)
     if not isinstance(body, dict):
         body = {}
-    if path != "freshness" or method != "GET":
+    if not runtime_inventory and (path != "freshness" or method != "GET"):
         from core.launcher import service as launcher_service
 
     _append_log("desktop_entry_python.launcher_api.started", method=method, path=raw_path)
@@ -2066,8 +2072,14 @@ def _run_launcher_api_bridge(args: argparse.Namespace) -> dict[str, object]:
         elif path == "branch-instances" and method == "GET":
             if _query_flag(query.get("cleanupMetadata", "")):
                 response = launcher_service.list_launcher_branch_instances(include_cleanup_metadata=True)
-            elif _query_flag(query.get("runtimeOnly", "")):
-                response = launcher_service.list_launcher_branch_instances(runtime_only=True)
+            elif runtime_inventory:
+                from core.launcher.branch_instance_lifecycle import list_overlayed_branch_instances
+
+                response = list_overlayed_branch_instances(include_dirty=False)
+                if response.get("currentId") != "main":
+                    from core.launcher import service as launcher_service
+
+                    response = launcher_service.list_launcher_branch_instances(runtime_only=True)
             else:
                 response = launcher_service.list_launcher_branch_instances()
         elif path == "state-refresh" and method == "POST":

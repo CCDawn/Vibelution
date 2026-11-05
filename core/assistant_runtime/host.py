@@ -613,6 +613,10 @@ class NativeFacade:
         from . import native
         return native.upload_attachment(payload, filename=filename, content_type=content_type)
 
+    def upload_secret_attachment(self, value, kind="secret", label=""):
+        from . import native
+        return native.upload_secret_attachment(value, kind=kind, label=label)
+
     def read_attachment(self, artifact_id):
         from . import native
         return native.read_attachment(artifact_id)
@@ -1691,8 +1695,26 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
             return value
         try:
             payload = json.loads(body, object_pairs_hook=unique)
-            if (type(payload) is not dict or set(payload) != {"filename", "contentType", "dataBase64"}
-                    or any(type(value) is not str for value in payload.values())
+            if type(payload) is not dict or any(type(value) is not str for value in payload.values()):
+                raise ValueError("Invalid attachment")
+            if payload.get("kind") == "user_secret":
+                # Privacy attachment: the plaintext is staged in native process
+                # memory and only its one-shot sec_ id is returned; no base64
+                # or filesystem path is involved. Only this native PA link
+                # accepts the kind; ordinary session endpoints never do.
+                if set(payload) not in (
+                    {"kind", "value"},
+                    {"kind", "value", "secretKind"},
+                    {"kind", "value", "label"},
+                    {"kind", "value", "secretKind", "label"},
+                ) or not payload["value"].strip() or len(payload["value"]) > 8192:
+                    raise ValueError("Invalid attachment")
+                return await asyncio.to_thread(
+                    native.upload_secret_attachment, payload["value"],
+                    kind=payload.get("secretKind") or "secret",
+                    label=payload.get("label") or "",
+                )
+            if (set(payload) != {"filename", "contentType", "dataBase64"}
                     or not 0 < len(payload["filename"]) <= 255 or not 0 < len(payload["contentType"]) <= 128
                     or not 0 < len(payload["dataBase64"]) <= ((8 * 1024 * 1024 + 2) // 3) * 4):
                 raise ValueError("Invalid attachment")

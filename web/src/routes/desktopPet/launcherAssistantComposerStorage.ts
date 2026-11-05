@@ -5,14 +5,16 @@ import type { LauncherAssistantQuestionDraft, LauncherAssistantQueuedAcceptance,
 /** Recoverable attachment metadata only: id plus the uploaded backend artifact.
  * The File/Blob body and its local blob: preview URL are not serializable, so
  * they are intentionally never persisted; a restored chip reuses its artifactId
- * (no re-upload) and fetches a fresh preview through the read IPC. */
+ * (no re-upload) and fetches a fresh preview through the read IPC. Secret chips
+ * persist the same reference-only shape (kind "secret", `sec_` artifactId) —
+ * the plaintext value never enters storage in any field. */
 export type PersistedLauncherComposerAttachment = {
   id: string;
   artifactId: string;
   filename: string;
   contentType: string;
   sizeBytes: number;
-  kind: "image" | "document";
+  kind: "image" | "document" | "secret";
 };
 
 export type PersistedLauncherComposer = {
@@ -123,7 +125,7 @@ function persistedAttachment(value: unknown): PersistedLauncherComposerAttachmen
     || typeof value.filename !== "string" || Array.from(value.filename).length > MAX_FILENAME_CHARS
     || /[\u0000-\u001f\u007f]/.test(value.filename)
     || !contentTypeValid(value.contentType) || !Number.isSafeInteger(value.sizeBytes) || (value.sizeBytes as number) < 0
-    || !["image", "document"].includes(String(value.kind))) return null;
+    || !["image", "document", "secret"].includes(String(value.kind))) return null;
   return { id: value.id, artifactId: value.artifactId, filename: value.filename,
     contentType: value.contentType, sizeBytes: value.sizeBytes as number, kind: value.kind as "image" | "document" };
 }

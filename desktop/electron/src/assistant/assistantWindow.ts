@@ -128,6 +128,16 @@ export class AssistantWindow {
     if (this.window && !this.window.isDestroyed()) this.window.hide();
   }
 
+  /** Cancelled-exit recovery only: the replacement AssistantWindow owns the
+   * float afterwards, so this instance force-tears its page down. destroy()
+   * bypasses the guarded close handler (which would only hide), and emits no
+   * close event the quit path could mistake for a real close. */
+  destroyFloat(): void {
+    const window = this.window;
+    this.window = null;
+    if (window && !window.isDestroyed()) window.destroy();
+  }
+
   /**
    * Toast-click surfacing: show and focus the resident float. Returns false
    * when the float does not exist — this verb never provisions a window or a
