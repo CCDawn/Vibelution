@@ -23,7 +23,7 @@ import html as html_lib
 import re
 import threading
 from urllib.parse import parse_qs, quote_plus, unquote, urljoin, urlparse
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Callable
 
 import httpx
 
@@ -1018,7 +1018,10 @@ def _open_web_fetch_client() -> httpx.Client:
     return httpx.Client(**kwargs)
 
 
-def _fetch_with_same_site_redirects(url: str) -> tuple[str, httpx.Response | None]:
+def _fetch_with_same_site_redirects(
+    url: str, *, url_validator: Callable[[str], str] | None = None,
+) -> tuple[str, httpx.Response | None]:
+    validate_url = url_validator or _validate_public_http_url
     current_url = url
     original_host = (urlparse(url).hostname or "").lower()
     original_site = _registrable_host(original_host)
@@ -1028,7 +1031,7 @@ def _fetch_with_same_site_redirects(url: str) -> tuple[str, httpx.Response | Non
     try:
         with _open_web_fetch_client() as client:
             for _ in range(_WEB_FETCH_MAX_REDIRECTS + 1):
-                validation_error = _validate_public_http_url(current_url)
+                validation_error = validate_url(current_url)
                 if validation_error:
                     return f"[错误] {validation_error}: {current_url}", None
                 try:
@@ -1047,7 +1050,7 @@ def _fetch_with_same_site_redirects(url: str) -> tuple[str, httpx.Response | Non
                     if not location:
                         return f"[错误] 重定向响应缺少 Location: {current_url}", None
                     next_url = urljoin(current_url, location)
-                    validation_error = _validate_public_http_url(next_url)
+                    validation_error = validate_url(next_url)
                     if validation_error:
                         return f"[错误] 重定向目标被拒绝: {validation_error}: {next_url}", None
                     next_host = (urlparse(next_url).hostname or "").lower()
@@ -1084,7 +1087,8 @@ def _fetch_with_same_site_redirects(url: str) -> tuple[str, httpx.Response | Non
         return f"[错误] 请求失败: {type(exc).__name__}: {exc}", None
 
 
-def web_fetch(url: str, max_chars: int = 8000, prompt: str = "") -> str:
+def web_fetch(url: str, max_chars: int = 8000, prompt: str = "", *,
+              url_validator: Callable[[str], str] | None = None) -> str:
     """
     获取网页内容并返回纯文本
 
@@ -1100,14 +1104,20 @@ def web_fetch(url: str, max_chars: int = 8000, prompt: str = "") -> str:
         return "[错误] URL 不能为空"
 
     url = url.strip()
-    validation_error = _validate_public_http_url(url)
+    validation_error = (url_validator or _validate_public_http_url)(url)
     if validation_error:
         return f"[错误] {validation_error}: {url}"
 
     fetch_url = _arxiv_export_mirror_url(url)
-    final_url_or_error, response = _fetch_with_same_site_redirects(fetch_url)
+    # Internal consumers may narrow outbound reads without changing the public
+    # tool's existing URL policy. Validate every hop before any client request.
+    final_url_or_error, response = (_fetch_with_same_site_redirects(fetch_url, url_validator=url_validator)
+                                    if url_validator else _fetch_with_same_site_redirects(fetch_url))
     mirror_fallback = False
     if response is None:
+        if url_validator is not None:
+            # Strict API documentation reads do not fan out to scholarly mirrors.
+            return final_url_or_error
         # 直接抓取失败且为 403/连接失败/超时/跨域重定向被停、URL 可解析出 DOI/PMCID 时，
         # 走一次 EuropePMC 镜像备援；备援任一步失败都返回 None → 原错误一字不改返回。
         mirrored_text = _europepmc_fulltext_mirror_text(url, final_url_or_error)
