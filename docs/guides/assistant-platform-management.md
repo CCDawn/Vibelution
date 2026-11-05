@@ -19,6 +19,12 @@
 
 `agent_dispatch_access_get` 的 `gatewayEnabled` 和 allowlist 表示第三方派遣网关策略，不能据此断言 Launcher 本地助理不可派遣；MCP enable 也不授予本地助理 authority。两条通道共享单 Agent deny，因此停用守卫须在同一原生管理边界内完整检查 MCP 与本地两个 namespace 的活动任务；不能遗漏尚无 Session 的本地 queued 任务。
 
+Launcher 的 `agent_list` 由客户端根据本地 authority 固定选择 `dispatch_context=launcher_local`，响应以 `dispatchContext=launcher_local` 明确说明资格口径。目录的 `dispatchable` 和 `counts.dispatchable`、`agents` 候选列表及任务接收共用本地资格判定，不受第三方 gateway 开关或 allowlist 影响，仍遵守显式 deny、保护状态、团队身份及生命周期约束。`agents` 的本地结果为 `scope=launcher_local_dispatchable`；它不是完整目录或项目总数。模型不能选择此上下文，也不能凭目录读结果获得执行 authority。
+
+原生目录 HTTP 读取的 `dispatch_context` 只选择已授权目录元数据的计算口径，仍要求 `agents:directory:read`，不修改配置或授予派遣权限。默认外部调用保持原有响应字段和白名单语义；只有显式本地上下文返回新标记，续页 revision 绑定该上下文。旧后台没有返回本地标记时，Launcher 拒绝将外部资格当成本地资格。
+
+完整目录始终包含不能直接派遣的身份。活跃团队成员通过当前 roster 对应团队的 `team_get`、`flow_list` 和 `flow_start` 调度；`recordedTeams` 不能代替当前成员证据。虚拟人及其助手使用专属会话机制；归档、禁用或受保护身份说明具体原因，不因为不能直接派遣而从目录消失。
+
 ## 模型 / provider 删除与停用
 
 `configuration_references` 覆盖完整 stored registrations，包括 inactive、离线登记和 native assistant 自身。它绑定实际项目身份与已有存储，检查 formal/sandbox 的 Agent、room、Team、历史 Session compiled pin、活动 supervised 绑定及 operator 模型引用；sandbox workspace 必须配自己的 runtime。缺失、损坏、离线、绑定不明或实际引用解析失败均阻止零引用证明，未知不能显示为 `0`。
