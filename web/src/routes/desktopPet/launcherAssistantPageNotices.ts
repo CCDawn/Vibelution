@@ -1,7 +1,8 @@
-import type { LauncherNotice } from "../../app/LauncherNotifications";
+import type { LauncherNotice, LauncherNoticeFeature } from "../../app/LauncherNotifications";
 
 export type LauncherNoticeRead = {
   label: string;
+  feature?: LauncherNoticeFeature;
   failed: boolean;
   pending: boolean;
   error?: unknown;
@@ -15,8 +16,12 @@ export function launcherNoticeReadFailed(query: { isError: boolean; isPending: b
 }
 
 function diagnostic(error: unknown): string {
-  return (error instanceof Error ? error.message : typeof error === "string" ? error : "")
-    .replace(/\s+/g, " ").trim().slice(0, 500);
+  const message = (error instanceof Error ? error.message : typeof error === "string" ? error : "")
+    .replace(/\s+/g, " ").trim();
+  const codes = message.match(/\bASSISTANT_[A-Z][A-Z0-9_]*\b/g);
+  return (codes ? [...new Set(codes)].join(", ")
+    : message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, ""))
+    .slice(0, 500);
 }
 
 /** Group affected reads, without claiming that equal transport errors prove a
@@ -33,14 +38,14 @@ export function launcherAssistantPageNotices(input: {
   const failedReads = input.reads.filter(read => read.failed);
   if (failedReads.length) notices.push({
     id: "assistant-reads", kind: "connection", tone: "warning",
-    title: zh ? "部分状态未更新" : "Some status is out of date",
-    description: zh ? "暂时无法读取最新状态，已保留现有内容。操作是否完成仍需核对。"
-      : "The latest status could not be read. Existing content is retained; operation outcomes still need checking.",
+    title: zh ? "聊天没能刷新" : "Chat could not refresh",
+    description: zh ? "稍后再试一次。" : "Try again in a moment.",
     labels: failedReads.map(read => read.label),
+    features: [...new Set(failedReads.flatMap(read => read.feature ? [read.feature] : []))],
     details: failedReads.map(read => `${read.label}: ${diagnostic(read.error) || (zh ? "读取延迟" : "Read delayed")}`).join("\n"),
-    actions: [{ id: "refresh", label: zh ? "重新连接" : "Reconnect",
+    actions: [{ id: "refresh", label: zh ? "再试一次" : "Try again",
       pending: failedReads.some(read => read.pending),
-      run: () => Promise.all(failedReads.map(read => read.retry())) }],
+      run: () => Promise.allSettled(failedReads.map(read => Promise.resolve().then(() => read.retry()))) }],
   });
   const failedImages = input.appearance.filter(read => read.failed);
   if (failedImages.length) notices.push({

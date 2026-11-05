@@ -14,8 +14,8 @@ function NotificationExample() {
   const [imageFailed, setImageFailed] = useState(true);
   usePublishLauncherNotices([
     ...(connectionFailed ? [{ id: "preview-connection", kind: "connection" as const, tone: "warning" as const,
-      title: "部分状态未更新", description: "示例：保留上次内容，操作结果仍需核对。", labels: ["会话刷新", "待授权查询"],
-      details: "示例读取超时", actions: [{ id: "retry", label: "重新连接", run: () => setConnectionFailed(false) }] }] : []),
+      title: "聊天没能刷新", description: "稍后再试一次。", features: ["conversation" as const, "approvals" as const, "tasks" as const],
+      details: "聊天记录：ASSISTANT_REQUEST_TIMEOUT", actions: [{ id: "retry", label: "再试一次", run: () => setConnectionFailed(false) }] }] : []),
     ...(imageFailed ? [{ id: "preview-appearance", kind: "appearance" as const, tone: "info" as const,
       title: "外观图片未加载", description: "示例：使用默认外观，不影响聊天。",
       actions: [{ id: "retry", label: "重试", run: () => setImageFailed(false) }] }] : []),
