@@ -35,6 +35,7 @@ let root: Root, host: HTMLDivElement, client: QueryClient;
 let invoke: ReturnType<typeof vi.fn>, teamReply: (cursor?: string) => Promise<LauncherAssistantTeamRunsPage>;
 let currentPage: LauncherAssistantTeamRunsPage, rows: LauncherAssistantDispatch[];
 let currentStatus: LauncherAssistantStatus;
+let visibility: DocumentVisibilityState;
 let notices: LauncherNotice[], model: LauncherTaskModel | null;
 function Observe() { notices = useLauncherNotices(); model = useLauncherTasks(); return null; }
 async function settle() {
@@ -69,7 +70,8 @@ function expectConflictWarning() {
 beforeEach(() => {
   vi.useFakeTimers();
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+  visibility = "visible";
+  vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility);
   rows = terminalDispatches(); currentPage = page(); notices = []; model = null;
   currentStatus = structuredClone(STATUS);
   teamReply = async () => currentPage;
@@ -89,6 +91,104 @@ afterEach(async () => {
 });
 
 describe("task progress recovery", () => {
+  it.each([
+    { source: "dispatches", cached: false }, { source: "teamRuns", cached: false },
+    { source: "dispatches", cached: true }, { source: "teamRuns", cached: true },
+  ] as const)("cancels a healthy late $source read on hide without a false warning (cached=$cached)", async ({ source, cached }) => {
+    let resolveRead!: () => void;
+    const pending = new Promise<void>(resolve => { resolveRead = resolve; });
+    let pause = !cached;
+    invoke.mockImplementation(async (request: { operation: string }) => {
+      if (request.operation === "status") return currentStatus;
+      if (request.operation === source && pause) { pause = false; await pending; }
+      if (request.operation === "dispatches") return { dispatches: rows };
+      if (request.operation === "teamRuns") return currentPage;
+      throw new Error(`Unexpected mutation: ${request.operation}`);
+    });
+    await render();
+    if (cached) {
+      pause = true;
+      await act(async () => { void model!.refresh(); });
+      await settle();
+    }
+    expect(operations()).toContain(source);
+    visibility = "hidden";
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    await act(async () => { resolveRead(); });
+    await settle();
+    expect(notices).toEqual([]);
+    visibility = "visible";
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    await settle();
+    expect(notices).toEqual([]);
+    expect(model!.tasks).toHaveLength(4);
+    expectReadOnly();
+  });
+
+  it("takes a fresh receipt after reopening before the cancelled native read drains", async () => {
+    const obsolete = rows;
+    let resolveRead!: () => void;
+    const pending = new Promise<void>(resolve => { resolveRead = resolve; });
+    let first = true;
+    invoke.mockImplementation(async (request: { operation: string }) => {
+      if (request.operation === "status") return currentStatus;
+      if (request.operation === "dispatches") {
+        if (first) { first = false; await pending; return { dispatches: obsolete }; }
+        return { dispatches: rows };
+      }
+      if (request.operation === "teamRuns") return currentPage;
+      throw new Error(`Unexpected mutation: ${request.operation}`);
+    });
+    await render();
+    visibility = "hidden";
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    rows = rows.map(row => ({ ...row, dispatchId: `fresh-${row.dispatchId}` }));
+    visibility = "visible";
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    await settle();
+    expect(notices).toEqual([]);
+    expect(operations().filter(operation => operation === "dispatches")).toHaveLength(1);
+    await act(async () => { resolveRead(); });
+    await settle();
+    expect(notices).toEqual([]);
+    expect(model!.tasks).toHaveLength(rows.length);
+    expect(model!.tasks).toEqual(expect.arrayContaining(rows.map(row =>
+      expect.objectContaining({ kind: "dispatch", dispatchId: row.dispatchId }))));
+    expectReadOnly();
+  });
+
+  it("keeps a genuine read failure when hiding cancels its in-flight recovery", async () => {
+    let resolveRead!: () => void;
+    const pending = new Promise<void>(resolve => { resolveRead = resolve; });
+    let failed = true, hold = true;
+    invoke.mockImplementation(async (request: { operation: string }) => {
+      if (request.operation === "status") return currentStatus;
+      if (request.operation === "dispatches") {
+        if (failed) throw new Error("Task source unavailable");
+        if (hold) { hold = false; await pending; }
+        return { dispatches: rows };
+      }
+      if (request.operation === "teamRuns") return currentPage;
+      throw new Error(`Unexpected mutation: ${request.operation}`);
+    });
+    await render();
+    expect(notices).toHaveLength(1);
+    failed = false;
+    await act(async () => { void model!.refresh(); });
+    await settle();
+    visibility = "hidden";
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    await act(async () => { resolveRead(); });
+    await settle();
+    expect(notices).toHaveLength(1);
+    visibility = "visible";
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    await settle();
+    expect(notices).toEqual([]);
+    expect(model!.tasks).toHaveLength(4);
+    expectReadOnly();
+  });
+
   it.each(["dispatches", "teamRuns"] as const)("gives a new identity its own %s probes and clears the warning on recovery", async source => {
     let failed = true;
     invoke.mockImplementation(async (request: { operation: string; cursor?: string }) => {
