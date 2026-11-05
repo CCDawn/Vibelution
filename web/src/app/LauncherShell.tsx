@@ -118,13 +118,13 @@ export function LauncherShell() {
     >
       <LauncherTitlebar lang={lang} desktop={desktopShell} onOpenNavigation={() => setNavigationOpen(true)} />
       <VWorkbenchFrame>
-       <VSplitWorkspace
-        chrome="workbench"
-        className={styles.workspace}
-        columnsClassName={styles.columns}
-        sidebar={<div className={styles.navigation}><LauncherNavigation lang={lang} items={branchInstancesQuery.data?.items ?? []} updateAvailable={updateAvailable} updateFailed={updateFailed} taskContent={<LauncherTaskNavigationSlot lang={lang}/>}/></div>}
-        main={routeContent}
-      />
+        <VSplitWorkspace
+          chrome="workbench"
+          className={styles.workspace}
+          columnsClassName={styles.columns}
+          sidebar={<div className={styles.navigation}><LauncherNavigation lang={lang} items={branchInstancesQuery.data?.items ?? []} updateAvailable={updateAvailable} updateFailed={updateFailed} taskContent={<LauncherTaskNavigationSlot lang={lang}/>}/></div>}
+          main={routeContent}
+        />
       </VWorkbenchFrame>
       <VDialog open={navigationOpen} onOpenChange={setNavigationOpen} title={lang === "zh" ? "功能导航" : "Navigation"} size="sm">
         <div className={styles.mobileNavigation}><LauncherNavigation lang={lang} items={branchInstancesQuery.data?.items ?? []} onNavigate={() => setNavigationOpen(false)} updateAvailable={updateAvailable} updateFailed={updateFailed} taskContent={<LauncherTaskNavigationSlot lang={lang} onNavigate={()=>setNavigationOpen(false)}/>}/></div>

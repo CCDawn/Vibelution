@@ -1,5 +1,5 @@
 const styles = {
-  root:"flex h-full min-h-0 flex-col bg-vui-surface-raised",
+  root:"flex h-full min-h-0 flex-col bg-vui-surface-rail",
   features:"flex shrink-0 flex-col gap-1 border-b border-vui-border-subtle px-3 pb-4 pt-5",
   tasks:"min-h-0 flex-1 overflow-hidden px-3 pt-3",
   groupLabel:"m-0 px-3 pb-2 text-vui-micro-10 tracking-wide text-vui-fg-tertiary",
