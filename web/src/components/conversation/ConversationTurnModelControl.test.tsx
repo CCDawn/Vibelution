@@ -257,7 +257,7 @@ describe("ConversationTurnModelControl", () => {
 
   it("keeps the toolbar trigger compact and the popover within the viewport", () => {
     expect(triggerStyles.label).toContain("truncate");
-    expect(triggerStyles.label).toContain("max-w-32");
+    expect(triggerStyles.label).toContain("max-w-[min(16rem,38vw)]");
     expect(styles.fullName).toContain("whitespace-normal");
     expect(styles.fullName).not.toContain("truncate");
     expect(triggerStyles.trigger).toContain("h-7");
