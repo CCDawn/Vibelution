@@ -1,6 +1,7 @@
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 
@@ -14,6 +15,7 @@ import {
 } from "../src/process/workbenchBackendRetire.js";
 import {
   queueDeferredRestartIntent,
+  adoptBackendRegistrationOwner,
   classifyWorkbenchPortOccupant,
   clearStaleRuntimeManagerDaemonRecords,
   clearWorkbenchLauncherRuntimeState,
@@ -1144,6 +1146,77 @@ describe("reclaimStaleWorkbenchBackend", () => {
     expect(terminateProcessTree).not.toHaveBeenCalled();
   });
 
+  it("captures a live legacy pid identity and retires it through the tree verifier", async () => {
+    const identity = { pid: 4242, createTime: 3, executable: "C:/Python/pythonw.exe" };
+    let alive = true;
+    const terminateProcessTree = vi.fn(async () => {
+      alive = false;
+      return true;
+    });
+    const result = await reclaimStaleWorkbenchBackend({
+      port: 8012,
+      workspaceRoot: "C:/repo",
+      connect: async () => false,
+      registeredPids: [4242],
+      pidAlive: () => alive,
+      terminateProcessTree,
+      captureProcessIdentity: async () => identity
+    });
+
+    expect(result).toMatchObject({
+      reclaimed: true,
+      reason: expect.stringContaining("already released"),
+      verifiedPid: 4242
+    });
+    expect(terminateProcessTree).toHaveBeenCalledWith(4242, identity);
+  });
+
+  it("records an unregistered orphan server retirement with a dedicated note", async () => {
+    let orphanAlive = true;
+    let orphanListening = true;
+    const written: Record<string, unknown>[] = [];
+    const orphanIdentity = { pid: 56756, createTime: 7, executable: "C:/Programs/Python/Python312/pythonw.exe" };
+    const terminateProcessTree = vi.fn(async () => true);
+    const gracefulShutdown = vi.fn(async () => {
+      orphanAlive = false;
+      orphanListening = false;
+      return { requested: true, completed: true, status: 202, reason: "closed" };
+    });
+    const result = await executeMainLineWorkbench({
+      workspaceRoot: "C:/repo",
+      pythonPath: "C:/repo/.venv/Scripts/python.exe",
+      operation: "stop",
+      command: { commandId: "cmd_orphan_stop", type: "close", operation: "stop", noBrowser: true },
+      readState: () => ({
+        backendPid: 4242,
+        backendCreateTime: 1,
+        backendExecutable: "C:/Python/pythonw.exe",
+        backendPort: 8000
+      }),
+      writeState: (state) => written.push(state),
+      listActiveWork: () => [],
+      connect: async () => orphanListening,
+      fetchHealth: async () => ({
+        status: 200,
+        json: async () => ({ status: "ok", routesReady: true, pid: 56756, workspaceRoot: "C:/repo" })
+      }),
+      pidAlive: (pid) => pid === 56756 && orphanAlive,
+      terminateProcessTree,
+      gracefulShutdown,
+      captureProcessIdentity: async ({ pid }) => (pid === 56756 ? orphanIdentity : { pid, createTime: 1, executable: "C:/Python/pythonw.exe" })
+    });
+
+    expect(result).toMatchObject({ accepted: true, operation: "stop" });
+    // The retired server was never in the launcher registry (pythonw stub
+    // split or a lost generation); it must stay distinguishable from a
+    // registered stale reclaim.
+    expect(written.at(-1)).toMatchObject({
+      orphanBackendRetirementNote: expect.stringContaining("unregistered same-project backend pid 56756")
+    });
+    expect(written.at(-1)).not.toHaveProperty("staleReclaimNote");
+    expect(gracefulShutdown).toHaveBeenCalledWith(expect.objectContaining({ backendPid: 56756 }));
+  });
+
   it("does not confirm close when a verified backend pid survives port release", async () => {
     let clock = 0;
     let listening = true;
@@ -1401,6 +1474,173 @@ describe("resolveNoConsolePython", () => {
     expect(
       resolveNoConsolePython("C:/repo/.venv/Scripts/python.exe", (path) => path.endsWith("pythonw.exe"))
     ).toBe("C:/repo/.venv/Scripts/pythonw.exe");
+  });
+
+  it("keeps the console executable when the caller already suppresses the window", () => {
+    expect(
+      resolveNoConsolePython(
+        "C:/repo/.venv/Scripts/python.exe",
+        (path) => path.endsWith("pythonw.exe"),
+        { consoleSuppressedByCaller: true }
+      )
+    ).toBe("C:/repo/.venv/Scripts/python.exe");
+  });
+
+  it("back-resolves a configured pythonw to its python sibling for a window-suppressed caller", () => {
+    expect(
+      resolveNoConsolePython(
+        "C:/repo/.venv/Scripts/pythonw.exe",
+        (path) => path.endsWith("python.exe"),
+        { consoleSuppressedByCaller: true }
+      )
+    ).toBe("C:/repo/.venv/Scripts/python.exe");
+  });
+
+  it("keeps pythonw when no python sibling exists for a window-suppressed caller", () => {
+    expect(
+      resolveNoConsolePython("C:/repo/.venv/Scripts/pythonw.exe", () => false, { consoleSuppressedByCaller: true })
+    ).toBe("C:/repo/.venv/Scripts/pythonw.exe");
+  });
+});
+
+describe("workbench backend spawn executable selection", () => {
+  it.runIf(process.platform === "win32")("spawns the plain venv python.exe through the tracked no-console Job", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vibelution-workbench-spawn-selection-"));
+    const previousProjectsHome = process.env.VIBELUTION_PROJECTS_HOME;
+    const nativeSpawn = vi.fn(() => ({ pid: 4242, job: {} }));
+    try {
+      process.env.VIBELUTION_PROJECTS_HOME = join(dir, "projects");
+      mkdirSync(join(dir, ".vibelution"), { recursive: true });
+      writeFileSync(join(dir, ".vibelution", "project.json"), JSON.stringify({ projectId: "spawn-selection" }), "utf8");
+      __setWorkbenchJobNativeForTests({
+        spawn: nativeSpawn,
+        terminate: () => true,
+        activeCount: () => 0,
+        drainStatus: () => ({ complete: true, channels: [] }),
+        exitCode: () => null,
+        close: () => undefined
+      });
+      const pythonPath = join(dir, ".venv", "Scripts", "python.exe");
+      const spawned = spawnWorkbenchBackend({ workspaceRoot: dir, pythonPath, port: 8012 });
+      expect(spawned.pythonPath).toBe(pythonPath);
+      expect(nativeSpawn).toHaveBeenCalledTimes(1);
+      // The tracked native spawn (CREATE_NO_WINDOW + Job + file-redirected
+      // stdio) must receive the console executable: a venv pythonw stub would
+      // delegate the real server to an unregistered base-Python child.
+      expect(nativeSpawn.mock.calls[0][0].executable).toBe(pythonPath);
+      expect(nativeSpawn.mock.calls[0][0].executable.toLowerCase()).not.toContain("pythonw.exe");
+    } finally {
+      __setWorkbenchJobNativeForTests(undefined);
+      if (previousProjectsHome === undefined) {
+        delete process.env.VIBELUTION_PROJECTS_HOME;
+      } else {
+        process.env.VIBELUTION_PROJECTS_HOME = previousProjectsHome;
+      }
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps CREATE_NO_WINDOW console suppression in the native tracked spawn source", () => {
+    const source = readFileSync(
+      fileURLToPath(new URL("../native/workbench-job/job_object.c", import.meta.url)),
+      "utf8"
+    );
+    // §8.0 no visible console: the tracked spawn that now launches the plain
+    // console executable must keep hiding the console window and redirecting
+    // stdio to files, otherwise python.exe would flash a console.
+    expect(source).toMatch(/CREATE_SUSPENDED\s*\|\s*CREATE_NO_WINDOW\s*\|\s*CREATE_NEW_PROCESS_GROUP/);
+    expect(source).toContain("STARTF_USESTDHANDLES");
+    expect(source).toContain("CreateProcessW");
+  });
+});
+
+describe("adoptBackendRegistrationOwner", () => {
+  const ownerResolution = (pid: number, kind = "managed_workbench_backend") => ({
+    pid,
+    kind,
+    alive: true,
+    trusted: kind === "managed_workbench_backend",
+    residual: false,
+    conflict: false
+  });
+
+  it("skips the inventory roundtrip when health self-reports the registered spawn pid", async () => {
+    const resolvePortOwner = vi.fn();
+    const result = await adoptBackendRegistrationOwner({
+      port: 8000,
+      spawnPid: 4242,
+      healthPid: 4242,
+      resolvePortOwner,
+      captureIdentity: async () => null
+    });
+    expect(result).toEqual({ ownerPid: 0, ownerIdentity: null, note: "" });
+    expect(resolvePortOwner).not.toHaveBeenCalled();
+  });
+
+  it("adopts the verified socket owner when the launch pid is a pythonw stub", async () => {
+    const ownerIdentity = { pid: 4243, createTime: 20, executable: "C:/Programs/Python/Python312/pythonw.exe" };
+    const captureIdentity = vi.fn(async (pid: number) =>
+      pid === 4243 ? ownerIdentity : { pid, createTime: 1, executable: "C:/repo/.venv/Scripts/pythonw.exe" });
+    const result = await adoptBackendRegistrationOwner({
+      port: 8000,
+      spawnPid: 4242,
+      healthPid: 4243,
+      resolvePortOwner: async () => ownerResolution(4243),
+      captureIdentity
+    });
+    expect(result.ownerPid).toBe(4243);
+    expect(result.ownerIdentity).toEqual(ownerIdentity);
+    expect(result.note).toContain("adopted the verified socket owner pid 4243");
+    expect(result.note).toContain("pythonw launcher delegation");
+  });
+
+  it("keeps the launch registration without adoption for a foreign occupant kind", async () => {
+    const result = await adoptBackendRegistrationOwner({
+      port: 8000,
+      spawnPid: 4242,
+      healthPid: 4243,
+      resolvePortOwner: async () => ownerResolution(4243, "unmanaged_workbench"),
+      captureIdentity: async () => ({ pid: 4243, createTime: 2, executable: "C:/x/python.exe" })
+    });
+    expect(result.ownerPid).toBe(4243);
+    expect(result.ownerIdentity).toBeNull();
+    expect(result.note).toContain("without adoption");
+  });
+
+  it("keeps the launch registration when the owner identity cannot be captured", async () => {
+    const result = await adoptBackendRegistrationOwner({
+      port: 8000,
+      spawnPid: 4242,
+      healthPid: 4243,
+      resolvePortOwner: async () => ownerResolution(4243),
+      captureIdentity: async () => null
+    });
+    expect(result.ownerPid).toBe(4243);
+    expect(result.ownerIdentity).toBeNull();
+    expect(result.note).toContain("without adoption");
+  });
+
+  it("keeps the launch registration when the inventory cannot confirm the socket owner", async () => {
+    const result = await adoptBackendRegistrationOwner({
+      port: 8000,
+      spawnPid: 4242,
+      healthPid: 4243,
+      resolvePortOwner: async () => null,
+      captureIdentity: async () => null
+    });
+    expect(result.ownerPid).toBe(0);
+    expect(result.note).toContain("could not confirm the socket owner");
+  });
+
+  it("stays silent when the inventory confirms the registered pid owns the socket", async () => {
+    const result = await adoptBackendRegistrationOwner({
+      port: 8000,
+      spawnPid: 4242,
+      healthPid: 4243,
+      resolvePortOwner: async () => ownerResolution(4242),
+      captureIdentity: async () => null
+    });
+    expect(result).toEqual({ ownerPid: 0, ownerIdentity: null, note: "" });
   });
 });
 
@@ -1776,6 +2016,65 @@ describe("runWorkbenchLifecycle", () => {
     expect(captureProcessIdentity).toHaveBeenCalledWith(expect.objectContaining({ pid: orphanIdentity.pid }));
     expect(terminateProcessTree).toHaveBeenCalledWith(orphanIdentity.pid, orphanIdentity);
     expect(spawnImpl).toHaveBeenCalledOnce();
+  });
+
+  it("re-registers the real socket owner when health proves a pythonw stub delegation", async () => {
+    const { input, written } = harness();
+    const stubIdentity = { pid: 4242, createTime: 1, executable: "C:/repo/.venv/Scripts/pythonw.exe" };
+    const ownerIdentity = { pid: 4243, createTime: 20, executable: "C:/Programs/Python/Python312/pythonw.exe" };
+    const result = await runWorkbenchLifecycle({
+      ...input,
+      operation: "start",
+      fetchHealth: async () => ({
+        status: 200,
+        json: async () => ({ status: "ok", shellReady: true, routesReady: true, pid: 4243, workspaceRoot: "C:/repo" })
+      }),
+      resolvePortOwner: async () => ({
+        pid: 4243,
+        kind: "managed_workbench_backend",
+        alive: true,
+        trusted: true,
+        residual: false,
+        conflict: false
+      }),
+      captureProcessIdentity: async ({ pid }) => (pid === 4243 ? ownerIdentity : stubIdentity)
+    });
+
+    expect(result).toMatchObject({ accepted: true, operation: "start" });
+    // The stub pid stays registered as the launch handle (job/tree retirement
+    // authority) while backendPid carries the verified socket owner so stop
+    // and graceful shutdown target the real server.
+    expect(written.at(-1)).toMatchObject({
+      backendPid: 4243,
+      backendCreateTime: 20,
+      backendExecutable: ownerIdentity.executable,
+      backendLaunchPid: 4242,
+      backendLaunchCreateTime: 1,
+      backendLaunchExecutable: stubIdentity.executable,
+      spawnPid: 4242,
+      spawnCreateTime: 1,
+      spawnExecutable: stubIdentity.executable,
+      lifecycleWarning: expect.stringContaining("adopted the verified socket owner pid 4243")
+    });
+  });
+
+  it("keeps the spawn registration when the inventory confirms the spawn pid owns the port", async () => {
+    const { input, written } = harness();
+    const result = await runWorkbenchLifecycle({
+      ...input,
+      operation: "start",
+      resolvePortOwner: async () => ({
+        pid: 4242,
+        kind: "managed_workbench_backend",
+        alive: true,
+        trusted: true,
+        residual: false,
+        conflict: false
+      })
+    });
+
+    expect(result).toMatchObject({ accepted: true, operation: "start" });
+    expect(written.at(-1)).toMatchObject({ backendPid: 4242, backendLaunchPid: 4242, spawnPid: 4242 });
   });
 
   it("rejects a live unverified browser handle before graceful backend shutdown", async () => {
