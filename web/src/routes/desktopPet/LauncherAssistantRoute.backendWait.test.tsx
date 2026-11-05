@@ -131,4 +131,44 @@ describe("Launcher assistant backend wait", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(2_100); });
     expect(statusCalls()).toBe(afterSecondRetry);
   });
+
+  it("names the cancelled-exit stop instead of the backend wait when status refuses with CLOSING", async () => {
+    await renderRoute({ status: async () => {
+      throw new Error("Error invoking remote method 'assistant:invoke': Error: ASSISTANT_LIFECYCLE_CLOSING");
+    } });
+    const closing = container.querySelector('[data-launcher-assistant-waiting="lifecycle-closing"]');
+    expect(closing).toBeTruthy();
+    // Honest degradation: unavailable tone with a retry, never the cold-boot
+    // loading skeleton or its "waiting for the backend" claim.
+    expect(closing?.getAttribute("data-tone")).toBe("unavailable");
+    expect(closing?.textContent).toContain("助理已随上一次退出停止");
+    expect(closing?.textContent).not.toContain("正在等待工作台后端启动");
+    expect(closing?.querySelectorAll('[aria-hidden="true"] .animate-pulse').length).toBe(0);
+    const retry = closing?.querySelector("button");
+    expect(retry?.textContent).toContain("重试");
+    // The underlying transport failure stays visible for diagnosability.
+    expect(closing?.textContent).toContain("ASSISTANT_LIFECYCLE_CLOSING");
+    expect(container.querySelector('[data-testid="native-conversation"]')).toBeNull();
+  });
+
+  it("keeps the collapsed float honest for a lifecycle-closing refusal", async () => {
+    await renderRoute({ embedded: false, status: async () => { throw new Error("ASSISTANT_LIFECYCLE_CLOSING"); } });
+    const petRoot = container.querySelector('[data-vui-domain-recipe="launcher-assistant"][data-expanded="false"]');
+    expect(petRoot?.getAttribute("data-waiting")).toBe("lifecycle-closing");
+    expect(petRoot?.textContent).toContain("助理已随上一次退出停止");
+    expect(petRoot?.textContent).not.toContain("正在等待工作台后端启动");
+  });
+
+  it("mounts the normal page once the resumed host answers after CLOSING", async () => {
+    let closing = true;
+    await renderRoute({ status: async () => { if (closing) throw new Error("ASSISTANT_LIFECYCLE_CLOSING"); return STATUS; } });
+    expect(container.querySelector('[data-launcher-assistant-waiting="lifecycle-closing"]')).toBeTruthy();
+    // The cancelled-exit recovery finished: the next poll is served by the
+    // resumed host and the conversation mounts without a reload.
+    closing = false;
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    await settle(); await settle();
+    expect(container.querySelector('[data-launcher-assistant-waiting="lifecycle-closing"]')).toBeNull();
+    expect(container.querySelector('[data-testid="native-conversation"]')).toBeTruthy();
+  });
 });

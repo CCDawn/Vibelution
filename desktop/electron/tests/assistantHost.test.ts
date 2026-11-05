@@ -294,6 +294,47 @@ describe("AssistantHost", () => {
     await host.stop();
   });
 
+  it("lets a cancelled exit hand the sealed gates back so the stopped host starts again", async () => {
+    const { host } = fixture({ graceful: true });
+    await host.start();
+    const admission = host.beginLifecycleAdmission();
+    await admission.seal();
+    admission.commit();
+    await host.stop();
+    // The retained lease release stayed blocked while Main counted as the
+    // shutdown owner (reopen false), so both gates are still held here: the
+    // exact stranded state after a cancelled exit. Every later start refuses
+    // forever until Main explicitly hands the gates back.
+    await expect(host.start()).rejects.toThrow("ASSISTANT_LIFECYCLE_CLOSING");
+    host.resumeAfterCancelledExit();
+    // The stale admission wrapper stays inert after recovery: releasing it
+    // must not throw and must not reopen anything a fresh exit now owns.
+    admission.release();
+    await expect(host.start()).resolves.toMatchObject({ state: "ready" });
+    // The migration gate reopens with the lifecycle gate; a later exit can
+    // seal a fresh admission pair on the resumed host.
+    const migration = host.beginMigrationAdmission();
+    await migration.seal();
+    migration.release();
+    const next = host.beginLifecycleAdmission();
+    await next.seal();
+    next.commit();
+    await host.stop();
+  });
+
+  it("recovers a sealed-but-uncommitted cancelled exit the same way and refuses a running host", async () => {
+    const { host } = fixture({ graceful: true });
+    await host.start();
+    expect(() => host.resumeAfterCancelledExit()).toThrow("ASSISTANT_NOT_READY");
+    const admission = host.beginLifecycleAdmission();
+    await admission.seal();
+    await host.stop();
+    await expect(host.start()).rejects.toThrow("ASSISTANT_LIFECYCLE_CLOSING");
+    host.resumeAfterCancelledExit();
+    await expect(host.start()).resolves.toMatchObject({ state: "ready" });
+    await host.stop();
+  });
+
   it.each([
     ["native session conflict", 409, { detail: { code: "SESSION_CONFLICT" } }, "ASSISTANT_SESSION_CONFLICT"],
     ["retryable quiescing state", 503, { detail: { code: "ASSISTANT_QUIESCING" } }, "ASSISTANT_QUIESCING"],

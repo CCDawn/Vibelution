@@ -891,6 +891,21 @@ export class AssistantHost {
     return true;
   }
 
+  /** Main-only cancelled-exit recovery. An approved exit sealed this stopped
+   * host's lifecycle gates, and the retained lease release stayed blocked
+   * because Main still counted as the shutdown owner; the exit was then
+   * cancelled and the shell survived. Shutdown only owns the retained gates
+   * while it is still exiting, so Main hands them back here exactly once per
+   * cancelled exit, before rebuilding its resident stack: start() may admit a
+   * new generation again instead of refusing forever with CLOSING. A completed
+   * exit never reaches this — its gates stay shutdown-owned until the process
+   * ends. */
+  resumeAfterCancelledExit(): void {
+    if (this.view.state !== "stopped") throw new HostError("ASSISTANT_NOT_READY");
+    this.lifecycleAdmission = null;
+    this.migrationAdmission?.release();
+  }
+
   /** Rebind the same window-facing host to the latest validated registry. */
   prepareForMigrationRestart(snapshot: AssistantProjectRegistrySnapshot, projectsSuspended: boolean): void {
     if (this.current?.migrationRetirementRequested && !this.finishMigrationRetirement(this.current))
