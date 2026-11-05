@@ -83,8 +83,16 @@ def test_missing_cache_data_and_observed_zero_stay_distinct(usage_owner, observe
     assert sample["cacheHitRate"] == 0
 
 
-@pytest.mark.parametrize("binding", ["agent", "session", "reverse", "root", "ledger", "directory", "stopping"])
-def test_identity_drift_never_reaches_the_ledger(usage_owner, monkeypatch, binding):
+# Identity drift reports the rebuild code; process-root drift, ledger and
+# directory-store failures stay the retryable usage-unavailable fold, and a
+# stop already requested surfaces its real lifecycle code.
+@pytest.mark.parametrize("binding,code", [
+    ("agent", "ASSISTANT_IDENTITY_INVALID"), ("session", "ASSISTANT_IDENTITY_INVALID"),
+    ("reverse", "ASSISTANT_IDENTITY_INVALID"), ("root", "ASSISTANT_USAGE_UNAVAILABLE"),
+    ("ledger", "ASSISTANT_USAGE_UNAVAILABLE"), ("directory", "ASSISTANT_USAGE_UNAVAILABLE"),
+    ("stopping", "ASSISTANT_STOPPING"),
+])
+def test_identity_drift_never_reaches_the_ledger(usage_owner, monkeypatch, binding, code):
     if binding == "agent":
         monkeypatch.setattr(native, "_AGENT_ID", "foreign-agent")
     elif binding == "session":
@@ -100,7 +108,7 @@ def test_identity_drift_never_reaches_the_ledger(usage_owner, monkeypatch, bindi
     else:
         native._STOP_REQUESTED.set()
     monkeypatch.setattr(usage_ledger, "build_usage_summary", lambda **_kw: pytest.fail("Foreign ledger read"))
-    with pytest.raises(native.AssistantSessionError, match="^ASSISTANT_USAGE_UNAVAILABLE$"):
+    with pytest.raises(native.AssistantSessionError, match=f"^{code}$"):
         native.usage_summary()
 
 
@@ -127,7 +135,7 @@ def test_native_rechecks_forward_binding_under_owner_locks_before_reading_the_le
 
     monkeypatch.setattr(native, "_projection", snapshot_then_rebind)
     monkeypatch.setattr(usage_ledger, "build_usage_summary", lambda **_kw: pytest.fail("Changed Agent binding reached ledger"))
-    with pytest.raises(native.AssistantSessionError, match="^ASSISTANT_USAGE_UNAVAILABLE$"):
+    with pytest.raises(native.AssistantSessionError, match="^ASSISTANT_IDENTITY_INVALID$"):
         native.usage_summary()
 
 
