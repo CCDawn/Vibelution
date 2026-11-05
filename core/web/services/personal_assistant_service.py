@@ -207,6 +207,11 @@ TASK = {**TASK,
         "由原生入口按用户选择的管理审批档位决定是否询问，不在工具审批之外重复要求确认；"
         "用户名、壁纸和助理设置继续用personal_assistant_action_tool；"),
 }
+_PRE_SECRET_REQUEST_TASK = TASK
+TASK = {**TASK, "responsibilities":
+    "模型连接等配置任务需要 API key、token 等凭据时，先用 secret_request 向用户说明用途并请其附加隐私附件；"
+    "用户附加后消息带 [隐私附件] sec_x 标记，在 provider_add 用 credential_token 兑换；"
+    "绝不让用户把明文发进聊天文本，也绝不把明文写进任何记录。\n" + TASK["responsibilities"]}
 _LOCK = threading.RLock()
 COMPOSER_STARTERS = (
     {
@@ -509,6 +514,7 @@ def create_personal_assistant(display_name: str = "个人助理") -> dict:
                 directory.normalize_task_profile(_PRE_ACTIONS_TASK),
                 directory.normalize_task_profile(_PRE_API_COVERAGE_TASK),
                 directory.normalize_task_profile(_PRE_MANAGEMENT_PERMISSION_TASK),
+                directory.normalize_task_profile(_PRE_SECRET_REQUEST_TASK),
                 directory.normalize_task_profile({**_PRE_QUERY_TASK, "constraints": _LEGACY_DESKTOP_CONSTRAINTS}),
                 directory.normalize_task_profile({**_PRE_AFFAIRS_TASK, "constraints": _LEGACY_DESKTOP_CONSTRAINTS}),
                 directory.normalize_task_profile({**_PRE_MESSAGES_TASK, "constraints": _LEGACY_DESKTOP_CONSTRAINTS}),

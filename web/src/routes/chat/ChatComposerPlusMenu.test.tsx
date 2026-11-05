@@ -340,6 +340,84 @@ describe("composer private attachment dialog interaction", () => {
   });
 });
 
+describe("composer secret request banner", () => {
+  let root: Root | null = null;
+  let container: HTMLDivElement;
+  afterEach(async () => {
+    await act(async () => root?.unmount());
+    container?.remove();
+    root = null;
+  });
+  const request = { purpose: "连接中转站需要 API 密钥", label: "中转站密钥" };
+  function banner(): Element | null {
+    return document.querySelector('[data-testid="chat-composer-secret-request"]');
+  }
+  function actionButton(label: string): HTMLButtonElement {
+    const element = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.trim() === label);
+    if (!element) throw new Error(`missing banner action ${label}`);
+    return element;
+  }
+  async function renderMenu(secretRequestValue: typeof request | null,
+    onAttachSecret?: (input: { value: string; label?: string }) => Promise<void>) {
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    const onDismiss = vi.fn();
+    await act(async () => root!.render(
+      <VuiProvider><ChatComposerPlusMenu lang="zh" showCapabilities={false} showReferences={false}
+        attachmentDisabled={false} sessionReferences={[]} onAddAttachments={vi.fn()}
+        onAttachSecret={onAttachSecret} secretRequest={secretRequestValue}
+        onSecretRequestDismiss={onDismiss} /></VuiProvider>,
+    ));
+    return onDismiss;
+  }
+  it("renders no banner without a request (null or omitted)", async () => {
+    await renderMenu(null);
+    expect(banner()).toBeNull();
+    expect(document.body.textContent).not.toContain("助理请求隐私内容");
+  });
+  it("surfaces the request with its purpose and suggested display name", async () => {
+    await renderMenu(request);
+    const element = banner();
+    expect(element).not.toBeNull();
+    expect(element!.textContent).toContain("助理请求隐私内容：连接中转站需要 API 密钥");
+    expect(element!.textContent).toContain("建议显示名：中转站密钥");
+    expect(element!.textContent).toContain("立即附加");
+    expect(element!.textContent).toContain("忽略");
+  });
+  it("opens the private attachment dialog with the suggested label prefilled", async () => {
+    const onAttachSecret = vi.fn(async () => {});
+    await renderMenu(request, onAttachSecret);
+    await act(async () => actionButton("立即附加").click());
+    const password = document.querySelector<HTMLInputElement>('input[type="password"]');
+    expect(password).not.toBeNull();
+    // The suggestion lands in the display-name field, ready to edit or send.
+    expect(document.querySelector<HTMLInputElement>('input[aria-label="隐私附件显示名"]')!.value).toBe("中转站密钥");
+    // The banner hides while the dialog is open so the two never stack.
+    expect(banner()).toBeNull();
+    const setInput = (element: HTMLInputElement, value: string) => {
+      act(() => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(element, value);
+        element.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    };
+    setInput(password!, "sk-relay-9f8a-live");
+    const submit = [...document.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.trim() === "添加")!;
+    await act(async () => submit.click());
+    expect(onAttachSecret).toHaveBeenCalledExactlyOnceWith({ value: "sk-relay-9f8a-live", label: "中转站密钥" });
+  });
+  it("reports the dismissal when the operator ignores the request", async () => {
+    const onDismiss = await renderMenu(request);
+    await act(async () => actionButton("忽略").click());
+    expect(onDismiss).toHaveBeenCalledExactlyOnceWith();
+    // The banner stays only as long as the host keeps passing the request:
+    // dismissal memory is the host's keyed state, not the menu's.
+    expect(banner()).not.toBeNull();
+  });
+});
+
 describe("composer reference context interaction", () => {
   let root: Root | null = null;
   let container: HTMLDivElement;

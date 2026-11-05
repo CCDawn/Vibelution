@@ -147,6 +147,45 @@ function readableApprovalJson(source: string): string {
 type ContinueAttempt = { requestId: string; expected: SessionContinuationExpectation; accepted: boolean };
 type ComposerSnapshot = { draft: string; outstanding: LauncherAssistantSubmission | null; acceptedTurnId: string; queuedAcceptance: LauncherAssistantQueuedAcceptance | null; continuation?: ContinueAttempt; attachments?: ComposerImageAttachment[]; references?: SessionReferenceAttachment[]; questionDraft?: LauncherAssistantQuestionDraft | null };
 
+/** One assistant tool receipt asking the operator to attach a private
+ * credential (a `secret_request` action result). */
+export type AssistantSecretRequest = { purpose: string; label?: string; key: string };
+
+/** The latest assistant turn's newest tool receipt decides whether the composer
+ * should surface a private-attachment request. Receipt JSON rides the canonical
+ * `tool_call` item's `output` string; anything else — no assistant turn yet, a
+ * newer user reply, a different action, or an unparseable/truncated output —
+ * means no request, never a partial banner. `key` is the turn+item identity, so
+ * ignoring one exact receipt stays quiet while a newer request re-arms. */
+export function resolveAssistantSecretRequest(detail: SessionDetail | undefined): AssistantSecretRequest | null {
+  const messages = detail?.messages || [];
+  let latestAssistantIndex = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === "assistant") { latestAssistantIndex = index; break; }
+  }
+  if (latestAssistantIndex < 0) return null;
+  const latestAssistant = messages[latestAssistantIndex]!;
+  if (latestAssistant.role !== "assistant") return null;
+  // A user message after the request means the conversation moved on: the
+  // composer tray (or a plain reply) already answered it, so never resurrect.
+  if (messages.slice(latestAssistantIndex + 1).some(message => message.role === "user")) return null;
+  const items = latestAssistant.turnItems || [];
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index]!;
+    if (item.type !== "tool_call") continue;
+    let receipt: unknown;
+    try { receipt = JSON.parse(String(item.output ?? "")); } catch { return null; }
+    if (!receipt || typeof receipt !== "object") return null;
+    const record = receipt as Record<string, unknown>;
+    if (record.action !== "secret_request" || record.status !== "awaiting_user_attachment") return null;
+    const purpose = typeof record.purpose === "string" ? record.purpose.trim() : "";
+    if (!purpose) return null;
+    const label = typeof record.label === "string" && record.label.trim() ? record.label.trim() : undefined;
+    return { purpose, label, key: `${latestAssistant.turnId}:${item.itemId || item.id}` };
+  }
+  return null;
+}
+
 export function LauncherAssistantRoute({ embedded = false, navigationOwned = false, computerRequested = false, entryIntent }: {
   embedded?: boolean; navigationOwned?: boolean; computerRequested?: boolean;
   entryIntent?: { key: string; title: string; label: string; message: string };
@@ -806,6 +845,23 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   // masked display name and that reference — never the value — and is already
   // "uploaded", so submit includes sec_x in attachmentIds without any re-upload.
   const MAX_SECRET_ATTACHMENTS = 4;
+  // Assistant `secret_request` receipts surface as a one-click banner near the
+  // composer. Suppressed three ways: the operator dismissed that exact receipt,
+  // a secret chip is already staged, or the receipt aged out of the newest
+  // conversational position (resolveAssistantSecretRequest). A successful
+  // attach retires the current request even if the chip is removed later.
+  const resolvedSecretRequest = useMemo(() => resolveAssistantSecretRequest(detail.data), [detail.data]);
+  const [dismissedSecretRequestKeys, setDismissedSecretRequestKeys] = useState<string[]>([]);
+  useEffect(() => { setDismissedSecretRequestKeys([]); }, [sessionId]);
+  const secretRequest = resolvedSecretRequest
+    && !dismissedSecretRequestKeys.includes(resolvedSecretRequest.key)
+    && !attachments.some(item => item.kind === "secret")
+    ? resolvedSecretRequest : null;
+  function dismissSecretRequest() {
+    if (!resolvedSecretRequest) return;
+    setDismissedSecretRequestKeys(current => current.includes(resolvedSecretRequest.key)
+      ? current : [...current, resolvedSecretRequest.key]);
+  }
   async function addSecretAttachment(input: ChatComposerSecretAttachmentInput): Promise<void> {
     if (status.data?.attachmentVersion !== 1 || sendPending || sendUnconfirmed || uploadGate.current) {
       throw new Error(lang === "zh" ? "当前不能添加隐私附件，请稍后再试。" : "A private attachment cannot be added right now.");
@@ -814,6 +870,9 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       throw new Error(lang === "zh" ? `隐私附件最多 ${MAX_SECRET_ATTACHMENTS} 个，请先移除一个再添加。` : `Up to ${MAX_SECRET_ATTACHMENTS} private attachments; remove one first.`);
     }
     const { attachmentId } = await uploadLauncherUserSecret(input.value, input.label);
+    // Staged: retire the request banner too, durably (the chip alone would
+    // resurrect the banner if the operator removed it before sending).
+    dismissSecretRequest();
     // No display name falls back to the same generic mask label the history
     // bubble side uses for a label-less user_secret attachment.
     const displayName = (input.label || "").trim() || (lang === "zh" ? "隐私附件" : "Private attachment");
@@ -1499,6 +1558,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
         budget={budget}
         sessionReferences={[]} onAddAttachments={addAttachments}
         onAttachSecret={input => addSecretAttachment(input)}
+        secretRequest={secretRequest} onSecretRequestDismiss={dismissSecretRequest}
         attachmentDisabled={status.data?.attachmentVersion !== 1 || sendPending || sendUnconfirmed || controlPending} />
         <LauncherManagementPermissionControl state={managementPermission} lang={lang} /></>}
       composerModelControl={status.data ? <LauncherAssistantModelControl key={sessionId} lang={lang}

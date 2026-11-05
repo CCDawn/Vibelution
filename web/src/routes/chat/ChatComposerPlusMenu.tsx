@@ -17,7 +17,7 @@ import {
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import type { SessionReferenceAttachment } from "../../api/types";
-import { VButton, VDialog, VInput, VNativeInput, VPopover } from "../../components/vui";
+import { VButton, VDialog, VInput, VNativeInput, VPopover, VStateSurface } from "../../components/vui";
 import { rankByScore } from "../../components/conversation/conversationFuzzyMatch";
 import { ChatComposerBudgetPopover, type ChatComposerBudgetControl, type ChatComposerBudgetPanelLabels } from "./ChatComposerBudgetPopover";
 import { composerAttachmentAcceptAttribute } from "./chatComposerSubmitModel";
@@ -43,6 +43,14 @@ export type ChatComposerKnowledgeReferenceState = {
  * unmount — it never enters a draft, snapshot or storage. */
 export type ChatComposerSecretAttachmentInput = {
   value: string;
+  label?: string;
+};
+
+/** A live assistant `secret_request` receipt (the model asked the operator for
+ * a private credential). Null or omitted renders nothing, so ordinary chats
+ * never see the banner. */
+export type ChatComposerSecretRequest = {
+  purpose: string;
   label?: string;
 };
 
@@ -92,6 +100,12 @@ export type ChatComposerPlusMenuProps = ChatComposerCapabilityProps & {
   /** Privacy attachment entry; omitted surfaces get no menu item (ordinary
    * chats never pass it, so their plus menu stays bit-for-bit identical). */
   onAttachSecret?: (input: ChatComposerSecretAttachmentInput) => Promise<void>;
+  /** A pending assistant `secret_request` receipt; renders a one-click request
+   * banner near the composer until attached or dismissed. Hidden while the
+   * private attachment dialog is open so the two never stack. */
+  secretRequest?: ChatComposerSecretRequest | null;
+  /** The operator ignored the current request; the host keys the dismissal. */
+  onSecretRequestDismiss?: () => void;
   sessionReferences: ChatComposerSessionReferenceOption[];
   onAddSessionReference?: (reference: SessionReferenceAttachment) => void;
   knowledgeReferenceOptions?: ChatComposerSessionReferenceOption[];
@@ -139,6 +153,8 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
     attachmentDisabled,
     onAddAttachments,
     onAttachSecret,
+    secretRequest,
+    onSecretRequestDismiss,
     sessionReferences: defaultSessionReferences,
     onAddSessionReference,
     knowledgeReferenceOptions,
@@ -280,6 +296,18 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
       // Any exit (cancel, escape, backdrop) burns the draft: write-only.
       resetSecretDraft();
     }
+  }
+
+  /** The request banner's one-click path into the same dialog the plus menu
+   * uses. The suggested display name prefills only while the operator has not
+   * typed one; a closed dialog always resets the label, so this fills just the
+   * assistant's suggestion and never overwrites a manual entry. */
+  function openSecretRequestDialog() {
+    setSecretError("");
+    if (secretRequest?.label && !secretLabel.trim()) {
+      setSecretLabel(secretRequest.label);
+    }
+    setSecretDialogOpen(true);
   }
 
   async function submitSecretAttachment() {
@@ -436,6 +464,29 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
 
   return (
     <>
+      {secretRequest && !secretDialogOpen ? (
+        <VStateSurface
+          density="compact"
+          tone="info"
+          role="status"
+          data-testid="chat-composer-secret-request"
+          className={styles.secretRequestBar}
+          icon={<KeyRound size={14} aria-hidden="true" />}
+          title={`${lang === "zh" ? "助理请求隐私内容：" : "Assistant requests private content: "}${secretRequest.purpose}`}
+          actions={<>
+            <VButton type="button" onPress={openSecretRequestDialog}>
+              {lang === "zh" ? "立即附加" : "Attach now"}
+            </VButton>
+            <VButton type="button" variant="ghost" onPress={() => onSecretRequestDismiss?.()}>
+              {lang === "zh" ? "忽略" : "Dismiss"}
+            </VButton>
+          </>}
+        >
+          {secretRequest.label
+            ? lang === "zh" ? `建议显示名：${secretRequest.label}` : `Suggested display name: ${secretRequest.label}`
+            : null}
+        </VStateSurface>
+      ) : null}
       <VPopover
         open={open}
         onOpenChange={(nextOpen) => {

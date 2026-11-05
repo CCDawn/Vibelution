@@ -22,6 +22,7 @@ const styles: Record<string, string> = {
   secretField: "vui-routes-chatcomposerplusmenu secretField grid gap-1.5 text-vui-xs font-medium text-[var(--fg-secondary)]",
   secretError: "vui-routes-chatcomposerplusmenu secretError min-w-0 text-vui-xs leading-[var(--vui-line-readable)] text-[var(--tone-danger, var(--fg-primary))]",
   secretActions: "vui-routes-chatcomposerplusmenu secretActions flex items-center justify-end gap-2 pt-1",
+  secretRequestBar: "vui-routes-chatcomposerplusmenu secretRequestBar min-w-0 flex-1",
 };
 
 export default styles;

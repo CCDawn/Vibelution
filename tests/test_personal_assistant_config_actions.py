@@ -354,6 +354,42 @@ def test_provider_add_still_rejects_inline_api_key_field(operator):
     assert "fixture-secret" not in json.dumps(result)
 
 
+def test_secret_request_returns_pure_receipt_without_config_access(operator, monkeypatch):
+    monkeypatch.setattr(actions, "_path", lambda: pytest.fail("receipt action must not read config"))
+    contract = actions.contracts()["secret_request"]
+    assert contract["governed"] is False
+    assert contract["parameters"]["properties"]["purpose"]["maxLength"] == 200
+    assert contract["parameters"]["properties"]["label"]["maxLength"] == 120
+    before = operator.read_bytes()
+    result = call("secret_request", {"purpose": "配置 Pixel 中转需要 API key", "label": "Pixel 密钥"})
+    assert result == {"ok": True, "action": "secret_request", "status": "awaiting_user_attachment",
+                      "purpose": "配置 Pixel 中转需要 API key", "label": "Pixel 密钥",
+                      "hint": "等待用户附加隐私附件；附加后在下一条用户消息会出现 sec_ 引用标记，届时用 credential_token 继续"}
+    assert operator.read_bytes() == before
+
+
+def test_secret_request_label_is_optional(operator):
+    result = call("secret_request", {"purpose": "连接官方 API 需要 token"})
+    assert result["ok"] is True and "label" not in result
+    assert result["status"] == "awaiting_user_attachment"
+    assert result["purpose"] == "连接官方 API 需要 token"
+    assert result["hint"].startswith("等待用户附加隐私附件")
+
+
+@pytest.mark.parametrize("purpose", ["", "p" * 201])
+def test_secret_request_rejects_invalid_purpose_without_touching_config(operator, monkeypatch, purpose):
+    monkeypatch.setattr(actions, "_path", lambda: pytest.fail("validation failure must not read config"))
+    before = operator.read_bytes()
+    result = call("secret_request", {"purpose": purpose})
+    assert result["error"] == "invalid_input"
+    assert operator.read_bytes() == before
+
+
+def test_secret_request_runs_without_native_approval(monkeypatch):
+    monkeypatch.setattr(actions, "_path", lambda: pytest.fail("receipt must not need approval-gated config"))
+    assert call("secret_request", {"purpose": "p"}, governed=False)["ok"] is True
+
+
 def test_provider_update_preserves_models_and_unrelated_provider(operator):
     before = read(operator)
     result = call("provider_update", {"provider_id": "pixel_relay", "label": "New label", "enabled": False}, governed=True)
