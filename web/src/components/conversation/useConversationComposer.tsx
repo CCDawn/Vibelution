@@ -854,7 +854,7 @@ export function useConversationComposer({
   ) : null;
 
   const composerActions = (
-    <div className={styles.composerActionStack}>
+    <div className={`${styles.composerActionStack}${composerVariant === "codex" ? " shrink-0" : ""}`}>
       {resolvedActionMode === "stop" && composerPending ? (
         <span
           className={styles.composerStopPendingFeedback}
@@ -1514,7 +1514,7 @@ export function useConversationComposer({
                 />
               ) : null}
             </div>
-            <div className={styles.composerToolbarEnd}>
+            <div className={`${styles.composerToolbarEnd}${composerVariant === "codex" ? " flex-wrap" : ""}`}>
               {composerModelControl ?? (turnModelControl ? <ConversationTurnModelControl {...turnModelControl} /> : null)}
               {llmControl ? <ConversationInferenceControl {...llmControl} /> : null}
               {composerContextRing ? (
