@@ -21,17 +21,26 @@ import { startManagedLegacyReminderRetirement } from "../src/notifications/manag
 import { createBranchLifecycleCommandOwner } from "../src/lifecycle/branchLifecycleCommands.js";
 import { ConfigurationReferenceLeaseBroker } from "../src/assistant/configurationReferenceLease.js";
 import { isConfigurationReferenceRequest } from "../src/assistant/configurationReferenceProtocol.js";
+import { invokeAssistant, LAUNCHER_ASSISTANT_URL } from "../src/assistant/assistantBridge.js";
 
 const ownedRoots: string[] = [];
 afterEach(() => { for (const root of ownedRoots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 const source = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
 const ast = createSourceFile("main.ts", source, ScriptTarget.Latest, true);
-const declarations = ["startLauncherAssistant", "stopLauncherAssistant"].map(name => {
+const declarations = ["startLauncherAssistant", "stopLauncherAssistant", "resumeLauncherAssistantAfterCancelledExit"].map(name => {
   const fn = ast.statements.find(node => isFunctionDeclaration(node) && node.name?.text === name);
   if (!fn) throw new Error(`Missing ${name}`);
   return fn.getFullText(ast);
 }).join("\n");
+/** The registered renderer producer gate, compiled against the same sandbox as
+ * the resume wiring so a cancelled exit can be driven end to end. */
+const assistantInvokeSlice = (() => {
+  const begin = source.indexOf("ipcMain.handle(IPC_CHANNELS.assistantInvoke,");
+  const end = source.indexOf("\nfunction createDesktopPathsForApp", begin);
+  if (begin < 0 || end < 0) throw new Error("Missing assistantInvoke handler");
+  return source.slice(begin, end);
+})();
 const assistantOpenDeclaration = ast.statements.find(node => isFunctionDeclaration(node)
   && node.name?.text === "requestOpenAssistantFromSecondInstance")?.getFullText(ast) ?? "";
 const secondInstanceRegistration = ast.statements.find(node => isExpressionStatement(node)
@@ -64,6 +73,7 @@ function fixture() {
   };
   const context: Record<string, any> = {
     launcherAssistantStarting: null, launcherAssistantStopping: null, initialMigrationReceiptFence: null, launcherAssistantStartupAbort: new AbortController(),
+    launcherAssistantResume: null, launcherAssistantPaths: null,
     launcherAssistantHost: null, launcherAssistantWindow: null, launcherAssistantBrowser: null, showAssistantStartupWait: null, dismissAssistantStartupWait: null, flushAssistantMigrationFeedback: null, assistantMigrationPending: false,
     launcherAssistantProjects: null, stopLauncherAssistantReminders: null, pendingAssistantOpen: null,
     projectAdmissionExperiment: false,
@@ -97,7 +107,7 @@ function fixture() {
     applyPendingProjectSlot: vi.fn(), handleSecondInstanceLifecycleCommand: vi.fn(),
     requestOpenWorkbenchFromSecondInstance: vi.fn(), focusExistingDesktopShell: vi.fn(),
   };
-  runInNewContext(transpileModule(`${declarations}\n${assistantOpenDeclaration}\n${secondInstanceRegistration}\nglobalThis.start=startLauncherAssistant;globalThis.stop=stopLauncherAssistant;`, {
+  runInNewContext(transpileModule(`${declarations}\n${assistantOpenDeclaration}\n${secondInstanceRegistration}\nglobalThis.start=startLauncherAssistant;globalThis.stop=stopLauncherAssistant;globalThis.resume=resumeLauncherAssistantAfterCancelledExit;`, {
     compilerOptions: { target: ScriptTarget.ES2022 },
   }).outputText, context);
   return { context, host, window, projects, projectSnapshot, paths: { resourcesRoot: "resources", workspaceRoot: "", userDataRoot: "private", desktopBundleRoot: "bundle" } };
@@ -298,6 +308,73 @@ describe("resident assistant startup", () => {
     expect(worker.release).toHaveBeenCalledOnce();
     expect(seal.release).toHaveBeenCalledOnce();
     expect(projects.start).toHaveBeenCalledOnce();
+    await context.stop();
+  });
+
+  it("resumes a cancelled exit by reopening the gates, replacing the abort signal and rebuilding the stack", async () => {
+    const { context, host, window, projects, paths } = fixture();
+    await context.start(paths);
+    const firstAbort = context.launcherAssistantStartupAbort;
+    const firstStarting = context.launcherAssistantStarting;
+    expect(context.launcherAssistantPaths).toBe(paths);
+    // The cancelled exit already ran its assistant stop: the generation signal
+    // is aborted, the host stopped and the exit marked ready.
+    await context.stop();
+    expect(context.launcherAssistantStartupAbort.signal.aborted).toBe(true);
+    expect(context.launcherAssistantExitReady).toBe(true);
+    // Producer fence joint scenario: with the owner shutdown admission armed
+    // (06af2e055), the registered renderer gate refuses every poll for the
+    // stopped stack instead of recovering a host behind its own retirement.
+    context.ipcMain = { handle: (_channel: unknown, handler: unknown) => { context.assistantInvokeHandler = handler; } };
+    context.IPC_CHANNELS = { assistantInvoke: "assistantInvoke" };
+    context.isLauncherControlSender = () => true;
+    context.isWorkbenchMainSender = () => false;
+    context.isTrustedLauncherControlFrame = () => true;
+    context.invokeAssistant = invokeAssistant;
+    host.request = vi.fn(async () => ({ accepted: true }));
+    runInNewContext(transpileModule(assistantInvokeSlice, { compilerOptions: { target: ScriptTarget.ES2022 } }).outputText, context);
+    const senderFrame = { url: LAUNCHER_ASSISTANT_URL };
+    const event = { sender: { mainFrame: senderFrame }, senderFrame };
+    await expect(context.assistantInvokeHandler(event, { operation: "status" })).rejects.toThrow("ASSISTANT_NOT_READY");
+    expect(host.start).toHaveBeenCalledOnce();
+    expect(host.request).not.toHaveBeenCalled();
+    host.snapshot = vi.fn(() => ({ state: "stopped" as const, errorCode: null }));
+    host.resumeAfterCancelledExit = vi.fn();
+    window.destroyFloat = vi.fn();
+    await context.resume();
+    expect(host.resumeAfterCancelledExit).toHaveBeenCalledOnce();
+    expect(context.launcherAssistantStartupAbort).not.toBe(firstAbort);
+    expect(context.launcherAssistantStartupAbort.signal.aborted).toBe(false);
+    expect(window.destroyFloat).toHaveBeenCalledOnce();
+    expect(context.launcherAssistantExitReady).toBe(false);
+    expect(context.launcherAssistantStarting).not.toBeNull();
+    expect(context.launcherAssistantStarting).not.toBe(firstStarting);
+    // The renderer producer fence (assistantInvoke) must admit the rebuilt
+    // stack: the settled stop promise from the cancelled exit is cleared, and
+    // a later real exit can start a fresh stop instead of short-circuiting.
+    expect(context.launcherAssistantStopping).toBeNull();
+    expect(context.launcherAssistantResume).toBeNull();
+    // The whole resident stack was rebuilt through the ordinary startup path:
+    // fresh registry connection, host generation, window and pumps.
+    expect(projects.start).toHaveBeenCalledTimes(2);
+    expect(host.start).toHaveBeenCalledTimes(2);
+    // The same registered gate admits renderer polls again for the resumed
+    // generation — the fence follows the cancelled exit, not the shell.
+    await expect(context.assistantInvokeHandler(event, { operation: "status" })).resolves.toEqual({ accepted: true });
+    expect(host.request).toHaveBeenCalledOnce();
+    await context.stop();
+  });
+
+  it("skips cancelled-exit recovery when the resident host never stopped", async () => {
+    const { context, host, projects, paths } = fixture();
+    await context.start(paths);
+    host.snapshot = vi.fn(() => ({ state: "ready" as const, errorCode: null }));
+    host.resumeAfterCancelledExit = vi.fn();
+    await context.stop();
+    await context.resume();
+    expect(host.resumeAfterCancelledExit).not.toHaveBeenCalled();
+    expect(projects.start).toHaveBeenCalledOnce();
+    expect(context.launcherAssistantResume).toBeNull();
     await context.stop();
   });
 

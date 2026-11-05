@@ -245,6 +245,7 @@ import { assertTrustedIpcSender } from "./security/ipcSenderValidation.js";
 import { isExternalOpenableUrl, normalizeAbsoluteOpenPath } from "./security/externalOpenPolicy.js";
 import { isLiveWorkbenchWindowUrl } from "./security/urlPolicy.js";
 import { createDesktopShellExitDeadline, executeApprovedDesktopShellShutdown, reapManagedRuntimeOnDesktopStart, DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS, withDesktopShellExitTimeout, type DesktopShellExitDeadline } from "./shutdown/desktopShellExit.js";
+import { hideDesktopShellWindowsForExit } from "./shutdown/exitWindowPresentation.js";
 import {
   decideShutdown,
   executeShutdownAuthorizationBoundary,
@@ -630,7 +631,13 @@ let launcherAssistantStarting: Promise<void> | null = null;
 let launcherAssistantStopping: Promise<void> | null = null;
 let acquireResidentAssistantLifecycleLease: ((signal?: AbortSignal) => Promise<AssistantLifecycleLease>) | null = null;
 let initialMigrationReceiptFence: Promise<void> | null = null;
-const launcherAssistantStartupAbort = new AbortController();
+/** Replaceable generation signal: the exit path aborts the current controller,
+ * and a cancelled exit rebuilds it before resuming the assistant. A one-way
+ * controller would keep every reopen() guard false forever and strand the
+ * shell with a sealed lifecycle admission it can never release. */
+let launcherAssistantStartupAbort = new AbortController();
+let launcherAssistantPaths: DesktopPaths | null = null;
+let launcherAssistantResume: Promise<void> | null = null;
 let launcherAssistantProjects: AssistantProjectRegistryConnection | null = null;
 let legacyReminderAdmission: {
   fence: LegacyReminderSourceFence;
@@ -724,6 +731,7 @@ async function requestOpenAssistantBrowserWorkspace(): Promise<void> {
 
 function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
   if (launcherAssistantStarting) return launcherAssistantStarting;
+  launcherAssistantPaths = paths;
   launcherAssistantStarting = (async () => {
     const projectConnection = new AssistantProjectRegistryConnection(join(paths.userDataRoot, "assistant", "projects.json"));
     launcherAssistantProjects = projectConnection;
@@ -1792,6 +1800,47 @@ async function stopLauncherAssistant(): Promise<void> {
     if (launcherAssistantStopping === stopping) launcherAssistantStopping = null;
     throw error;
   }
+}
+
+/** Cancelled-exit recovery. An approved exit that already stopped the resident
+ * assistant seals its lifecycle admission and aborts its generation signal;
+ * when that exit is then cancelled (a managed runtime stop failed inside the
+ * budget) the shell survives but every assistant read would be refused with
+ * ASSISTANT_LIFECYCLE_CLOSING forever: the retained lease release stays blocked
+ * by the reopen() guard because the aborted signal still looks like a shutdown
+ * owner. Once Main knows the exit is cancelled, it is the shell owner again:
+ * hand the gates back, replace the aborted controller, and rebuild the whole
+ * resident stack (fresh registry connection, host generation, float window,
+ * reminder and event pumps) through the ordinary startup path. A completed
+ * exit never reaches this — shutdown keeps owning its gates. */
+function resumeLauncherAssistantAfterCancelledExit(): Promise<void> {
+  if (shutdownApproved || !launcherAssistantPaths) return Promise.resolve();
+  launcherAssistantResume ??= (async () => {
+    // The exit deadline may have died while its assistant stop was still
+    // settling; that stop must reach its final state before the host can be
+    // judged (and recovered) as stopped.
+    await launcherAssistantStopping?.catch(() => undefined);
+    const host = launcherAssistantHost;
+    if (!host || host.snapshot().state !== "stopped") {
+      console.warn("ASSISTANT_CANCELLED_EXIT_RECOVERY skipped: resident host is not stopped");
+      return;
+    }
+    console.warn("ASSISTANT_CANCELLED_EXIT_RECOVERY resuming resident assistant");
+    host.resumeAfterCancelledExit();
+    launcherAssistantStartupAbort = new AbortController();
+    launcherAssistantWindow?.destroyFloat();
+    launcherAssistantWindow = null;
+    launcherAssistantExitReady = false;
+    launcherAssistantStarting = null;
+    // The producer fence for renderer admission reads this flag: a settled
+    // stop promise from the cancelled exit must not keep the rebuilt stack
+    // sealed (and would also short-circuit a later real stop).
+    launcherAssistantStopping = null;
+    await startLauncherAssistant(launcherAssistantPaths);
+  })().catch(error => {
+    console.warn(`ASSISTANT_CANCELLED_EXIT_RECOVERY_FAILED ${error instanceof Error ? error.message : String(error)}`);
+  }).finally(() => { if (launcherAssistantResume) launcherAssistantResume = null; });
+  return launcherAssistantResume;
 }
 
 async function exitDesktopShellProcess(): Promise<void> {
@@ -4384,20 +4433,32 @@ async function requestDesktopShellExit(
         notifyDesktopTray("Vibelution", decision.message || "有任务正在进行，可从托盘选择退出并保存记录。", "info");
       },
       runApproved: async (decision) => {
+        const presentation = hideDesktopShellWindowsForExit(BrowserWindow.getAllWindows());
         // Human confirmation spends no part of the bounded execution budget.
         const deadline = createDesktopShellExitDeadline(DESKTOP_QUIT_TOTAL_BUDGET_MS);
         const interruptActiveWork = decision.reason === "operator_confirmed";
-        const assistantGuard: { lease: AssistantLifecycleLease | null } = { lease: null };
+        /** `lease` is the !operatorRequested guard whose commit belongs to
+         * approveShutdown; `deferred` is the committed idle-probe lease whose
+         * gates are handed back when the exit is cancelled before the deferred
+         * assistant stop starts. Both live in one object because property reads
+         * are not flow-narrowed across the callback assignments below. */
+        const assistantGuard: { lease: AssistantLifecycleLease | null; deferred: AssistantLifecycleLease | null }
+          = { lease: null, deferred: null };
         let assistantStop: Promise<void> | null = null;
+        const assistantStopStartedAt = Date.now();
+        const recordAssistantStop = () => recordSupervisorEventFallbackLocally({
+          eventCode: "electron.desktop_shell.exit_stage",
+          message: "Desktop shell exit stage settled.",
+          fields: { stage: "assistant_stop", durationMs: Date.now() - assistantStopStartedAt }
+        });
+        const startAssistantStop = () => {
+          if (assistantStop) return;
+          assistantStop = stopLauncherAssistant().finally(recordAssistantStop);
+          void assistantStop.catch(() => undefined);
+        };
         try {
           await withDesktopShellExitTimeout(async (signal) => {
             signal.throwIfAborted();
-            const assistantStopStartedAt = Date.now();
-            const recordAssistantStop = () => recordSupervisorEventFallbackLocally({
-              eventCode: "electron.desktop_shell.exit_stage",
-              message: "Desktop shell exit stage settled.",
-              fields: { stage: "assistant_stop", durationMs: Date.now() - assistantStopStartedAt }
-            });
             if (operatorRequested && decision.reason === "no_active_work") {
               const guardAttempt: { pending?: Promise<AssistantLifecycleLease> } = {};
               try {
@@ -4407,10 +4468,15 @@ async function requestDesktopShellExit(
                 }, Math.min(IDLE_ASSISTANT_SHUTDOWN_PROBE_MS, deadline.remainingMs()), "prepare idle assistant shutdown");
                 signal.throwIfAborted();
                 lease.commit();
-                // All producers are fenced. Both processes may now retire,
-                // retaining their original owners until both drains finish.
-                assistantStop = stopLauncherAssistant().finally(recordAssistantStop);
-                void assistantStop.catch(() => undefined);
+                // All producers are fenced, but the assistant now retires only
+                // once the other managed runtime stops are confirmed feasible
+                // (workbench close join, isolated instances): a failure before
+                // the managed-runtime stage then leaves the resident assistant
+                // untouched and its gates releasable, instead of a stopped host
+                // the shell could never admit again. The retirement itself
+                // still overlaps the main runtime stop inside stopManagedRuntime
+                // below.
+                assistantGuard.deferred = lease;
                 recordSupervisorEventFallbackLocally({
                   eventCode: "electron.desktop_shell.assistant_overlap",
                   message: "Assistant retirement overlap decision settled.",
@@ -4438,7 +4504,13 @@ async function requestDesktopShellExit(
               }
             }
             if (operatorRequested) {
-              if (!assistantStop) await stopLauncherAssistant();
+              // A committed barrier keeps the fenced assistant stop deferred to
+              // the managed-runtime stage below; an unfenced serial stop must
+              // still finish here, before any project runtime is touched.
+              if (!assistantGuard.deferred) {
+                startAssistantStop();
+                await assistantStop;
+              }
             } else {
               const pendingGuard = acquireResidentAssistantShutdownGuard();
               void pendingGuard.then(lease => {
@@ -4446,7 +4518,7 @@ async function requestDesktopShellExit(
               }, () => undefined);
               assistantGuard.lease = await pendingGuard;
             }
-            if (!assistantStop) recordAssistantStop();
+            if (!assistantStop && !assistantGuard.lease) recordAssistantStop();
             signal.throwIfAborted();
             pendingWorkbenchCloseAck = null;
             const workbenchJoinStartedAt = Date.now();
@@ -4489,6 +4561,11 @@ async function requestDesktopShellExit(
                 });
               },
               stopManagedRuntime: async (signal) => {
+                // The fenced assistant retirement starts here — after the
+                // workbench close join and the isolated instance stops proved
+                // the remaining managed runtime stop feasible — and overlaps
+                // the main runtime stop as before.
+                if (operatorRequested) startAssistantStop();
                 const results = await Promise.allSettled([
                   mainRuntimeAlreadyStopped
                     ? Promise.resolve()
@@ -4516,7 +4593,21 @@ async function requestDesktopShellExit(
             await withDesktopShellExitTimeout(assistantStop, deadline, "stop personal assistant").catch(() => undefined);
           }
           deadline.dispose();
-          if (!shutdownApproved && assistantGuard.lease) void assistantGuard.lease.release().catch(() => undefined);
+          if (!shutdownApproved) presentation.restore();
+          // A cancelled exit releases only leases whose host is still live;
+          // once the assistant stop ran, the committed gates belong to the
+          // recovery below, not to a blocked release replay.
+          if (!shutdownApproved && assistantGuard.lease && !assistantStop)
+            void assistantGuard.lease.release().catch(() => undefined);
+          if (!shutdownApproved && assistantGuard.deferred && !assistantStop)
+            void assistantGuard.deferred.release().catch(() => undefined);
+          // The exit was cancelled after its assistant stage already stopped
+          // the resident assistant (both the deferred and the serial stop abort
+          // this controller). Without this recovery the shell keeps a host
+          // whose sealed admission refuses every later start forever.
+          if (!shutdownApproved && launcherAssistantStartupAbort.signal.aborted) {
+            void resumeLauncherAssistantAfterCancelledExit();
+          }
         }
       },
       onApprovedFailure: async (_decision, error) => {

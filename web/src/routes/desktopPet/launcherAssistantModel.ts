@@ -125,6 +125,17 @@ export function launcherAssistantSendBusyCode(error: unknown): string {
   return LAUNCHER_ASSISTANT_RETRYABLE_BUSY_CODES.find(code => launcherAssistantSendBusyMatch(error, code)) ?? "";
 }
 
+/** The desktop bridge folds AssistantHost.start() refusals into stable codes.
+ * ASSISTANT_LIFECYCLE_CLOSING means the resident host is retiring behind a
+ * shell exit — including an exit Main later cancelled while it resumes the
+ * assistant. That is never the cold-boot backend wait, so the page states it
+ * explicitly instead of claiming the workbench backend is still starting.
+ * Structural match (name/message plus the Electron context-bridge wrapper),
+ * identical to the retryable-busy codes. */
+export function launcherAssistantLifecycleClosing(error: unknown): boolean {
+  return error instanceof Error && launcherAssistantSendBusyMatch(error, "ASSISTANT_LIFECYCLE_CLOSING");
+}
+
 export function launcherAssistantActivity(source: SessionActivitySource = {}): {
   tone: PetActivityTone; animationState: PetAnimationState;
 } {
