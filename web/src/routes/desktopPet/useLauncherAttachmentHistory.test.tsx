@@ -145,6 +145,39 @@ it.each(["succeeded", "failed"])("discards a late %s read from the previous sess
   expect(read).toHaveBeenCalledTimes(2);
 });
 
+it("hides the previous session failure while another old read delays the new session", async () => {
+  let resolveOld!: (url: string) => void;
+  let resolveNext!: (url: string) => void;
+  read.mockRejectedValueOnce(new Error("old session unavailable"))
+    .mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; }))
+    .mockImplementationOnce(() => new Promise(resolve => { resolveNext = resolve; }));
+  await setup([row(0), row(1)]);
+  await rerender(["m0", "m1"]);
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(result.failed).toBe(true);
+  expect(result.pending).toBe(true);
+
+  await rerender(["m0"], undefined, { sessionId: "next" });
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(result.failed).toBe(false);
+  expect(result.pending).toBe(false);
+  expect(result.messages[0].attachments?.[0].imageUrl).toBe("");
+
+  await act(async () => { resolveOld("data:image/png;base64,OLD"); await new Promise(resolve => setTimeout(resolve, 0)); });
+  expect(read).toHaveBeenCalledTimes(3);
+  expect(read).toHaveBeenLastCalledWith("i0.png");
+  expect(result.messages[1].attachments?.[0].imageUrl).toBe("");
+  expect(result.failed).toBe(false);
+  expect(result.pending).toBe(true);
+
+  await act(async () => { resolveNext("data:image/png;base64,NEW"); await new Promise(resolve => setTimeout(resolve, 0)); });
+  expect(result.messages[0].attachments?.[0].imageUrl).toBe("data:image/png;base64,NEW");
+  expect(result.messages[1].attachments?.[0].imageUrl).toBe("");
+  expect(result.failed).toBe(false);
+  expect(result.pending).toBe(false);
+  expect(read).toHaveBeenCalledTimes(3);
+});
+
 it("clears cached attachments while disabled and reloads when enabled again", async () => {
   read.mockResolvedValueOnce("data:image/png;base64,OLD").mockResolvedValueOnce("data:image/png;base64,NEW");
   await setup([row(0)]);

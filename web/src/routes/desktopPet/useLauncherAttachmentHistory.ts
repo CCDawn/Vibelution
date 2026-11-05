@@ -85,7 +85,7 @@ export function useLauncherAttachmentHistory(messages: ConversationMessage[], se
       return { ...attachment, url, imageUrl: attachment.kind === "user_image" ? url : "", downloadUrl: url };
     }) };
   });
-  return { messages: safeMessages, missingGenerated, failed: enabled && desired.some(id => failed.current.has(id)), pending: enabled && flight.current?.sessionId === sessionId, retry: () => {
+  return { messages: safeMessages, missingGenerated, failed: enabled && cache.current.sessionId === sessionId && desired.some(id => failed.current.has(id)), pending: enabled && flight.current?.sessionId === sessionId, retry: () => {
     if (flight.current) return;
     for (const id of failed.current) attempted.current.delete(id);
     setVersion(value => value + 1);
