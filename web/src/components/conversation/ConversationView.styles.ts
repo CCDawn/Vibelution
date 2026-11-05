@@ -1167,7 +1167,8 @@ backToBottomButton:
   composerToolbarStart: "vui-components-conversationview composerToolbarStart flex min-w-0 items-center gap-1.5",
   // End cluster: inference control may shrink; send/stop stays shrink-0 and fully visible.
   composerToolbarEnd: "vui-components-conversationview composerToolbarEnd ml-auto flex min-w-0 max-w-full items-center justify-end gap-1.5 [&_[data-testid=conversation-inference-control]]:min-w-0 [&_[data-testid=conversation-inference-control]]:max-w-full",
-  inputCodex: `vui-components-conversationview inputCodex min-h-[40px] !max-h-[240px] w-full flex-none !resize-none overflow-y-auto !border-0 !p-0 ![font-size:var(--vui-font-xs)] font-[var(--vui-weight-regular)] !leading-[1.8] text-[var(--fg-primary)] placeholder:text-[var(--fg-tertiary)] focus:!ring-0 ${composerFlatTextarea}`,
+  // The composer shell owns focus chrome; a zero-width ring still paints its offset.
+  inputCodex: `vui-components-conversationview inputCodex min-h-[40px] !max-h-[240px] w-full flex-none !resize-none overflow-y-auto !border-0 !p-0 ![font-size:var(--vui-font-xs)] font-[var(--vui-weight-regular)] !leading-[1.8] text-[var(--fg-primary)] placeholder:text-[var(--fg-tertiary)] focus:!ring-0 focus:!ring-offset-0 ${composerFlatTextarea}`,
   sessionMeta:
     "vui-components-conversationview sessionMeta min-w-0 flex flex-wrap items-center gap-1.5",
   statPill:
