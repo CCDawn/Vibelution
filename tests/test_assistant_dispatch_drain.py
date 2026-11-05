@@ -2,6 +2,8 @@
 
 import json
 import threading
+from pathlib import Path
+from types import SimpleNamespace
 
 import anyio
 import pytest
@@ -56,6 +58,202 @@ def service_for(tmp_path, remote):
 
 async def start(service, ident="original"):
     return await service.dispatch("project", agent_id="coder", task="original task", dispatch_id=ident)
+
+
+@pytest.mark.anyio
+async def test_empty_profile_without_dispatch_directory_has_an_empty_drain(tmp_path):
+    service = service_for(tmp_path, Remote())
+    assert not service._root.exists()
+    async with service.drain_fence() as fence:
+        assert await fence.observe() == {"drained": True, "recordCount": 0}
+
+
+async def _cleaned_dispatch(tmp_path, *, local_only=False):
+    from core.assistant_runtime.task_cleanup import CleanupExecute, CleanupPreview, TaskCleanup
+
+    class CleanupRemote(Remote):
+        async def preview_task_cleanup(self, **_kwargs):
+            return {"schemaVersion": 1, "taskId": "task-1", "revision": 1,
+                    "fingerprint": "a" * 64, "estimatedBytes": 0, "resources": [], "retained": []}
+
+        async def cleanup_task(self, **_kwargs):
+            return {"taskId": "task-1", "status": "deleted", "releasedBytes": 0, "retained": [], "failures": []}
+
+    remote = CleanupRemote()
+    service = service_for(tmp_path, remote)
+    await start(service)
+    remote.status = "succeeded"
+    await service.reconcile("original")
+    original = service._path("original").read_bytes()
+    identity = {"agentId": "assistant", "directSessionId": "session"}
+    cleanup = TaskCleanup(service, lambda: identity)
+    payload = CleanupPreview(**identity, targets=[{"kind": "dispatch", "projectId": "project",
+                                                   "dispatchId": "original", "localOnly": local_only}])
+    preview = await cleanup.preview(payload)
+    assert preview["items"][0]["status"] == "ready"
+    result = await cleanup.execute(CleanupExecute(**payload.model_dump(), fingerprint=preview["fingerprint"]))
+    assert result["items"][0]["status"] == "deleted" and not service._path("original").exists()
+    marker = service._root / "deleted" / "original.json"
+    assert json.loads(marker.read_text())["localOnly"] is local_only
+    return service, remote, marker, original
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("local_only", [False, True])
+async def test_completed_cleanup_metadata_allows_drain_without_reusing_consumed_id(tmp_path, local_only):
+    service, remote, marker, _ = await _cleaned_dispatch(tmp_path, local_only=local_only)
+    lock = service._path("original").with_suffix(".json.lock")
+    assert lock.read_bytes() == b"\0"
+    temp = lock.parent / ".original.json.abcdefgh.tmp"
+    temp.write_bytes(b"")
+    before = {path: path.read_bytes() for path in (marker, lock, temp)}
+    async with service.drain_fence() as fence:
+        assert await fence.observe() == {"drained": True, "recordCount": 0}
+    assert all(path.read_bytes() == raw for path, raw in before.items())
+    reloaded = service_for(tmp_path, remote)
+    async with reloaded.drain_fence() as fence:
+        assert await fence.observe() == {"drained": True, "recordCount": 0}
+    calls = len(remote.calls)
+    with pytest.raises(DispatchError) as denied:
+        await start(reloaded)
+    assert denied.value.code == "DISPATCH_ALREADY_CLEANED" and len(remote.calls) == calls
+
+
+@pytest.mark.anyio
+async def test_cleanup_marker_never_hides_a_recreated_running_record(tmp_path):
+    service, remote, _, original = await _cleaned_dispatch(tmp_path)
+    service._path("original").write_bytes(original)
+    remote.status = "running"
+    async with service.drain_fence() as fence:
+        assert (await fence.observe())["drained"] is False
+    assert service._path("original").exists()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("change", ["missing", "legacy", "schema_bool", "schema_version", "local_only",
+    "kind", "dispatch_id", "project_id", "project_binding", "agent_id", "session_id", "digest", "oversized",
+    "malformed", "nonobject", "deeply_nested"])
+async def test_cleanup_metadata_requires_a_complete_bounded_marker(tmp_path, change):
+    service, _, marker, _ = await _cleaned_dispatch(tmp_path)
+    data = json.loads(marker.read_text())
+    changes = {"schema_bool": ("schemaVersion", True), "schema_version": ("schemaVersion", 2),
+        "local_only": ("localOnly", 0), "kind": ("kind", "team_run"), "dispatch_id": ("dispatchId", "other"),
+        "project_id": ("projectId", 1), "project_binding": ("projectBinding", "binding"),
+        "agent_id": ("agentId", ""), "session_id": ("directSessionId", False), "digest": ("requestDigest", "g" * 64)}
+    if change == "missing":
+        marker.unlink()
+    elif change == "oversized":
+        marker.write_text(" " * 4097)
+    elif change == "malformed":
+        marker.write_text("{broken")
+    elif change == "nonobject":
+        marker.write_text("[]")
+    elif change == "deeply_nested":
+        marker.write_text("[" * 1500 + "]" * 1500)
+    else:
+        if change == "legacy":
+            data = {"schemaVersion": 1, "requestDigest": data["requestDigest"]}
+        else:
+            key, value = changes[change]
+            data[key] = value
+        marker.write_text(json.dumps(data))
+    async with service.drain_fence() as fence:
+        assert (await fence.observe())["drained"] is False
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("name,content", [("unknown", b""), (".original.json.abcdefgh.tmp", b"partial"),
+    (".original.json.abcdefg.tmp", b""), (".original.json.ABCDEFGH.tmp", b""),
+    ("original.json.lock", b""), ("original.json.lock", b"x"), ("original.json.lock", b"\0\0")])
+async def test_cleanup_marker_does_not_hide_unknown_or_noncanonical_artifacts(tmp_path, name, content):
+    service, _, _, _ = await _cleaned_dispatch(tmp_path)
+    artifact = service._path("original").parent / name
+    artifact.write_bytes(content)
+    async with service.drain_fence() as fence:
+        assert (await fence.observe())["drained"] is False
+    assert artifact.read_bytes() == content
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("part", ["root", "records", "deleted", "marker", "artifact", "dangling_record"])
+async def test_cleanup_metadata_rejects_links(tmp_path, part):
+    service, _, marker, _ = await _cleaned_dispatch(tmp_path)
+    path = {"root": service._root, "records": service._path("original").parent, "deleted": marker.parent, "marker": marker,
+            "artifact": service._path("original").with_suffix(".json.lock"),
+            "dangling_record": service._path("original")}[part]
+    target = tmp_path / "link-target"
+    directory = part in {"root", "records", "deleted"}
+    if part != "dangling_record":
+        path.rename(target)
+    try:
+        path.symlink_to(target, target_is_directory=directory)
+    except OSError:
+        pytest.skip("This host does not permit creation of fixture symlinks")
+    async with service.drain_fence() as fence:
+        assert (await fence.observe())["drained"] is False
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("part", ["root", "records", "deleted", "marker", "artifact"])
+async def test_cleanup_metadata_rejects_windows_reparse_attributes(tmp_path, monkeypatch, part):
+    service, _, marker, _ = await _cleaned_dispatch(tmp_path)
+    path = {"root": service._root, "records": service._path("original").parent, "deleted": marker.parent, "marker": marker,
+            "artifact": service._path("original").with_suffix(".json.lock")}[part]
+    original = Path.lstat
+
+    def reparse(candidate, *args, **kwargs):
+        row = original(candidate, *args, **kwargs)
+        return SimpleNamespace(st_mode=row.st_mode, st_file_attributes=0x400) if candidate == path else row
+
+    monkeypatch.setattr(Path, "lstat", reparse)
+    if part in {"root", "deleted", "marker"}:
+        from core.assistant_runtime.dispatch import _read_dispatch_cleanup_marker
+        with pytest.raises(ValueError):
+            _read_dispatch_cleanup_marker(marker, "original")
+    async with service.drain_fence() as fence:
+        assert (await fence.observe())["drained"] is False
+
+
+@pytest.mark.anyio
+async def test_cleanup_marker_replaced_between_stat_and_open_is_not_trusted(tmp_path, monkeypatch):
+    service, _, marker, _ = await _cleaned_dispatch(tmp_path)
+    from core.assistant_runtime.dispatch import _read_dispatch_cleanup_marker
+    content = marker.read_bytes()
+    open_path = Path.open
+
+    def replaced(candidate, mode="r", *args, **kwargs):
+        if candidate == marker and mode == "rb":
+            marker.replace(marker.with_suffix(".previous"))
+            marker.write_bytes(content)
+        return open_path(candidate, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", replaced)
+    with pytest.raises(ValueError):
+        _read_dispatch_cleanup_marker(marker, "original")
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("change", ["marker_invalid", "marker_missing", "record_recreated"])
+async def test_cleanup_metadata_is_rechecked_by_the_second_drain_inventory(tmp_path, monkeypatch, change):
+    service, _, marker, original = await _cleaned_dispatch(tmp_path)
+    await start(service, "remaining")
+    assert service._drain_record_paths() == [service._path("remaining")]
+    refresh = service._refresh_batch
+
+    async def changed_after_refresh(ids, *, include_terminal=False):
+        result = await refresh(ids, include_terminal=include_terminal)
+        if include_terminal:
+            if change == "marker_invalid":
+                marker.write_text("{}")
+            elif change == "marker_missing":
+                marker.unlink()
+            else:
+                service._path("original").write_bytes(original)
+        return result
+
+    monkeypatch.setattr(service, "_refresh_batch", changed_after_refresh)
+    async with service.drain_fence() as fence:
+        assert await fence.observe() == {"drained": False, "reason": "records_changed"}
 
 
 @pytest.mark.anyio
