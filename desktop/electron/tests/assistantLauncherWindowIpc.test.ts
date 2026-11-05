@@ -22,6 +22,7 @@ function handlers() {
     isWorkbenchMainSender: () => false, invokeAssistant,
     launcherAssistantHost: { start: vi.fn(async () => undefined), request: vi.fn(async () => ({ agentId: "resident" })) },
     launcherAssistantWindow: null, requestOpenLauncherFromAssistant: vi.fn(),
+    launcherAssistantStopping: null, launcherAssistantStartupAbort: new AbortController(),
     BrowserWindow: { fromWebContents: () => ({ isDestroyed: () => false, close }) },
     launcherBootstrap: null, windowProvider: null, shutdownApproved: false, dialog,
     statSync: () => ({ isDirectory: () => true, isFile: () => true }), join: (...parts: string[]) => parts.join("/"),

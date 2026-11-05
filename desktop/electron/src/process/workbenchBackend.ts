@@ -218,16 +218,34 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function resolveNoConsolePython(
   pythonPath: string,
-  fileExists: (path: string) => boolean = existsSync
+  fileExists: (path: string) => boolean = existsSync,
+  options: { consoleSuppressedByCaller?: boolean } = {}
 ): string {
   const raw = String(pythonPath || "").trim();
   if (!raw) {
     return "";
   }
-  if (raw.toLowerCase().endsWith("pythonw.exe")) {
+  const lower = raw.toLowerCase();
+  // A caller that already suppresses the console window itself (the tracked
+  // native spawn wraps the child in a Job with CREATE_NO_WINDOW and
+  // file-redirected stdio) must keep the plain console executable: the venv
+  // ``pythonw.exe`` is a launcher stub that CreateProcess-delegates the real
+  // base-Python interpreter as a child, so the registered pid is a ~5MB stub
+  // that never binds the port while the server runs as an unregistered
+  // grandchild (documented in core/launcher/desktop_shell.py).
+  if (options.consoleSuppressedByCaller) {
+    if (lower.endsWith("pythonw.exe")) {
+      const sibling = raw.slice(0, -"pythonw.exe".length) + "python.exe";
+      if (fileExists(sibling)) {
+        return sibling;
+      }
+    }
     return raw;
   }
-  if (raw.toLowerCase().endsWith("python.exe")) {
+  if (lower.endsWith("pythonw.exe")) {
+    return raw;
+  }
+  if (lower.endsWith("python.exe")) {
     const sibling = raw.slice(0, -"python.exe".length) + "pythonw.exe";
     if (fileExists(sibling)) {
       return sibling;
@@ -941,6 +959,95 @@ export async function classifyWorkbenchPortOccupant(input: {
   return { kind: "same-project-backend", pid };
 }
 
+export type BackendRegistrationOwnership = {
+  /** The verified listening-process pid when it differs from the launch pid. */
+  ownerPid: number;
+  ownerIdentity: PythonProcessIdentity | null;
+  note: string;
+};
+
+/**
+ * Verify that the pid registered for a freshly healthy backend actually owns
+ * the listening socket.
+ *
+ * Health proves a same-project backend answers on the port, not that the
+ * spawn pid is the server: a venv ``pythonw.exe`` launcher stub delegates the
+ * real base-Python interpreter to a child process, and an unregistered
+ * same-project orphan can still own the port. The project process inventory
+ * resolves the actual socket owner; when it is this project's managed backend
+ * and its identity can be captured, the caller re-registers the owner as
+ * ``backendPid`` while keeping the spawn pid as the launch handle — mirroring
+ * the launcher's backendPid/launchPid split (_wait_for_started_backend in
+ * scripts/vibelution_launcher.py). Everything else stays on the launch
+ * registration with a visible note instead of a silent adoption.
+ */
+export async function adoptBackendRegistrationOwner(input: {
+  port: number;
+  spawnPid: number;
+  healthPid?: number;
+  resolvePortOwner: (port: number) => Promise<WorkbenchPortOwnerResolution | null>;
+  captureIdentity: (pid: number) => Promise<PythonProcessIdentity | null>;
+  signal?: AbortSignal;
+}): Promise<BackendRegistrationOwnership> {
+  const port = Math.trunc(input.port);
+  const spawnPid = Math.trunc(input.spawnPid);
+  const healthPid = Math.trunc(Number(input.healthPid || 0));
+  if (healthPid > 0 && healthPid === spawnPid) {
+    // The health-verified server self-reports the registered spawn pid; no
+    // inventory roundtrip is needed for the common direct-python.exe case.
+    return { ownerPid: 0, ownerIdentity: null, note: "" };
+  }
+  let owner: WorkbenchPortOwnerResolution | null = null;
+  try {
+    owner = await input.resolvePortOwner(port);
+  } catch {
+    owner = null;
+  }
+  input.signal?.throwIfAborted();
+  const ownerPid = Math.trunc(Number(owner?.pid || 0));
+  if (ownerPid <= 0 || !owner?.alive) {
+    return {
+      ownerPid: 0,
+      ownerIdentity: null,
+      note: healthPid > 0 && healthPid !== spawnPid
+        ? `workbench backend health reported pid ${healthPid} on port ${port} while the registered launch pid is ${spawnPid}; the process inventory could not confirm the socket owner, so the launch registration was kept`
+        : ""
+    };
+  }
+  if (ownerPid === spawnPid) {
+    // The inventory proves the registered pid owns the socket; a diverging
+    // health self-report does not override the socket authority.
+    return { ownerPid: 0, ownerIdentity: null, note: "" };
+  }
+  const discrepancy = `workbench backend port ${port} is owned by pid ${ownerPid} while the registered launch pid ${spawnPid} does not own the listening socket`;
+  if (owner.kind !== "managed_workbench_backend") {
+    return {
+      ownerPid,
+      ownerIdentity: null,
+      note: `${discrepancy} (process kind ${owner.kind || "unclassified"}); the launch registration was kept without adoption`
+    };
+  }
+  let ownerIdentity: PythonProcessIdentity | null = null;
+  try {
+    ownerIdentity = await input.captureIdentity(ownerPid);
+  } catch {
+    ownerIdentity = null;
+  }
+  input.signal?.throwIfAborted();
+  if (!ownerIdentity || Math.trunc(Number(ownerIdentity.pid)) !== ownerPid) {
+    return {
+      ownerPid,
+      ownerIdentity: null,
+      note: `${discrepancy} (managed backend); the owner identity could not be captured, so the launch registration was kept without adoption`
+    };
+  }
+  return {
+    ownerPid,
+    ownerIdentity,
+    note: `${discrepancy}; the backend registration adopted the verified socket owner pid ${ownerPid} and kept pid ${spawnPid} as the launch handle (pythonw launcher delegation or an adopted same-project backend)`
+  };
+}
+
 /** Timing only: diagnostics must not alter retirement or create synthetic test roots. */
 function recordBackendRetirementTiming(workspaceRoot: string, stage: string, startedAt: number): number {
   const settledAt = Date.now();
@@ -975,6 +1082,13 @@ export async function reclaimStaleWorkbenchBackend(input: {
   captureProcessIdentity?: (pid: number) => Promise<PythonProcessIdentity | null>;
   /** Inventory-based port owner resolution; see classifyWorkbenchPortOccupant. */
   resolvePortOwner?: (port: number) => Promise<WorkbenchPortOwnerResolution | null>;
+  /**
+   * Python bridge inputs for the identity-checked owned-tree terminator that
+   * replaces the single-pid kill fallback when no explicit terminator is
+   * injected.
+   */
+  pythonPath?: string;
+  env?: NodeJS.ProcessEnv;
   controlToken?: string;
   /** Explicit operator restart consent to pause active work through graceful shutdown. */
   interruptActiveWork?: boolean;
@@ -992,6 +1106,8 @@ export async function reclaimStaleWorkbenchBackend(input: {
   reason: string;
   verifiedPid?: number;
   activeWorkBlocked?: boolean;
+  /** A retired real server that was absent from the launcher registry. */
+  retiredUnregisteredPid?: number;
 }> {
   input.signal?.throwIfAborted();
   const port = Math.trunc(input.port);
@@ -1034,6 +1150,20 @@ export async function reclaimStaleWorkbenchBackend(input: {
   input.signal?.throwIfAborted();
   const killPid = input.killPid ?? terminatePid;
   const failedTreePids = new Set<number>();
+  // Without an injected terminator, upgrade the retirement from a single-pid
+  // kill to the identity-checked, kind-checked owned-tree terminator: a
+  // registered pid can be a pythonw launcher stub whose real server runs as a
+  // child, and killing only the stub leaves the server holding the port.
+  const fallbackTreeTerminator = input.terminateProcessTree || !input.captureProcessIdentity
+    || !String(input.pythonPath || "").trim()
+    ? undefined
+    : createPythonOwnedProcessTreeTerminator({
+        pythonPath: String(input.pythonPath),
+        workspaceRoot: input.workspaceRoot,
+        ...(input.env === undefined ? {} : { env: input.env }),
+        allowedKinds: ["managed_workbench_backend"]
+      });
+  const treeTerminate = input.terminateProcessTree ?? fallbackTreeTerminator;
   const terminateOne = async (pid: number): Promise<boolean> => {
     input.signal?.throwIfAborted();
     const finishLogDrain = async (): Promise<boolean> => {
@@ -1047,8 +1177,29 @@ export async function reclaimStaleWorkbenchBackend(input: {
       }
     }
     input.signal?.throwIfAborted();
-    if (input.terminateProcessTree) {
-      const expectedIdentity = expectedIdentities[String(pid)];
+    if (treeTerminate) {
+      let expectedIdentity = expectedIdentities[String(pid)];
+      if (!expectedIdentity && input.captureProcessIdentity) {
+        // A registered pid without persisted identity (legacy state) can still
+        // be retired through the kind-checked verifier once its live identity
+        // is captured; the verifier itself fails closed on foreign trees.
+        const captured = await input.captureProcessIdentity(pid);
+        input.signal?.throwIfAborted();
+        if (
+          captured
+          && Math.trunc(Number(captured.pid)) === pid
+          && Number.isFinite(Number(captured.createTime))
+          && Number(captured.createTime) > 0
+          && String(captured.executable || "").trim()
+        ) {
+          expectedIdentity = {
+            pid,
+            createTime: Number(captured.createTime),
+            executable: String(captured.executable).trim()
+          };
+          expectedIdentities[String(pid)] = expectedIdentity;
+        }
+      }
       // The project classifier is not a substitute for pid/create-time/exe
       // identity. Old state without that identity remains visible rather than
       // risking a PID-reuse kill.
@@ -1064,7 +1215,7 @@ export async function reclaimStaleWorkbenchBackend(input: {
         failedTreePids.add(pid);
         return false;
       }
-      const terminated = await input.terminateProcessTree(pid, expectedIdentity);
+      const terminated = await treeTerminate(pid, expectedIdentity);
       if (!terminated) {
         failedTreePids.add(pid);
       }
@@ -1301,12 +1452,21 @@ export async function reclaimStaleWorkbenchBackend(input: {
     };
   }
   recordBackendRetirementTiming(input.workspaceRoot, "ownership_and_log_retirement", stageStartedAt);
+  // A retired occupant absent from the registry is a real same-project server
+  // that outlived its launcher registration (pythonw stub split or a lost
+  // generation). Surface it separately from the generic stale-reclaim note so
+  // diagnostics can distinguish "stopped what we registered" from "reclaimed
+  // an unregistered server".
+  const retiredUnregisteredPid = [...registeredPids, ...extraPids].includes(occupant.pid)
+    ? undefined
+    : occupant.pid;
   return {
     reclaimed: true,
     reason: gracefulCompleted
       ? `gracefully stopped stale backend pid ${occupant.pid} on port ${Math.trunc(input.port)}`
       : `reclaimed stale backend pid ${occupant.pid} on port ${Math.trunc(input.port)}`,
-    verifiedPid: occupant.pid
+    verifiedPid: occupant.pid,
+    ...(retiredUnregisteredPid ? { retiredUnregisteredPid } : {})
   };
 }
 
@@ -1324,6 +1484,9 @@ export async function resolveBindableWorkbenchPort(input: {
   captureProcessIdentity?: (pid: number) => Promise<PythonProcessIdentity | null>;
   /** Inventory-based port owner resolution for a wedged backend. */
   resolvePortOwner?: (port: number) => Promise<WorkbenchPortOwnerResolution | null>;
+  /** Python bridge inputs for the identity-checked tree terminator fallback. */
+  pythonPath?: string;
+  env?: NodeJS.ProcessEnv;
   controlToken?: string;
   /** Explicit operator restart consent to pause active work through graceful shutdown. */
   interruptActiveWork?: boolean;
@@ -1563,7 +1726,18 @@ export function spawnWorkbenchBackend(input: {
 }): SpawnedWorkbenchBackend {
   const host = input.host?.trim() || DEFAULT_WORKBENCH_HOST;
   const fileExists = input.fileExists ?? existsSync;
-  const pythonPath = resolveNoConsolePython(input.pythonPath, fileExists);
+  // The tracked Windows spawn already creates the child with CREATE_NO_WINDOW
+  // and file-redirected stdio inside a Job (native/workbench-job), so the
+  // plain console executable stays windowless there. Keeping python.exe on
+  // that path avoids the venv pythonw stub whose base-interpreter delegation
+  // splits the real server into an unregistered grandchild pid. Callers
+  // without native console suppression keep the pythonw preference.
+  const nativeTrackedSpawn = process.platform === "win32" && !input.spawnImpl;
+  const pythonPath = resolveNoConsolePython(
+    input.pythonPath,
+    fileExists,
+    nativeTrackedSpawn ? { consoleSuppressedByCaller: true } : {}
+  );
   if (!pythonPath) {
     throw new Error("pythonPath is required to spawn the workbench backend");
   }
@@ -1940,6 +2114,7 @@ export async function executeMainLineWorkbench(
       reason: string;
       verifiedPid?: number;
       activeWorkBlocked?: boolean;
+      retiredUnregisteredPid?: number;
     };
     if (gracefulShutdown && terminateProcessTree) {
       staleReclaim = await reclaimStaleWorkbenchBackend({
@@ -1955,6 +2130,8 @@ export async function executeMainLineWorkbench(
         expectedIdentities,
         captureProcessIdentity: captureCurrentBackendIdentity,
         resolvePortOwner: resolveCurrentPortOwner,
+        pythonPath: input.pythonPath,
+        env: input.targetEnvironment,
         controlToken: input.controlToken,
         gracefulShutdown,
         trackBackground: trackCommandBackground,
@@ -2027,6 +2204,8 @@ export async function executeMainLineWorkbench(
           expectedIdentities,
           captureProcessIdentity: captureCurrentBackendIdentity,
           resolvePortOwner: resolveCurrentPortOwner,
+          pythonPath: input.pythonPath,
+          env: input.targetEnvironment,
           controlToken: input.controlToken,
           gracefulShutdown,
           trackBackground: trackCommandBackground,
@@ -2071,6 +2250,8 @@ export async function executeMainLineWorkbench(
         expectedIdentities,
         captureProcessIdentity: captureCurrentBackendIdentity,
         resolvePortOwner: resolveCurrentPortOwner,
+        pythonPath: input.pythonPath,
+        env: input.targetEnvironment,
         controlToken: input.controlToken,
         trackBackground: trackCommandBackground,
         forceRetireOnActiveWorkRefusal: operation === "force-stop",
@@ -2150,7 +2331,14 @@ export async function executeMainLineWorkbench(
       spawnExecutable: "",
       browserLaunchPid: retainedBrowserLaunchPid,
       browserWindowPid: retainedBrowserWindowPid,
-      ...(staleReclaim.reclaimed ? { staleReclaimNote: staleReclaim.reason } : {}),
+      ...(staleReclaim.reclaimed
+        ? (staleReclaim.retiredUnregisteredPid
+          ? {
+              orphanBackendRetirementNote:
+                `reclaimed unregistered same-project backend pid ${staleReclaim.retiredUnregisteredPid}: ${staleReclaim.reason}`
+            }
+          : { staleReclaimNote: staleReclaim.reason })
+        : {}),
       ...(lifecycleWarning ? { lifecycleWarning } : {}),
       lastReason: `electron_main_${operation.replace("-", "_")}`,
       lastSource: "electron_main",
@@ -2345,6 +2533,8 @@ export async function executeMainLineWorkbench(
       expectedIdentities,
       captureProcessIdentity: captureCurrentBackendIdentity,
       resolvePortOwner: resolveCurrentPortOwner,
+      pythonPath: input.pythonPath,
+      env: input.targetEnvironment,
       gracefulShutdown,
       trackBackground: trackCommandBackground,
       interruptActiveWork: input.interruptActiveWork,
@@ -2422,6 +2612,7 @@ export async function executeMainLineWorkbench(
   const spawnPid = Number(spawned.child.pid || 0);
   const retireOwnedJob = captureTrackedWorkbenchJobRetirement(input.workspaceRoot, spawnPid);
   let backendIdentity: PythonProcessIdentity | null = null;
+  let backendOwner: BackendRegistrationOwnership = { ownerPid: 0, ownerIdentity: null, note: "" };
   const persistUnretiredStart = async (message: string): Promise<void> => {
     if (input.signal?.aborted) return;
     await writeState({
@@ -2502,7 +2693,7 @@ export async function executeMainLineWorkbench(
       }
     }
     input.signal?.throwIfAborted();
-    await waitForBackendHealthy({
+    const healthBody = await waitForBackendHealthy({
       port: resolved.port,
       host,
       readiness: "shell",
@@ -2516,6 +2707,18 @@ export async function executeMainLineWorkbench(
       },
       connect: input.connect,
       fetchHealth: input.fetchHealth
+    });
+    input.signal?.throwIfAborted();
+    // Health alone does not prove the registered pid owns the listening
+    // socket (pythonw stub delegation, adopted orphan). Verify the socket
+    // owner against the spawn registration before settling into steady.
+    backendOwner = await adoptBackendRegistrationOwner({
+      port: resolved.port,
+      spawnPid,
+      healthPid: Number(healthBody?.pid || 0),
+      resolvePortOwner: resolveCurrentPortOwner,
+      captureIdentity: captureCurrentBackendIdentity,
+      signal: input.signal
     });
     input.signal?.throwIfAborted();
   } catch (error: unknown) {
@@ -2545,6 +2748,49 @@ export async function executeMainLineWorkbench(
     throw error;
   }
   input.signal?.throwIfAborted();
+  // The backend registration must point at the process that owns the port so
+  // stop/graceful shutdown targets the real server. When the socket owner is
+  // a verified managed backend distinct from the spawn pid (pythonw stub
+  // delegation or an adopted same-project orphan), backendPid carries the
+  // owner's identity while backendLaunchPid/spawnPid keep the launched
+  // process's identity for job and tree retirement.
+  const adoptedOwnerIdentity = backendOwner.ownerIdentity;
+  const adoptedOwnerPid = adoptedOwnerIdentity
+    && Math.trunc(Number(adoptedOwnerIdentity.pid)) === backendOwner.ownerPid
+    && backendOwner.ownerPid > 0
+    ? backendOwner.ownerPid
+    : 0;
+  const registrationFields: Record<string, unknown> = adoptedOwnerPid && adoptedOwnerIdentity
+    ? {
+        backendPid: adoptedOwnerPid,
+        backendCreateTime: adoptedOwnerIdentity.createTime,
+        backendExecutable: adoptedOwnerIdentity.executable,
+        backendLaunchPid: spawnPid,
+        spawnPid,
+        ...(backendIdentity
+          ? {
+              backendLaunchCreateTime: backendIdentity.createTime,
+              backendLaunchExecutable: backendIdentity.executable,
+              spawnCreateTime: backendIdentity.createTime,
+              spawnExecutable: backendIdentity.executable
+            }
+          : {})
+      }
+    : {
+        backendPid: spawnPid,
+        backendLaunchPid: spawnPid,
+        spawnPid,
+        ...(backendIdentity
+          ? {
+              backendCreateTime: backendIdentity.createTime,
+              backendExecutable: backendIdentity.executable,
+              backendLaunchCreateTime: backendIdentity.createTime,
+              backendLaunchExecutable: backendIdentity.executable,
+              spawnCreateTime: backendIdentity.createTime,
+              spawnExecutable: backendIdentity.executable
+            }
+          : {})
+      };
   await writeState({
     ...previous,
     schemaVersion: 1,
@@ -2558,18 +2804,7 @@ export async function executeMainLineWorkbench(
     backendPort: resolved.port,
     port: resolved.port,
     url: `http://${host}:${resolved.port}`,
-    backendPid: spawnPid,
-    backendLaunchPid: spawnPid,
-    ...(backendIdentity
-      ? {
-          backendCreateTime: backendIdentity.createTime,
-          backendExecutable: backendIdentity.executable,
-          backendLaunchCreateTime: backendIdentity.createTime,
-          backendLaunchExecutable: backendIdentity.executable,
-          spawnCreateTime: backendIdentity.createTime,
-          spawnExecutable: backendIdentity.executable
-        }
-      : {}),
+    ...registrationFields,
     portRelocationNote: resolved.note,
     lifecycleWarning: [
       deadHandleReconcileReasons.length > 0
@@ -2577,6 +2812,7 @@ export async function executeMainLineWorkbench(
         : "",
       unretiredRegisteredNote,
       reusedDaemonRecordNote,
+      backendOwner.note,
       ignoredStaleDaemonPid > 0
         ? `Ignored stale Runtime Manager daemon pid ${ignoredStaleDaemonPid} without a verifiable identity; no process was terminated.`
         : ""
