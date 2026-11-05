@@ -245,10 +245,38 @@ def staged_paths(root: Path) -> tuple[str, ...]:
     )
 
 
+def _history_bridge_error(error: Exception) -> ClaimGuardError:
+    """Translate an internal bridge failure into a structured, actionable error.
+
+    The raw exception text alone (traceback or parser prose) is not explainable
+    at the hook boundary. The translated error keeps the stable code, the root
+    cause, and explicit guidance: the guard did NOT auto-degrade this failure
+    tier (it is semantic or permission-class evidence where no automatic repair
+    is safe), so a human must repair or quarantine the evidence. Exiting via
+    ``ClaimGuardError`` keeps the structured exit-code contract of ``main`` (1).
+    """
+    return ClaimGuardError(
+        "history_bridge_unavailable: "
+        + str(error).strip()
+        + "\n[claim-guard] what: the history-bridge mapping that scopes task "
+          "claims failed verification, so the commit is blocked (fail-closed); "
+          "the guard did not auto-degrade this failure tier"
+        + "\n[claim-guard] action: inspect vibelution-cache/history-bridge/ in "
+          "the common git dir (active.json and any active.json.corrupt-* "
+          "quarantine copies), repair or quarantine the evidence, then retry "
+          "the commit"
+    )
+
+
 def committed_task_paths(root: Path) -> tuple[str, ...]:
     from scripts import git_history_bridge as history
 
-    receipt = history.load_active_mapping(root)
+    try:
+        receipt = history.load_active_mapping(root)
+    except history.HistoryBridgeError as error:
+        # Corrupt-pointer content already degraded to None inside the bridge;
+        # whatever still raises here is semantic or permission-class evidence.
+        raise _history_bridge_error(error) from error
     revision = "main...HEAD"
     if receipt is not None:
         # Use the canonical DAG's logical merge base, including mixed old/clean
@@ -257,7 +285,10 @@ def committed_task_paths(root: Path) -> tuple[str, ...]:
         if contains_main.returncode not in {0, 1}:
             raise ClaimGuardError("task_paths_unavailable")
         if contains_main.returncode:
-            translated = history.translate_task_dag(root, "HEAD", receipt)
+            try:
+                translated = history.translate_task_dag(root, "HEAD", receipt)
+            except history.HistoryBridgeError as error:
+                raise _history_bridge_error(error) from error
             revision = f"main...{translated.head}"
     completed = subprocess.run(
         [

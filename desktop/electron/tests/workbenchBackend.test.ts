@@ -1529,7 +1529,19 @@ describe("resolveBindableWorkbenchPort", () => {
     expect(result.note).toContain("another Vibelution project");
   });
 
-  it("fails loudly when an unknown process holds the preferred port", async () => {
+  it("relocates when an unidentifiable process holds the preferred port", async () => {
+    const fetchHealth = vi.fn().mockRejectedValue(new Error("fetch failed"));
+    const result = await resolveBindableWorkbenchPort({
+      preferred: 8000,
+      workspaceRoot: "C:/repo",
+      connect: async (port) => port === 8000,
+      fetchHealth
+    });
+    expect(result.port).toBe(8001);
+    expect(result.note).toContain("unidentifiable process");
+  });
+
+  it("fails when an unknown occupant leaves no free port nearby", async () => {
     const fetchHealth = vi.fn().mockRejectedValue(new Error("fetch failed"));
     await expect(
       resolveBindableWorkbenchPort({
@@ -1538,7 +1550,7 @@ describe("resolveBindableWorkbenchPort", () => {
         connect: async () => true,
         fetchHealth
       })
-    ).rejects.toThrow("occupied by an unknown process");
+    ).rejects.toThrow("No free workbench backend port");
   });
 });
 
@@ -2181,6 +2193,9 @@ describe("runWorkbenchLifecycle", () => {
         json: async () => ({ status: "ok", routesReady: true, pid: 51, workspaceRoot: "C:/repo" })
       }),
       pidAlive: (pid) => pid === 51 || pid === 9911,
+      // Identity capture cannot establish the handle's owner, so the handle
+      // keeps the conservative refusal instead of being falsified.
+      captureProcessIdentity: async () => null,
       terminateProcessTree,
       gracefulShutdown
     })).rejects.toThrow("unverified browser/window handles");
@@ -2192,6 +2207,64 @@ describe("runWorkbenchLifecycle", () => {
       browserWindowPid: 9911,
       observedState: "failed"
     });
+  });
+
+  it("clears a stale browser window handle whose pid has exited and starts", async () => {
+    const { spawnImpl, input, written } = harness();
+    const result = await executeMainLineWorkbench({
+      ...input,
+      operation: "start",
+      command: { commandId: "cmd_dead_browser_handle", type: "open", operation: "start", noBrowser: true },
+      readState: () => ({ backendPid: 0, backendPort: 8000, browserWindowPid: 9911 }),
+      pidAlive: () => false
+    });
+    expect(result.accepted).toBe(true);
+    expect(spawnImpl).toHaveBeenCalledOnce();
+    expect(written.at(-1)).toMatchObject({
+      observedState: "open",
+      browserWindowPid: 0,
+      lifecycleWarning: expect.stringContaining("9911")
+    });
+  });
+
+  it("clears a browser window handle whose pid was reused by a foreign process and starts", async () => {
+    const { spawnImpl, input, written } = harness();
+    const result = await executeMainLineWorkbench({
+      ...input,
+      operation: "start",
+      command: { commandId: "cmd_reused_browser_handle", type: "open", operation: "start", noBrowser: true },
+      readState: () => ({ backendPid: 0, backendPort: 8000, browserWindowPid: 9911 }),
+      pidAlive: (pid) => pid === 9911,
+      captureProcessIdentity: async ({ pid }) => ({
+        pid,
+        createTime: 1,
+        executable: "C:/Windows/System32/notepad.exe"
+      })
+    });
+    expect(result.accepted).toBe(true);
+    expect(spawnImpl).toHaveBeenCalledOnce();
+    expect(written.at(-1)).toMatchObject({
+      observedState: "open",
+      browserWindowPid: 0,
+      lifecycleWarning: expect.stringContaining("notepad.exe")
+    });
+  });
+
+  it("keeps refusing to start while a genuine managed-browser pid holds the handle", async () => {
+    const { spawnImpl, input } = harness();
+    await expect(executeMainLineWorkbench({
+      ...input,
+      operation: "start",
+      command: { commandId: "cmd_live_browser_handle", type: "open", operation: "start", noBrowser: true },
+      readState: () => ({ backendPid: 0, backendPort: 8000, browserWindowPid: 9911 }),
+      pidAlive: (pid) => pid === 9911,
+      captureProcessIdentity: async ({ pid }) => ({
+        pid,
+        createTime: 1,
+        executable: "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"
+      })
+    })).rejects.toThrow("unverified browser/window handles");
+    expect(spawnImpl).not.toHaveBeenCalled();
   });
 
   it("starts when a stale dead Runtime Manager PID has no identity", async () => {
@@ -2489,7 +2562,13 @@ describe("runWorkbenchLifecycle", () => {
         written = state;
       },
       connect: async () => false,
-      pidAlive: (pid) => pid === 9911
+      pidAlive: (pid) => pid === 9911,
+      // A live Edge-family pid keeps the conservative unverified-handle refusal.
+      captureProcessIdentity: async ({ pid }) => ({
+        pid,
+        createTime: 1,
+        executable: "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"
+      })
     })).rejects.toThrow("unverified browser/window handles");
     expect(spawnImpl).not.toHaveBeenCalled();
     expect(written).toMatchObject({

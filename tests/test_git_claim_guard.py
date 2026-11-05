@@ -60,6 +60,95 @@ def test_rewritten_main_claim_uses_verified_old_fork_without_expanding_scope(tmp
     assert before == after
 
 
+def test_corrupt_active_pointer_degrades_and_task_paths_resolve(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import json as jsonlib
+
+    root = _repo(tmp_path)
+    _git(root, "switch", "-c", "codex/degrade")
+    (root / "degraded.py").write_text("value = 1\n", encoding="utf-8")
+    _git(root, "add", "degraded.py")
+    _git(root, "-c", "core.hooksPath=", "commit", "-m", "task work")
+    directory = root / ".git" / "vibelution-cache" / "history-bridge"
+    directory.mkdir(parents=True)
+    (directory / "active.json").write_text("corrupted{", encoding="utf-8")
+
+    # The escape hatch: corrupt pointer evidence must not deadlock the commit
+    # path. The guard degrades to the plain main...HEAD revision instead.
+    assert guard.committed_task_paths(root) == ("degraded.py",)
+    assert not (directory / "active.json").exists()
+    backups = list(directory.glob("active.json.corrupt-*"))
+    assert len(backups) == 1
+    assert backups[0].read_text(encoding="utf-8") == "corrupted{"
+    stderr = capsys.readouterr().err
+    event = jsonlib.loads(stderr.splitlines()[-1].removeprefix("[history-bridge] "))
+    assert event["event"] == "active_pointer_corrupt"
+    assert event["action"] == "quarantined"
+
+
+def test_history_bridge_semantic_failure_is_structured_and_exits_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts import git_history_bridge as history
+
+    root = _repo(tmp_path)
+    _git(root, "switch", "-c", "codex/example")
+    (root / "blocked.py").write_text("value = 1\n", encoding="utf-8")
+    _git(root, "add", "blocked.py")
+    _git(root, "-c", "core.hooksPath=", "commit", "-m", "task work")
+
+    def raise_semantic(_root: Path) -> None:
+        raise history.HistoryBridgeError("active receipt digest mismatch")
+
+    monkeypatch.setattr(history, "load_active_mapping", raise_semantic)
+    with pytest.raises(guard.ClaimGuardError) as blocked:
+        guard.committed_task_paths(root)
+    message = str(blocked.value)
+    assert "history_bridge_unavailable" in message
+    assert "active receipt digest mismatch" in message
+    assert "fail-closed" in message
+    assert "action:" in message
+    # The guard translation itself invents no quarantine side effects; semantic
+    # evidence is left for the human (degrade is proven in the bridge suite).
+    assert not (root / ".git" / "vibelution-cache" / "history-bridge").exists()
+
+    def raise_structured(_root: Path) -> None:
+        raise blocked.value
+
+    monkeypatch.setattr(guard, "ensure_development_claim", raise_structured)
+    assert guard.main(["ensure-claim", "--repo", str(root)]) == 1
+    stderr = capsys.readouterr().err
+    assert "[claim-guard] history_bridge_unavailable" in stderr
+    assert "repair or quarantine the evidence" in stderr
+
+
+def test_task_dag_translation_failure_is_structured_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    from scripts import git_history_bridge as history
+
+    root = _repo(tmp_path)
+    empty_tree = _git(root, "mktree").stdout.strip()
+    orphan = _git(root, "commit-tree", empty_tree, "-m", "orphan task work").stdout.strip()
+    _git(root, "update-ref", "refs/heads/codex/orphan", orphan)
+    _git(root, "checkout", "codex/orphan")
+
+    monkeypatch.setattr(history, "load_active_mapping", lambda _root: SimpleNamespace(digest="d"))
+    monkeypatch.setattr(
+        history,
+        "translate_task_dag",
+        lambda *_args: (_ for _ in ()).throw(history.HistoryBridgeError("missing or invalid raw commit: abc")),
+    )
+    with pytest.raises(
+        guard.ClaimGuardError, match="history_bridge_unavailable.*missing or invalid raw commit"
+    ) as blocked:
+        guard.committed_task_paths(root)
+    assert "action:" in str(blocked.value)
+
+
 def _git(root: Path, *args: str, env: dict[str, str] | None = None, check: bool = True):
     return subprocess.run(
         ["git", *args],
