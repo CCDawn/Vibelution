@@ -90,6 +90,7 @@ async function mount({ initiallyFail = [], withTaskOwner = false }: { initiallyF
   await settle(); await settle();
   if (!initiallyFail.includes("detail")) expect(container.querySelector('[data-testid="native-conversation"]')).toBeTruthy();
   if (!initiallyFail.length) expect(trigger().getAttribute("aria-label")).toContain("0 项提醒");
+  expect(trigger().textContent).not.toMatch(/\d/);
 }
 
 function body() {
@@ -113,6 +114,16 @@ function panelButton(label: string) {
   const found = [...panel().querySelectorAll("button")].find(button => button.textContent?.trim() === label);
   expect(found, `notification action: ${label}`).toBeTruthy();
   return found!;
+}
+
+function summaryButton(item: Element) {
+  const button = item.querySelector<HTMLButtonElement>("button[aria-expanded]");
+  expect(button).toBeTruthy();
+  return button!;
+}
+
+function queryStatus(query: string) {
+  return client.getQueryCache().findAll({ queryKey: ["launcher-assistant", query] }).map(item => item.state.status);
 }
 
 function operations() {
@@ -162,27 +173,84 @@ describe("Launcher assistant hosted notifications", () => {
     expect(trigger().getAttribute("aria-label")).toContain("1 项提醒");
     await click(trigger());
     expect(panel().querySelectorAll("li")).toHaveLength(1);
-    expect(panel().textContent).toContain("任务状态未更新");
-    expect(panel().textContent).not.toContain("部分状态未更新");
+    expect(panel().textContent).toContain("暂时查不到任务进度");
+    expect(queryStatus("status")).toEqual(["error"]);
+    expect(queryStatus("dispatches")).toEqual(["success"]);
+    expect(queryStatus("task-cards")).toEqual(["success"]);
     failing.delete("status");
-    await click(panelButton("刷新"));
+    await click(panelButton("再试一次"));
     expect(trigger().getAttribute("aria-label")).toContain("0 项提醒");
     failing.add("dispatches");
     await act(async()=>{await client.refetchQueries({queryKey:["launcher-assistant","dispatches"]});});
     await settle(); await settle();
     expect(trigger().getAttribute("aria-label")).toContain("1 项提醒");
     expect(panel().querySelectorAll("li")).toHaveLength(1);
-    expect(panel().textContent).toContain("部分状态未更新");
-    expect(panel().textContent).not.toContain("任务状态未更新");
+    expect(panel().textContent).toContain("暂时查不到任务进度");
+    expect(queryStatus("dispatches")).toEqual(["error"]);
+    expect(queryStatus("task-cards")).toEqual(["success"]);
     failing.delete("dispatches");
-    await click(panelButton("重新连接"));
+    invoke.mockClear();
+    await click(panelButton("再试一次"));
+    expect(operations()).toEqual(["dispatches"]);
     expect(trigger().getAttribute("aria-label")).toContain("0 项提醒");
     failing.add("dispatches");
     await act(async()=>{await client.refetchQueries({queryKey:["launcher-assistant","task-cards"]});});
     await settle(); await settle();
     expect(trigger().getAttribute("aria-label")).toContain("1 项提醒");
-    expect(panel().textContent).toContain("任务状态未更新");
-    expect(panel().textContent).not.toContain("部分状态未更新");
+    expect(panel().textContent).toContain("暂时查不到任务进度");
+    expect(queryStatus("dispatches")).toEqual(["success"]);
+    expect(queryStatus("task-cards")).toEqual(["error"]);
+    await click(summaryButton(panel().querySelector("li")!));
+    expect(panel().querySelector("dl")?.textContent).toContain("任务进度");
+    failing.delete("dispatches");
+    invoke.mockClear();
+    await click(panelButton("再试一次"));
+    expect(operations().sort()).toEqual(["dispatches", "status"]);
+    expect(trigger().getAttribute("aria-label")).toContain("0 项提醒");
+  });
+
+  it("combines page and task-owner failures into one read-only retry and retains unrecovered tasks", async () => {
+    await mount({ withTaskOwner: true });
+    await act(async () => conversation!.onComposerChange("合并重试仍保留草稿"));
+    failing.add("detail");
+    failing.add("dispatches");
+    await act(async () => {
+      await client.refetchQueries({ predicate: query => query.queryKey[0] === "launcher-assistant"
+        && ["detail", "task-cards"].includes(String(query.queryKey[1])) });
+    });
+    await settle(); await settle();
+    expect(queryStatus("detail")).toEqual(["error"]);
+    expect(queryStatus("task-cards")).toEqual(["error"]);
+    expect(queryStatus("dispatches")).toEqual(["success"]);
+    expect(trigger().getAttribute("aria-label")).toContain("刷新没成功, 1 项提醒");
+    expect(trigger().textContent?.trim()).toBe("刷新没成功");
+    await click(trigger());
+    expect(panel().querySelectorAll("li")).toHaveLength(1);
+    expect(panel().textContent).toContain("聊天和任务进度没刷新");
+    await click(summaryButton(panel().querySelector("li")!));
+    expect([...panel().querySelectorAll("dt")].map(item => item.textContent).sort()).toEqual(["任务进度", "聊天记录"]);
+
+    failing.delete("detail");
+    invoke.mockClear();
+    await click(panelButton("再试一次"));
+    expect(operations().sort()).toEqual(["detail", "dispatches", "status"]);
+    expect(operations()).not.toContain("send");
+    expect(operations()).not.toContain("resolveApproval");
+    expect(operations()).not.toContain("decideDispatchApproval");
+    expect(queryStatus("detail")).toEqual(["success"]);
+    expect(queryStatus("task-cards")).toEqual(["error"]);
+    expect(trigger().getAttribute("aria-label")).toContain("刷新没成功, 1 项提醒");
+    expect(panel().querySelectorAll("li")).toHaveLength(1);
+    expect(panel().textContent).toContain("暂时查不到任务进度");
+    expect([...panel().querySelectorAll("dt")].map(item => item.textContent)).toEqual(["任务进度"]);
+    expect(body().querySelector("textarea")?.value).toBe("合并重试仍保留草稿");
+
+    failing.delete("dispatches");
+    invoke.mockClear();
+    await click(panelButton("再试一次"));
+    expect(operations().sort()).toEqual(["dispatches", "status"]);
+    expect(trigger().getAttribute("aria-label")).toContain("暂无异常, 0 项提醒");
+    expect(body().querySelector("textarea")?.value).toBe("合并重试仍保留草稿");
   });
 
   it("groups failed reads and appearance while retaining the mounted conversation and draft", async () => {
@@ -192,7 +260,8 @@ describe("Launcher assistant hosted notifications", () => {
     await act(async () => conversation!.onComposerChange("这份草稿仍要保留"));
     await failReads();
 
-    expect(trigger().getAttribute("aria-label")).toContain("连接异常, 2 项提醒");
+    expect(trigger().getAttribute("aria-label")).toContain("刷新没成功, 2 项提醒");
+    expect(trigger().textContent?.trim()).toBe("刷新没成功");
     expect(body().querySelector('[data-vui="state-surface"][data-tone="error"]')).toBeNull();
     expect(body().querySelector('[data-testid="native-conversation"]')).toBe(originalConversation);
     expect(body().querySelector("textarea")).toBe(originalComposer);
@@ -200,11 +269,25 @@ describe("Launcher assistant hosted notifications", () => {
     await click(trigger());
     const items = [...panel().querySelectorAll("li")];
     expect(items).toHaveLength(2);
-    expect(items[0].textContent).toContain("部分状态未更新");
-    expect(items[0].querySelector('[data-tone="warning"]')).toBeTruthy();
-    for (const label of ["会话刷新", "待授权查询", "任务状态"]) expect(items[0].textContent).toContain(label);
+    expect(items[0].textContent).toContain("聊天和任务进度没刷新");
+    expect(items[0].getAttribute("data-tone")).toBe("warning");
+    expect(summaryButton(items[0]).getAttribute("aria-expanded")).toBe("false");
+    expect(items[0].querySelector("dl")).toBeNull();
+    expect(items[0].querySelector("details")).toBeNull();
+    await click(summaryButton(items[0]));
+    expect(summaryButton(items[0]).getAttribute("aria-expanded")).toBe("true");
+    for (const label of ["聊天记录", "待你确认的操作", "任务进度"]) expect(items[0].querySelector("dl")?.textContent).toContain(label);
+    const details = items[0].querySelector("details")!;
+    expect(details.open).toBe(false);
+    await act(async () => details.querySelector("summary")!.click());
+    expect(details.open).toBe(true);
+    for (const label of ["会话刷新", "待授权查询", "任务状态"]) expect(details.textContent).toContain(label);
     expect(items[1].textContent).toContain("外观图片未加载");
-    expect(items[1].querySelector('[data-tone="info"]')).toBeTruthy();
+    expect(items[1].getAttribute("data-tone")).toBe("info");
+    expect(items[1].textContent).not.toContain("暂时使用默认外观");
+    expect(items[1].textContent).not.toContain("用户头像");
+    await click(summaryButton(items[1]));
+    expect(items[1].textContent).toContain("暂时使用默认外观，不影响聊天。");
     expect(items[1].textContent).toContain("用户头像");
     expect(items[1].textContent).toContain("背景图片");
     expect(operations()).not.toContain("send");
@@ -216,12 +299,12 @@ describe("Launcher assistant hosted notifications", () => {
     await click(trigger());
     for (const operation of ["detail", "approvals", "dispatches"]) failing.delete(operation);
     invoke.mockClear();
-    await click(panelButton("重新连接"));
+    await click(panelButton("再试一次"));
 
     expect(operations().sort()).toEqual(["approvals", "detail", "dispatches"]);
     expect(trigger().getAttribute("aria-label")).toContain("1 项提醒");
     expect(panel().querySelectorAll("li")).toHaveLength(1);
-    expect(panel().textContent).not.toContain("部分状态未更新");
+    expect(panel().textContent).not.toContain("聊天和任务进度没刷新");
     expect(panel().textContent).toContain("外观图片未加载");
 
     failing.delete("operatorAsset");
@@ -235,8 +318,8 @@ describe("Launcher assistant hosted notifications", () => {
   });
 
   it.each([
-    { operation: "detail", query: "detail", title: "部分状态未更新", retry: "重新连接" },
-    { operation: "approvals", query: "approvals", title: "部分状态未更新", retry: "重新连接" },
+    { operation: "detail", query: "detail", title: "聊天没能刷新", retry: "再试一次" },
+    { operation: "approvals", query: "approvals", title: "暂时查不到待确认的操作", retry: "再试一次" },
     { operation: "operatorAsset", query: "operator-asset", title: "外观图片未加载", retry: "重试" },
   ])("retains a first-load $operation failure throughout a pending retry", async ({ operation, query, title, retry }) => {
     await mount({ initiallyFail: [operation] });
@@ -266,8 +349,8 @@ describe("Launcher assistant hosted notifications", () => {
     }
     expect(new Set(operations())).toEqual(new Set([operation]));
     expect(trigger().getAttribute("aria-label")).toContain("1 项提醒");
-    expect(panel().textContent).toContain(title);
-    expect(panelButton(retry).disabled).toBe(true);
+    expect(panel().textContent).toContain(operation === "operatorAsset" ? title : "正在刷新…");
+    expect(panelButton(operation === "operatorAsset" ? retry : "请稍等").disabled).toBe(true);
     expect(panel().textContent).not.toContain("当前没有异常");
 
     await act(async () => release());

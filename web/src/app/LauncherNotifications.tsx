@@ -1,6 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 
 /** Launcher presentation only. These entries never own task or conversation state. */
+export type LauncherNoticeFeature = "conversation" | "approvals" | "tasks" | "assistant";
+
 export type LauncherNoticeAction = {
   id: string;
   label: string;
@@ -15,6 +17,8 @@ export type LauncherNotice = {
   title: string;
   description: string;
   labels?: string[];
+  /** Affected reads, used only to compose the compact notification view. */
+  features?: LauncherNoticeFeature[];
   details?: string;
   actions?: LauncherNoticeAction[];
 };

@@ -2,6 +2,7 @@
 @import "../theme.tailwind.css";
 
 @source "../../routes/desktopPet/LauncherAssistantRoute.tsx";
+@source "../../routes/desktopPet/LauncherAssistantQuestionCard.styles.ts";
 @source "../../routes/desktopPet/LauncherManagementPermissionControl.styles.ts";
 @source "../../routes/desktopPet/LauncherAssistantWorkspaceRoute.tsx";
 @source "../../routes/desktopPet/LauncherAssistantWorkspaceRoute.styles.ts";

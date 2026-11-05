@@ -9,8 +9,8 @@ import {LauncherTaskContext,usePublishLauncherTaskNotices,type LauncherTaskModel
 (globalThis as {IS_REACT_ACT_ENVIRONMENT?:boolean}).IS_REACT_ACT_ENVIRONMENT=true;
 let root:Root,host:HTMLDivElement,notices:LauncherNotice[];
 function ReadNotices(){notices=useLauncherNotices();return null;}
-function TaskOwner({value,children}:{value:LauncherTaskModel;children:React.ReactNode}){
- usePublishLauncherTaskNotices(value,"zh");
+function TaskOwner({value,children,lang}:{value:LauncherTaskModel;children:React.ReactNode;lang:"zh"|"en"}){
+ usePublishLauncherTaskNotices(value,lang);
  return <LauncherTaskContext.Provider value={value}>{children}</LauncherTaskContext.Provider>;
 }
 function model(overrides:Partial<LauncherTaskModel>={}):LauncherTaskModel{return {
@@ -19,8 +19,8 @@ function model(overrides:Partial<LauncherTaskModel>={}):LauncherTaskModel{return
  cleanableCount:0,cleanupBusy:false,canCleanCompleted:false,refresh:vi.fn(async()=>{}),more:vi.fn(async()=>{}),
  openTask:vi.fn(),remove:vi.fn(),cleanCompleted:vi.fn(),reviewRequest:null,...overrides,
 };}
-async function render(value:LauncherTaskModel){await act(async()=>{
- root.render(<LauncherNotificationProvider><TaskOwner value={value}>
+async function render(value:LauncherTaskModel,lang:"zh"|"en"="zh"){await act(async()=>{
+ root.render(<LauncherNotificationProvider><TaskOwner value={value} lang={lang}>
   <LauncherAssistantTaskSidebar/><LauncherAssistantTaskSidebar/><ReadNotices/>
  </TaskOwner></LauncherNotificationProvider>);
 });}
@@ -40,13 +40,29 @@ describe("task sidebar notifications",()=>{
   await render(model({partial:true,historyIncomplete:true,legacyUnrecoverable:2,refresh}));
   expect(host.textContent).not.toMatch(/部分团队关联|可显示的历史有限|旧关联无法恢复/);
   expect(notices).toHaveLength(1);
-  expect(notices[0].title).toBe("任务状态未更新");
+  expect(notices[0]).toMatchObject({title:"暂时查不到任务进度",description:"稍后再试一次。",features:["tasks"]});
+  expect(notices[0].actions![0].label).toBe("再试一次");
   await notices[0].actions![0].run();
   expect(refresh).toHaveBeenCalledOnce();
   await render(model({teamUnavailable:true,refreshing:true,refresh}));
   expect(notices).toHaveLength(1);
   expect(notices[0].actions![0].pending).toBe(true);
   await render(model());
+  expect(notices).toEqual([]);
+ });
+ it.each([{partial:true},{invalid:1}])("describes incomplete task reads without claiming a network outage: %o",async warning=>{
+  await render(model(warning));
+  expect(notices).toHaveLength(1);
+  expect(notices[0]).toMatchObject({title:"暂时查不到任务进度",features:["tasks"]});
+  expect(`${notices[0].title} ${notices[0].description} ${notices[0].actions![0].label}`).not.toMatch(/网络|断开|连接/);
+ });
+ it("keeps a failed task read visible during retry and uses plain English copy",async()=>{
+  await render(model({unavailable:true}),"en");
+  expect(notices[0]).toMatchObject({title:"Task progress is unavailable",description:"Try again in a moment.",features:["tasks"]});
+  await render(model({unavailable:true,refreshing:true}),"en");
+  expect(notices).toHaveLength(1);
+  expect(notices[0].actions![0]).toMatchObject({label:"Try again",pending:true});
+  await render(model(),"en");
   expect(notices).toEqual([]);
  });
 });
