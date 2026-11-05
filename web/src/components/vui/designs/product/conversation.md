@@ -1311,18 +1311,24 @@ React Virtual 限制挂载数量；当前位置变化和容器恢复时滚动到
 
 ## ConversationModelControlTrigger
 
-### 功能与适用范围
-普通 Chat 与 Launcher 的模型入口共用一个无图标、文字与下拉箭头组成的安静触发器。长模型名截断并保留完整 title，窄屏可收缩，键盘焦点及 aria-expanded 保留。
+### 功能
+共用一个无图标、文字与下拉箭头组成的安静模型触发器。长模型名截断并保留完整 title，窄屏可收缩，键盘焦点及 aria-expanded 保留。
 
-### 复用与边界
+### 适用范围
+普通 Chat 与 Launcher 的真实模型入口。
+
+### 使用方式
 组合 VButton；两个 host 只提供真实模型名称、打开状态和动作。普通 Agent 保留绑定模型参数弹层，Launcher 保留原生模型选择；不存在的推理参数不补造。不得新增 host 专属 trigger 样式。
 
 ## ConversationComposerMetrics
 
-### 功能与适用范围
-普通 Chat 与 Launcher 的工具栏共用单一用量图标。无可用用量时隐藏；点击向上打开详情，复用 ComposerContextRingPanel 展示上下文分组、最近调用缓存与速度，另保留本会话缓存和上报覆盖率。不同统计范围不混算。
+### 功能
+工具栏的单一用量图标。无可用用量时隐藏；点击向上打开详情，复用 ComposerContextRingPanel 展示上下文分组、最近调用缓存与速度，另保留本会话缓存和上报覆盖率。不同统计范围不混算。
 
-### 使用与边界
+### 适用范围
+普通 Chat 与 Launcher 共用的 composer；只显示 host 注入的实际数据。
+
+### 使用方式
 组合 VButton 与 VPopover；Escape、关闭按钮返回触发器，切换会话关闭浮层。数据由原 host 注入，不新增普通 Session HTTP 请求；原生 Launcher 不借用 Chat mutation、预算或会话客户端。错误、部分上报和统计中状态按原数据明示。
 
 ## Codex 共享对话表面
