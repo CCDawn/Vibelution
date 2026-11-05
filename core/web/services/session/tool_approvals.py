@@ -1509,6 +1509,25 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
             return {"assistantAction": action, "assistantTargets": validated.model_dump()}
         except (ValueError, TypeError, KeyError, RuntimeError, RecursionError):
             return {"assistantAction": action, "assistantArgumentsInvalid": True}
+    if action == "branch_cleanup_execute":
+        from core.infrastructure.native_runtime import is_launcher_assistant_process
+        if not is_launcher_assistant_process():
+            return {"assistantArgumentsInvalid": True}
+        try:
+            raw = args.get("arguments_json")
+            values = json.loads(raw) if isinstance(raw, str) and len(raw) <= 16000 else None
+            if not isinstance(values, dict):
+                raise ValueError("Invalid branch cleanup arguments")
+            from core.web.services.local_assistant.branch_cleanup_actions import BranchCleanupExecute
+            validated = BranchCleanupExecute.model_validate(values)
+            projected = validated.model_dump()
+            return {"assistantAction": action,
+                    "assistantTargets": {"instanceIds": projected["instance_ids"],
+                                         "allowUnmerged": projected["allow_unmerged"],
+                                         "allowDirty": projected["allow_dirty"]},
+                    "assistantOperationDescription": "删除选中的分支实例：停止实例、删除 worktree 目录和本地分支；主项目与当前工作区不可删，活跃 claim 一律拒绝。执行前应已把 branch_cleanup_plan 结果给用户确认。"}
+        except (ValueError, TypeError, KeyError, RuntimeError, RecursionError):
+            return {"assistantAction": action, "assistantArgumentsInvalid": True}
     if action == "dispatch_write":
         from core.infrastructure.native_runtime import is_launcher_assistant_process
         if not is_launcher_assistant_process():

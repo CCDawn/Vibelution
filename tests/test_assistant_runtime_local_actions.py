@@ -20,6 +20,7 @@ def test_catalog_reuses_native_schema_and_governance_without_project_actions():
         "legacy_memory_list", "legacy_memory_read",
         "provider_prepare", "provider_model_resolve",
         "preference_proposals", "preference_proposal_accept", "preference_proposal_reject", "dispatch_list", "management_requests",
+        "branch_cleanup_plan", "branch_cleanup_execute",
     }
     assert set(contracts) == expected
     for owner in (assistant, config):

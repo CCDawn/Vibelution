@@ -51,6 +51,8 @@ def contracts() -> dict:
     result.update(personal_memory_actions.contracts())
     from . import legacy_memory_actions
     result.update(legacy_memory_actions.contracts())
+    from core.web.services.local_assistant import branch_cleanup_actions
+    result.update(branch_cleanup_actions.contracts())
     result["assistant_settings_update"] = {**result["assistant_settings_update"],
         "description": result["assistant_settings_update"]["description"] + " 当前轮结束后自动刷新生效，不要求用户手动刷新或重启。"}
     # This native read action predates describe support. Its empty arguments
@@ -82,6 +84,9 @@ def execute(action: str, parameters: dict, runtime: dict, *, governed: bool = Fa
     if action == "configuration_references":
         from .configuration_control import inspect
         return inspect(parameters, runtime)
+    if action in {"branch_cleanup_plan", "branch_cleanup_execute"}:
+        from core.web.services.local_assistant import branch_cleanup_actions
+        return branch_cleanup_actions.execute(action, parameters, runtime, governed=governed)
     if action in {"preference_proposals", "preference_proposal_accept", "preference_proposal_reject", "dispatch_list", "management_requests"}:
         from .discovery_actions import execute as execute_discovery
         return execute_discovery(action, parameters, runtime, governed=governed)
