@@ -10,15 +10,22 @@ import { readLauncherAttachment } from "../../api/launcherAssistant";
 const read = vi.mocked(readLauncherAttachment);
 let root: ReturnType<typeof createRoot>;
 let result: ReturnType<typeof useLauncherAttachmentHistory>;
-let rerender: (ids: string[], messages?: ConversationMessage[]) => Promise<void>;
+let rerender: (ids: string[], messages?: ConversationMessage[], options?: { sessionId?: string; enabled?: boolean }) => Promise<void>;
 const row = (n: number) => ({ id: `m${n}`, role: "user", content: "", attachments: [{ artifactId: `i${n}.png`, kind: "user_image", url: "/old", imageUrl: "/old", downloadUrl: "/old" }] }) as unknown as ConversationMessage;
-afterEach(async () => { if (root) await act(async () => root.unmount()); document.body.innerHTML = ""; vi.clearAllMocks(); });
+afterEach(async () => { if (root) await act(async () => root.unmount()); document.body.innerHTML = ""; vi.resetAllMocks(); });
 async function setup(initial: ConversationMessage[]) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const div = document.createElement("div"); document.body.append(div); root = createRoot(div);
   let messages = initial;
-  function Harness({ ids, rows }: { ids: string[]; rows: ConversationMessage[] }) { result = useLauncherAttachmentHistory(rows, "s", true, ids); return null; }
-  rerender = async (ids, next) => { messages = next || messages; await act(async () => { root.render(createElement(Harness, { ids, rows: messages })); await new Promise(resolve => setTimeout(resolve, 0)); }); };
+  let sessionId = "s";
+  let enabled = true;
+  function Harness({ ids, rows, sessionId, enabled }: { ids: string[]; rows: ConversationMessage[]; sessionId: string; enabled: boolean }) { result = useLauncherAttachmentHistory(rows, sessionId, enabled, ids); return null; }
+  rerender = async (ids, next, options) => {
+    messages = next || messages;
+    sessionId = options?.sessionId ?? sessionId;
+    enabled = options?.enabled ?? enabled;
+    await act(async () => { root.render(createElement(Harness, { ids, rows: messages, sessionId, enabled })); await new Promise(resolve => setTimeout(resolve, 0)); });
+  };
   await rerender([]);
 }
 it("loads only visible history, bounds the cache and reloads an evicted old row", async () => {
@@ -82,4 +89,109 @@ it("retains a failed history notice during retry and prevents repeated reads whi
   expect(result.failed).toBe(false);
   expect(result.pending).toBe(false);
   expect(read).toHaveBeenCalledTimes(2);
+});
+
+it.each(["succeeded", "failed"])("automatically reloads the same artifact after a %s read in the previous session", async outcome => {
+  let resolveNext!: (url: string) => void;
+  if (outcome === "succeeded") read.mockResolvedValueOnce("data:image/png;base64,OLD");
+  else read.mockRejectedValueOnce(new Error("old session unavailable"));
+  read.mockImplementationOnce(() => new Promise(resolve => { resolveNext = resolve; }));
+  await setup([row(0)]);
+  await rerender(["m0"]);
+  expect(result.failed).toBe(outcome === "failed");
+  expect(result.pending).toBe(false);
+
+  await rerender(["m0"], undefined, { sessionId: "next" });
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(read).toHaveBeenLastCalledWith("i0.png");
+  expect(result.messages[0].attachments?.[0].imageUrl).toBe("");
+  expect(result.failed).toBe(false);
+  expect(result.pending).toBe(true);
+
+  await act(async () => { resolveNext("data:image/png;base64,NEW"); await new Promise(resolve => setTimeout(resolve, 0)); });
+  expect(result.messages[0].attachments?.[0].imageUrl).toBe("data:image/png;base64,NEW");
+  expect(result.failed).toBe(false);
+  expect(result.pending).toBe(false);
+  expect(read).toHaveBeenCalledTimes(2);
+});
+
+it.each(["succeeded", "failed"])("discards a late %s read from the previous session while serializing the next read", async outcome => {
+  let resolveOld!: (url: string) => void;
+  let rejectOld!: (error: Error) => void;
+  let resolveNext!: (url: string) => void;
+  read.mockImplementationOnce(() => new Promise((resolve, reject) => { resolveOld = resolve; rejectOld = reject; }))
+    .mockImplementationOnce(() => new Promise(resolve => { resolveNext = resolve; }));
+  await setup([row(0)]);
+  await rerender(["m0"]);
+  expect(result.pending).toBe(true);
+  await rerender(["m0"], undefined, { sessionId: "next" });
+  expect(read).toHaveBeenCalledTimes(1);
+  expect(result.messages[0].attachments?.[0].imageUrl).toBe("");
+
+  await act(async () => {
+    if (outcome === "succeeded") resolveOld("data:image/png;base64,OLD");
+    else rejectOld(new Error("old session unavailable"));
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(result.messages[0].attachments?.[0].imageUrl).toBe("");
+  expect(result.failed).toBe(false);
+  expect(result.pending).toBe(true);
+
+  await act(async () => { resolveNext("data:image/png;base64,NEW"); await new Promise(resolve => setTimeout(resolve, 0)); });
+  expect(result.messages[0].attachments?.[0].imageUrl).toBe("data:image/png;base64,NEW");
+  expect(result.failed).toBe(false);
+  expect(result.pending).toBe(false);
+  expect(read).toHaveBeenCalledTimes(2);
+});
+
+it("hides the previous session failure while another old read delays the new session", async () => {
+  let resolveOld!: (url: string) => void;
+  let resolveNext!: (url: string) => void;
+  read.mockRejectedValueOnce(new Error("old session unavailable"))
+    .mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; }))
+    .mockImplementationOnce(() => new Promise(resolve => { resolveNext = resolve; }));
+  await setup([row(0), row(1)]);
+  await rerender(["m0", "m1"]);
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(result.failed).toBe(true);
+  expect(result.pending).toBe(true);
+
+  await rerender(["m0"], undefined, { sessionId: "next" });
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(result.failed).toBe(false);
+  expect(result.pending).toBe(false);
+  expect(result.messages[0].attachments?.[0].imageUrl).toBe("");
+
+  await act(async () => { resolveOld("data:image/png;base64,OLD"); await new Promise(resolve => setTimeout(resolve, 0)); });
+  expect(read).toHaveBeenCalledTimes(3);
+  expect(read).toHaveBeenLastCalledWith("i0.png");
+  expect(result.messages[1].attachments?.[0].imageUrl).toBe("");
+  expect(result.failed).toBe(false);
+  expect(result.pending).toBe(true);
+
+  await act(async () => { resolveNext("data:image/png;base64,NEW"); await new Promise(resolve => setTimeout(resolve, 0)); });
+  expect(result.messages[0].attachments?.[0].imageUrl).toBe("data:image/png;base64,NEW");
+  expect(result.messages[1].attachments?.[0].imageUrl).toBe("");
+  expect(result.failed).toBe(false);
+  expect(result.pending).toBe(false);
+  expect(read).toHaveBeenCalledTimes(3);
+});
+
+it("clears cached attachments while disabled and reloads when enabled again", async () => {
+  read.mockResolvedValueOnce("data:image/png;base64,OLD").mockResolvedValueOnce("data:image/png;base64,NEW");
+  await setup([row(0)]);
+  await rerender(["m0"]);
+  await rerender(["m0"], undefined, { enabled: false });
+  expect(read).toHaveBeenCalledTimes(1);
+  expect(result.messages[0].attachments?.[0].imageUrl).toBe("");
+  expect(result.failed).toBe(false);
+  expect(result.pending).toBe(false);
+  await rerender(["m0"], undefined, { sessionId: "next" });
+  expect(read).toHaveBeenCalledTimes(1);
+  await rerender(["m0"], undefined, { enabled: true });
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(result.messages[0].attachments?.[0].imageUrl).toBe("data:image/png;base64,NEW");
+  expect(result.failed).toBe(false);
+  expect(result.pending).toBe(false);
 });

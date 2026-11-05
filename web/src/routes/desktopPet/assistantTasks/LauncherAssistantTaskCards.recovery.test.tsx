@@ -33,6 +33,7 @@ function terminalDispatches(): LauncherAssistantDispatch[] {
 let root: Root, host: HTMLDivElement, client: QueryClient;
 let invoke: ReturnType<typeof vi.fn>, teamReply: (cursor?: string) => Promise<LauncherAssistantTeamRunsPage>;
 let currentPage: LauncherAssistantTeamRunsPage, rows: LauncherAssistantDispatch[];
+let currentStatus: LauncherAssistantStatus;
 let notices: LauncherNotice[], model: LauncherTaskModel | null;
 function Observe() { notices = useLauncherNotices(); model = useLauncherTasks(); return null; }
 async function settle() {
@@ -69,9 +70,10 @@ beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
   rows = terminalDispatches(); currentPage = page(); notices = []; model = null;
+  currentStatus = structuredClone(STATUS);
   teamReply = async () => currentPage;
   invoke = vi.fn(async (request: { operation: string; cursor?: string }) => {
-    if (request.operation === "status") return STATUS;
+    if (request.operation === "status") return currentStatus;
     if (request.operation === "dispatches") return { dispatches: rows };
     if (request.operation === "teamRuns") return teamReply(request.cursor);
     throw new Error(`Unexpected mutation: ${request.operation}`);
@@ -86,6 +88,39 @@ afterEach(async () => {
 });
 
 describe("task progress recovery", () => {
+  it.each(["dispatches", "teamRuns"] as const)("gives a new identity its own %s probes and clears the warning on recovery", async source => {
+    let failed = true;
+    invoke.mockImplementation(async (request: { operation: string; cursor?: string }) => {
+      if (request.operation === source && failed) throw new Error("Task read temporarily unavailable");
+      if (request.operation === "status") return currentStatus;
+      if (request.operation === "dispatches") return { dispatches: rows };
+      if (request.operation === "teamRuns") return currentPage;
+      throw new Error(`Unexpected mutation: ${request.operation}`);
+    });
+    const reads = () => operations().filter(operation => operation === source).length;
+    await render();
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); }); await settle();
+    expect(reads()).toBe(6);
+    expect(notices).toHaveLength(1);
+
+    currentStatus = { ...currentStatus, assistant: { ...currentStatus.assistant, agentId: "assistant-2", directSessionId: "session-2" } };
+    currentPage = { ...currentPage, assistant: { agentId: "assistant-2", directSessionId: "session-2" } };
+    await act(async () => { await client.refetchQueries({ queryKey: ["launcher-assistant", "status"], exact: true }); });
+    await settle();
+    expect(reads()).toBe(7);
+    expect(notices).toHaveLength(1);
+
+    failed = false;
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); }); await settle();
+    expect(reads()).toBe(8);
+    expect(notices).toEqual([]);
+    expect(model!.unavailable).toBe(false);
+    expect(model!.teamUnavailable).toBe(false);
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); }); await settle();
+    expect(reads()).toBe(8);
+    expectReadOnly();
+  });
+
   it("keeps the live zero-team legacy gap quiet without hiding four terminal dispatch receipts", async () => {
     const original = structuredClone(currentPage);
     await render();

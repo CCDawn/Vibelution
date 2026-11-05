@@ -40,6 +40,7 @@ export function LauncherAssistantTaskCards({onReview,onApproval,onOpenConversati
   // no-data error query as non-error while its retry is in flight.
   const dispatchProbeStartedAt = useRef<number | null>(null);
   const teamProbeStartedAt = useRef<number | null>(null);
+  const probeIdentity = useRef("");
   useEffect(() => {
     activeView.current.mounted = true;
     const update = () => {
@@ -67,6 +68,12 @@ export function LauncherAssistantTaskCards({onReview,onApproval,onOpenConversati
   const agentId = status.data?.assistant.agentId || "";
   const sessionId = status.data?.assistant.directSessionId || "";
   const identity = JSON.stringify([agentId, sessionId]);
+  // Reset before query observers choose their intervals for the new identity.
+  if (probeIdentity.current !== identity) {
+    probeIdentity.current = identity;
+    dispatchProbeStartedAt.current = null;
+    teamProbeStartedAt.current = null;
+  }
   useEffect(() => {
     // Revalidate once per visible opening. Later shared status refreshes must
     // not toggle enabled and silently retry a failed dispatch read forever.
