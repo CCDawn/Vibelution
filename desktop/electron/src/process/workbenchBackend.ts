@@ -453,6 +453,22 @@ export function executableLooksLikePythonDaemon(executable: string): boolean {
   return PYTHON_DAEMON_EXECUTABLE_NAME.test(name.endsWith(".exe") ? name.slice(0, -".exe".length) : name);
 }
 
+const MANAGED_BROWSER_EXECUTABLE_NAME = /^(msedge|msedgewebview2)$/;
+
+/**
+ * Whether an executable path could plausibly belong to the managed workbench
+ * browser (the Edge family the launcher spawns for the built-in window).
+ * Windows pid reuse turns a stale browser/window handle into an unrelated
+ * process; this check separates that reuse from a genuinely open browser.
+ */
+export function executableLooksLikeManagedBrowser(executable: string): boolean {
+  const name = basename(String(executable || "").trim()).toLowerCase();
+  if (!name) {
+    return false;
+  }
+  return MANAGED_BROWSER_EXECUTABLE_NAME.test(name.endsWith(".exe") ? name.slice(0, -".exe".length) : name);
+}
+
 export type RuntimeManagerDaemonRecordCleanupResult = {
   removedPaths: string[];
   failedPaths: string[];
@@ -577,6 +593,13 @@ function stateWithoutReconciledBackendHandles(
   return sanitized;
 }
 
+const BROWSER_WINDOW_HANDLE_KEYS = [
+  "browserLaunchPid",
+  "browserWindowPid",
+  "workbenchBrowserLaunchPid",
+  "workbenchBrowserWindowPid"
+] as const;
+
 function liveUnverifiedBrowserWindowHandles(
   state: WorkbenchBackendState,
   pidAlive: (pid: number) => boolean,
@@ -584,18 +607,108 @@ function liveUnverifiedBrowserWindowHandles(
 ): number[] {
   const trusted = new Set(trustedPids.map((pid) => Math.trunc(Number(pid))));
   const handles = new Set<number>();
-  for (const key of [
-    "browserLaunchPid",
-    "browserWindowPid",
-    "workbenchBrowserLaunchPid",
-    "workbenchBrowserWindowPid"
-  ]) {
+  for (const key of BROWSER_WINDOW_HANDLE_KEYS) {
     const pid = Math.trunc(Number(state[key] || 0));
     if (Number.isFinite(pid) && pid > 0 && !trusted.has(pid) && pidAlive(pid)) {
       handles.add(pid);
     }
   }
   return [...handles].sort((left, right) => right - left);
+}
+
+function stateWithoutBrowserWindowHandles(
+  state: WorkbenchBackendState,
+  clearedPids: ReadonlySet<number>
+): WorkbenchBackendState {
+  if (clearedPids.size === 0) {
+    return state;
+  }
+  const sanitized = { ...state };
+  for (const key of BROWSER_WINDOW_HANDLE_KEYS) {
+    const pid = Math.trunc(Number(state[key] || 0));
+    if (Number.isFinite(pid) && pid > 0 && clearedPids.has(pid)) {
+      sanitized[key] = 0;
+    }
+  }
+  return sanitized;
+}
+
+type BrowserWindowHandleFalsification = {
+  /** Handles whose pid exited or was provably reused: cleared from state. */
+  clearedPids: number[];
+  /** Live handles that stay unverified and keep the conservative refusal. */
+  livePids: number[];
+  note: string;
+};
+
+/**
+ * Falsify stale browser/window handle records before the start path refuses on
+ * them. Closing the built-in browser window leaves the handle in state; when
+ * the recorded pid has exited, or Windows reused it for a process outside the
+ * managed browser family (Edge), the record is provably stale and is dropped
+ * without terminating anything, so cleanup/restart cannot wedge on it forever.
+ * A live browser-family pid — or one whose identity cannot be captured — keeps
+ * the conservative refusal, mirroring the daemon-record falsification.
+ */
+async function falsifyStaleBrowserWindowHandles(input: {
+  state: WorkbenchBackendState;
+  pidAlive: (pid: number) => boolean;
+  trustedPids?: readonly number[];
+  captureIdentity: (pid: number) => Promise<PythonProcessIdentity | null>;
+  signal?: AbortSignal;
+}): Promise<BrowserWindowHandleFalsification> {
+  const trusted = new Set((input.trustedPids ?? []).map((pid) => Math.trunc(Number(pid))));
+  const handles = new Set<number>();
+  for (const key of BROWSER_WINDOW_HANDLE_KEYS) {
+    const pid = Math.trunc(Number(input.state[key] || 0));
+    if (Number.isFinite(pid) && pid > 0 && !trusted.has(pid)) {
+      handles.add(pid);
+    }
+  }
+  if (handles.size === 0) {
+    return { clearedPids: [], livePids: [], note: "" };
+  }
+  const clearedPids: number[] = [];
+  const exitedPids: number[] = [];
+  const reusedExecutables = new Map<number, string>();
+  const livePids: number[] = [];
+  for (const pid of [...handles].sort((left, right) => right - left)) {
+    input.signal?.throwIfAborted();
+    if (!input.pidAlive(pid)) {
+      exitedPids.push(pid);
+      clearedPids.push(pid);
+      continue;
+    }
+    let identity: PythonProcessIdentity | null = null;
+    try {
+      identity = await input.captureIdentity(pid);
+    } catch {
+      identity = null;
+    }
+    input.signal?.throwIfAborted();
+    const executable = String(identity?.executable || "").trim();
+    if (
+      identity
+      && Math.trunc(Number(identity.pid)) === pid
+      && executable
+      && !executableLooksLikeManagedBrowser(executable)
+    ) {
+      reusedExecutables.set(pid, basename(executable));
+      clearedPids.push(pid);
+      continue;
+    }
+    livePids.push(pid);
+  }
+  const notes = [
+    exitedPids.length > 0
+      ? `Cleared stale browser/window handle pid ${exitedPids.join(",")}; the recorded process had exited.`
+      : "",
+    reusedExecutables.size > 0
+      ? `Ignored stale browser/window handle pid ${[...reusedExecutables.keys()].join(",")}; the pid was reused by `
+        + `${[...reusedExecutables.values()].join(", ")} and the handle was cleared without terminating any process.`
+      : ""
+  ].filter(Boolean);
+  return { clearedPids, livePids, note: notes.join("; ") };
 }
 
 export function readLauncherStateFile(path: string, options: { required?: boolean } = {}): WorkbenchBackendState {
@@ -1089,6 +1202,29 @@ function recordForeignPidRegistrationClearance(
   } catch { /* Diagnostic failure cannot change the reclaim outcome. */ }
 }
 
+/**
+ * Structured note for auto-relocating the backend because the preferred port
+ * is held by a process whose identity cannot be established. Mirrors the
+ * launcher's fresh-start policy (_resolve_start_backend_port): relocation
+ * continues the start instead of refusing it. Diagnostics only.
+ */
+function recordUnknownOccupantPortRelocation(
+  workspaceRoot: string,
+  preferredPort: number,
+  boundPort: number
+): void {
+  try {
+    if (!existsSync(launcherStatePath(workspaceRoot))) {
+      return;
+    }
+    appendSupervisorEventFallback(workspaceRoot, {
+      eventCode: "electron.backend_port.unknown_occupant_relocated",
+      message: "Preferred backend port was held by an unidentifiable process; the backend auto-bound to the next free port.",
+      fields: { preferredPort, boundPort }
+    });
+  } catch { /* Diagnostic failure cannot change the start outcome. */ }
+}
+
 export async function reclaimStaleWorkbenchBackend(input: {
   port: number;
   host?: string;
@@ -1580,7 +1716,9 @@ export async function resolveBindableWorkbenchPort(input: {
     return { port: preferred, note: "" };
   }
   // Never silently drift to a new port: identify the occupier first. A stale
-  // backend of this project is reclaimed; anything unidentifiable fails loud.
+  // backend of this project is reclaimed; verified foreign projects relocate
+  // with a note, and an unidentifiable occupant relocates exactly like the
+  // launcher does (_resolve_start_backend_port) instead of failing the start.
   const occupant = await classifyWorkbenchPortOccupant({ ...input, port: preferred, host });
   input.signal?.throwIfAborted();
   if (occupant.kind === "free") {
@@ -1615,21 +1753,20 @@ export async function resolveBindableWorkbenchPort(input: {
         : `port ${preferred} released while reclaiming a stale backend of this project`
     };
   }
-  if (occupant.kind === "unknown") {
-    throw new Error(
-      `workbench backend port ${preferred} is occupied by an unknown process; `
-        + "stop that process or set VIBELUTION_PORT before starting the workbench."
-    );
-  }
   for (let offset = 1; offset <= 48; offset += 1) {
     const candidate = preferred + offset;
     if (candidate >= 65536) {
       continue;
     }
     if (!(await connect(candidate, host))) {
+      if (occupant.kind === "unknown") {
+        recordUnknownOccupantPortRelocation(input.workspaceRoot, preferred, candidate);
+      }
       return {
         port: candidate,
-        note: `port ${preferred} in use by another Vibelution project (${occupant.workspaceRoot}); auto-bound this project to ${candidate}`
+        note: occupant.kind === "unknown"
+          ? `port ${preferred} is occupied by an unidentifiable process; auto-bound this project to ${candidate}`
+          : `port ${preferred} in use by another Vibelution project (${occupant.workspaceRoot}); auto-bound this project to ${candidate}`
       };
     }
   }
@@ -2457,7 +2594,7 @@ export async function executeMainLineWorkbench(
     }
   }
 
-  const previous = readState();
+  let previous = readState();
   let reconciledDeadPids: ReadonlySet<number> = new Set();
   const persistStartPreflightFailure = async (error: unknown): Promise<void> => {
     // The error is rethrown by every caller; a superseded intent settles
@@ -2546,6 +2683,20 @@ export async function executeMainLineWorkbench(
   const backendTreePids = ["backendPid", "backendLaunchPid", "spawnPid"]
     .map((key) => Math.trunc(Number(previous[key] || 0)))
     .filter((pid) => Number.isFinite(pid) && pid > 0);
+  // A closed built-in browser window leaves its pid handle in state. Falsify
+  // provably stale handles (pid exited, or Windows reused it for a non-browser
+  // process) before the unverified-handle refusal below, so closing the browser
+  // cannot wedge cleanup/restart forever; a live browser keeps the refusal.
+  const browserHandleFalsification = await falsifyStaleBrowserWindowHandles({
+    state: previous,
+    pidAlive: input.pidAlive ?? knownPidIsAlive,
+    trustedPids: [...backendTreePids, ...extraPids, ...(input.ownedDirectPids ?? [])],
+    captureIdentity: captureCurrentBackendIdentity,
+    signal: input.signal
+  });
+  if (browserHandleFalsification.clearedPids.length > 0) {
+    previous = stateWithoutBrowserWindowHandles(previous, new Set(browserHandleFalsification.clearedPids));
+  }
   const registeredHandles = collectRegisteredHandles(previous, extraPids);
   const deadHandleReconcile = await reconcileDeadRegisteredHandles({
     pids: registeredHandles,
@@ -2894,6 +3045,7 @@ export async function executeMainLineWorkbench(
         : "",
       unretiredRegisteredNote,
       reusedDaemonRecordNote,
+      browserHandleFalsification.note,
       backendOwner.note,
       ignoredStaleDaemonPid > 0
         ? `Ignored stale Runtime Manager daemon pid ${ignoredStaleDaemonPid} without a verifiable identity; no process was terminated.`

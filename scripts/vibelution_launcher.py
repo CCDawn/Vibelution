@@ -482,6 +482,45 @@ def _is_project_workbench_pid(pid: int) -> bool:
     return expected_script.lower() in command_lower and project_marker in command_lower
 
 
+def _project_backend_verdict_from_command_line(command_line: str) -> str:
+    if not command_line:
+        return "unknown"
+    expected_script = str(PROJECT_ROOT / "scripts" / "web_workbench.py")
+    command_lower = command_line.lower()
+    if expected_script.lower() in command_lower and str(PROJECT_ROOT).lower() in command_lower:
+        return "project"
+    return "foreign"
+
+
+def _verify_project_backend_pid(pid: int) -> str:
+    """Three-state backend identity verdict for focus recovery.
+
+    Returns "project" when the live process's command line references this
+    checkout's web_workbench.py, "foreign" when it provably belongs to an
+    unrelated process (including an exited pid), and "unknown" when identity
+    cannot be captured (callers keep the existing registration instead of
+    guessing). Focus must never anchor a foreign pid as backendPid.
+    """
+    pid = int(pid or 0)
+    if pid <= 0:
+        return "foreign"
+    try:
+        import psutil
+    except Exception:
+        if os.name == "nt":
+            return "unknown"
+        return _project_backend_verdict_from_command_line(_posix_process_command_line(pid))
+    try:
+        command_line = " ".join(psutil.Process(pid).cmdline())
+    except psutil.NoSuchProcess:
+        return "foreign"
+    except Exception:
+        if os.name == "nt":
+            return "unknown"
+        command_line = _posix_process_command_line(pid)
+    return _project_backend_verdict_from_command_line(command_line)
+
+
 def _read_project_ports() -> dict:
     try:
         payload = json.loads(PORTS_PATH.read_text(encoding="utf-8"))
@@ -2466,24 +2505,43 @@ def _focus_backend(port: int, host: str) -> dict:
     Runtime-manager "already open" short-circuit calls internal-focus. Launcher state can
     lag (backendPid=0 or a dead pid) while the project backend is still healthy on the
     bound port — treat live health as source of truth so start does not hard-fail.
+    backendPid is only kept or recovered when the pid's image/command line still matches
+    this project's backend: a foreign or exited pid is never re-registered (advisory
+    note only), and focus itself still succeeds for the user's window/refresh goal.
     """
     state = _read_state()
     port = int(port or state.get("backendPort") or state.get("port") or DEFAULT_PORT)
     host = str(host or state.get("host") or DEFAULT_HOST).strip() or DEFAULT_HOST
     pid = int(state.get("backendPid") or 0)
-    if pid > 0 and _pid_alive(pid) and _backend_healthy(port, host):
+    pid_alive = _pid_alive(pid) if pid > 0 else False
+    pid_verdict = _verify_project_backend_pid(pid) if pid > 0 else "foreign"
+    backend_healthy = _backend_healthy(port, host)
+    if pid > 0 and pid_alive and backend_healthy and pid_verdict != "foreign":
+        # Live, healthy, and not provably foreign (project or unverifiable
+        # identity): keep the recorded registration instead of second-guessing.
         return state
-    if not _backend_healthy(port, host):
+    if not backend_healthy:
         raise RuntimeError("Workbench focus requested but no running workbench backend is available.")
     owner_pid = _listening_pid_for_port(port)
     recovered_pid = 0
-    if owner_pid > 0 and (_is_project_workbench_pid(owner_pid) or pid <= 0 or not _pid_alive(pid)):
+    if owner_pid > 0 and _verify_project_backend_pid(owner_pid) == "project":
         recovered_pid = owner_pid
-    elif pid > 0 and _pid_alive(pid):
+    elif pid > 0 and pid_alive and pid_verdict == "project":
         recovered_pid = pid
+    advisory_parts: list[str] = []
+    if pid > 0 and recovered_pid != pid:
+        if not pid_alive:
+            advisory_parts.append(f"cleared stale backendPid {pid}: the recorded process has exited")
+        elif pid_verdict == "foreign":
+            advisory_parts.append(
+                f"ignored backendPid {pid}: the pid is alive but belongs to an unrelated process; "
+                "it was not kept as backendPid"
+            )
+    if recovered_pid > 0 and recovered_pid != pid:
+        advisory_parts.append(f"recovered backendPid {recovered_pid} from the port listener identity check")
     next_state = {
         **state,
-        "backendPid": int(recovered_pid or pid or 0),
+        "backendPid": int(recovered_pid),
         "backendPort": port,
         "port": port,
         "host": host,
@@ -2496,6 +2554,9 @@ def _focus_backend(port: int, host: str) -> dict:
         "lastSource": "python_launcher",
         "updatedAt": _now_iso(),
     }
+    advisory_note = "; ".join(advisory_parts)
+    if advisory_note:
+        next_state["focusAdvisoryNote"] = advisory_note
     _write_state(next_state)
     return next_state
 

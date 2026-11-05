@@ -204,12 +204,65 @@ class TestSecurityValidator:
         is_safe, error = validator.validate_command(cmd)
         assert is_safe is True, error
 
-    def test_validate_command_blocks_forbidden_git_subcommands(self, validator):
-        """破坏性或高风险 Git 子命令应被拦截。"""
-        for cmd in ["git reset --hard", "git clean -fdx", "git push origin main"]:
+    def test_validate_command_blocks_destructive_git_subcommands_and_variants(self, validator):
+        """纯破坏类 Git 子命令与破坏性参数变体应被拦截。
+
+        本层只做破坏类兜底；日常放行口径以 consent 层
+        （core/web/services/local_assistant/policy.py 的 _git_development）
+        为唯一事实源。
+        """
+        blocked_commands = [
+            "git reset --hard",
+            "git clean -fdx",
+            "git clean --force",
+            "git push --force origin main",
+            "git push -f origin main",
+            "git push origin --delete release",
+            "git push origin -d release",
+            "git push origin +main",
+            "git filter-branch -- --all",
+            "git rebase main",
+            "git reflog expire --expire=now --all",
+            "git stash clear",
+            "git stash drop",
+            "git switch --discard-changes main",
+            "git checkout -- .",
+            "git restore core/example.py",
+            "git rm core/example.py",
+            "git -C submodule reset --hard",
+        ]
+        for cmd in blocked_commands:
             is_safe, error = validator.validate_command(cmd)
-            assert is_safe is False, f"应阻止 Git 子命令: {cmd}"
-            assert "Git 子命令" in error
+            assert is_safe is False, f"应阻止破坏类 Git 操作: {cmd}"
+            assert "禁止" in error, f"拦截文案应可区分: {cmd}: {error}"
+
+    def test_validate_command_allows_consent_layer_git_operations(self, validator):
+        """consent 层放行的日常 Git 操作不再被本层整体封禁。
+
+        merge --ff-only/switch -c/stash list|show 是 consent 层明确放行的
+        日常操作；pull/fetch/cherry-pick/tag 与普通 push 不属于不可逆破坏，
+        本层不再按子命令整体封禁（consent 会话仍受 consent 层约束）。
+        """
+        allowed_commands = [
+            "git merge --ff-only main",
+            "git switch -c codex/example",
+            "git switch main",
+            "git stash list",
+            "git stash show",
+            "git stash push -m wip",
+            "git stash pop",
+            "git reset --soft HEAD~1",
+            "git fetch origin",
+            "git pull --ff-only",
+            "git cherry-pick abc1234",
+            "git tag v1.0",
+            "git push origin main",
+            "git clean -n",
+            "git -C submodule status",
+        ]
+        for cmd in allowed_commands:
+            is_safe, error = validator.validate_command(cmd)
+            assert is_safe is True, f"应允许非破坏 Git 操作: {cmd}: {error}"
 
     def test_validate_command_whitelist_allowed(self, validator):
         """测试白名单允许的命令"""

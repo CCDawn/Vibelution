@@ -6,6 +6,10 @@ re-checks every hard gate in this process before delegating to the existing
 launcher cleanup executor. Active coordination claims are absolute: no flag
 bypasses them, and an unavailable coordination backend can never prove a
 worktree unowned, so it blocks deletion too (fail-closed).
+
+Both actions resolve the managed integration checkout explicitly (host
+dispatch registry, then machine instances registry); the redirected assistant
+profile ``PROJECT_ROOT`` is never treated as a Git workspace.
 """
 from __future__ import annotations
 
@@ -78,24 +82,97 @@ def contracts() -> dict[str, dict[str, Any]]:
 def execute(action: str, parameters: dict, runtime: dict, *, governed: bool = False) -> dict:
     """Dispatch the two closed actions; identity/approval come from the wrapper."""
     if action == "branch_cleanup_plan":
-        return plan()
+        return plan(runtime)
     if action == "branch_cleanup_execute":
         if governed is not True:
             return {**_APPROVAL_GUIDANCE, "action": action}
-        return execute_cleanup(parameters)
+        return execute_cleanup(parameters, runtime)
     return {"ok": False, "status": "blocked", "error": "unknown_action"}
 
 
-def plan() -> dict:
+def _root_failure(error: str, message: str) -> dict:
+    return {"ok": False, "status": "unavailable", "action": "branch_cleanup_plan",
+            "error": error, "message": message}
+
+
+def _resolve_integration_root(runtime: dict | None) -> tuple[Path | None, dict | None]:
+    """Resolve the managed integration checkout without trusting model input.
+
+    The tool ``runtime`` carries only agent/session/turn identity (no project
+    root), so the root comes from the host-authorized dispatch project registry
+    first, then from the machine instances registry as a last fallback. Zero or
+    ambiguous roots stay fail-closed with a readable error; the redirected
+    assistant profile ``PROJECT_ROOT`` is never guessed as a workspace.
+    """
+    roots = _dispatch_registered_roots()
+    if len(roots) == 1:
+        return roots[0], None
+    if len(roots) > 1:
+        return None, _root_failure("project_root_ambiguous",
+            "宿主登记了多个项目根，无法确定要查看哪个工作台的分支实例；请先在 Launcher 聚焦目标项目后重试，不自动猜测。")
+    roots = _registry_project_roots()
+    if len(roots) == 1:
+        return roots[0], None
+    if len(roots) > 1:
+        return None, _root_failure("project_root_ambiguous",
+            "本机实例注册表存在多个候选项目根，无法确定目标工作台；请先在 Launcher 打开目标项目后重试，不自动猜测。")
+    return None, _root_failure("project_root_unavailable",
+        "无法确定当前工作台项目根：宿主进程没有已登记的项目根可用；请先在 Launcher 打开项目后重试，不把助理目录当作 Git 工作区。")
+
+
+def _dispatch_registered_roots() -> tuple[Path, ...]:
+    from core.assistant_runtime import actions
+
+    binding = actions._binding
+    service = binding[0] if isinstance(binding, tuple) and binding else None
+    getter = getattr(service, "registered_project_roots", None)
+    if getter is None:
+        return ()
+    try:
+        return tuple(getter())
+    except Exception:
+        return ()
+
+
+def _registry_project_roots() -> tuple[Path, ...]:
+    """Last-resort roots from machine instances registry rows, git-proven."""
+    from core.infrastructure.branch_workspace import resolve_branch_workspace
+    from core.runtime_manager import instances_registry as registry
+
+    try:
+        payload = registry.load_registry()
+    except (OSError, ValueError):
+        return ()
+    roots: list[Path] = []
+    for entry in (payload.get("instances") or {}).values():
+        if not isinstance(entry, dict):
+            continue
+        raw = str(entry.get("projectRoot") or "").strip()
+        if not raw:
+            continue
+        try:
+            resolved = Path(raw).expanduser().resolve()
+            resolve_branch_workspace(resolved)
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if resolved not in roots:
+            roots.append(resolved)
+    return tuple(roots)
+
+
+def plan(runtime: dict | None = None) -> dict:
     """Read-only cleanup view; never mutates instances, branches or registry."""
     from core.launcher import service as launcher_service
 
-    payload = launcher_service.list_launcher_branch_instances(include_cleanup_metadata=True)
+    checkout, failure = _resolve_integration_root(runtime)
+    if failure is not None:
+        return failure
+    payload = launcher_service.list_launcher_branch_instances(include_cleanup_metadata=True, checkout=checkout)
     return {"ok": True, "action": "branch_cleanup_plan", "status": "observed",
             **_plan_view(payload)}
 
 
-def execute_cleanup(parameters: dict) -> dict:
+def execute_cleanup(parameters: dict, runtime: dict | None = None) -> dict:
     """Hard-gate every instance, then delegate accepted ids to the executor."""
     try:
         args = BranchCleanupExecute.model_validate(parameters)
@@ -105,13 +182,6 @@ def execute_cleanup(parameters: dict) -> dict:
                 "message": "参数不符合 branch_cleanup_execute 的 schema；请重新 describe 并按 plan 结果提供完整 instance_ids。"}
     from core.launcher import service as launcher_service
 
-    payload = launcher_service.list_launcher_branch_instances(include_cleanup_metadata=True)
-    by_id = {
-        str(item.get("id") or ""): dict(item)
-        for item in payload.get("items") or []
-        if isinstance(item, dict) and str(item.get("id") or "")
-    }
-    claims = _resolve_claims(list(by_id.values()), _integration_root(payload))
     wanted: list[str] = []
     for raw in args.instance_ids:
         instance_id = str(raw).strip()
@@ -121,6 +191,16 @@ def execute_cleanup(parameters: dict) -> dict:
         return {"ok": False, "status": "blocked", "action": "branch_cleanup_execute",
                 "error": "invalid_input",
                 "message": "instance_ids 必须包含 plan 返回的完整非空实例 id。"}
+    checkout, failure = _resolve_integration_root(runtime)
+    if failure is not None:
+        return {**failure, "action": "branch_cleanup_execute"}
+    payload = launcher_service.list_launcher_branch_instances(include_cleanup_metadata=True, checkout=checkout)
+    by_id = {
+        str(item.get("id") or ""): dict(item)
+        for item in payload.get("items") or []
+        if isinstance(item, dict) and str(item.get("id") or "")
+    }
+    claims = _resolve_claims(list(by_id.values()), _integration_root(payload))
     accepted: list[str] = []
     rejected: list[dict[str, Any]] = []
     for instance_id in wanted:
@@ -143,7 +223,7 @@ def execute_cleanup(parameters: dict) -> dict:
     if accepted:
         from core.launcher.branch_instance_cleanup import cleanup_branch_instances
 
-        result = cleanup_branch_instances(accepted, confirm=True, list_payload=payload)
+        result = cleanup_branch_instances(accepted, confirm=True, list_payload=payload, checkout=checkout)
         cleaned, failed, skipped = result.get("cleaned") or [], result.get("failed") or [], result.get("skipped") or []
     ok = not rejected and not failed and (result is None or result.get("ok") is True)
     if ok:

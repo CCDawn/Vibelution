@@ -101,6 +101,11 @@ def _no_claims(monkeypatch, payload: dict | None = {"agents": [], "claims": []})
     monkeypatch.setattr(actions, "_coordination_status", lambda root: payload)
 
 
+def _with_root(monkeypatch, *roots: Path) -> None:
+    """Pretend the host dispatch registry authorized exactly these roots."""
+    monkeypatch.setattr(actions, "_dispatch_registered_roots", lambda: tuple(roots))
+
+
 def _scanned_repo(tmp_path: Path) -> tuple[Path, dict[str, dict]]:
     """Temp repo with merged+clean, unmerged and dirty worktrees."""
     root = _init_repo(tmp_path / "repo")
@@ -128,15 +133,14 @@ def test_plan_lists_full_ids_reasons_and_active_claim(tmp_path, monkeypatch):
     items["main"] = {"id": "main", "kind": "main", "branch": "main", "shortName": "main",
                      "path": str(root), "current": True, "dirty": False, "mergedToMain": True,
                      "checkedOut": True, "alive": False}
-    _patch_payload(monkeypatch, _payload(root, list(items.values())))
     _no_claims(monkeypatch, {"agents": [
         {"id": "agent-1", "state": "active", "branch": "codex/unmerged",
          "stage": "implement", "worktree": ""},
     ], "claims": []})
 
-    result = actions.plan()
+    result = actions._plan_view(_payload(root, list(items.values())))
 
-    assert result["ok"] is True and result["status"] == "observed"
+    assert result["total"] == len(items)
     rows = {row["instanceId"]: row for row in result["instances"]}
     assert rows["worktree:clean"]["eligible"] is True
     assert rows["worktree:clean"]["reasons"] == []
@@ -158,10 +162,10 @@ def test_plan_current_workspace_and_in_flight_reasons(tmp_path, monkeypatch):
     root, items = _scanned_repo(tmp_path)
     items["clean"]["current"] = True
     items["unmerged"]["status"] = "starting"
-    _patch_payload(monkeypatch, _payload(root, list(items.values())))
     _no_claims(monkeypatch)
 
-    rows = {row["instanceId"]: row for row in actions.plan()["instances"]}
+    rows = {row["instanceId"]: row
+            for row in actions._plan_view(_payload(root, list(items.values())))["instances"]}
 
     assert rows["worktree:clean"]["reasons"] == ["CURRENT_WORKSPACE"]
     assert rows["worktree:unmerged"]["reasons"] == ["INSTANCE_IN_FLIGHT", "UNMERGED"]
@@ -169,10 +173,10 @@ def test_plan_current_workspace_and_in_flight_reasons(tmp_path, monkeypatch):
 
 def test_plan_marks_every_row_unprovable_when_coordination_unavailable(tmp_path, monkeypatch):
     root, items = _scanned_repo(tmp_path)
-    _patch_payload(monkeypatch, _payload(root, list(items.values())))
     _no_claims(monkeypatch, None)
 
-    rows = {row["instanceId"]: row for row in actions.plan()["instances"]}
+    rows = {row["instanceId"]: row
+            for row in actions._plan_view(_payload(root, list(items.values())))["instances"]}
 
     assert all(row["reasons"][0] == "CLAIM_UNPROVABLE" for row in rows.values())
     assert all(row["eligible"] is False for row in rows.values())
@@ -185,17 +189,17 @@ def test_worktree_claim_binding_resolves_active_registry_claim(tmp_path, monkeyp
     binding = {"claim_id": "claim-7", "agent_id": "agent-9", "branch": "codex/clean",
                "worktree": str(clean_path), "scopes": ["integration/codex/clean"]}
     (git_dir / "vibelution-claim.json").write_text(json.dumps(binding), encoding="utf-8")
-    _patch_payload(monkeypatch, _payload(root, list(items.values())))
+    payload = _payload(root, list(items.values()))
 
     # The bound claim is active in the registry -> blocked with the binding owner.
     _no_claims(monkeypatch, {"agents": [], "claims": [{"id": "claim-7", "status": "active"}]})
-    rows = {row["instanceId"]: row for row in actions.plan()["instances"]}
+    rows = {row["instanceId"]: row for row in actions._plan_view(payload)["instances"]}
     assert rows["worktree:clean"]["reasons"] == ["CLAIM_ACTIVE"]
     assert rows["worktree:clean"]["activeClaim"] == {"agentId": "agent-9", "stage": ""}
 
     # A completed/expired bound claim no longer blocks.
     _no_claims(monkeypatch, {"agents": [], "claims": [{"id": "claim-7", "status": "completed"}]})
-    rows = {row["instanceId"]: row for row in actions.plan()["instances"]}
+    rows = {row["instanceId"]: row for row in actions._plan_view(payload)["instances"]}
     assert rows["worktree:clean"]["reasons"] == []
 
 
@@ -218,6 +222,7 @@ def test_execute_gates_unmerged_and_dirty_then_flags_allow_deletion(tmp_path, mo
     root, items = _scanned_repo(tmp_path)
     payload = _payload(root, list(items.values()))
     _patch_payload(monkeypatch, payload)
+    _with_root(monkeypatch, root)
     _no_claims(monkeypatch)
 
     rejected = actions.execute_cleanup({"instance_ids": ["worktree:unmerged", "worktree:dirty"]})
@@ -244,6 +249,7 @@ def test_execute_never_deletes_claimed_or_unprovable_instances(tmp_path, monkeyp
     root, items = _scanned_repo(tmp_path)
     payload = _payload(root, list(items.values()))
     _patch_payload(monkeypatch, payload)
+    _with_root(monkeypatch, root)
     _no_claims(monkeypatch, {"agents": [
         {"id": "agent-1", "state": "paused", "branch": "codex/unmerged",
          "stage": "review", "worktree": str(items["unmerged"]["path"])},
@@ -275,6 +281,7 @@ def test_execute_rejects_protected_current_and_unknown_instances(tmp_path, monke
     items["clean"]["current"] = True
     payload = _payload(root, list(items.values()))
     _patch_payload(monkeypatch, payload)
+    _with_root(monkeypatch, root)
     _no_claims(monkeypatch)
 
     result = actions.execute_cleanup({"instance_ids": ["main", "worktree:clean", "worktree:ghost"]})
@@ -360,3 +367,139 @@ def test_execute_approval_summary_projects_instance_list(monkeypatch):
                         lambda: False)
     assert _assistant_management_summary({
         "action": "branch_cleanup_execute", "arguments_json": "{}"})["assistantArgumentsInvalid"] is True
+
+
+class _StubHostService:
+    """Minimal stand-in for the bound DispatchService facade."""
+
+    def __init__(self, *roots: Path):
+        self._roots = roots
+
+    def registered_project_roots(self):
+        return self._roots
+
+
+def _redirect_host_project_root(monkeypatch, tmp_path):
+    """Simulate the assistant host: module PROJECT_ROOT is a non-Git profile."""
+    profile = tmp_path / "DesktopShell" / "assistant" / "profile"
+    profile.mkdir(parents=True, exist_ok=True)
+    assert not (profile / ".git").exists()
+    from core.launcher import branch_instance_cleanup, branch_instance_lifecycle
+    from core.launcher import service as launcher_service
+
+    for module in (branch_instance_lifecycle, branch_instance_cleanup, launcher_service):
+        monkeypatch.setattr(module, "PROJECT_ROOT", profile)
+
+
+def test_plan_and_execute_run_real_chain_under_redirected_host_project_root(tmp_path, monkeypatch):
+    root, items = _scanned_repo(tmp_path)
+    _redirect_host_project_root(monkeypatch, tmp_path)
+    monkeypatch.setattr("core.assistant_runtime.actions._binding",
+                        (_StubHostService(root), object(), None))
+    _no_claims(monkeypatch)
+    unmerged_path = Path(items["unmerged"]["path"])
+
+    plan = actions.plan({"agentId": "assistant", "sessionId": "s"})
+
+    assert plan["ok"] is True and plan["status"] == "observed"
+    rows = {row["instanceId"]: row for row in plan["instances"]}
+    assert {"worktree:clean", "worktree:unmerged", "worktree:dirty"} <= set(rows)
+    assert rows["worktree:unmerged"]["worktreeRoot"] == str(unmerged_path)
+    assert rows["worktree:clean"]["eligible"] is True
+    assert rows["worktree:unmerged"]["reasons"] == ["UNMERGED"]
+
+    applied = actions.execute("branch_cleanup_execute",
+                              {"instance_ids": ["worktree:unmerged"], "allow_unmerged": True},
+                              {"agentId": "assistant", "sessionId": "s"}, governed=True)
+
+    assert applied["ok"] is True and applied["status"] == "applied"
+    assert [row["id"] for row in applied["cleaned"]] == ["worktree:unmerged"]
+    assert not unmerged_path.exists()
+    assert not _branch_exists(root, "codex/unmerged")
+    assert Path(items["clean"]["path"]).exists()
+
+
+def test_plan_fails_closed_without_resolvable_root(tmp_path, monkeypatch):
+    from core.launcher import service as launcher_service
+
+    root, items = _scanned_repo(tmp_path)
+    _redirect_host_project_root(monkeypatch, tmp_path)
+    monkeypatch.setattr("core.assistant_runtime.actions._binding", None)
+    monkeypatch.setattr(launcher_service, "list_launcher_branch_instances",
+                        lambda **kwargs: (_ for _ in ()).throw(AssertionError("no root, no scan")))
+
+    result = actions.plan({"agentId": "assistant"})
+
+    assert result["ok"] is False
+    assert result["status"] == "unavailable"
+    assert result["error"] == "project_root_unavailable"
+    assert "项目根" in result["message"]
+    assert Path(items["clean"]["path"]).exists()
+
+
+def test_plan_fails_closed_when_registered_roots_are_ambiguous(tmp_path, monkeypatch):
+    from core.launcher import service as launcher_service
+
+    root, items = _scanned_repo(tmp_path)
+    other = _init_repo(tmp_path / "other-repo")
+    monkeypatch.setattr("core.assistant_runtime.actions._binding",
+                        (_StubHostService(root, other), object(), None))
+    monkeypatch.setattr(launcher_service, "list_launcher_branch_instances",
+                        lambda **kwargs: (_ for _ in ()).throw(AssertionError("ambiguous root must not scan")))
+
+    result = actions.plan({})
+
+    assert result["ok"] is False
+    assert result["error"] == "project_root_ambiguous"
+    assert Path(items["clean"]["path"]).exists()
+
+
+def test_instances_registry_fallback_resolves_single_git_root(tmp_path, monkeypatch):
+    from core.runtime_manager import instances_registry as registry
+
+    root, items = _scanned_repo(tmp_path)
+    _redirect_host_project_root(monkeypatch, tmp_path)
+    monkeypatch.setattr("core.assistant_runtime.actions._binding", None)
+    _no_claims(monkeypatch)
+    registry_path = registry.instances_registry_path()
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    registry_path.write_text(json.dumps({"schemaVersion": 3, "instances": {
+        "worktree:elsewhere": {"projectRoot": str(tmp_path / "not-a-repo"), "status": "closed"},
+        "worktree:main": {"status": "closed"},
+        "worktree:managed": {"projectRoot": str(root), "status": "closed"},
+    }}, ensure_ascii=False), encoding="utf-8")
+
+    plan = actions.plan({})
+
+    assert plan["ok"] is True
+    rows = {row["instanceId"]: row for row in plan["instances"]}
+    assert rows["worktree:clean"]["eligible"] is True
+
+
+def test_execute_fails_closed_without_root_and_never_scans(tmp_path, monkeypatch):
+    from core.launcher import service as launcher_service
+
+    root, items = _scanned_repo(tmp_path)
+    monkeypatch.setattr("core.assistant_runtime.actions._binding", None)
+    monkeypatch.setattr(launcher_service, "list_launcher_branch_instances",
+                        lambda **kwargs: (_ for _ in ()).throw(AssertionError("no root, no scan")))
+
+    result = actions.execute_cleanup({"instance_ids": ["worktree:clean"]}, {"agentId": "assistant"})
+
+    assert result["ok"] is False
+    assert result["action"] == "branch_cleanup_execute"
+    assert result["error"] == "project_root_unavailable"
+    assert Path(items["clean"]["path"]).exists()
+    assert _branch_exists(root, "codex/clean")
+
+
+def test_dispatch_registry_exposes_distinct_physical_roots(tmp_path):
+    from core.assistant_runtime.dispatch import DispatchService
+
+    first = tmp_path / "repo-one"
+    second = tmp_path / "repo-two"
+    first.mkdir()
+    second.mkdir()
+    service = DispatchService(tmp_path / "profile", {"registered:1": first, "registered:2": second,
+                                                     "registered:aliased": first})
+    assert service.registered_project_roots() == (first.resolve(), second.resolve())

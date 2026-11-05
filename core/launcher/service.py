@@ -225,7 +225,10 @@ def get_launcher_current_instance_identity() -> dict[str, Any]:
 
 
 def list_launcher_branch_instances(
-    *, include_cleanup_metadata: bool = False, runtime_only: bool = False
+    *,
+    include_cleanup_metadata: bool = False,
+    runtime_only: bool = False,
+    checkout: Path | str | None = None,
 ) -> dict[str, Any]:
     """Return Git-governed branch instances for the Launcher first screen.
 
@@ -234,15 +237,17 @@ def list_launcher_branch_instances(
     it is only required when the user filters unmerged rows or confirms cleanup.
     Runtime-only shutdown inventory skips Git dirtiness; cleanup requests always
     retain the full scan so unchecked worktrees cannot be treated as clean.
+    Assistant-host callers must supply ``checkout`` because the in-process
+    ``PROJECT_ROOT`` is the redirected assistant profile, not a Git workspace.
     """
 
     from core.launcher.branch_instance_lifecycle import list_overlayed_branch_instances
 
     current_bundle = _current_project_bundle_for_branch_list()
     payload = (
-        list_overlayed_branch_instances(current_bundle=current_bundle, include_dirty=False)
+        list_overlayed_branch_instances(current_bundle=current_bundle, include_dirty=False, checkout=checkout)
         if runtime_only and not include_cleanup_metadata
-        else list_overlayed_branch_instances(current_bundle=current_bundle)
+        else list_overlayed_branch_instances(current_bundle=current_bundle, checkout=checkout)
     )
     if not include_cleanup_metadata:
         return payload

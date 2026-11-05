@@ -421,8 +421,9 @@ def test_service_binds_current_project_bundle_into_branch_runtime(monkeypatch):
 
     from core.launcher import branch_instance_cleanup, branch_instance_lifecycle
 
-    def fake_list(*, current_bundle=None):
+    def fake_list(*, current_bundle=None, checkout=None):
         seen["bundle"] = current_bundle
+        seen["checkout"] = checkout
         return {"items": []}
 
     monkeypatch.setattr(branch_instance_lifecycle, "list_overlayed_branch_instances", fake_list)
@@ -434,6 +435,7 @@ def test_service_binds_current_project_bundle_into_branch_runtime(monkeypatch):
 
     assert launcher_service.list_launcher_branch_instances() == {"items": []}
     assert seen["bundle"] is bundle
+    assert seen["checkout"] is None
 
 
 def test_branch_list_does_not_call_full_launcher_status(monkeypatch):
@@ -453,7 +455,7 @@ def test_branch_list_does_not_call_full_launcher_status(monkeypatch):
     monkeypatch.setattr(
         branch_instance_lifecycle,
         "list_overlayed_branch_instances",
-        lambda *, current_bundle=None: {"items": []},
+        lambda *, current_bundle=None, checkout=None: {"items": []},
     )
 
     def boom_annotate(_payload):
@@ -539,8 +541,8 @@ def test_service_runtime_only_skips_dirty_unless_cleanup_metadata_is_requested(
         runtime_only=True, include_cleanup_metadata=include_cleanup_metadata
     ) is payload
     assert calls == [
-        {"current_bundle": bundle}
-        if include_cleanup_metadata else {"current_bundle": bundle, "include_dirty": False}
+        {"current_bundle": bundle, "checkout": None}
+        if include_cleanup_metadata else {"current_bundle": bundle, "include_dirty": False, "checkout": None}
     ]
     assert annotations == ([2.0] if include_cleanup_metadata else [])
 
@@ -557,7 +559,7 @@ def test_service_cleanup_metadata_annotation_is_opt_in(monkeypatch):
     monkeypatch.setattr(
         branch_instance_lifecycle,
         "list_overlayed_branch_instances",
-        lambda *, current_bundle=None: {"items": [{"id": "worktree:task"}]},
+        lambda *, current_bundle=None, checkout=None: {"items": [{"id": "worktree:task"}]},
     )
     annotated = {"items": [{"id": "worktree:task", "mergedToMain": False}]}
     seen: dict[str, object] = {}

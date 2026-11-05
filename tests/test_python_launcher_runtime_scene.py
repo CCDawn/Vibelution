@@ -103,3 +103,89 @@ def test_python_launcher_unsupported_action_reports_supported_actions(tmp_path, 
     assert "vibelution_launcher.ps1" in message
     captured = capsys.readouterr()
     assert "supported: start, stop, focus, restart" in captured.err
+
+
+def test_focus_keeps_validated_live_backend_pid(tmp_path, monkeypatch) -> None:
+    launcher = _load_launcher_module()
+    runtime_dir = tmp_path / ".runtime" / "launcher"
+    state_path = runtime_dir / "state.json"
+    monkeypatch.setattr(launcher, "RUNTIME_DIR", runtime_dir)
+    monkeypatch.setattr(launcher, "STATE_PATH", state_path)
+    launcher._write_state({"backendPid": 4321, "backendPort": 8123})
+    monkeypatch.setattr(launcher, "_pid_alive", lambda pid: pid == 4321)
+    monkeypatch.setattr(
+        launcher,
+        "_verify_project_backend_pid",
+        lambda pid: "project" if pid == 4321 else "foreign",
+    )
+    monkeypatch.setattr(launcher, "_backend_healthy", lambda port, host="127.0.0.1": True)
+    monkeypatch.setattr(launcher, "_listening_pid_for_port", lambda port: 4321)
+
+    state = launcher._focus_backend(8123, "127.0.0.1")
+
+    assert state["backendPid"] == 4321
+    assert "focusAdvisoryNote" not in state
+    assert json.loads(state_path.read_text(encoding="utf-8")) == state
+
+
+def test_focus_replaces_foreign_recorded_pid_with_verified_port_owner(tmp_path, monkeypatch) -> None:
+    launcher = _load_launcher_module()
+    runtime_dir = tmp_path / ".runtime" / "launcher"
+    state_path = runtime_dir / "state.json"
+    monkeypatch.setattr(launcher, "RUNTIME_DIR", runtime_dir)
+    monkeypatch.setattr(launcher, "STATE_PATH", state_path)
+    launcher._write_state({"backendPid": 999, "backendPort": 8123})
+    monkeypatch.setattr(launcher, "_pid_alive", lambda pid: pid == 999)
+    monkeypatch.setattr(
+        launcher,
+        "_verify_project_backend_pid",
+        lambda pid: "project" if pid == 4322 else "foreign",
+    )
+    monkeypatch.setattr(launcher, "_backend_healthy", lambda port, host="127.0.0.1": True)
+    monkeypatch.setattr(launcher, "_listening_pid_for_port", lambda port: 4322)
+
+    state = launcher._focus_backend(8123, "127.0.0.1")
+
+    assert state["backendPid"] == 4322
+    assert "unrelated process" in str(state.get("focusAdvisoryNote"))
+    persisted = json.loads(state_path.read_text(encoding="utf-8"))
+    assert persisted["backendPid"] == 4322
+    assert persisted["desiredState"] == "open"
+
+
+def test_focus_clears_dead_recorded_pid_without_adopting_foreign_owner(tmp_path, monkeypatch) -> None:
+    launcher = _load_launcher_module()
+    runtime_dir = tmp_path / ".runtime" / "launcher"
+    state_path = runtime_dir / "state.json"
+    monkeypatch.setattr(launcher, "RUNTIME_DIR", runtime_dir)
+    monkeypatch.setattr(launcher, "STATE_PATH", state_path)
+    launcher._write_state({"backendPid": 999, "backendPort": 8123})
+    monkeypatch.setattr(launcher, "_pid_alive", lambda pid: False)
+    monkeypatch.setattr(launcher, "_verify_project_backend_pid", lambda pid: "foreign")
+    monkeypatch.setattr(launcher, "_backend_healthy", lambda port, host="127.0.0.1": True)
+    monkeypatch.setattr(launcher, "_listening_pid_for_port", lambda port: 555)
+
+    state = launcher._focus_backend(8123, "127.0.0.1")
+
+    # Focus itself still succeeds for the user's window/refresh goal, but the
+    # dead recorded pid and the unverified port owner are never registered.
+    assert state["backendPid"] == 0
+    assert state["desiredState"] == "open"
+    assert state["observedState"] == "open"
+    assert "has exited" in str(state.get("focusAdvisoryNote"))
+
+
+def test_project_backend_verdict_classifies_command_line(monkeypatch) -> None:
+    launcher = _load_launcher_module()
+    project_root = Path("D:/dev-projects/Vibelution")
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", project_root)
+
+    command_line = (
+        f"{project_root / '.venv/Scripts/pythonw.exe'} "
+        f"{project_root / 'scripts/web_workbench.py'} --port 8000"
+    )
+    assert launcher._project_backend_verdict_from_command_line(command_line) == "project"
+    assert launcher._project_backend_verdict_from_command_line(
+        "C:/Windows/System32/notepad.exe"
+    ) == "foreign"
+    assert launcher._project_backend_verdict_from_command_line("") == "unknown"
