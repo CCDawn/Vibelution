@@ -11,6 +11,7 @@ import {
   stopLauncherAssistantTurn, continueLauncherAssistantTurn, switchLauncherAssistantHead,
   regenerateLauncherAssistantMessage, guideLauncherAssistantTurn,
   getLauncherOperatorAsset, getLauncherAssistantAvatar, openLauncherFromAssistant, uploadLauncherAttachment,
+  uploadLauncherUserSecret, launcherUserSecretKindLabel,
   readLauncherAttachment, subscribeLauncherAssistantSessionEvent,
   launcherAssistantBudgetQueryKey,
 } from "../../api/launcherAssistant";
@@ -23,7 +24,7 @@ import { LazyConversationView } from "../../components/conversation/LazyConversa
 import { LauncherAssistantWelcome } from "./LauncherAssistantWelcome";
 import { LauncherAssistantQuestionCard } from "./LauncherAssistantQuestionCard";
 import { VButton, VDenseOpsPage, VNativeButton, VStateSurface } from "../../components/vui";
-import { ChatComposerPlusMenu } from "../chat/ChatComposerPlusMenu";
+import { ChatComposerPlusMenu, type ChatComposerSecretAttachmentInput } from "../chat/ChatComposerPlusMenu";
 import { LauncherAssistantModelControl } from "./LauncherAssistantModelControl";
 import { useShellI18n } from "../../i18n/useShellI18n";
 import { hasExecutionOwnership, resolveSessionActivity, sessionActivityStatusLabel } from "../sessionActivityState";
@@ -352,11 +353,13 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   }, [client, sessionId, embedded]);
   // Restored chips start with an empty preview (the blob: URL is unrecoverable);
   // refill each from its already-uploaded artifact through the read IPC, so a
-  // reload keeps the tray usable without re-uploading anything.
+  // reload keeps the tray usable without re-uploading anything. Secret chips
+  // are skipped: their `sec_` reference has no readable bytes here, and the
+  // read verb must never become a value-fetch channel.
   useEffect(() => {
     if (!sessionId || status.data?.attachmentVersion !== 1) return;
     const targets = attachmentsRef.current.flatMap(item =>
-      item.uploadStatus === "uploaded" && item.artifactId && !item.previewUrl ? [{ id: item.id, artifactId: item.artifactId }] : []);
+      item.uploadStatus === "uploaded" && item.kind !== "secret" && item.artifactId && !item.previewUrl ? [{ id: item.id, artifactId: item.artifactId }] : []);
     if (!targets.length) return;
     let active = true;
     void (async () => {
@@ -795,6 +798,33 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     updateAttachments(merged.attachments);
     if (incoming.rejected.length || merged.rejected.length) setFeedback(lang === "zh" ? "部分附件类型不支持、过大或超过数量限制。" : "Some attachments are unsupported, too large, or exceed the limit.");
     else setFeedback("");
+  }
+  // Privacy attachments: the dialog plaintext goes straight to the closed IPC
+  // verb and only the `sec_` reference returns. The chip below carries the
+  // masked display name and that reference — never the value — and is already
+  // "uploaded", so submit includes sec_x in attachmentIds without any re-upload.
+  const MAX_SECRET_ATTACHMENTS = 4;
+  async function addSecretAttachment(input: ChatComposerSecretAttachmentInput): Promise<void> {
+    if (status.data?.attachmentVersion !== 1 || sendPending || sendUnconfirmed || uploadGate.current) {
+      throw new Error(lang === "zh" ? "当前不能添加隐私附件，请稍后再试。" : "A private attachment cannot be added right now.");
+    }
+    if (attachmentsRef.current.filter(item => item.kind === "secret").length >= MAX_SECRET_ATTACHMENTS) {
+      throw new Error(lang === "zh" ? `隐私附件最多 ${MAX_SECRET_ATTACHMENTS} 个，请先移除一个再添加。` : `Up to ${MAX_SECRET_ATTACHMENTS} private attachments; remove one first.`);
+    }
+    const { attachmentId } = await uploadLauncherUserSecret(input.value, input.secretType, input.label);
+    const displayName = (input.label || "").trim() || launcherUserSecretKindLabel(input.secretType, lang);
+    const chipLabel = lang === "zh" ? `隐私 · ${displayName}` : `Private · ${displayName}`;
+    updateAttachments([...attachmentsRef.current, {
+      id: crypto.randomUUID(),
+      file: new File([], chipLabel, { type: "application/octet-stream" }),
+      filename: chipLabel,
+      previewUrl: "",
+      sizeBytes: 0,
+      contentType: "application/octet-stream",
+      kind: "secret",
+      uploadStatus: "uploaded",
+      artifactId: attachmentId,
+    }]);
   }
   function removeAttachment(id: string) {
     if (sendPending || sendUnconfirmed || uploadGate.current) return;
@@ -1456,6 +1486,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       composerLeadingControl={<><ChatComposerPlusMenu lang={lang} showCapabilities={false} showReferences={false}
         budget={budget}
         sessionReferences={[]} onAddAttachments={addAttachments}
+        onAttachSecret={input => addSecretAttachment(input)}
         attachmentDisabled={status.data?.attachmentVersion !== 1 || sendPending || sendUnconfirmed || controlPending} />
         <LauncherManagementPermissionControl state={managementPermission} lang={lang} /></>}
       composerModelControl={status.data ? <LauncherAssistantModelControl key={sessionId} lang={lang}

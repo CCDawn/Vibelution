@@ -46,6 +46,7 @@ class ModelDefault(Arguments):
 class ProviderAdd(Arguments):
     provider_id: str = Field(min_length=1, max_length=64)
     source_provider_id: str = Field(default="", max_length=64)
+    credential_token: str = Field(default="", max_length=128, description="一次性隐私附件引用（sec_ 开头）；与 source_provider_id 互斥")
     base_url: str = Field(default="", max_length=512)
     label: str = Field(default="", max_length=120)
     service_class: Literal["official_api", "aggregator", "relay", "self_hosted", "local_runtime"] = Field(
@@ -91,7 +92,7 @@ class ModelEdits(Arguments):
 
 _CONTRACTS = {
     "provider_catalog": (Catalog, False, "分页查看已有连接标识、origin、状态和模型；不返回完整URL、凭据或环境变量名。"),
-    "provider_add": (ProviderAdd, True, "添加连接。可沿用已有连接的凭据，但仅限同一发送 origin；无来源时建立无凭据连接。重复连接返回 existing。"),
+    "provider_add": (ProviderAdd, True, "添加连接。可沿用已有连接的凭据（仅限同一发送 origin），或提供一次性隐私附件引用 credential_token 直接配置 API 密钥凭据，两者互斥；无来源时建立无凭据连接。重复连接返回 existing，此时附件凭据保持未消费。"),
     "provider_update": (ProviderUpdate, True, "修改连接名称、启用状态或地址。跨 origin 必须清除凭据或选择新 origin 的已有连接。"),
     "provider_remove": (ProviderRemove, True, "移除无模型、无活动引用的连接；需原生审批。"),
     "provider_test": (ProviderTest, True, "用该连接的已固定模型执行原生连接测试；返回有限状态，不返回响应正文。"),
@@ -521,6 +522,8 @@ def execute(action: str, parameters: dict, runtime: dict, governed: bool = False
             tables = [table]
         elif action == "provider_add":
             from config.llm_provider_registry import add_llm_provider
+            if args.credential_token and args.source_provider_id:
+                return _failure("ambiguous_credential_source")
             provider = {"label": args.label or args.provider_id, "base_url": args.base_url,
                         "service_class": args.service_class, "driver": args.driver,
                         "auth_kind": "none", "credential_ref": "none", "requires_credential": False,
@@ -548,9 +551,47 @@ def execute(action: str, parameters: dict, runtime: dict, governed: bool = False
                 return target_failure
             duplicate = _duplicate(before, provider)
             if duplicate:
+                # Early return intentionally leaves any credential_token
+                # unconsumed: the one-shot attachment stays usable for a retry
+                # against a genuinely new connection.
                 return {"ok": True, "status": "existing", "verified": True, "providerId": duplicate}
+            env_name = ""
+            if args.credential_token:
+                from config.llm_security import validate_llm_api_key_env
+                from config.public_config import _delete_user_env_var, _set_user_env_var
+                from core.assistant_runtime.secret_attachments import resolve_secret_attachment
+                # Validate the derived name before the one-shot pop so a naming
+                # failure never burns the user's attachment.
+                try:
+                    env_name = validate_llm_api_key_env(
+                        f"VIBELUTION_LLM_{args.provider_id.upper().replace('-', '_')}_API_KEY", required=True)
+                except ValueError:
+                    return _failure("credential_env_name_invalid")
+                secret = resolve_secret_attachment(args.credential_token)
+                if secret is None:
+                    return _failure("credential_token_invalid")
+                value, kind = secret
+                if kind != "api_key":
+                    # The pop already consumed this attachment; retrying
+                    # requires the user to attach the secret again.
+                    return _failure("credential_token_kind")
+                _set_user_env_var(env_name, value)
+                provider.update(auth_kind="api_key", credential_ref=f"env:{env_name}", requires_credential=True)
             candidate = add_llm_provider(before, args.provider_id, provider)
             tables = [("llm", "providers", args.provider_id)]
+            if env_name:
+                try:
+                    result = _commit(path, before, candidate, tables)
+                except Exception:
+                    # Never leave a live credential env var behind a connection
+                    # that failed to land; the token is consumed, so a retry
+                    # needs the secret re-attached.
+                    _delete_user_env_var(env_name)
+                    raise
+                if result.get("ok") is not True:
+                    _delete_user_env_var(env_name)
+                    return result
+                return {**result, "credentialState": "configured"}
         elif action == "provider_update":
             from config.llm_provider_registry import update_llm_provider
             old = _provider(before, args.provider_id)

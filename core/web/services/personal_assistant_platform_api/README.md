@@ -40,7 +40,7 @@
 | --- | --- |
 | 助理自身 | `assistant_settings`、`assistant_settings_update`、`assistant_model_set`：名称、外观、提示开关、空闲文案、已配置对话模型，写后读回。 |
 | 对话偏好 | `dialogue_settings`、`dialogue_settings_update`：当前唯一助理的主动说话、提问与偏好建议方式；在原生 Agent 锁中读合并写，未指定项保留。 |
-| 模型连接 | `provider_catalog`、`provider_add/update/remove/test/discover`、`provider_models`：连接目录只返回公开 origin、标识和状态；凭据留在服务端，同 origin 才可复用既有凭据。新密钥不得经模型文本提交。发现与连接测试不代表真实任务或生图完成。 |
+| 模型连接 | `provider_catalog`、`provider_add/update/remove/test/discover`、`provider_models`：连接目录只返回公开 origin、标识和状态；凭据留在服务端，同 origin 才可复用既有凭据。明文密钥仍不得经模型文本或工具参数提交；聊天隐私附件（user_secret）是合法凭据入口：明文经封闭 IPC 暂存进程内存（10 分钟 TTL、读即毁），模型只见一次性 sec_ 引用，工具执行时服务端兑换并落盘为 env 引用，回执与投影不含凭据。发现与连接测试不代表真实任务或生图完成。 |
 | 模型配置 | `model_update/remove/default`：精确写入已固定模型，删除检查活动引用；默认目标为已有 profile、image2 或 git。Git 原生路径支持 v2 provider/model 与别名。image2 资格筛选不代替真实生图验证。 |
 | 会话 | `workspace_list`、`session_get`、`session_parameters_get` 只投影公开标识和参数；`session_pin/unpin`、`session_reasoning_update`、`session_model_parameters_update`、`session_budget_update`、`session_archive/unarchive` 保留 native CAS/生命周期边界。不得选择操作者当前会话或改动助理自身会话。 |
 | 团队与群聊 | `team_get`、`team_update`、`room_get`、`room_update`：按名称发现，再修改受限元数据；不返回消息、私有档案或路径，不改变成员权限。团队归档必须额外通过原生团队 admission 保护。 |

@@ -34,7 +34,11 @@ export const MAX_COMPOSER_IMAGE_BYTES = 8 * 1024 * 1024;
 export const MAX_COMPOSER_DOCUMENT_BYTES = 2 * 1024 * 1024;
 export { COMPOSER_IMAGE_ACCEPT_TYPES, COMPOSER_DOCUMENT_ACCEPT_EXTENSIONS };
 
-export type ComposerAttachmentKind = "image" | "document";
+/**
+ * "secret" chips are personal-assistant-only privacy attachments: they hold a
+ * backend `sec_` reference (never the plaintext) and skip file upload/retry.
+ */
+export type ComposerAttachmentKind = "image" | "document" | "secret";
 
 /**
  * Per-attachment upload lifecycle. Undefined stays the "not attempted yet"

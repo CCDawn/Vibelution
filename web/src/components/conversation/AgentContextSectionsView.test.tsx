@@ -118,6 +118,50 @@ describe("AgentContextSectionsView", () => {
     expect(html).toContain('data-agent-context-attachment-name="vib_smoke_ref.md"');
   });
 
+  it("renders user_secret attachments as a masked card without preview, download or value", () => {
+    const sections: AgentMessageContextSection[] = [
+      {
+        id: "user-context-section-secret",
+        kind: "context",
+        parts: [
+          {
+            id: "user-context-attachment-secret",
+            type: "attachment",
+            attachment: {
+              artifactId: "sec_test123",
+              filename: "中转站密钥",
+              url: "",
+              imageUrl: "",
+              downloadUrl: "",
+              contentType: "application/octet-stream",
+              sizeBytes: 0,
+              kind: "user_secret",
+              status: "ready",
+            },
+          },
+        ],
+      },
+    ];
+
+    const html = renderToStaticMarkup(
+      <AgentContextSectionsView sections={sections} lang="zh" />,
+    );
+
+    expect(html).toContain('data-agent-context-attachment-secret="true"');
+    expect(html).toContain('data-agent-context-attachment-name="中转站密钥"');
+    expect(html).toContain("隐私 · 中转站密钥");
+    expect(html).toContain("····");
+    expect(html).toContain("userAttachmentSecret");
+    expect(html).toContain('aria-label="用户上下文隐私附件 中转站密钥（内容已遮盖）"');
+    // No preview, no download affordance, no url, and never the staged value
+    // (the response only ever carries the sec_ reference, which stays hidden).
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("Download");
+    expect(html).not.toContain("下载");
+    expect(html).not.toContain("sec_test123");
+    expect(html).not.toContain("href=");
+  });
+
   it("keeps attachments and reference chips bounded for dense conversation rows", () => {
     expect(styles.userAttachmentGrid).toContain("grid-cols-[repeat(auto-fit,minmax(min(12rem,100%),1fr))]");
     expect(styles.userAttachment).toContain("overflow-hidden");
