@@ -48,14 +48,15 @@ async function settle() { await act(async () => { await new Promise(resolve => s
 async function destroy() {
   await act(async () => root?.unmount()); root = undefined; client?.clear(); container?.remove();
 }
-async function mount(shell = false) {
+async function mount(shell = false, strict = false) {
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity, staleTime: 30_000 } } });
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
-  await act(async () => root!.render(<QueryClientProvider client={client}>{shell
+  const content = <QueryClientProvider client={client}>{shell
     ? <MemoryRouter initialEntries={["/launcher/tools"]}><Routes><Route path="/launcher" element={<LauncherShell />}>
       <Route path="tools" element={<div>Tools</div>} /><Route path="assistant" element={<LauncherAssistantRoute embedded navigationOwned />} />
     </Route></Routes></MemoryRouter>
-    : <LauncherAssistantRoute embedded />}</QueryClientProvider>));
+    : <LauncherAssistantRoute embedded />}</QueryClientProvider>;
+  await act(async () => root!.render(strict ? <React.StrictMode>{content}</React.StrictMode> : content));
   await settle(); await settle();
 }
 async function selectB() {
@@ -100,6 +101,17 @@ beforeEach(() => {
 afterEach(async () => { await destroy(); vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); });
 
 describe("Launcher task approval handoff through the real Shell and Route", () => {
+  it.each([false, true])("opens B without a refresh after StrictMode replay with stale dispatch cache=%s", async cached => {
+    rows = [dispatch("A"), dispatch("B")]; await mount(true, true);
+    if (cached) client.setQueryData(["launcher-assistant", "dispatches", "assistant", "session", 0], [dispatch("A")], { updatedAt: 1 });
+    await selectB();
+    expect(client.getQueryState(["launcher-assistant", "dispatches", "assistant", "session", 0])?.error).toBeNull();
+    expect(calls("previewDispatchApproval")).toEqual([{ operation: "previewDispatchApproval", dispatchId: "dispatch-B", taskId: "task-B", approvalId: "approval-B" }]);
+    const dialog = document.querySelector('[data-chat-tool-approval-variant="composer"]');
+    expect(dialog?.textContent).toContain("approval-B");
+    expect(dialog?.textContent).not.toContain("approval-A");
+  });
+
   it("opens the selected B approval after navigation instead of the first A approval", async () => {
     rows = [dispatch("A"), dispatch("B")]; await mount(true); await selectB();
     expect(calls("previewDispatchApproval")).toEqual([{ operation: "previewDispatchApproval", dispatchId: "dispatch-B", taskId: "task-B", approvalId: "approval-B" }]);

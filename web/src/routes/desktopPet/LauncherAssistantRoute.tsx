@@ -216,6 +216,12 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   const [epoch, setEpoch] = useState(0);
   const epochRef = useRef(0);
   const mounted = useRef(true);
+  // Restore the lifetime guard before query observers subscribe again during
+  // StrictMode effect replay; otherwise the first guarded read aborts locally.
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const sending = useRef<{ submission: LauncherAssistantSubmission } | null>(null);
   const requestReadbackGate = useRef(false);
   const resizing = useRef(false);
@@ -645,7 +651,6 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     && launcherDispatchDeclineRevisionIsValid(dispatchApproval.request.revision));
 
   useEffect(() => {
-    mounted.current = true;
     // The transparent pet root belongs to the floating window only; the
     // Launcher control surface owns its own document chrome.
     if (!embedded) {
@@ -669,7 +674,6 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     }
     document.addEventListener("visibilitychange", visibilityChanged);
     return () => {
-      mounted.current = false;
       epochRef.current += 1;
       document.removeEventListener("visibilitychange", visibilityChanged);
       if (!embedded) {
