@@ -152,7 +152,7 @@ def _facts(text: str) -> set[tuple[str, str]]:
                 continue
         protocols = {endpoint_protocol} if endpoint_protocol else {
             wire for target, wire in facts if target == base and wire}
-        if not protocols and not foreign and len({target for _, target, _ in bases}) == 1:
+        if not protocols and not foreign and len({item.group(1) for item in _BASE.finditer(context)}) == 1:
             protocols = _text_protocols(context)
         for protocol in protocols or {""}:
             facts.add((base, protocol))
@@ -197,12 +197,14 @@ def _prepare(args: Prepare) -> dict:
             else:
                 text = text + "\n" + document[:16000]
                 fetched = True
-    facts.update(_facts(text))
+    document_facts = _facts(text)
+    facts.update(document_facts)
     if explicit:
         # User-selected address is authoritative, documentation cannot redirect it.
         facts = {(base, protocol) for base, protocol in facts if base == explicit}
-        if not facts:
-            facts.add((explicit, explicit_protocol))
+        if not facts or not any(wire for _, wire in facts) and not document_facts:
+            relative_protocols = _text_protocols(text) if not document_facts else set()
+            facts.update((explicit, wire) for wire in relative_protocols or {explicit_protocol})
     if args.wire_protocol:
         bases = {base for base, _ in facts}
         facts = {(base, args.wire_protocol) for base in bases}

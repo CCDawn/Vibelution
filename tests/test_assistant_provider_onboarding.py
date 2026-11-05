@@ -92,12 +92,20 @@ def test_protocol_from_another_endpoint_cannot_be_lent_to_explicit_base():
     assert value["draft"]["wire_protocol"] == ""
 
 
-def test_multiple_sdk_base_urls_require_address_and_protocol_evidence():
+def test_multiple_sdk_base_urls_bind_only_their_own_paragraph_protocol():
     value = prepare(documentation_text=(
         'Base URL: https://one.example/v1\nclient.messages.create()\n\n'
         'Base URL: https://two.example/v1\nclient.chat.completions.create()'))
     assert not value["ready"] and value["requiredFields"] == ["base_url"]
-    assert all(candidate["wire_protocol"] == "" for candidate in value["candidates"])
+    assert value["candidates"] == [{"base_url": "https://one.example/v1", "wire_protocol": "anthropic_messages"},
+                                   {"base_url": "https://two.example/v1", "wire_protocol": "chat_completions"}]
+
+
+@pytest.mark.parametrize("address", [{"base_url": "https://chosen.example/v1"},
+                                  {"source_url": "https://chosen.example/v1", "source_kind": "api"}])
+def test_relative_protocol_example_is_usable_with_user_supplied_base(address):
+    value = prepare(**address, documentation_text="client.messages.create(model=chosen)")
+    assert value["ready"] and value["providerAdd"]["wire_protocol"] == "anthropic_messages"
 
 
 @pytest.mark.parametrize("source", ["https://user:password@example.com/start", "https://docs.example/start?key=hidden",
