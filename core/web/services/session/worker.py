@@ -31,6 +31,7 @@ from core.web.services.financial_research.as_of import (
 )
 from core.llm.error_classification import PERMANENT
 from .turn_model_parameters import pin_agent_model_parameters
+from .accepted_prompt_config import load_accepted_prompt_config, pin_agent_prompt_profile
 from . import control as _stop_control
 from core.orchestration.context_engine import AgentContextInterrupted
 from core.orchestration.turn_stop_signal import attach_stop_event
@@ -1389,10 +1390,23 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
     prepare_timings["agentDirectorySyncMs"] = s._elapsed_ms(stage_started_at)
     agent_id = str(context.get("agent_id") or context.get("agentId") or "").strip()
     stage_started_at = s._perf_counter()
+    accepted_prompt_config = None
+    if context.get("accepted_prompt_config_ref") is not None:
+        accepted_prompt_config = load_accepted_prompt_config(
+            s, session_id, context["accepted_prompt_config_ref"],
+            agent_id=agent_id,
+            submission_id=str(context.get("accepted_prompt_submission_id") or ""),
+        )
     supplied_agent = context.get("agent_snapshot") if isinstance(context.get("agent_snapshot"), dict) else None
     if supplied_agent and str(supplied_agent.get("agentId") or "").strip() != agent_id:
         supplied_agent = None
     agent_instance = supplied_agent or (s.get_agent(agent_id, include_archived=False) if agent_id else None)
+    if accepted_prompt_config is not None:
+        # Only prompt/profile fields are accepted evidence. Authorization and
+        # plugin/lifecycle metadata retain the live Agent as their authority.
+        agent_instance = pin_agent_prompt_profile(
+            s.get_agent(agent_id, include_archived=False), accepted_prompt_config,
+        )
     agent_instance = pin_agent_model_parameters(agent_instance, context.get("model_parameters"))
     historical_agent = None if agent_instance else (s.get_agent(agent_id, include_archived=True) if agent_id else None)
     if supplied_agent:
@@ -1505,16 +1519,15 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
     interrupt_checker._vibelution_chat_provider_abort_enabled = True
     attach_stop_event(interrupt_checker, getattr(turn_control, "stop_event", None))
     try:
-        agent_prompt_snapshot = (
-            s._ensure_session_agent_prompt_snapshot(
+        if accepted_prompt_config is not None:
+            agent_prompt_snapshot = accepted_prompt_config["promptSnapshot"]
+        else:
+            agent_prompt_snapshot = s._ensure_session_agent_prompt_snapshot(
                 session_id,
                 agent_instance,
                 snapshot_hint=prompt_snapshot_hint,
                 interrupt_checker=interrupt_checker,
-            )
-            if agent_instance
-            else {}
-        )
+            ) if agent_instance else {}
         agent_prompt_snapshot_block = s._render_agent_prompt_snapshot_block(agent_prompt_snapshot)
         prepare_timings["promptSnapshotMs"] = s._elapsed_ms(stage_started_at)
         if _abort_session_turn_for_stop(
@@ -1557,7 +1570,7 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                 session_id=session_id,
                 run_id=turn_id,
                 agent_snapshot=agent_instance,
-                include_prompt_template_context=not bool(agent_prompt_snapshot_block),
+                include_prompt_template_context=accepted_prompt_config is None and not bool(agent_prompt_snapshot_block),
                 interrupt_checker=interrupt_checker,
             )
             if agent_id

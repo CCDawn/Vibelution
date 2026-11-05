@@ -20,6 +20,7 @@ from typing import Any
 
 from core.web.services.session.timebase import parse_timestamp_utc
 from .turn_model_parameters import capture_model_parameters
+from .accepted_prompt_config import capture_accepted_prompt_config
 
 QUEUED_TURN_STATE_KEY = "queued_turns"
 # User-stop queue hold (ZCode full-stop parity): an explicit stop freezes the
@@ -354,6 +355,12 @@ def enqueue_session_queued_turn(
             "createdAt": s._now_timestamp(),
             "updatedAt": s._now_timestamp(),
         }
+        prompt_reference = capture_accepted_prompt_config(
+            s, normalized_session_id, conversation,
+            submission_id=normalized_client_submission_id or row["id"],
+        )
+        if prompt_reference is not None:
+            row["acceptedPromptConfig"] = prompt_reference
         # Sending a new message is an explicit user action: it resumes a queue
         # an earlier stop froze. Machine notices enqueue elsewhere and must
         # not lift the hold on their own.
@@ -496,6 +503,7 @@ def update_session_queued_turn(
                 )
             )
         current_status = str(row.get("status") or "queued")
+        recapture_prompt = content is not None
         if requested_status == "paused" and current_status != "queued":
             # A "blocked" row must go through the edit-retry path; a "starting"
             # row was already rejected above.
@@ -530,6 +538,7 @@ def update_session_queued_turn(
             if retry_state == "failed":
                 row["dispatchClientSubmissionId"] = f"queue-retry-{uuid.uuid4().hex}"
                 row["modelParameters"] = capture_model_parameters(s, conversation)
+                recapture_prompt = True
         if content is not None:
             next_content = str(content or "").strip()
             if not next_content and not row["attachments"]:
@@ -549,6 +558,13 @@ def update_session_queued_turn(
                     row["content"],
                     fingerprint_base,
                 )
+        if recapture_prompt:
+            prompt_reference = capture_accepted_prompt_config(
+                s, normalized_session_id, conversation,
+                submission_id=str(row.get("dispatchClientSubmissionId") or row.get("clientSubmissionId") or row["id"]),
+            )
+            if prompt_reference is not None:
+                row["acceptedPromptConfig"] = prompt_reference
         if requested_status == "paused":
             row["status"] = "paused"
             # A paused row never drains, so a pending send-now pin is stale.
@@ -1583,6 +1599,14 @@ def drain_session_queued_turns(session_id: str) -> bool:
                         else None
                     ),
                     "_model_parameters_snapshot": head.get("modelParameters"),
+                    "_accepted_prompt_config_ref": (
+                        head.get("acceptedPromptConfig") if isinstance(head.get("acceptedPromptConfig"), dict)
+                        else {"invalid": True} if "acceptedPromptConfig" in head else None
+                    ),
+                    "_accepted_prompt_submission_id": str(
+                        head.get("dispatchClientSubmissionId") or head.get("clientSubmissionId") or head.get("id") or ""
+                    ),
+                    "_accepted_prompt_config_source": "legacy_queue_drain",
                     "turn_steer_promotion": {
                         "steerId": str(head.get("id") or "").strip(),
                         "delivery": "queue",

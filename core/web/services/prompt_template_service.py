@@ -7,6 +7,8 @@ import hashlib
 import json
 import re
 import time
+from functools import wraps
+from threading import RLock
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -38,6 +40,17 @@ from .runtime_scene_service import record_runtime_scene_event
 
 
 SOURCE_ROOT = Path(__file__).resolve().parents[3]
+PROMPT_TEMPLATE_LOCK = RLock()
+
+
+def _serialized_template_operation(function):
+    @wraps(function)
+    def locked(*args, **kwargs):
+        with PROMPT_TEMPLATE_LOCK:
+            return function(*args, **kwargs)
+    return locked
+
+
 PROJECT_ROOT = resolve_native_project_root(SOURCE_ROOT)
 PROMPT_TEMPLATE_INDEX_VERSION = 1
 CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION = 17
@@ -1131,6 +1144,7 @@ def get_agent_prompt_snapshot_versions(
     }
 
 
+@_serialized_template_operation
 def build_agent_prompt_snapshot(
     template_id: str,
     *,
@@ -1288,6 +1302,84 @@ def build_agent_prompt_snapshot(
     }
 
 
+def read_existing_prompt_template_records(*, index_path: Path, workspace_root: Path,
+                                         project_root: Path, resolve_template_id: str | None = None) -> tuple[dict, list[dict]]:
+    """Strict existing-only view: no repair, source creation or sandbox seeding."""
+    from .external_management.state_snapshot import ExistingStateSnapshot
+
+    with PROMPT_TEMPLATE_LOCK:
+        payload = ExistingStateSnapshot.read_json(index_path, strict=True, max_bytes=16 * 1024 * 1024)
+        records = payload.get("templates")
+        if (not isinstance(records, list) or len(records) > 4096
+                or any(not isinstance(row, dict) for row in records)):
+            raise PromptTemplateError("Prompt template authority unavailable")
+        result, ids = [], set()
+        for row in records:
+            template_id = row.get("templateId")
+            if not isinstance(template_id, str) or not template_id or template_id in ids:
+                raise PromptTemplateError("Ambiguous prompt template authority")
+            ids.add(template_id)
+            source = str(row.get("sourcePath") or "").replace("\\", "/")
+            if "content" in row:
+                content = row["content"]
+                origin = "record_content"
+            elif source and resolve_template_id is not None and template_id != resolve_template_id:
+                # Discovery must not read every unrelated template file. Its
+                # body fingerprint remains explicitly unavailable until selected.
+                result.append({"templateId": template_id, "name": str(row.get("name") or template_id),
+                    "category": str(row.get("category") or "general"), "status": str(row.get("status") or "active"),
+                    "content": "", "contentHash": None, "contentLength": None,
+                    "origin": "source_file", "contentAvailable": False})
+                continue
+            elif source:
+                parts = PurePosixPath(source).parts
+                base = workspace_root.resolve() if parts[0] == "workspace" else project_root.resolve()
+                target = base.joinpath(*(parts[1:] if parts[0] == "workspace" else parts)).resolve()
+                if not target.is_relative_to(base) or target.stat().st_size > 320_000:
+                    raise PromptTemplateError("Prompt template source unavailable")
+                before = target.stat()
+                content = target.read_text(encoding="utf-8")
+                after = target.stat()
+                if ((after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)
+                        != (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)):
+                    raise PromptTemplateError("Prompt template source changed")
+                origin = "source_file"
+            else:
+                content, origin = "", "empty"
+            if not isinstance(content, str) or len(content) > 80_000:
+                raise PromptTemplateError("Prompt template content unavailable")
+            result.append({"templateId": template_id, "name": str(row.get("name") or template_id),
+                "category": str(row.get("category") or "general"), "status": str(row.get("status") or "active"),
+                "content": content, "contentHash": _content_hash(content), "contentLength": len(content),
+                "origin": origin, "contentAvailable": True})
+        return payload, result
+
+
+def create_agent_prompt_template_checked(*, template_id: str, agent_id: str, base_template_id: str,
+        expected_content_hash: str, content: str, index_path: Path, workspace_root: Path,
+        project_root: Path) -> dict:
+    """Copy on write into an inline Agent-owned template; shared files stay shared."""
+    with PROMPT_TEMPLATE_LOCK:
+        payload, records = read_existing_prompt_template_records(index_path=index_path,
+            workspace_root=workspace_root, project_root=project_root, resolve_template_id=base_template_id)
+        base = next((row for row in records if row["templateId"] == base_template_id), None)
+        if base is None or base["contentHash"] != expected_content_hash:
+            raise PromptTemplateError("Prompt template version conflict")
+        if any(row["templateId"] == template_id for row in records):
+            raise PromptTemplateError("Prompt template identity conflict")
+        if not content.strip() or len(content) > 8000:
+            raise PromptTemplateError("Prompt content must contain 1 to 8000 characters")
+        record = {"templateId": _normalize_template_id(template_id), "name": agent_id + " prompt",
+            "category": "general", "status": "active", "sourcePath": "", "content": content,
+            "metadata": {"ownerAgentId": agent_id, "baseTemplateId": base_template_id},
+            "createdAt": _now(), "updatedAt": _now()}
+        updated = copy.deepcopy(payload)
+        updated["templates"].append(record)
+        updated["updatedAt"] = _now()
+        _atomic_write_json(index_path, updated)
+        return {"templateId": record["templateId"], "contentHash": _content_hash(content)}
+
+
 def render_agent_prompt_snapshot_system_block(snapshot: dict[str, Any] | None) -> str:
     """Render a frozen Agent prompt snapshot as a stable model-facing block."""
 
@@ -1314,6 +1406,7 @@ def render_agent_prompt_snapshot_system_block(snapshot: dict[str, Any] | None) -
     return "\n".join(lines).strip()
 
 
+@_serialized_template_operation
 def update_prompt_template(
     template_id: str,
     *,
@@ -1355,6 +1448,7 @@ def update_prompt_template(
     return _template_to_api(templates[index], include_content=True)
 
 
+@_serialized_template_operation
 def reset_prompt_template(template_id: str) -> dict[str, Any]:
     """Reset a template to its built-in default record when one exists."""
 
@@ -1376,6 +1470,7 @@ def reset_prompt_template(template_id: str) -> dict[str, Any]:
     return _template_to_api(reset_record, include_content=True)
 
 
+@_serialized_template_operation
 def repair_prompt_templates(*, project_root: Path | None = None) -> dict[str, Any]:
     """Load and repair the prompt template index."""
 

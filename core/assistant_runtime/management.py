@@ -421,7 +421,8 @@ class ManagementAdapter:
             if key in ManagementAssetView.model_fields})
         result = await self._bound_read(project_id, lambda client: client.management_asset(operation, **parameters))
         result = {key: value for key, value in result.items() if key != "projectId"}
-        action = {"team": "team_asset_get", "team-archive": "team_archive_preview", "tool-policy": "agent_tool_policy_get", "knowledge-acl": "knowledge_acl_get"}[operation]
+        action = {"team": "team_asset_get", "team-archive": "team_archive_preview", "tool-policy": "agent_tool_policy_get", "knowledge-acl": "knowledge_acl_get",
+                  "agent-config": "agent_config_get", "agent-prompt": "agent_prompt_get", "tool-policy-inspect": "agent_tool_policy_inspect"}[operation]
         return project_management_asset(action, result, project_id, view.model_dump())
 
     async def flow(self, project_id: str, operation: str, **parameters):

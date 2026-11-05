@@ -36,6 +36,9 @@ from core.web.services.external_management.asset_contracts import (
     DispatchAccessQuery, DispatchAccessResponse,
 )
 from core.web.services.external_management.team_lifecycle_contracts import TeamArchivePreviewResponse
+from core.web.services.external_management.agent_configuration_contracts import AgentConfigurationQuery, AgentConfigurationResponse
+from core.web.services.external_management.configuration_discovery_contracts import (AgentPromptQuery, AgentPromptResponse,
+    ToolPolicyInspectQuery, ToolPolicyInspectResponse)
 from core.web.services.external_management.flow_contracts import FlowListQuery, FlowListResponse, FlowReadQuery, FlowReadResponse
 from core.web.services.external_management.platform_actions import PLATFORM_ACTIONS
 from core.web.services.external_management.service import (
@@ -195,6 +198,27 @@ async def read_tool_policy(request: Request, agent_id: str = ""):
     _require_control(request)
     query = _closed_query(request, ToolPolicyQuery)
     return await _operator_call(request, lambda: _service().read_asset(*_credentials(request), "tool-policy", query))
+
+
+@router.get("/assets/agent-config", response_model=AgentConfigurationResponse)
+async def read_agent_configuration(request: Request, agent_id: str = ""):
+    _require_control(request)
+    query = _closed_query(request, AgentConfigurationQuery)
+    return await _operator_call(request, lambda: _service().read_asset(*_credentials(request), "agent-config", query))
+
+
+@router.get("/assets/agent-prompt", response_model=AgentPromptResponse)
+async def read_agent_prompt(request: Request, agent_id: str = ""):
+    _require_control(request)
+    query = _closed_query(request, AgentPromptQuery)
+    return await _operator_call(request, lambda: _service().read_asset(*_credentials(request), "agent-prompt", query))
+
+
+@router.get("/assets/tool-policy-inspect", response_model=ToolPolicyInspectResponse)
+async def inspect_agent_tool_policy(request: Request, agent_id: str = "", updates_json: str = "{}"):
+    _require_control(request)
+    query = _closed_query(request, ToolPolicyInspectQuery)
+    return await _operator_call(request, lambda: _service().read_asset(*_credentials(request), "tool-policy-inspect", query))
 
 
 @router.get("/assets/dispatch-access", response_model=DispatchAccessResponse)

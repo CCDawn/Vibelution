@@ -13,6 +13,7 @@ _ROUTINE = frozenset({
     "flow_start", "knowledge_ingest", "knowledge_acl_revoke", "dispatch_write",
     "dispatch_cancel", "dispatch_derived", "delegation_goal_create", "delegation_goal_revoke",
     "authorization_reduce", "authorization_revoke",
+    "agent_parameters_update", "agent_prompt_update",
 })
 _DESTRUCTIVE = frozenset({"agent_archive", "agent_purge", "agent_purge_batch", "team_archive", "project_lifecycle"})
 _EXPLICIT = frozenset({"authorization_upgrade", "agent_tool_policy_update", "knowledge_acl_grant",

@@ -1,13 +1,14 @@
 """Small native acknowledgements for the additive platform control actions."""
 from .asset_contracts import ASSET_ACTION_MODELS, AssetMutationResponse
+from .configuration_actions import CONFIGURATION_ACTION_MODELS
 from .team_lifecycle_contracts import TEAM_LIFECYCLE_ACTION_MODELS
 from .flow_contracts import FLOW_ACTION_MODELS, FlowMutationResponse
 from .runtime_contracts import RuntimeCommandResponse
 from .research_contracts import ResearchCommandResponse
 
 
-PLATFORM_ACTIONS = frozenset({"runtime_command", "research_command", *ASSET_ACTION_MODELS, *TEAM_LIFECYCLE_ACTION_MODELS, *FLOW_ACTION_MODELS})
-RESULT_FIELDS = {"runtime_command": "operation", **{key: "asset" for key in {*ASSET_ACTION_MODELS, *TEAM_LIFECYCLE_ACTION_MODELS}},
+PLATFORM_ACTIONS = frozenset({"runtime_command", "research_command", *ASSET_ACTION_MODELS, *CONFIGURATION_ACTION_MODELS, *TEAM_LIFECYCLE_ACTION_MODELS, *FLOW_ACTION_MODELS})
+RESULT_FIELDS = {"runtime_command": "operation", **{key: "asset" for key in {*ASSET_ACTION_MODELS, *CONFIGURATION_ACTION_MODELS, *TEAM_LIFECYCLE_ACTION_MODELS}},
                  **{key: "flow" for key in FLOW_ACTION_MODELS}, "research_command": "research"}
 
 
@@ -15,7 +16,7 @@ def native_result(action, raw):
     if action not in PLATFORM_ACTIONS:
         raise ValueError("Unknown platform action")
     model = (RuntimeCommandResponse if action == "runtime_command" else ResearchCommandResponse if action == "research_command" else
-             AssetMutationResponse if action in {*ASSET_ACTION_MODELS, *TEAM_LIFECYCLE_ACTION_MODELS} else FlowMutationResponse)
+             AssetMutationResponse if action in {*ASSET_ACTION_MODELS, *CONFIGURATION_ACTION_MODELS, *TEAM_LIFECYCLE_ACTION_MODELS} else FlowMutationResponse)
     result = model.model_validate(raw).model_dump(exclude_none=True)
     if action not in {"runtime_command", "research_command"} and (result["action"] != action or result["verified"] is not True):
         raise ValueError("Native acknowledgement is not verified for this action")
@@ -48,7 +49,7 @@ def verify_target(action, result, parameters, marker=None):
         valid = result["action"] == action
     elif action in TEAM_LIFECYCLE_ACTION_MODELS:
         valid = result["action"] == action and result["resourceId"] == parameters["team_id"]
-    elif action in ASSET_ACTION_MODELS:
+    elif action in {*ASSET_ACTION_MODELS, *CONFIGURATION_ACTION_MODELS}:
         target = next(parameters[key] for key in ("agent_id", "team_id", "knowledge_base_id") if key in parameters)
         valid = result["action"] == action and result["resourceId"] == target
     else:
@@ -77,6 +78,12 @@ def execute(native, action, parameters, marker):
     elif action == "research_command":
         from .research_control import command
         raw = command(native, parameters, request_id=marker["requestKey"])
+    elif action == "agent_parameters_update":
+        from .agent_configuration import AgentConfigurationControl
+        raw = AgentConfigurationControl(native).update_parameters(parameters, marker)
+    elif action == "agent_prompt_update":
+        from .configuration_discovery import ConfigurationDiscovery
+        raw = ConfigurationDiscovery(native).update_prompt(parameters, marker)
     elif action in TEAM_LIFECYCLE_ACTION_MODELS:
         from .team_lifecycle_control import TeamLifecycleControl
         method = {"team_create": "create_team", "team_member_add": "add_member",
