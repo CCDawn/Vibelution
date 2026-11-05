@@ -272,6 +272,20 @@ describe("launcher assistant native stream", () => {
     expect(next.layer?.turnItems[0]).toMatchObject({ text: "🐳abc继续" });
   });
 
+  it.each([false, true])("keeps retired-epoch text out of the baseline after a non-answer delta (reasoning=%s)", reasoning => {
+    const stream = createLauncherAssistantStream("session-1");
+    stream.apply({ type: "heartbeat", sessionId: "session-1", at: 1, connectionEpoch: 1 });
+    stream.reconcile(detail());
+    stream.apply(event({ connectionEpoch: 1, turnItems: [item("seed")] }));
+    stream.apply({ type: "heartbeat", sessionId: "session-1", at: 2, connectionEpoch: 2 });
+    stream.reconcile(detail([item("🐳abc")]));
+    stream.apply(event({ connectionEpoch: 2, turnItems: reasoning
+      ? [item("think", { type: "reasoning", itemId: "reason", id: "reason-r1" })] : [] }));
+    const next = stream.apply(appendEvent(2, 4, "继续", { connectionEpoch: 2 }));
+    expect(next.needsRefresh).toBe(false);
+    expect(next.layer?.turnItems).toContainEqual(expect.objectContaining({ itemId: "answer", text: "🐳abc继续" }));
+  });
+
   it("validates and preserves only positive bounded connection epochs at the IPC boundary", () => {
     expect(parseLauncherAssistantSessionEvent(event({ connectionEpoch: 2 }))).toMatchObject({ connectionEpoch: 2 });
     for (const connectionEpoch of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, "2", Number.NaN]) {

@@ -103,6 +103,13 @@ export function createLauncherAssistantStream(sessionId: string) {
     } else {
       layer = reconcileActiveTurnLayerItemsWithMessages(layer, authority.messages);
     }
+    if (epochRecovery && coversLayer && detailSeq >= recoveryWatermark) {
+      // This completed read is the new connection's projection. Old transport
+      // rows may share IDs/revisions yet contain a different body; none may
+      // seed the new decoder or survive into a later partial-row merge.
+      layer = undefined;
+      latestLayerDeltaSeq = 0;
+    }
     const baselineTurn = layer?.turnId || nextTurn;
     decoder.rebase(sessionId, baselineTurn, sessionStreamAppendBaseline(
       sessionId, baselineTurn, detailItems(authority, baselineTurn), epochRecovery ? undefined : layer?.turnItems,
