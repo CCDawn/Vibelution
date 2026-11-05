@@ -118,6 +118,19 @@ def _text_protocols(text: str) -> set[str]:
     return {protocol for protocol, pattern in patterns.items() if re.search(pattern, text)}
 
 
+def _only_target_urls(text: str, base: str) -> bool:
+    # Even an unlabelled URL may be the SDK's target. Do not lend syntax
+    # across it just because it lacks a recognised invocation suffix.
+    for match in _URL.finditer(text):
+        try:
+            target, _ = _endpoint(match.group().rstrip(".,;"))
+        except ValueError:
+            return False
+        if target != base:
+            return False
+    return True
+
+
 def _facts(text: str) -> set[tuple[str, str]]:
     facts: set[tuple[str, str]] = set()
     # A full invocation URL binds its own protocol, even in multi-protocol docs.
@@ -142,18 +155,11 @@ def _facts(text: str) -> set[tuple[str, str]]:
         start = boundary + 2 if boundary >= 0 else 0
         end = text.find("\n\n", match.end())
         context = text[max(0, start):end if end >= 0 else len(text)]
-        foreign = False
-        for url in _URL.finditer(context):
-            try:
-                target, wire = _endpoint(url.group().rstrip(".,;"))
-                if wire and target != base:
-                    foreign = True
-            except ValueError:
-                continue
-        protocols = {endpoint_protocol} if endpoint_protocol else {
-            wire for target, wire in facts if target == base and wire}
-        if not protocols and not foreign and len({item.group(1) for item in _BASE.finditer(context)}) == 1:
-            protocols = _text_protocols(context)
+        protocols = {endpoint_protocol} if endpoint_protocol else set()
+        if _only_target_urls(context, base):
+            # Each paragraph contributes independently, including when the
+            # same Base URL is repeated with another supported protocol.
+            protocols.update(_text_protocols(context))
         for protocol in protocols or {""}:
             facts.add((base, protocol))
     return facts
@@ -195,16 +201,19 @@ def _prepare(args: Prepare) -> dict:
             if not document or document.startswith("[错误]") or document.startswith("[网页抓取]"):
                 result["warning"] = "documentation_unavailable"
             else:
-                text = text + "\n" + document[:16000]
+                # The fetcher's receipt is metadata, not an example target.
+                body = re.sub(r"^\[(?:网页内容|PDF 文本)\][^\n]*\n", "", document[:16000], count=1)
+                text = text + "\n" + body
                 fetched = True
     document_facts = _facts(text)
     facts.update(document_facts)
     if explicit:
         # User-selected address is authoritative, documentation cannot redirect it.
         facts = {(base, protocol) for base, protocol in facts if base == explicit}
-        if not facts or not any(wire for _, wire in facts) and not document_facts:
-            relative_protocols = _text_protocols(text) if not document_facts else set()
-            facts.update((explicit, wire) for wire in relative_protocols or {explicit_protocol})
+        if not any(wire for _, wire in facts) and not document_facts and _only_target_urls(text, explicit):
+            facts.update((explicit, wire) for wire in _text_protocols(text))
+        if not facts:
+            facts.add((explicit, explicit_protocol))
     if args.wire_protocol:
         bases = {base for base, _ in facts}
         facts = {(base, args.wire_protocol) for base in bases}

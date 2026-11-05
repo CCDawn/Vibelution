@@ -101,6 +101,28 @@ def test_multiple_sdk_base_urls_bind_only_their_own_paragraph_protocol():
                                    {"base_url": "https://two.example/v1", "wire_protocol": "chat_completions"}]
 
 
+@pytest.mark.parametrize("prefix", ["", "Base URL: https://chosen.example/v1\n"])
+@pytest.mark.parametrize("foreign", ["API URL: https://other.example/v1\n",
+                                    "Use https://other.example/v1 for this SDK example.\n"])
+def test_unlabelled_foreign_api_url_cannot_lend_sdk_protocol_to_selected_target(prefix, foreign):
+    value = prepare(base_url="https://chosen.example/v1",
+                    documentation_text=prefix + foreign + "client.messages.create()")
+    assert not value["ready"] and value["requiredFields"] == ["wire_protocol"]
+    assert value["draft"]["base_url"] == "https://chosen.example/v1"
+    assert value["draft"]["wire_protocol"] == ""
+
+
+@pytest.mark.parametrize("separator", ["\n", "\n\n"])
+def test_repeated_base_url_accumulates_protocol_choices_from_each_example(separator):
+    value = prepare(documentation_text=(
+        'Base URL: https://chosen.example/v1\nclient.messages.create()' + separator +
+        'Base URL: https://chosen.example/v1\nclient.responses.create()'))
+    assert not value["ready"] and value["requiredFields"] == ["wire_protocol"]
+    assert value["candidates"] == [
+        {"base_url": "https://chosen.example/v1", "wire_protocol": "anthropic_messages"},
+        {"base_url": "https://chosen.example/v1", "wire_protocol": "responses"}]
+
+
 @pytest.mark.parametrize("address", [{"base_url": "https://chosen.example/v1"},
                                   {"source_url": "https://chosen.example/v1", "source_kind": "api"}])
 def test_relative_protocol_example_is_usable_with_user_supplied_base(address):
