@@ -2,7 +2,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { dictionary } from "../../i18n/dictionary";
 import { ConversationView } from "./ConversationView";
@@ -92,12 +92,9 @@ describe("composer image attachment preview", () => {
     });
     // The dialog module is loaded lazily; poll instead of assuming a fixed
     // number of macrotask ticks so a cold transform cache cannot flake this.
-    let dialogOpened = false;
-    for (let attempt = 0; attempt < 40 && !dialogOpened; attempt += 1) {
+    await vi.waitFor(async () => {
       await flush();
-      dialogOpened = document.body.textContent?.includes("下载图片") ?? false;
-    }
-
-    expect(document.body.textContent).toContain("下载图片");
+      expect(document.body.textContent).toContain("下载图片");
+    }, { timeout: 4000, interval: 25 });
   });
 });

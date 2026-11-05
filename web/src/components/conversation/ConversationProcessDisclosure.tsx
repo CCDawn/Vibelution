@@ -15,6 +15,7 @@ import { conversationToolPresentationLabel } from "./conversationToolPresentatio
 import { activeTurnElapsedSeconds } from "./conversationActiveTurnStatusPresentation";
 import {
   codexTranscriptToolDurationSeconds,
+  codexTranscriptToolArguments,
   codexTranscriptToolRawName,
   formatCodexTranscriptDuration,
 } from "./conversationToolActivityModel";
@@ -33,13 +34,16 @@ type ConversationProcessDisclosureProps = {
   cells: readonly CodexTranscriptCell[];
   language: "zh" | "en";
   children: ReactNode | ((expanded: boolean) => ReactNode);
-  /** Flow keeps narration and tools visible; expansion reveals only thoughts. */
+  /** Flow has independent work-record and thought disclosure controls. */
   presentation?: "disclosure" | "flow";
   messageOrder?: ReadonlyMap<string, number>;
   onUserToggle?: ConversationProcessUserToggle;
   /** Session-owned user choice survives row identity changes and remounts. */
   expanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
+  /** Work-record choice uses the same session-owned expansion store as thoughts. */
+  workExpanded?: boolean;
+  onWorkExpandedChange?: (expanded: boolean) => void;
   /**
    * True while the owning assistant turn is still streaming. Multi-step agents
    * often finish every current tool before the next model step; without this
@@ -130,6 +134,7 @@ function processDuration(cells: readonly CodexTranscriptCell[]) {
 
 function firstFailedToolIdentity(
   cells: readonly CodexTranscriptCell[],
+  language: "zh" | "en",
   messageOrder?: ReadonlyMap<string, number>,
 ) {
   const failed = unrecoveredFailedCells(cells, messageOrder)[0];
@@ -138,7 +143,10 @@ function firstFailedToolIdentity(
   }
   // The expanded transcript row owns failure details. Keep the collapsed
   // summary identifiable without repeating its full error message.
-  return codexTranscriptToolRawName(failed) || String(failed.title || "").trim();
+  const identity = codexTranscriptToolRawName(failed) || String(failed.title || "").trim();
+  return identity.startsWith("personal_assistant_")
+    ? conversationToolPresentationLabel(identity, language, codexTranscriptToolArguments(failed))
+    : identity;
 }
 
 function isRetryCell(cell: CodexTranscriptCell) {
@@ -206,12 +214,9 @@ export function processLabel(
     : labels[state];
   const parts = [headline, durationLabel];
   if (state === "failed") {
-    const toolIdentity = firstFailedToolIdentity(retryFreeCells, messageOrder);
+    const toolIdentity = firstFailedToolIdentity(retryFreeCells, language, messageOrder);
     if (toolIdentity) {
-      const label = toolIdentity.startsWith("personal_assistant_")
-        ? conversationToolPresentationLabel(toolIdentity, language)
-        : toolIdentity;
-      parts.push(`· ${label}`);
+      parts.push(`· ${toolIdentity}`);
     } else if (showTrailHints) {
       parts.push(language === "zh" ? "· 展开查看原因" : "· expand for details");
     }
@@ -273,6 +278,8 @@ export function ConversationProcessDisclosure({
   onUserToggle,
   expanded: controlledExpanded,
   onExpandedChange,
+  workExpanded: controlledWorkExpanded,
+  onWorkExpandedChange,
   turnStreaming = false,
   turnStartedAt,
   activeStage,
@@ -280,6 +287,11 @@ export function ConversationProcessDisclosure({
 }: ConversationProcessDisclosureProps) {
   const state = processState(cells, messageOrder, turnStreaming);
   const running = state === "running";
+  const [workChoice, setWorkChoice] = useState<boolean | undefined>();
+  const workExpanded = controlledWorkExpanded ?? workChoice ?? (state !== "completed");
+  const workTriggerRef = useRef<HTMLButtonElement>(null);
+  const workContentRef = useRef<HTMLDivElement>(null);
+  const lastRecordFocusRef = useRef<EventTarget | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
     if (!running || activeTurnElapsedSeconds(turnStartedAt, Date.now()) === null) {
@@ -305,6 +317,17 @@ export function ConversationProcessDisclosure({
   const contentRef = useRef<HTMLDivElement>(null);
   const summaryRef = useRef<HTMLElement>(null);
   useEffect(() => {
+    // Chromium can blur a newly hidden control to body before this effect.
+    // Retain the last focused record control, without stealing external focus.
+    const lastFocus = lastRecordFocusRef.current;
+    const focusInRecord = (target: EventTarget | null) => target instanceof Node
+      && (workContentRef.current?.contains(target) || target === summaryRef.current);
+    if (!workExpanded && (focusInRecord(document.activeElement)
+      || (document.activeElement === document.body && focusInRecord(lastFocus)))) {
+      workTriggerRef.current?.focus({ preventScroll: true });
+    }
+  }, [workExpanded]);
+  useEffect(() => {
     if (!expanded && contentRef.current?.contains(document.activeElement)) {
       summaryRef.current?.focus({ preventScroll: true });
     }
@@ -316,7 +339,9 @@ export function ConversationProcessDisclosure({
   // Keep the trail mounted while the turn streams so the full multi-step flow
   // stays visible; after settle, unmount when collapsed (Codex-style compact summary).
   const shouldRenderContent = mounted || turnStreaming || typeof window === "undefined";
-  const content = typeof children === "function" ? children(expanded) : children;
+  const content = typeof children === "function"
+    ? children(expanded && (presentation !== "flow" || workExpanded))
+    : children;
   const rows = shouldRenderContent ? Children.toArray(content) : [];
 
   if (presentation === "flow") {
@@ -328,12 +353,44 @@ export function ConversationProcessDisclosure({
         data-codex-process-presentation="flow"
         data-codex-process-state={state}
         data-codex-process-expanded={expanded ? "true" : "false"}
+        data-codex-process-work-expanded={workExpanded ? "true" : "false"}
         data-codex-process-turn-streaming={turnStreaming ? "true" : undefined}
         data-active-turn-stage={turnStreaming ? activeStage : undefined}
         data-codex-process-elapsed-seconds={elapsedSeconds ?? undefined}
+        onFocusCapture={(event) => { lastRecordFocusRef.current = event.target; }}
+        onBlurCapture={(event) => {
+          if (event.relatedTarget && event.relatedTarget !== document.body
+            && !event.currentTarget.contains(event.relatedTarget as Node)) {
+            lastRecordFocusRef.current = null;
+          }
+        }}
       >
         <div className={styles.flowStatusRow}>
-          <span data-codex-process-work-status="true" role={running ? "status" : undefined}>{label}</span>
+          <VButton
+            ref={workTriggerRef}
+            type="button"
+            variant="ghost"
+            contentLayout="plain"
+            className={styles.flowWorkToggle}
+            data-codex-process-work-toggle="true"
+            aria-controls={`${contentId}-work`}
+            aria-expanded={workExpanded}
+            aria-label={`${toggleLabel}：${label}`}
+            onClick={(event) => {
+              const nextExpanded = !workExpanded;
+              const settle = onUserToggle?.(event.currentTarget, nextExpanded);
+              setWorkChoice(nextExpanded);
+              onWorkExpandedChange?.(nextExpanded);
+              if (settle) window.requestAnimationFrame(settle);
+            }}
+          >
+            <span data-codex-process-work-status="true" role={running ? "status" : undefined}>{label}</span>
+            <ChevronRight
+              className={[styles.chevron, workExpanded ? styles.chevronExpanded : ""].filter(Boolean).join(" ")}
+              size={12}
+              aria-hidden="true"
+            />
+          </VButton>
           {hasThoughts ? (
             <VButton
               ref={summaryRef as React.Ref<HTMLButtonElement>}
@@ -341,6 +398,8 @@ export function ConversationProcessDisclosure({
               variant="ghost"
               contentLayout="plain"
               className={styles.flowThoughtToggle}
+              data-codex-process-thought-toggle="true"
+              hidden={!workExpanded}
               aria-controls={contentId}
               aria-expanded={expanded}
               onClick={handleSummaryClick}
@@ -354,8 +413,10 @@ export function ConversationProcessDisclosure({
             </VButton>
           ) : null}
         </div>
-        <div ref={contentRef} id={contentId} className={styles.flowContent}>
-          {content}
+        <div className={styles.flowWorkContent} ref={workContentRef} id={`${contentId}-work`} hidden={!workExpanded} inert={!workExpanded} aria-hidden={!workExpanded}>
+          <div ref={contentRef} id={contentId} className={styles.flowContent}>
+            {content}
+          </div>
         </div>
       </div>
     );

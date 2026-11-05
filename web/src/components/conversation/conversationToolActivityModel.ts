@@ -40,6 +40,7 @@ export function createCodexTranscriptToolActivity(cells: readonly CodexTranscrip
  */
 export function buildCodexTranscriptTimelineNodes(
   cells: readonly CodexTranscriptCell[],
+  options?: { hideReasoning?: boolean },
 ): CodexTranscriptTimelineNode[] {
   const nodes: CodexTranscriptTimelineNode[] = [];
   let pendingTools: CodexTranscriptCell[] = [];
@@ -56,6 +57,11 @@ export function buildCodexTranscriptTimelineNodes(
   };
 
   for (const cell of cells) {
+    // Hidden thoughts must not split visually adjacent tool work. The renderer
+    // keeps their keyed components mounted separately to retain live clocks.
+    if (options?.hideReasoning && cell.kind === "reasoning_summary") {
+      continue;
+    }
     if (!isToolActivityCell(cell)) {
       flushPendingTools();
       nodes.push({ kind: "cell", cell });
@@ -74,7 +80,18 @@ export function codexTranscriptToolRawName(cell: CodexTranscriptCell) {
   if (rawToolName && rawToolName !== "tool_call" && rawToolName !== "tool") {
     return rawToolName;
   }
-  return cell.title?.trim() || rawToolName;
+  const projectedRawName = cell.diagnosticSummary?.rawToolName;
+  return (typeof projectedRawName === "string" ? projectedRawName.trim() : "") || cell.title?.trim() || rawToolName;
+}
+
+/** Canonical arguments can be partial while the lifecycle retains the request. */
+export function codexTranscriptToolArguments(cell: CodexTranscriptCell) {
+  const primary = cell.toolArguments;
+  const fallback = cell.toolLifecycleModel?.toolCalls?.[0]?.arguments;
+  if (!primary) return fallback;
+  if (!fallback) return primary;
+  const hasAction = typeof primary.action === "string" && Boolean(primary.action.trim());
+  return { ...fallback, ...primary, ...(!hasAction && fallback.action ? { action: fallback.action } : {}) };
 }
 
 function normalizeToolIdentity(value: string) {

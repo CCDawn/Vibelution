@@ -12,7 +12,7 @@ const styles = {
   // Continuous tool rail: no horizontal frame lines; spacing + scroll only.
   activity: cx(
     "activity",
-    "grid w-full max-w-full min-w-0 gap-0 border-0 py-1 my-0.5 max-h-[min(18rem,42vh)] overflow-y-auto overflow-x-hidden [scrollbar-width:thin] [scrollbar-color:color-mix(in_srgb,var(--fg-tertiary)_35%,transparent)_transparent]",
+    "grid w-full max-w-full min-w-0 gap-0 border-0 py-0 my-0 max-h-[min(18rem,42vh)] overflow-y-auto overflow-x-hidden [scrollbar-width:thin] [scrollbar-color:color-mix(in_srgb,var(--fg-tertiary)_35%,transparent)_transparent]",
   ),
   activityRow: cx("activityRow", "w-full max-w-full min-w-0"),
   group: cx("group", "w-full max-w-full min-w-0 my-1"),
@@ -84,7 +84,7 @@ const styles = {
   // Plain action label (no chip chrome). data-codex-tool-action-pill kept for tests/selectors.
   actionLabel: cx(
     "actionLabel",
-    "shrink-0 font-normal text-[var(--fg-tertiary)]",
+    "shrink-0 font-normal text-[var(--fg-secondary)]",
   ),
   // Running rows keep the leading icon static; the action word carries the
   // live state via a text shimmer (gradient sweep, see ConversationToolActivity.css).
@@ -129,7 +129,7 @@ const styles = {
   ),
   itemPreview: cx(
     "itemPreview",
-    "max-w-full min-w-0 flex-1 truncate font-normal text-[color-mix(in_srgb,var(--fg-tertiary)_78%,transparent)]",
+    "max-w-full min-w-0 flex-1 truncate font-normal text-[var(--fg-secondary)]",
   ),
   // ZCode subagent-name chip: layout only here — the tinted colors derive from
   // the inline `--subagent-accent` custom property (see ConversationToolActivity.css).

@@ -8,6 +8,7 @@ import {
   extractToolDisplayCommand,
   formatCodexStyleToolActivityLine,
   normalizeToolActivityStatus,
+  subjectFromToolArguments,
   terminalSandboxPresentationDetail,
   terminalSandboxPresentationSummary,
 } from "./conversationToolPresentation";
@@ -129,6 +130,17 @@ describe("conversation tool presentation", () => {
       .not.toBe("source_collection_context_tool");
     expect(conversationToolPresentationLabel("source_collection_stage_writeback_tool", "zh"))
       .not.toBe("source_collection_stage_writeback_tool");
+  });
+
+  it("uses the same normalized assistant action labels for presentation and activity rows", () => {
+    expect(conversationToolPresentationLabel("personal_assistant_action_tool", "zh", { action: "SOURCE-SEARCH" }))
+      .toBe("搜索源码");
+    expect(conversationToolPresentationLabel("personal_assistant_manage_tool", "en", [{ action: "session_create" }]))
+      .toBe("Create session");
+    expect(conversationToolPresentationLabel("personal_assistant_manage_tool", "en", { action: "future_action" }))
+      .toBe("Run assistant action");
+    expect(conversationToolPresentationLabel("read_file_tool", "zh", { action: "session_create" }))
+      .toBe("读取文件");
   });
 
   it("matches whole name tokens so research tools are not read as search", () => {
@@ -408,6 +420,49 @@ describe("normalizeToolActivityStatus / extractToolDisplayCommand", () => {
 });
 
 describe("buildCodexToolActivityPills", () => {
+  it("names assistant entity targets without displaying prompts, bodies or credentials", () => {
+    const toolArguments = {
+      action: "session_update",
+      project_id: "project-alpha",
+      session_id: "session-42",
+      prompt: "private complete prompt",
+      body: "private message body",
+      content: "private document content",
+      api_key: "private-api-key",
+      credential_token: "private-credential-token",
+      parameters: { token: "private-token" },
+    };
+    expect(buildCodexToolActivityPills({
+      toolName: "personal_assistant_manage_tool",
+      status: "running",
+      language: "zh",
+      toolArguments,
+    })).toMatchObject({
+      actionLabel: "修改会话",
+      subject: "会话 session-42 · 项目 project-alpha",
+      statusKind: "running",
+    });
+    expect(subjectFromToolArguments({ toolArguments, language: "en" }))
+      .toBe("Session session-42 · Project project-alpha");
+    expect(subjectFromToolArguments({ toolArguments: { prompt: toolArguments.prompt, content: toolArguments.content, api_key: toolArguments.api_key }, language: "zh" }))
+      .toBe("");
+  });
+
+  it("supports bounded direct and nested entity ids while preserving specific source targets", () => {
+    expect(subjectFromToolArguments({ toolArguments: { agentId: "reviewer", projectId: "project-a" }, language: "zh" }))
+      .toBe("Agent reviewer · 项目 project-a");
+    expect(subjectFromToolArguments({ toolArguments: { target: { team_id: "team-a", flow_id: "flow-b" } }, language: "en" }))
+      .toBe("Team team-a · Flow flow-b");
+    expect(subjectFromToolArguments({ toolArguments: { project_id: "p".repeat(200) }, language: "zh" }))
+      .toHaveLength(72);
+    expect(subjectFromToolArguments({ toolArguments: { path: "src/agent.ts", agent_id: "reviewer" }, language: "zh" }))
+      .toBe("agent.ts");
+    expect(subjectFromToolArguments({ toolArguments: { query: "session state", project_id: "project-a" }, language: "en" }))
+      .toBe("session state");
+    expect(subjectFromToolArguments({ toolArguments: { projectId: { prompt: "private" }, sessionId: ["private"] }, language: "en" }))
+      .toBe("");
+  });
+
   it.each(["personal_assistant_action_tool", "personal_assistant_manage_tool"])(
     "names the specific assistant action for %s while preserving status and target",
     (toolName) => {
@@ -417,6 +472,10 @@ describe("buildCodexToolActivityPills", () => {
         language: "zh",
         toolArguments: { action: "source_read", path: "README.md" },
       })).toMatchObject({ actionLabel: "读取源码", statusKind: "running", subject: "README.md" });
+      expect(buildCodexToolActivityPills({
+        toolName, status: "completed", language: "zh", resultPreview: "已完成。",
+        toolArguments: { action: "source_read", path: "README.md" },
+      })).toMatchObject({ actionLabel: "读取源码", statusKind: "completed", subject: "README.md" });
       expect(buildCodexToolActivityPills({
         toolName,
         status: "failed",

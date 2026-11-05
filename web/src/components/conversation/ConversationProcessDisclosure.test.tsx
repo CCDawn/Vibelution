@@ -50,7 +50,7 @@ function retryCell(status: CodexTranscriptCell["status"] = "running"): CodexTran
 }
 
 describe("ConversationProcessDisclosure", () => {
-  it("keeps the flow visible after settlement and makes only thoughts opt-in", () => {
+  it("collapses completed work independently of the thought choice", () => {
     const cells = [
       processCell("completed"),
       { ...processCell("completed"), id: "second-tool" },
@@ -64,11 +64,12 @@ describe("ConversationProcessDisclosure", () => {
     expect(html).toContain('data-codex-process-presentation="flow"');
     expect(html).toContain("完整进展正文");
     expect(html).toContain("工具记录");
-    expect(html).toContain("显示思考");
+    expect(html).toMatch(/data-codex-process-thought-toggle="true" hidden=""/);
     expect(html).toContain('aria-expanded="false"');
     expect(html).not.toContain("思考摘要");
     expect(html).not.toContain("<details");
-    expect(html).not.toContain('aria-hidden="true" inert');
+    expect(html).toContain('data-codex-process-work-expanded="false"');
+    expect(html).toContain('hidden="" inert="" aria-hidden="true"');
     expect(html).not.toContain("3 步");
     expect(html.indexOf("已工作")).toBeLessThan(html.indexOf("工具记录"));
   });
@@ -82,6 +83,7 @@ describe("ConversationProcessDisclosure", () => {
     expect(html).toContain('data-codex-process-state="failed"');
     expect(html).toContain("失败原因和已完成进展");
     expect(html).toContain("工具失败");
+    expect(html).toContain('data-codex-process-work-expanded="true"');
     expect(html).not.toContain("显示思考");
     expect(html).not.toContain("<details");
   });
@@ -243,6 +245,7 @@ describe("ConversationProcessDisclosure", () => {
     const failed = { ...processCell("failed"), title: "personal_assistant_action_tool" };
     expect(processLabel([failed], "zh")).toContain("处理助理请求");
     expect(processLabel([failed], "zh")).not.toContain("personal_assistant_action_tool");
+    expect(processLabel([{ ...failed, toolArguments: { action: "dispatch" } }], "zh")).toContain("派遣只读任务");
     expect(processLabel([failed], "en")).toContain("Handle assistant request");
     expect(processLabel([processCell("failed")], "zh")).toContain("cli_tool");
   });

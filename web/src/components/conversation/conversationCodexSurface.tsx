@@ -21,6 +21,7 @@ import { resolveConversationTurnWorkSummary } from "./conversationTurnWorkStatus
 import { resolveActiveTurnProgressStage } from "./conversationActiveTurnStatusPresentation";
 import { conversationChangedFilesFromMetadata, fileDeliveryFollowupDraft } from "./conversationFileDeliveryModel";
 import { buildConversationToolActivityDetailRows } from "./conversationToolActivityDetail";
+import { conversationToolActivityNeedsAttention } from "./conversationToolActivityPresentation";
 import { buildTurnErrorDiagnosticRows, resolveIterationLimitNotice } from "./conversationTurnErrorPresentation";
 import {
   completedToolPresentationSummary,
@@ -403,7 +404,14 @@ export function createConversationCodexSurface({
       timelineCells: CodexTranscriptCell[],
       options?: { attachToolApproval?: boolean; reasoningPresentation?: "flow"; reasoningExpanded?: boolean },
     ) => {
-      const nodes = buildCodexTranscriptTimelineNodes(timelineCells);
+      const hideReasoning = options?.reasoningPresentation === "flow" && !options.reasoningExpanded;
+      const nodes = buildCodexTranscriptTimelineNodes(timelineCells, { hideReasoning });
+      // These stay direct, stable-keyed siblings when thoughts are revealed;
+      // moving an invisible row must not reset its first-live measurement.
+      if (hideReasoning) {
+        nodes.push(...timelineCells.filter((cell) => cell.kind === "reasoning_summary")
+          .map((cell) => ({ kind: "cell" as const, cell })));
+      }
       const canAttach = Boolean(options?.attachToolApproval && toolApproval && !toolApprovalConsumedRef.current);
       const toolActivities = nodes.filter((node) => node.kind === "tool_activity");
       const matchedActivityId = canAttach
@@ -489,6 +497,10 @@ export function createConversationCodexSurface({
             onUserToggle={handleProcessDisclosureUserToggle}
             expanded={getExpansionState(message.id, "process", false)}
             onExpandedChange={(expanded) => setExpansionState(message.id, "process", expanded)}
+            workExpanded={getExpansionState(message.id, "work", streaming || finalCells.length === 0
+              || turnWorkForceExpand(message)
+              || processCells.some(conversationToolActivityNeedsAttention))}
+            onWorkExpandedChange={(expanded) => setExpansionState(message.id, "work", expanded)}
             turnStreaming={assistantTurnIsStreaming(message)}
             turnStartedAt={(message as ConversationMessage & { turnStartedAt?: string }).turnStartedAt || message.timestamp}
             activeStage={phase === "stopping" ? "stopping" : resolveActiveTurnProgressStage(message)}
