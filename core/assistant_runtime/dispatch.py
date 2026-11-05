@@ -591,6 +591,23 @@ class DispatchService:
         """Expose registered IDs to the action index without disclosing paths."""
         return tuple(sorted(self._projects))
 
+    def registered_project_roots(self) -> tuple[Path, ...]:
+        """Distinct physical roots of host-authorized projects, in registry order.
+
+        Launcher-supplied authority for host-side filesystem actions that need
+        the managed checkout (assistant branch cleanup). Distinctness follows
+        the platform path rules so aliased registrations collapse.
+        """
+        roots: list[Path] = []
+        for path in self._projects.values():
+            try:
+                resolved = path.expanduser().resolve()
+            except (OSError, RuntimeError, ValueError):
+                resolved = path
+            if resolved not in roots:
+                roots.append(resolved)
+        return tuple(roots)
+
     async def discover(self, project_id: str, *, limit: int = 50) -> dict[str, Any]:
         """Discover using the native eligibility of the authenticated task transport."""
         payload = await self._call(project_id, lambda client: client.list_agents(limit=limit))

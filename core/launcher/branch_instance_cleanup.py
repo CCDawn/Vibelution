@@ -142,8 +142,15 @@ def cleanup_branch_instances(
     confirm: bool,
     stop_runner: StopRunner | None = None,
     list_payload: dict[str, Any] | None = None,
+    checkout: Path | str | None = None,
 ) -> dict[str, Any]:
-    """Stop, detach, and delete the selected local instances after confirm."""
+    """Stop, detach, and delete the selected local instances after confirm.
+
+    ``checkout`` is the explicit integration checkout for assistant-host
+    callers whose module-level ``PROJECT_ROOT`` is a redirected non-Git
+    profile directory. Callers that pass a ``list_payload`` carrying
+    ``integrationRoot`` keep the previous behavior unchanged.
+    """
 
     if not confirm:
         raise BranchInstanceCleanupError("confirm_required", "清理需要确认。")
@@ -154,13 +161,13 @@ def cleanup_branch_instances(
     # The list endpoint already computes optional cleanup metadata when the
     # caller asks for it.  Re-running the Git ancestry scan here is both
     # redundant and can exceed the native bridge's bounded request budget.
-    payload = dict(list_payload or _list_instances())
+    payload = dict(list_payload or _list_instances(checkout))
     by_id = {
         str(item.get("id") or ""): dict(item)
         for item in payload.get("items") or []
         if isinstance(item, dict) and str(item.get("id") or "")
     }
-    root = Path(str(payload.get("integrationRoot") or PROJECT_ROOT))
+    root = Path(str(payload.get("integrationRoot") or checkout or PROJECT_ROOT))
     cleaned: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
@@ -455,10 +462,10 @@ def _drop_registry_instance(instance_id: str) -> bool:
         return False
 
 
-def _list_instances() -> dict[str, Any]:
+def _list_instances(checkout: Path | str | None = None) -> dict[str, Any]:
     from core.launcher.branch_instance_lifecycle import list_overlayed_branch_instances
 
-    return list_overlayed_branch_instances()
+    return list_overlayed_branch_instances(checkout=checkout)
 
 
 def _merged_to_main(root: Path, head: str) -> bool:

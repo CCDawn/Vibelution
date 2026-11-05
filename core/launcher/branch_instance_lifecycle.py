@@ -125,12 +125,22 @@ def overlay_instance_ports(
 
 
 def list_overlayed_branch_instances(
-    *, current_bundle: dict[str, Any] | None = None, include_dirty: bool = True
+    *,
+    current_bundle: dict[str, Any] | None = None,
+    include_dirty: bool = True,
+    checkout: Path | str | None = None,
 ) -> dict[str, Any]:
+    """List branch instances for an explicit checkout, else the process root.
+
+    Assistant-host callers must supply ``checkout``: their module-level
+    ``PROJECT_ROOT`` is the redirected assistant profile, which is not a Git
+    workspace. Existing launcher callers keep the previous behavior unchanged.
+    """
+    root = Path(checkout).expanduser() if checkout is not None else PROJECT_ROOT
     payload = (
-        list_branch_instances(PROJECT_ROOT)
+        list_branch_instances(root)
         if include_dirty
-        else list_branch_instances(PROJECT_ROOT, include_dirty=False)
+        else list_branch_instances(root, include_dirty=False)
     )
     return overlay_instance_ports(payload, current_bundle=current_bundle)
 
