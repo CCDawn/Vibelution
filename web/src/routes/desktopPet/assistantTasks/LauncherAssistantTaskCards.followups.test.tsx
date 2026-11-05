@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LauncherAssistantDispatch, LauncherAssistantStatus, LauncherAssistantTeamRun, LauncherAssistantTeamRunsPage } from "../../../api/launcherAssistant";
 import type { LauncherTaskCleanupPreview, LauncherTaskCleanupResult, LauncherTaskCleanupTarget } from "../../../api/launcherAssistantTaskCleanup";
 import { LauncherAssistantTaskCards } from "./LauncherAssistantTaskCards";
+import { LauncherAssistantTaskSidebar } from "./LauncherAssistantTaskSidebar";
+import { LauncherTaskModelControls } from "./__fixtures__/LauncherTaskModelControls";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 type CleanupRequest = { targets: LauncherTaskCleanupTarget[] };
@@ -67,7 +69,9 @@ async function settle(milliseconds = 5) {
   for (let index = 0; index < milliseconds; index += 1) await act(async () => { await vi.advanceTimersByTimeAsync(1); });
 }
 async function render() {
-  await act(async () => { root!.render(<QueryClientProvider client={client}><LauncherAssistantTaskCards /></QueryClientProvider>); });
+  await act(async () => { root!.render(<QueryClientProvider client={client}><LauncherAssistantTaskCards>
+    <LauncherTaskModelControls /><LauncherAssistantTaskSidebar />
+  </LauncherAssistantTaskCards></QueryClientProvider>); });
   await settle();
 }
 function button(label: string): HTMLButtonElement {
@@ -227,13 +231,18 @@ describe("cleanup focus recovery", () => {
     expect(document.activeElement).toBe(current);
   });
 
-  it("uses the toolbar after the cleaned task disappears", async () => {
+  it("focuses the selected category tab after the cleaned task disappears", async () => {
     teamReply = async () => page([]); await render();
     executeReply = async request => { rows = []; return outcome(request); };
     await click("清理“委派周报”");
     expect(container.querySelector("article")).toBeNull();
     await click("关闭"); await settle(32);
-    expect(document.activeElement).toBe(container.querySelector('[data-assistant-task-refresh]'));
+    const selectedTab = container.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')!;
+    expect(selectedTab).toBeTruthy();
+    expect(selectedTab.textContent).toBe("已结束 0");
+    expect(selectedTab.getClientRects().length).toBeGreaterThan(0);
+    expect(selectedTab.closest('[hidden],[aria-hidden="true"],[inert]')).toBeNull();
+    expect(document.activeElement).toBe(selectedTab);
   });
 
   it.each(["identity", "hidden", "unmounted"] as const)("does not restore old task focus when %s changes", async change => {

@@ -13,7 +13,7 @@ let root: Root, host: HTMLDivElement;
 beforeEach(() => { vi.resetAllMocks(); host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host); });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
 
-async function render(options: { onNavigate?: () => void; updateAvailable?: boolean; updateFailed?: boolean } = {}, entry = "/launcher/assistant") {
+async function render(options: { onNavigate?: () => void; taskContent?: React.ReactNode; updateAvailable?: boolean; updateFailed?: boolean } = {}, entry = "/launcher/assistant") {
   const router = createMemoryRouter([{ path: "*", element: <LauncherNavigation lang="zh" items={[]} {...options} /> }],
     { initialEntries: [entry] });
   await act(async () => root.render(<RouterProvider router={router} />));
@@ -26,27 +26,48 @@ function link(label: string): HTMLAnchorElement {
 }
 
 describe("Launcher navigation", () => {
-  it("navigates and marks the selected assistant and Launcher pages in one rail", async () => {
+  it("keeps two main entries under one features group and marks the selected page", async () => {
     const router = await render();
     const nav = host.querySelector('nav[aria-label="Launcher 功能导航"]')!;
-    expect(nav.querySelector('[aria-label="个人助理功能"]')).toBeTruthy();
-    expect(nav.textContent).toContain("个人助理");
-    expect(nav.textContent).toContain("Launcher");
+    expect([...nav.querySelectorAll("p")].map(node => node.textContent)).toEqual(["功能"]);
+    expect(nav.querySelector('[aria-label="个人助理功能"]')).toBeNull();
+    expect(nav.textContent).not.toContain("个人助理");
+    expect(nav.textContent).not.toContain("Launcher");
     expect(nav.textContent).not.toContain("平台概览");
     expect(nav.textContent).not.toContain("派遣与回执");
     for (const label of ["浏览器", "事务", "待办与提醒", "电脑操作", "对话偏好", "助理设置", "诊断", "维护", "启动设置", "版本更新"]) expect(nav.textContent).not.toContain(label);
-    expect([...nav.querySelectorAll("a")].map(node => node.textContent?.trim())).toEqual(["对话", "任务", "项目与分支"]);
-    for (const [label, path] of [["任务", "/launcher/assistant?panel=tasks"], ["项目与分支", "/launcher"], ["对话", "/launcher/assistant"]]) {
+    expect([...nav.querySelectorAll("a")].map(node => node.textContent?.trim())).toEqual(["对话", "项目与分支"]);
+    for (const [label, path] of [["项目与分支", "/launcher"], ["对话", "/launcher/assistant"]]) {
       await act(async () => link(label).dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })));
       expect(router.state.location.pathname + router.state.location.search).toBe(path);
       expect(link(label).getAttribute("aria-current")).toBe("page");
       expect(nav.querySelectorAll('a[aria-current="page"]')).toHaveLength(1);
     }
   });
-  it("selects the single conversation entry for legacy browser URLs", async () => {
-    await render({}, "/launcher/assistant?panel=browser");
+  it.each(["tasks", "browser", "preferences", "settings"])("selects conversation for the legacy %s deep link", async panel => {
+    await render({}, `/launcher/assistant?panel=${panel}`);
     expect(link("对话").getAttribute("aria-current")).toBe("page");
-    expect([...host.querySelectorAll("a")].map(node => node.textContent?.trim())).toEqual(["对话", "任务", "项目与分支"]);
+    expect([...host.querySelectorAll("a")].map(node => node.textContent?.trim())).toEqual(["对话", "项目与分支"]);
+    expect(host.querySelectorAll('a[aria-current="page"]')).toHaveLength(1);
+  });
+
+  it("places explicit task content between the main entries and footer actions", async () => {
+    await render({ taskContent: <div data-test-task-content>Task content</div>, updateAvailable: true });
+    const nav = host.querySelector("nav")!;
+    const features = nav.querySelector("[data-launcher-navigation-features]")!;
+    const tasks = nav.querySelector("[data-launcher-navigation-tasks]")!;
+    const footer = nav.querySelector("[data-launcher-navigation-footer]")!;
+    expect([...nav.children]).toEqual([features, tasks, footer]);
+    expect([...features.querySelectorAll("a")].map(node => node.textContent?.trim())).toEqual(["对话", "项目与分支"]);
+    expect(tasks.querySelector("[data-test-task-content]")?.textContent).toBe("Task content");
+    expect(footer.contains(link("更新有新版"))).toBe(true);
+    expect([...footer.querySelectorAll("button")].map(node => node.textContent?.trim())).toEqual(["设置", "回到桌面"]);
+  });
+
+  it("leaves the task region empty when no task content is provided", async () => {
+    await render();
+    expect(host.querySelector("[data-launcher-navigation-tasks]")?.childElementCount).toBe(0);
+    expect(host.querySelector('a[href="/launcher/assistant?panel=tasks"]')).toBeNull();
   });
 
   it("opens settings from the keyboard and keeps every destination reachable", async () => {
