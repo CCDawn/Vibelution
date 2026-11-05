@@ -53,8 +53,10 @@ describe("approved conversation reading hierarchy", () => {
     expect(styles.composerCodex).not.toContain("0_8px_24px");
     expect(styles.composerCodex).toContain("border-[color-mix(in_srgb,var(--fg-primary)_13%,transparent)]");
     expect(styles.composerCodex).toContain("[[data-theme=dark]_&]:bg-[var(--vui-surface-raised)]");
-    expect(styles.composerCodex).toContain("[[data-theme=dark]_&]:focus-within:border-[color-mix(in_srgb,var(--accent-cool)_60%,var(--vui-border-subtle))]");
-    expect(styles.composerCodex).toContain("[[data-theme=dark]_&]:focus-within:ring-2");
+    // Codex alignment keeps a visible, neutral focus edge in both themes.
+    expect(styles.composerCodex).toContain("[[data-theme=dark]_&]:focus-within:border-[color-mix(in_srgb,var(--fg-primary)_24%,transparent)]");
+    expect(styles.composerCodex).toContain("focus-within:ring-1");
+    expect(styles.composerCodex).toContain("focus-within:ring-[color-mix(in_srgb,var(--fg-primary)_4%,transparent)]");
     for (const bubble of [styles.userMessageBody, userStyles.userMessageBody]) {
       expect(bubble).toContain("rounded-[12px]");
       expect(bubble).toContain("shadow-[var(--vui-sheen)]");
