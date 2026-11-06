@@ -176,3 +176,91 @@ def test_import_does_not_traverse_symlinked_directory_outside_source(routed_work
 
     search = service.search_user_markdown_spaces(query="outside directory phrase", space_id=imported["space"]["spaceId"])
     assert search["summary"]["resultCount"] == 0
+
+
+def test_staging_failure_keeps_existing_space_intact_and_cleans_staging(routed_workspace, tmp_path, monkeypatch):
+    first_source = tmp_path / "source-first"
+    second_source = tmp_path / "source-second"
+    _write_note(first_source, "Plan.md", "# Plan\nlegacy stable phrase only\n")
+    _write_note(second_source, "Plan.md", "# Plan\nreplacement phrase only\n")
+
+    first_import = service.import_markdown_space(str(first_source), space_name="Team Notes")
+    space_id = first_import["space"]["spaceId"]
+
+    original_write_json = service._write_json
+
+    def failing_write_json(path, payload):
+        if path.name == "link_index.json":
+            raise OSError("simulated staging failure")
+        return original_write_json(path, payload)
+
+    monkeypatch.setattr(service, "_write_json", failing_write_json)
+
+    with pytest.raises(OSError, match="simulated staging failure"):
+        service.import_markdown_space(str(second_source), space_name="Team Notes", overwrite=True)
+
+    # The previous space was never touched and stays fully served.
+    listed = service.list_markdown_spaces()
+    assert listed["summary"]["spaceCount"] == 1
+    assert [space["spaceId"] for space in listed["spaces"]] == [space_id]
+    search = service.search_user_markdown_spaces(query="legacy stable phrase", space_id=space_id)
+    assert search["summary"]["resultCount"] == 1
+    assert "legacy stable phrase" in search["results"][0]["excerpt"]
+
+    # No staging leftovers next to the live space.
+    markdown_root = service._user_content_root("default")
+    leftovers = [path.name for path in markdown_root.iterdir() if ".staging." in path.name]
+    assert leftovers == []
+
+
+def test_staging_failure_on_fresh_import_leaves_no_partial_space(routed_workspace, tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    _write_note(source, "Note.md", "# Note\nfresh content phrase\n")
+
+    def failing_write_json(path, payload):
+        raise OSError("simulated fresh staging failure")
+
+    monkeypatch.setattr(service, "_write_json", failing_write_json)
+
+    with pytest.raises(OSError, match="simulated fresh staging failure"):
+        service.import_markdown_space(str(source), space_name="Fresh Space")
+
+    markdown_root = service._user_content_root("default")
+    assert list(markdown_root.iterdir()) == []
+    assert service.list_markdown_spaces()["summary"]["spaceCount"] == 0
+
+
+def test_commit_failure_restores_previous_space_from_backup(routed_workspace, tmp_path, monkeypatch):
+    first_source = tmp_path / "source-first"
+    second_source = tmp_path / "source-second"
+    _write_note(first_source, "Plan.md", "# Plan\nlegacy restored phrase only\n")
+    _write_note(second_source, "Plan.md", "# Plan\nnever committed phrase\n")
+
+    first_import = service.import_markdown_space(str(first_source), space_name="Swap Notes")
+    space_id = first_import["space"]["spaceId"]
+    space_root = service._user_content_root("default") / space_id
+
+    real_replace = service.os.replace
+
+    def failing_replace(src, dst, *args, **kwargs):
+        if Path(str(dst)) == space_root:
+            raise OSError("simulated commit failure")
+        return real_replace(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(service.os, "replace", failing_replace)
+
+    with pytest.raises(OSError, match="simulated commit failure"):
+        service.import_markdown_space(str(second_source), space_name="Swap Notes", overwrite=True)
+
+    # The backup moved back: the legacy space is intact at the canonical path.
+    manifest = json.loads((space_root / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["spaceId"] == space_id
+    legacy_page = Path(manifest["canonicalPagesRoot"]) / "Plan.md"
+    assert "legacy restored phrase" in legacy_page.read_text(encoding="utf-8")
+    search = service.search_user_markdown_spaces(query="legacy restored phrase", space_id=space_id)
+    assert search["summary"]["resultCount"] == 1
+
+    # No staging trees or orphan backups remain.
+    markdown_root = service._user_content_root("default")
+    remaining = sorted(path.name for path in markdown_root.iterdir())
+    assert remaining == [space_id]
