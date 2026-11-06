@@ -183,7 +183,7 @@ def team_workflow_challenge_question_run_publish(
 ) -> dict:
     try:
         return publish_research_project_challenge_question_output(team_id, payload.model_dump())
-    except TeamNotFoundError as exc:
+    except (TeamNotFoundError, ResearchProjectNotFoundError) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (ValueError, TeamServiceError, TeamWorkflowOrchestrationError) as exc:
         _raise_team_workflow_route_error(
