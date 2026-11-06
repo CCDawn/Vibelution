@@ -2808,9 +2808,31 @@ def _config_edit_lock(config_path: Path, *, timeout_seconds: float = 10.0, stale
             yield
 
 
+_CONFIG_EDIT_LOCK_DEPTH = threading.local()
+
+
 @contextmanager
 def _config_edit_lock_unfenced(config_path: Path, *, timeout_seconds: float = 10.0, stale_seconds: float = 300.0):
     lock_path = resolve_config_lock_path(config_path)
+    key = os.path.normcase(str(lock_path))
+    depths = getattr(_CONFIG_EDIT_LOCK_DEPTH, "counts", None)
+    if depths is None:
+        depths = _CONFIG_EDIT_LOCK_DEPTH.counts = {}
+    if depths.get(key, 0) > 0:
+        # Same-thread re-entry: a long-span writer (apply_config_workspace's
+        # read-baseline-merge-persist critical section, or the config
+        # bootstrap's schema upgrader) already owns the sidecar, and a nested
+        # save_public_config / load_public_config must re-enter instead of
+        # self-deadlocking on its own O_EXCL sidecar. Other threads and other
+        # processes still serialize on the lock file below.
+        depths[key] += 1
+        try:
+            yield
+        finally:
+            depths[key] -= 1
+            if depths[key] <= 0:
+                depths.pop(key, None)
+        return
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     token = f"{os.getpid()}:{uuid.uuid4().hex}"
     deadline = time.monotonic() + timeout_seconds
@@ -2833,9 +2855,11 @@ def _config_edit_lock_unfenced(config_path: Path, *, timeout_seconds: float = 10
             if time.monotonic() >= deadline:
                 raise RuntimeError(f"Config edit lock is busy: {lock_path}")
             time.sleep(0.05)
+    depths[key] = 1
     try:
         yield
     finally:
+        depths.pop(key, None)
         if acquired:
             try:
                 if lock_path.read_text(encoding="utf-8").strip() == token:
