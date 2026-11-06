@@ -6,6 +6,7 @@ import type { SessionToolApprovalRequest } from "../../api/types";
 import styles from "./ChatToolApprovalDialog.styles";
 import {
   assistantActionWindowSummary,
+  approvalGrantMapsToSessionTool,
   toolApprovalActionPreview,
   toolApprovalCodexButtonLabels,
   toolApprovalCodexTitle,
@@ -46,6 +47,8 @@ type ChatToolApprovalDialogProps = {
   onApproveForSessionTool?: () => void;
   /** b3: approve once and open the low-risk manage action window. */
   onApproveWithActionWindow?: () => void;
+  /** b3: one-click session trust for the execute/write development tools. */
+  onApproveForDevelopmentBundle?: () => void;
   onReject: () => void;
 };
 
@@ -79,6 +82,7 @@ export function ChatToolApprovalDialog({
   onApproveForSession,
   onApproveForSessionTool,
   onApproveWithActionWindow,
+  onApproveForDevelopmentBundle,
   onReject,
 }: ChatToolApprovalDialogProps) {
   const dialogId = useId();
@@ -94,7 +98,10 @@ export function ChatToolApprovalDialog({
   const primaryToolName = toolName || toolLabels[0]?.id || "";
   const displayName = toolLabels.find((item) => item.id === primaryToolName)?.label || toolApprovalDisplayName(primaryToolName, lang);
   const preview = String(actionPreview || toolApprovalActionPreview(undefined, primaryToolName) || rawTitle || "").trim();
-  const grantText = toolApprovalSessionGrantDescription(sessionGrantScope, lang).trim();
+  const grantText = toolApprovalSessionGrantDescription(sessionGrantScope, lang, primaryToolName).trim();
+  // A2b: for shell/file dev tools the "A" button performs the tool-level
+  // session grant, so its label and title must state that exact semantic.
+  const alwaysMapsToToolSession = approvalGrantMapsToSessionTool(primaryToolName);
   const showGrant = Boolean(grantText) && onApproveForSession;
   const riskText = String(riskLabel || "").trim();
   const scopeText = String(scopeLabel || "").trim();
@@ -235,9 +242,12 @@ export function ChatToolApprovalDialog({
               className={styles.alwaysButton}
               onClick={onApproveForSession}
               isDisabled={pending || approveDisabled}
-              title={lang === "zh" ? "本会话始终允许同类调用（A）" : "Always allow for this session (A)"}
+              data-chat-approval-accept-session={alwaysMapsToToolSession ? "tool-session" : "durable"}
+              title={alwaysMapsToToolSession
+                ? (lang === "zh" ? "本会话内此工具不再询问（A）" : "Stop asking for this tool this session (A)")
+                : (lang === "zh" ? "本会话始终允许同类调用（A）" : "Always allow for this session (A)")}
             >
-              <span>{buttons.always}</span>
+              <span>{alwaysMapsToToolSession ? buttons.toolSession : buttons.always}</span>
             </VButton>
           ) : null}
           {onApproveForSessionTool ? (
@@ -250,6 +260,20 @@ export function ChatToolApprovalDialog({
               title={lang === "zh" ? "本会话内此工具不再询问" : "Stop asking for this tool this session"}
             >
               <span>{buttons.toolSession}</span>
+            </VButton>
+          ) : null}
+          {onApproveForDevelopmentBundle ? (
+            <VButton
+              type="button"
+              className={styles.alwaysButton}
+              onClick={onApproveForDevelopmentBundle}
+              isDisabled={pending || approveDisabled}
+              data-chat-approval-trust-development-session="true"
+              title={lang === "zh"
+                ? "本会话信任开发操作：cli_tool、exec_command、write_stdin、apply_diff_edit_tool、apply_patch_tool、write_file_tool 本会话内不再询问"
+                : "Trust development operations this session: cli_tool, exec_command, write_stdin, apply_diff_edit_tool, apply_patch_tool, write_file_tool stop asking for this session"}
+            >
+              <span>{lang === "zh" ? "本会话信任开发操作" : "Trust dev tools"}</span>
             </VButton>
           ) : null}
           {onApproveWithActionWindow ? (
