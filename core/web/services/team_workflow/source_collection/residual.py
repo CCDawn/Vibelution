@@ -4153,8 +4153,9 @@ def _source_collection_run_workflow_root(team_id: str, run_id: str) -> Path:
 def _source_collection_task_store_search_roots(team_id: str) -> list[Path]:
     """All plausible ``source_collection_runs`` roots for cross-run lookups.
 
-    Covers the active project root and every isolated research-project root.
-    The retired team-level store is intentionally excluded.
+    Covers the active project root, the default (legacy) project root, and
+    every isolated research-project root. The retired team-level store is
+    intentionally excluded.
     """
 
     s = _service()
@@ -4168,6 +4169,15 @@ def _source_collection_task_store_search_roots(team_id: str) -> list[Path]:
         base_root = formal_team_workspace_root(team_id)
     except Exception:  # noqa: BLE001 - unknown team keeps the active root only
         return roots
+    # ISS-039: default-project runs live directly under the formal team
+    # workspace. The per-project glob below only sees ``research_projects/*``
+    # children, so without this explicit root a stage-task writeback 422s
+    # whenever an isolated project is active while the run belongs to the
+    # default project. Storage itself resolves through the run-owner project
+    # and never drifts with the active pointer; this list is read-side only.
+    legacy_root = base_root / "source_collection_runs"
+    if legacy_root not in roots:
+        roots.append(legacy_root)
     candidates = sorted(
         (child / "workspace" / "source_collection_runs")
         for child in (base_root / "research_projects").glob("*")
