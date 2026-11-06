@@ -110,6 +110,8 @@ export function ChatReadOnlySessionWorkspace({
               modeNotice: "",
               modeTargetPreview: "",
               pending: false,
+              submitPending: false,
+              stopPending: false,
               placeholder: lang === "zh" ? "会话只读" : "Session is read-only",
               references: [],
               safeGuidancePending: false,

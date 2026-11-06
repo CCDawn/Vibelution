@@ -33,13 +33,13 @@
 ## 会话输入区主按钮
 
 ### 功能
-普通会话停止、中断或达到迭代上限后，空输入区的主按钮显示 Play 图标，提示和无障碍名称为「继续任务」。有文字、附件或引用时恢复发送；执行中使用原停止按钮。正常完成不显示继续，真实请求失败保留原重试入口。
+普通聊天与 Launcher 个人助理共用一个圆形主按钮：有文字、附件或引用时显示向上箭头；请求等待确认时显示 spinner 并禁用重复提交；执行中且草稿为空时显示停止方块；输入新草稿后恢复发送。停止、中断或达到迭代上限且原生快照允许继续时，空输入显示 Play 和「继续任务」。正常完成不显示继续，真实请求失败保留原重试入口。
 
 ### 适用范围
-Chat 的可写普通原生 Session；不用于 Finance、Companion、只读历史或仍有排队消息的会话。
+普通聊天与 Launcher 个人助理的共享输入区。继续资格仍不用于 Finance、Companion、只读历史或仍有排队消息的会话。
 
 ### 使用方式
-沿用 ConversationView 原主按钮的 VButton、位置、尺寸和键盘规则。点击或空框 Enter 通过原提交链路新增可见的「继续」消息，不重新生成旧请求；Shift+Enter 与输入法组合键仍由原 composer 处理。提交中保持原停止能力，防止连续点击重复发送。
+使用 VIconButton，保持现有位置和 token。首次发送、运行中追加请求、停止请求由各自 pending 来源驱动；本地 optimistic running 不等于已收到排队回执，提交等待统一显示「发送中」。只有原生 queued 回执进入原队列栏；主按钮旁不再并排显示「正在排队」、队列 pill 和停止控件。停止等待具有优先级，直到原生确认终态。继续与发送沿用原 mutation、请求标识和安全核对；Shift+Enter、Escape、输入法与既有 Enter 规则保留。
 
 ### 实现落点与边界
 `useChatComposerBridgeState` 与 `conversationContinuationModel` 派生显示状态，`useChatContinueTurn` 复用原 mutation；服务端在接受锁内检查 Turn、分支和日志序号，旧快照只读拒绝。没有第二套 transcript、恢复 worker 或压缩状态；保留原生历史与压缩摘要。
@@ -47,13 +47,21 @@ Chat 的可写普通原生 Session；不用于 Finance、Companion、只读历�
 ## 运行中引导按钮
 
 ### 功能
-轮次运行且草稿非空时，输入区动作排提供运行中引导入口：主按钮与 Enter 走安全引导（不动当前轮），「打断并引导」描边 pill 走 interrupt 通道——发送草稿并请求停止当前轮。引导 pending 时禁用并显示 pending 文案与 spinner；无引导 handler 时不渲染占位。
+轮次运行且草稿非空时，主按钮与 Enter 走安全引导；附件、引用或缺少 guidance handler 时走原排队提交。执行中空草稿始终显示停止，即使已有队列。引导请求中，同一个主按钮显示 spinner 并阻止重复发送。
 
 ### 适用范围
 ConversationView 的运行中引导（普通 Chat 与 Launcher 个人助理共用）；空闲输入区不出现。
 
 ### 使用方式
-沿用既有 VButton pill 几何与 accent token，位置在队列主按钮和终止按钮之间；label 经 `interruptGuidance` / `interruptGuidancePending` 传入，tooltip 固定说明「发送草稿并结束当前轮次」，先于首次点击表达结束本轮的语义。附件或引用在草稿上时 Enter 仍按既有语义转排队，不经打断通道。
+「排队」和「打断并引导」放入既有「＋」菜单的发送方式分组。共享输入区提供 action context，普通聊天与 Launcher 的 ChatComposerPlusMenu 消费同一组回调和禁用状态；没有重复的提交状态。打断项明示「发送草稿并结束当前轮次」，附件或引用存在时禁用打断，继续使用排队通道。无 route-owned 菜单的嵌入面复用 VDropdownMenu 显示次级项。
+
+## 对话消息外侧头像
+
+### 功能与适用范围
+普通聊天与 Launcher 个人助理逐条显示已配置头像，包括连续同角色消息。助理头像在正文列左侧、用户头像在右侧，与各条顶部对齐；姓名与时间不因恢复头像重新增加一行。图片缺失时沿用当前身份的 fallback。
+
+### 布局与边界
+桌面使用左右各 32px 的独立头像竖栏与 12px 间距，中间正文保留 760px 上限并与输入框居中对齐；窄屏使用 28px 头像、8px 间距，防止水平溢出。轮次导航与头像栏避碰。Companion、群聊、inbox 与旧 compact 表面保留各自身份和布局；不改变消息合并、Journal 或原生 Session 权威。
 
 ## ChatSessionIndexToolbar
 

@@ -34,7 +34,8 @@ import type {
 import type { Language, TranslationKey } from "../../i18n/dictionaryTypes";
 import type { ComposerContextRingModel } from "../../routes/chat/composerContextModel";
 import { AgentPermissionPresetControl } from "../vui/product/agent-management";
-import { VButton, VNativeInput, VNativeTextarea } from "../vui";
+import { VButton, VDropdownMenu, VIconButton, VNativeInput, VNativeTextarea } from "../vui";
+import { ConversationComposerActionsContext, type ConversationComposerSecondaryAction } from "./ConversationComposerActionsContext";
 import { ConversationComposerMetrics } from "./ConversationComposerMetrics";
 import type { ComposerCacheUsageModel } from "./composerCacheUsageModel";
 import { ConversationFollowupQueueBar } from "./ConversationFollowupQueueBar";
@@ -57,7 +58,7 @@ import {
   resolveComposerEditMode,
   resolveComposerEnterDelivery,
   resolveComposerGuidanceUi,
-  resolveComposerPrimaryActionFlags,
+  resolveComposerPrimaryAction,
   shouldStopComposerOnEscape,
 } from "./conversationComposerActionModel";
 import {
@@ -126,7 +127,7 @@ export type UseConversationComposerInput = {
   /** The stop request RPC is in flight; keeps stop copy dominant over queueing. */
   composerStopPending?: boolean;
   /** The queue/send submit RPC is in flight while the turn keeps running. */
-  composerQueueSendPending?: boolean;
+  composerSubmitPending?: boolean;
   composerSafeGuidancePending: boolean;
   composerInterruptGuidancePending: boolean;
   composerError?: string;
@@ -159,7 +160,6 @@ export type UseConversationComposerInput = {
   safeGuidancePendingLabel?: string;
   interruptGuidanceLabel?: string;
   interruptGuidancePendingLabel?: string;
-  queueSendPendingLabel?: string;
   editingMessageId?: string;
   composerModeNotice?: string;
   composerModeTargetPreview?: string;
@@ -222,7 +222,7 @@ export function useConversationComposer({
   composerActionMode,
   composerPending,
   composerStopPending,
-  composerQueueSendPending,
+  composerSubmitPending,
   composerSafeGuidancePending,
   composerInterruptGuidancePending,
   composerError,
@@ -255,7 +255,6 @@ export function useConversationComposer({
   safeGuidancePendingLabel,
   interruptGuidanceLabel,
   interruptGuidancePendingLabel,
-  queueSendPendingLabel,
   editingMessageId,
   composerModeNotice,
   composerModeTargetPreview,
@@ -334,7 +333,7 @@ export function useConversationComposer({
   const hasComposerReferences = composerReferences.length > 0;
   const attachmentInputDisabled = composerAttachmentInputDisabled ?? composerDisabled;
   const resolvedActionDisabled = resolveComposerActionDisabled({
-    actionMode: resolvedActionMode,
+    actionMode: resolvedActionMode === "continue" && (composerValue.trim() || hasComposerAttachments || hasComposerReferences) ? "send" : resolvedActionMode,
     composerActionDisabled,
     composerDisabled,
     composerValue,
@@ -342,7 +341,7 @@ export function useConversationComposer({
     hasReferences: hasComposerReferences,
     hasContinueHandler: Boolean(onContinueTurn),
   });
-  const { actionLabel: resolvedActionLabel, pendingLabel: resolvedPendingLabel } = resolveComposerActionLabels({
+  const { pendingLabel: resolvedPendingLabel } = resolveComposerActionLabels({
     actionMode: resolvedActionMode,
     stopLabel,
     continueLabel: lang === "zh" ? "继续任务" : "Continue task",
@@ -354,12 +353,8 @@ export function useConversationComposer({
     fallbackSend: t("send"),
     fallbackStopPending: t("stopPending"),
     fallbackSendPending: t("sendPending"),
-    // The queue-send RPC and the stop request stay separate pending sources;
-    // queueing while busy must not borrow the "stopping" copy.
     stopPendingActive: composerStopPending,
-    queueSendPendingActive: composerQueueSendPending,
-    queueSendPendingLabel,
-    fallbackQueueSendPending: lang === "zh" ? "正在排队…" : "Queueing…",
+    submitPendingActive: composerSubmitPending,
   });
 
   const {
@@ -371,15 +366,17 @@ export function useConversationComposer({
     compactPreview: compactConversationPreview,
     failureNotice: t("editMessageFailureRerunNotice"),
   });
-  const { primaryActionIsEditSubmit, runningGuidanceActionsEnabled } = resolveComposerPrimaryActionFlags({
+  const runningGuidanceActionsEnabled = resolvedActionMode === "stop";
+  const primaryAction = resolveComposerPrimaryAction({
     actionMode: resolvedActionMode,
-    editModeActive: composerEditModeActive,
+    composerValue,
+    hasAttachments: hasComposerAttachments,
+    hasReferences: hasComposerReferences,
+    hasSafeGuidance: Boolean(onSafeGuidance),
   });
   const {
     guidanceActionDisabled,
     guidanceDraftReady,
-    showQueuePrimary,
-    queuePrimaryIsImmediate,
   } = resolveComposerGuidanceUi({
     runningGuidanceActionsEnabled,
     composerValue,
@@ -387,15 +384,15 @@ export function useConversationComposer({
     safeGuidancePending: composerSafeGuidancePending,
     interruptGuidancePending: composerInterruptGuidancePending,
     queueCount: followupQueue.length,
+    hasAttachments: hasComposerAttachments,
+    hasReferences: hasComposerReferences,
   });
   const queuePrimaryKind = resolveComposerQueuePrimaryKind({
     sessionBusy: runningGuidanceActionsEnabled,
     draft: composerValue,
     queueCount: followupQueue.length,
   });
-  const primaryActionIsQueueSubmit = runningGuidanceActionsEnabled && showQueuePrimary;
   const resolvedQueueFollowupLabel = t("queueFollowup");
-  const resolvedImmediateSteerLabel = t("immediateSteer");
   const resolvedSafeGuidanceLabel = safeGuidanceLabel ?? t("safeGuidance");
   const resolvedSafeGuidancePendingLabel = safeGuidancePendingLabel ?? t("safeGuidancePending");
   const resolvedInterruptGuidanceLabel = interruptGuidanceLabel ?? t("interruptGuidance");
@@ -403,16 +400,24 @@ export function useConversationComposer({
   // The interrupt channel both delivers the draft and requests a stop for the
   // running turn; the tooltip must say so before the first click.
   const resolvedInterruptGuidanceHint = t("interruptGuidanceHint");
-  const resolvedBusyPrimaryLabel = queuePrimaryIsImmediate
-    ? resolvedImmediateSteerLabel
-    : resolvedQueueFollowupLabel;
-  // Tooltip carries the keyboard contract: running Enter delivers immediately
-  // (or queues the draft when guidance cannot carry it); the button itself
-  // stays the explicit queue entry.
-  const resolvedBusyPrimaryHint = queuePrimaryIsImmediate
-    ? t("composerSteerEnterHint")
-    : t("composerQueueSteerEnterHint");
-  const baseComposerPlaceholder = composerPlaceholder.trim()
+  const primaryPending = Boolean(composerPending || composerSubmitPending || composerStopPending
+    || composerSafeGuidancePending || composerInterruptGuidancePending);
+  const primaryPendingLabel = composerStopPending ? (stopPendingLabel ?? t("stopPending"))
+    : composerSubmitPending ? (submitPendingLabel ?? t("sendPending"))
+    : composerInterruptGuidancePending ? resolvedInterruptGuidancePendingLabel
+    : composerSafeGuidancePending ? resolvedSafeGuidancePendingLabel : resolvedPendingLabel;
+  const primaryLabel = primaryPending ? primaryPendingLabel
+    : primaryAction === "stop" ? (stopLabel ?? t("stop"))
+    : primaryAction === "steer" ? resolvedSafeGuidanceLabel
+    : primaryAction === "queue" ? resolvedQueueFollowupLabel
+    : primaryAction === "continue" ? (lang === "zh" ? "继续任务" : "Continue task")
+    : submitLabel?.trim() || t("send");
+  const primaryDisabled = primaryPending || (primaryAction === "steer" || primaryAction === "queue"
+    ? composerDisabled || !(composerValue.trim() || hasComposerAttachments || hasComposerReferences)
+    : resolvedActionDisabled);
+  const baseComposerPlaceholder = runningGuidanceActionsEnabled && onSafeGuidance && !hasComposerAttachments && !hasComposerReferences
+    ? (lang === "zh" ? "补充消息以引导当前任务…" : "Add a message to guide the current task…")
+    : composerPlaceholder.trim()
     ? composerPlaceholder
     : resolvedActionMode === "stop"
       ? (followupQueue.length ? t("sessionBusyQueuedPlaceholder") : t("sessionBusyPlaceholder"))
@@ -424,11 +429,7 @@ export function useConversationComposer({
     lang,
     fallback: baseComposerPlaceholder,
   });
-  // Edit/rerun and running-turn queue/steer are labeled primary pills. Do not mix in
-  // round icon-only geometry (composerRoundButtonPrimary forces a square slot).
-  const primaryActionClassName = primaryActionIsEditSubmit || primaryActionIsQueueSubmit
-    ? styles.composerEditSubmitButton
-    : `${styles.sendButton} ${styles.composerRoundButton} ${styles.composerRoundButtonPrimary}`;
+  const primaryActionClassName = `${styles.composerRoundButton} ${styles.composerRoundButtonPrimary} ${primaryAction === "stop" ? styles.stopButton : styles.sendButton}`;
   const composerCanAcceptImageDrop = Boolean(onAddComposerAttachments) && !attachmentInputDisabled;
   const composerCanAcceptReferenceDrop = Boolean(onAddComposerReference) && !composerDisabled;
   // Recomputed per render on purpose: `t` is not a stable identity and the list
@@ -770,11 +771,29 @@ export function useConversationComposer({
     onSubmit();
   }
 
-  const handlePrimaryAction = resolvedActionMode === "stop"
-    ? (onStop ?? onSubmit)
-    : resolvedActionMode === "continue"
-      ? (onContinueTurn ?? (() => undefined))
-      : handleSendAndFollowLatest;
+  function handlePrimaryAction() {
+    if (primaryDisabled) return;
+    if (primaryAction === "stop") (onStop ?? onSubmit)();
+    else if (primaryAction === "continue") onContinueTurn?.();
+    else if (primaryAction === "steer") {
+      if (!handleSideChatCommand()) onSafeGuidance?.();
+    } else if (primaryAction === "queue") handleQueueSubmit();
+    else handleSendAndFollowLatest();
+  }
+
+  const secondaryActions: ConversationComposerSecondaryAction[] = runningGuidanceActionsEnabled ? [
+    {
+      id: "queue", label: resolvedQueueFollowupLabel,
+      disabled: primaryPending || composerDisabled || !(composerValue.trim() || hasComposerAttachments || hasComposerReferences),
+      onSelect: handleQueueSubmit,
+    },
+    ...(onInterruptGuidance ? [{
+      id: "interrupt" as const, label: resolvedInterruptGuidanceLabel,
+      disabled: primaryPending || composerDisabled || !guidanceDraftReady || hasComposerAttachments || hasComposerReferences,
+      hint: resolvedInterruptGuidanceHint,
+      onSelect: onInterruptGuidance,
+    }] : []),
+  ] : [];
 
   useEffect(() => {
     const focusSignal = String(editingMessageId || "").trim();
@@ -853,99 +872,24 @@ export function useConversationComposer({
     />
   ) : null;
 
-  const composerActions = (
+  const composerActions = editingMessageId ? null : (
     <div className={`${styles.composerActionStack} ${composerVariant === "codex" ? conversationComposerResponsiveStyles.actionStack : ""}`}>
-      {resolvedActionMode === "stop" && composerPending ? (
-        <span
-          className={styles.composerStopPendingFeedback}
-          role="status"
-          aria-live="polite"
-          data-testid="composer-stop-pending-feedback"
-        >
-          {resolvedPendingLabel}
-        </span>
-      ) : null}
-      {!runningGuidanceActionsEnabled || showQueuePrimary ? (
-        <VButton
-          className={primaryActionClassName}
-          isIconOnly={!primaryActionIsEditSubmit && !primaryActionIsQueueSubmit}
-          isDisabled={runningGuidanceActionsEnabled ? guidanceActionDisabled : resolvedActionDisabled}
-          type="button"
-          onClick={runningGuidanceActionsEnabled ? handleQueueSubmit : handlePrimaryAction}
-          icon={
-            primaryActionIsEditSubmit
-              ? (
-                composerPending || composerSafeGuidancePending
-                  ? <LoaderCircle className={styles.statusSpinner} size={14} aria-hidden="true" />
-                  : <RefreshCw size={14} aria-hidden="true" />
-              )
-              : undefined
-          }
-          title={
-            runningGuidanceActionsEnabled
-              ? composerSafeGuidancePending
-                ? resolvedSafeGuidancePendingLabel
-                : resolvedBusyPrimaryHint
-              : composerPending
-                ? resolvedPendingLabel
-                : primaryActionIsEditSubmit || resolvedActionMode === "continue"
-                  ? resolvedActionLabel
-                  : t("composerSendEnterHint")
-          }
-          aria-label={
-            runningGuidanceActionsEnabled
-              ? composerSafeGuidancePending
-                ? resolvedSafeGuidancePendingLabel
-                : resolvedBusyPrimaryLabel
-              : composerPending
-                ? resolvedPendingLabel
-                : resolvedActionLabel
-          }
-        >
-          {primaryActionIsEditSubmit
-            ? (composerPending || composerSafeGuidancePending ? resolvedPendingLabel : resolvedActionLabel)
-            : primaryActionIsQueueSubmit
-              ? (composerSafeGuidancePending ? resolvedSafeGuidancePendingLabel : resolvedBusyPrimaryLabel)
-            : (composerPending || composerSafeGuidancePending
-              ? <LoaderCircle className={styles.statusSpinner} size={17} aria-hidden="true" />
-              : resolvedActionMode === "continue"
-                ? <Play size={16} aria-hidden="true" />
-                : <ArrowUp size={16} aria-hidden="true" />)}
-        </VButton>
-      ) : null}
-      {runningGuidanceActionsEnabled && guidanceDraftReady && onInterruptGuidance ? (
-        <VButton
-          className={styles.composerInterruptGuidanceButton}
-          type="button"
-          isDisabled={composerDisabled || composerSafeGuidancePending || composerInterruptGuidancePending}
-          onClick={onInterruptGuidance}
-          title={composerInterruptGuidancePending ? resolvedInterruptGuidancePendingLabel : resolvedInterruptGuidanceHint}
-          aria-label={composerInterruptGuidancePending ? resolvedInterruptGuidancePendingLabel : resolvedInterruptGuidanceLabel}
-          data-testid="composer-interrupt-guidance"
-          icon={composerInterruptGuidancePending ? (
-            <LoaderCircle className={styles.statusSpinner} size={14} aria-hidden="true" />
-          ) : undefined}
-        >
-          {composerInterruptGuidancePending ? resolvedInterruptGuidancePendingLabel : resolvedInterruptGuidanceLabel}
-        </VButton>
-      ) : null}
-      {runningGuidanceActionsEnabled ? (
-        <VButton
-          className={`${styles.composerRoundButton} ${styles.stopButton}`}
-          isIconOnly
-          isDisabled={resolvedActionDisabled}
-          type="button"
-          onClick={handlePrimaryAction}
-          title={composerPending ? resolvedPendingLabel : resolvedActionLabel}
-          aria-label={composerPending ? resolvedPendingLabel : resolvedActionLabel}
-        >
-          {composerPending ? (
-            <LoaderCircle className={styles.statusSpinner} size={17} aria-hidden="true" />
-          ) : (
-            <Square size={14} aria-hidden="true" />
-          )}
-        </VButton>
-      ) : null}
+      {primaryPending ? <span className="sr-only" role="status" aria-live="polite" data-testid="composer-pending-feedback">{primaryPendingLabel}</span> : null}
+      <VIconButton
+        className={primaryActionClassName}
+        data-testid="composer-primary-action"
+        data-composer-action={primaryAction}
+        isDisabled={primaryDisabled}
+        isPending={primaryPending}
+        type="button"
+        onClick={handlePrimaryAction}
+        label={primaryLabel}
+        tooltip={primaryPending ? primaryPendingLabel : primaryAction === "send" ? t("composerSendEnterHint")
+          : primaryAction === "steer" ? t("composerSteerEnterHint") : primaryLabel}
+        icon={primaryAction === "stop" ? <Square size={14} aria-hidden="true" />
+          : primaryAction === "continue" ? <Play size={16} aria-hidden="true" />
+          : <ArrowUp size={16} aria-hidden="true" />}
+      />
     </div>
   );
 
@@ -1292,7 +1236,7 @@ export function useConversationComposer({
             rows={composerVariant === "codex" ? 1 : undefined}
             className={composerVariant === "codex" ? styles.inputCodex : styles.input}
             value={composerValue}
-            disabled={composerDisabled && resolvedActionMode !== "stop"}
+            disabled={primaryPending || (composerDisabled && resolvedActionMode !== "stop")}
             placeholder={resolvedComposerPlaceholder}
             data-composer-prompt-suggestion={composerPromptSuggestion.ghost ? "true" : undefined}
             aria-label={lang === "zh" ? "发送消息" : "Message"}
@@ -1440,7 +1384,7 @@ export function useConversationComposer({
                   defaultPrevented: event.defaultPrevented,
                   composing: event.nativeEvent.isComposing,
                   actionMode: resolvedActionMode,
-                  hasStopHandler: Boolean(onStop),
+                  hasStopHandler: Boolean(onStop) && !primaryPending,
                   ghostVisible: Boolean(composerPromptSuggestion.ghost),
                   slashSuggestionsOpen: showSlashSuggestions,
                   referenceTypeaheadOpen: showReferenceSuggestions,
@@ -1462,13 +1406,14 @@ export function useConversationComposer({
                 metaKey: event.metaKey,
                 altKey: event.altKey,
                 isComposing: event.nativeEvent.isComposing,
-                actionMode: resolvedActionMode,
+                actionMode: resolvedActionMode === "continue" && primaryAction === "send" ? "send" : resolvedActionMode,
                 canDeliverImmediately: Boolean(onSafeGuidance)
                   && !hasComposerAttachments
                   && !hasComposerReferences,
               });
               if (composerEnterDelivery !== "none") {
                 event.preventDefault();
+                if (primaryPending) return;
                 if (composerEnterDelivery === "continue") {
                   if (!resolvedActionDisabled && onContinueTurn) {
                     onContinueTurn();
@@ -1484,7 +1429,7 @@ export function useConversationComposer({
                     onSafeGuidance();
                   }
                 } else if (
-                  (queuePrimaryKind === "queue" || queuePrimaryKind === "immediate")
+                  (hasComposerAttachments || hasComposerReferences || queuePrimaryKind === "queue" || queuePrimaryKind === "immediate")
                   && !guidanceActionDisabled
                 ) {
                   handleQueueSubmit();
@@ -1494,19 +1439,24 @@ export function useConversationComposer({
           />
           <div className={composerVariant === "codex" ? styles.composerToolbarCodex : styles.composerToolbar}>
             <div className={styles.composerToolbarStart}>
-              {composerLeadingControl ?? (
-                <VButton
-                  className={styles.attachButton}
-                  isIconOnly
-                  isDisabled={attachmentInputDisabled || !onAddComposerAttachments}
-                  type="button"
-                  onClick={() => attachmentInputRef.current?.click()}
-                  title={t("composerAttachTooltip")}
-                  aria-label={t("composerAttachTooltip")}
-                >
-                  <ImagePlus size={16} />
-                </VButton>
-              )}
+              <ConversationComposerActionsContext.Provider value={secondaryActions}>
+                {composerLeadingControl ?? (secondaryActions.length ? (
+                  <VDropdownMenu
+                    side="top" align="start"
+                    trigger={<VIconButton className={styles.attachButton} label={lang === "zh" ? "添加与更多操作" : "Add and more actions"} icon={<ImagePlus size={16} />} />}
+                    items={[
+                      { id: "attach", label: t("composerAttachTooltip"), disabled: attachmentInputDisabled || !onAddComposerAttachments, onSelect: () => attachmentInputRef.current?.click() },
+                      ...secondaryActions.map(action => ({ ...action, title: action.hint })),
+                    ]}
+                  />
+                ) : (
+                  <VIconButton className={styles.attachButton}
+                    isDisabled={attachmentInputDisabled || !onAddComposerAttachments}
+                    type="button" onClick={() => attachmentInputRef.current?.click()}
+                    label={t("composerAttachTooltip")} icon={<ImagePlus size={16} />} />
+                ))}
+              </ConversationComposerActionsContext.Provider>
+
               {permissionControl ? (
                 <AgentPermissionPresetControl
                   {...permissionControl}
