@@ -4,7 +4,7 @@ import { ACTIVE_WORK_BLOCK_MESSAGE_RESTART } from "./activeWorkGuard.js";
 import type { DesktopShellStatus } from "./desktopShellFreshness.js";
 import { parseLauncherBuild, type LauncherBuild } from "./launcherBuildIdentity.js";
 
-export type LauncherUpdatePhase = "checking" | "preparing" | "saving" | "replacing";
+export type LauncherUpdatePhase = "checking" | "preparing" | "desktop" | "frontend" | "package" | "saving" | "replacing";
 export type LauncherUpdateProgress = { phase: LauncherUpdatePhase; startedAt: number };
 
 /** A version read is not permission to stop a workspace. Recheck after preparation. */

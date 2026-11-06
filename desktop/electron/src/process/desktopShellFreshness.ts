@@ -554,7 +554,10 @@ export async function ensureLatestLauncher(input: {
   shellKind?: "packaged" | "unpackaged";
   spawnImpl?: PythonJsonBridgeSpawn;
   signal?: AbortSignal;
+  onProgress?: (phase: "desktop" | "frontend" | "package") => void;
 }): Promise<LatestLauncherEnsureResult> {
+  let progressLine = "";
+  let oversizedLine = false;
   const raw = await runPythonJsonBridge({
     pythonPath: input.pythonPath,
     args: desktopShellBridgeArgs(input.workspaceRoot, input.pythonPath, "ensure-latest-launcher", input.shellKind ? ["--shell-kind", input.shellKind] : []),
@@ -563,6 +566,26 @@ export async function ensureLatestLauncher(input: {
     failureLabel: "latest launcher ensure",
     timeoutMs: LATEST_LAUNCHER_PREPARATION_TIMEOUT_MS,
     signal: input.signal,
+    onStderrChunk: input.onProgress ? (chunk) => {
+      // Build tools can write arbitrary stderr. Only bounded, complete records
+      // from the private ensure action may become user-visible phases.
+      for (const character of chunk.toString("utf8")) {
+        if (character === "\n") {
+          if (!oversizedLine) {
+            try {
+              const event = JSON.parse(progressLine);
+              if (event?.event === "launcher-update-progress" && Object.keys(event).length === 2
+                && ["desktop", "frontend", "package"].includes(event.phase)) input.onProgress?.(event.phase);
+            } catch { /* Ordinary build output and observer errors are not progress. */ }
+          }
+          progressLine = "";
+          oversizedLine = false;
+        } else if (!oversizedLine) {
+          if (progressLine.length < 512) progressLine += character;
+          else { progressLine = ""; oversizedLine = true; }
+        }
+      }
+    } : undefined,
     killPolicy: "child",
     mutation: true
   });

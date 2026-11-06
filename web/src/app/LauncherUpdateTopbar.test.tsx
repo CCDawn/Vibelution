@@ -38,6 +38,12 @@ function button(text: string) {
   return found!;
 }
 
+function progressButton() {
+  const found = [...host.querySelectorAll("button")].find(item => item.disabled && item.textContent?.trim() !== "重新检测");
+  expect(found).toBeTruthy();
+  return found!;
+}
+
 async function click(text: string) {
   await act(async () => { button(text).click(); await new Promise((resolve) => setTimeout(resolve, 10)); });
 }
@@ -105,7 +111,7 @@ describe("shared Launcher update topbar", () => {
     expect(api.restartLatestLauncher).not.toHaveBeenCalled();
     await click("确认更新");
     expect(api.restartLatestLauncher).toHaveBeenCalledOnce();
-    expect(host.textContent).toContain("准备中");
+    expect(host.textContent).toContain("正在检查更新");
   });
 
   it("keeps a real update failure across remount and retries after confirmation", async () => {
@@ -129,8 +135,8 @@ describe("shared Launcher update topbar", () => {
     await click("确认更新");
     await act(async () => root.render(<QueryClientProvider client={client}><div /></QueryClientProvider>));
     await act(async () => root.render(<QueryClientProvider client={client}><LauncherUpdateTopbar lang="zh" /></QueryClientProvider>));
-    expect(host.textContent).toContain("准备中");
-    expect(button("准备中…").disabled).toBe(true);
+    expect(host.textContent).toContain("正在检查更新");
+    expect(progressButton().disabled).toBe(true);
     expect(api.restartLatestLauncher).toHaveBeenCalledOnce();
   });
 
@@ -153,7 +159,7 @@ describe("shared Launcher update topbar", () => {
     await click("更新并重启");
     api.getLauncherFreshness.mockResolvedValue({ ...available, updateInProgress: true });
     await click("确认更新");
-    expect(button("准备中…").disabled).toBe(true);
+    expect(progressButton().disabled).toBe(true);
     await act(async () => root.render(<QueryClientProvider client={client}><div /></QueryClientProvider>));
     await act(async () => root.render(<QueryClientProvider client={client}><LauncherUpdateTopbar lang="zh" /></QueryClientProvider>));
     api.getLauncherFreshness.mockResolvedValue({ ...available, updateInProgress: false, refreshError: "保存任务失败" });
@@ -175,7 +181,7 @@ describe("shared Launcher update topbar", () => {
     await click("更新并重启");
     await click("确认更新");
     await act(async () => { await client.refetchQueries({ queryKey: queryKeys.launcherFreshness() }); });
-    expect(button("准备中…").disabled).toBe(true);
+    expect(progressButton().disabled).toBe(true);
     expect(api.restartLatestLauncher).toHaveBeenCalledOnce();
     await act(async () => { rejectUpdate(new Error("构建失败")); await new Promise((resolve) => setTimeout(resolve, 10)); });
     expect(button("重试更新").disabled).toBe(false);
@@ -190,7 +196,7 @@ describe("shared Launcher update topbar", () => {
     await click("确认更新");
     const readsBefore = api.getLauncherFreshness.mock.calls.length;
     if (trigger === "poll") {
-      await act(async () => { await vi.advanceTimersByTimeAsync(10_100); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_100); });
     } else if (trigger === "focus") {
       await act(async () => { window.dispatchEvent(new Event("focus")); await vi.advanceTimersByTimeAsync(20); });
     } else {
@@ -198,8 +204,8 @@ describe("shared Launcher update topbar", () => {
       await click("重新检测");
     }
     expect(api.getLauncherFreshness).toHaveBeenCalledTimes(readsBefore + 1);
-    expect(button("准备中…").disabled).toBe(true);
-    button("准备中…").click();
+    expect(progressButton().disabled).toBe(true);
+    progressButton().click();
     expect(api.restartLatestLauncher).toHaveBeenCalledOnce();
     expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
@@ -218,7 +224,7 @@ describe("shared Launcher update topbar", () => {
     expect(host.textContent).toContain("构建失败");
     expect(host.textContent).not.toContain("仍在等待 Launcher 完成更新");
     expect(host.querySelector('[role="alert"]')?.textContent).toContain("构建失败");
-    expect(button("准备中…").disabled).toBe(true);
+    expect(progressButton().disabled).toBe(true);
     expect(button("重新检测").disabled).toBe(false);
     expect(api.restartLatestLauncher).toHaveBeenCalledOnce();
   });
@@ -226,16 +232,42 @@ describe("shared Launcher update topbar", () => {
   it.each([
     ["checking", "正在检查更新"],
     ["preparing", "正在准备桌面程序和界面"],
+    ["desktop", "正在准备桌面程序"],
+    ["frontend", "正在准备界面"],
+    ["package", "正在打包桌面程序"],
     ["saving", "正在保存任务"],
     ["replacing", "正在重启 Launcher"],
   ])("shows the native %s phase without inventing a percentage", async (updatePhase, status) => {
     api.getLauncherFreshness.mockResolvedValue({ ...available, updateInProgress: true, updatePhase });
     await mount();
     expect(host.querySelector('[role="status"]')?.textContent).toBe(status);
+    expect(progressButton().textContent).toBe(status);
     expect(host.textContent).not.toContain("%");
-    expect(button("准备中…").disabled).toBe(true);
+    expect(progressButton().disabled).toBe(true);
     expect(button("重新检测").disabled).toBe(false);
     expect(api.restartLatestLauncher).not.toHaveBeenCalled();
+  });
+
+  it("follows the native build, save and restart journey through polling without extra clicks", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-11-06T04:00:00Z"));
+    api.restartLatestLauncher.mockImplementationOnce(() => new Promise(() => {}));
+    await mount();
+    await click("更新并重启");
+    await click("确认更新");
+    const updateStartedAt = Date.now();
+    for (const [updatePhase, label] of [
+      ["desktop", "正在准备桌面程序"], ["frontend", "正在准备界面"],
+      ["package", "正在打包桌面程序"], ["saving", "正在保存任务"], ["replacing", "正在重启 Launcher"],
+    ]) {
+      api.getLauncherFreshness.mockResolvedValue({ ...available, updateInProgress: true, updatePhase, updateStartedAt });
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_100); });
+      expect(host.querySelector('[role="status"]')?.textContent).toBe(label);
+      expect(progressButton().textContent).toBe(label);
+    }
+    expect(host.textContent).toMatch(/已用时 [1-9]\d* 秒/);
+    expect(api.restartLatestLauncher).toHaveBeenCalledOnce();
+    expect(host.textContent).not.toContain("准备中");
   });
 
   it("preserves native phase and elapsed time across remount while the request is pending", async () => {
@@ -252,7 +284,7 @@ describe("shared Launcher update topbar", () => {
     const readsBefore = api.getLauncherFreshness.mock.calls.length;
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
     expect(host.textContent).toContain("已用时 31 秒");
-    expect(api.getLauncherFreshness).toHaveBeenCalledTimes(readsBefore);
+    expect(api.getLauncherFreshness.mock.calls.length).toBeGreaterThan(readsBefore);
     const elapsed = host.querySelector('[aria-live="off"]');
     expect(elapsed?.textContent).toContain("已用时");
     expect(elapsed?.closest('[aria-live="polite"]')).toBeNull();
@@ -262,7 +294,7 @@ describe("shared Launcher update topbar", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(20); });
     expect(host.querySelector('[role="status"]')?.textContent).toBe("正在保存任务");
     expect(host.textContent).toContain("已用时 33 秒");
-    expect(button("准备中…").disabled).toBe(true);
+    expect(progressButton().disabled).toBe(true);
     expect(api.restartLatestLauncher).toHaveBeenCalledOnce();
   });
 
@@ -286,12 +318,12 @@ describe("shared Launcher update topbar", () => {
     expect(host.textContent).not.toContain("更新失败");
     expect(host.textContent).not.toContain("已是最新版本");
     expect(host.textContent).toContain("已用时 2 秒");
-    expect(button("准备中…").disabled).toBe(true);
+    expect(progressButton().disabled).toBe(true);
     expect(button("重新检测").disabled).toBe(false);
     const readsBefore = api.getLauncherFreshness.mock.calls.length;
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
     expect(host.textContent).toContain("已用时 3 秒");
-    expect(api.getLauncherFreshness).toHaveBeenCalledTimes(readsBefore);
+    expect(api.getLauncherFreshness.mock.calls.length).toBeGreaterThan(readsBefore);
     expect(api.restartLatestLauncher).toHaveBeenCalledOnce();
   });
 
@@ -301,7 +333,7 @@ describe("shared Launcher update topbar", () => {
     api.getLauncherFreshness.mockRejectedValue(new Error("offline"));
     await click("确认更新");
     expect(host.textContent).toContain("无法确认更新状态");
-    expect(button("准备中…").disabled).toBe(true);
+    expect(progressButton().disabled).toBe(true);
     expect(button("重新检测").disabled).toBe(false);
     api.getLauncherFreshness.mockResolvedValue({ ...available, updateInProgress: false });
     await click("重新检测");
@@ -317,7 +349,7 @@ describe("shared Launcher update topbar", () => {
     api.getLauncherFreshness.mockResolvedValue({ ...available, current: true, updateAvailable: false, updateInProgress: false });
     await act(async () => { window.dispatchEvent(new Event("focus")); await new Promise((resolve) => setTimeout(resolve, 20)); });
     expect(host.textContent).toContain("已是最新版本");
-    expect(host.textContent).not.toContain("准备中");
+    expect(host.textContent).not.toContain("正在检查更新");
     expect(api.restartLatestLauncher).toHaveBeenCalledOnce();
   });
 
@@ -326,7 +358,7 @@ describe("shared Launcher update topbar", () => {
     await mount();
     await click("更新并重启");
     await click("确认更新");
-    expect(button("准备中…").disabled).toBe(true);
+    expect(progressButton().disabled).toBe(true);
     const readsBefore = api.getLauncherFreshness.mock.calls.length;
     api.getLauncherFreshness.mockResolvedValue({ ...available, updateInProgress: false, refreshError: "保存任务失败" });
     await act(async () => { await vi.advanceTimersByTimeAsync(5_100); });

@@ -18,12 +18,12 @@ import sys
 import tempfile
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from core.infrastructure.atomic_io import atomic_write_json
@@ -2259,23 +2259,41 @@ def prepare_unpackaged_electron(project_root: Path | str = PROJECT_ROOT) -> dict
 
 
 def ensure_latest_launcher(
-    project_root: Path | str = PROJECT_ROOT, *, shell_kind: str = "unpackaged"
+    project_root: Path | str = PROJECT_ROOT,
+    *,
+    shell_kind: str = "unpackaged",
+    on_progress: Callable[[Literal["desktop", "frontend", "package"]], None] | None = None,
 ) -> dict[str, Any]:
     """Prepare Electron and the frontend while the old shell remains usable.
 
     The refresh helper publishes the prepared Electron tree after wait_pid exits.
+    Progress reports entry into each preparation stage; observer errors are ignored.
     """
 
     root = Path(project_root)
     if shell_kind not in {"packaged", "unpackaged"}:
         raise ValueError("Unsupported desktop shell kind.")
-    electron = prepare_unpackaged_electron(root) if shell_kind == "unpackaged" else {}
+
+    def report_progress(phase: Literal["desktop", "frontend", "package"]) -> None:
+        if on_progress is not None:
+            try:
+                on_progress(phase)
+            except Exception:
+                # Progress observers must not change preparation success or failure.
+                pass
+
+    electron = {}
+    if shell_kind == "unpackaged":
+        report_progress("desktop")
+        electron = prepare_unpackaged_electron(root)
     from core.runtime_manager.daemon import _preflight_frontend_build_for_restart
 
+    report_progress("frontend")
     frontend = _preflight_frontend_build_for_restart("ensure-latest-launcher", project_root=root)
     if not bool(frontend.get("ok", True)):
         raise RuntimeError(str(frontend.get("reason") or "frontend ensure failed"))
     if shell_kind == "packaged":
+        report_progress("package")
         staged = run_desktop_shell_prebuild(root)
         if staged.get("ok") is not True or not (
             staged.get("staged") is True or staged.get("skipped") == "current"

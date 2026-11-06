@@ -546,6 +546,8 @@ export async function runPythonJsonBridge(input: {
   terminateOwnedTree?: PythonJsonBridgeOwnedTreeTerminator;
   captureChildIdentity?: (pid: number) => Promise<PythonProcessIdentity | null>;
   terminationGraceMs?: number;
+  /** Optional observation only; callers must parse a closed progress vocabulary. */
+  onStderrChunk?: (chunk: Buffer) => void;
 }): Promise<string> {
   if (!Number.isFinite(input.timeoutMs) || input.timeoutMs <= 0) {
     throw new RangeError("python JSON bridge timeoutMs must be a positive finite number");
@@ -663,6 +665,9 @@ export async function runPythonJsonBridge(input: {
       chunks.push(chunk);
     });
     child.stderr?.on("data", (chunk: Buffer) => {
+      if (!settled && !terminating) {
+        try { input.onStderrChunk?.(chunk); } catch { /* Observation cannot change bridge settlement. */ }
+      }
       // Drain stderr so stdio pipes cannot deadlock. Keep a short tail for the
       // launcher row when the process exits without a JSON message.
       if (stderrText.length >= 800) {

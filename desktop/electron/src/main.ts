@@ -4773,7 +4773,10 @@ async function performLauncherUpdate(
       prepare: () => ensureLatestLauncher({
         workspaceRoot: createDesktopPathsForApp().workspaceRoot,
         pythonPath: desktopPythonPath(),
-        shellKind: options.shellKind ?? (app.isPackaged ? "packaged" : "unpackaged")
+        shellKind: options.shellKind ?? (app.isPackaged ? "packaged" : "unpackaged"),
+        onProgress: (phase) => {
+          if (launcherUpdateProgress) launcherUpdateProgress = { ...launcherUpdateProgress, phase };
+        }
       }),
       stopWorkspaces: async () => {
         // Each task owner must confirm saved state before replacement.
@@ -4887,6 +4890,20 @@ const observeLauncherFreshness = createLauncherFreshnessObservation(launcherFres
 });
 
 async function currentLauncherUpdateFreshness(): Promise<Record<string, unknown>> {
+  // Phase reads must not wait behind version inspection, build locks or a
+  // shutting-down assistant. Cached versions here are display-only; update
+  // admission still performs its own checks in executeLauncherUpdate.
+  if (shellRefreshInFlight) {
+    const cached = launcherBuildCandidateObservation;
+    return projectLauncherUpdateFreshness({
+      raw: cached?.identity === launcherFreshnessObservationIdentity() ? cached.raw : {},
+      runningBuild: runningLauncherBuild,
+      packaged: app.isPackaged,
+      activeWork: { state: "unknown", message: "" },
+      updating: true,
+      progress: launcherUpdateProgress
+    });
+  }
   const snapshot = launcherStateStore.snapshot();
   const snapshotRawFreshness = launcherStateStore.projectFreshness();
   if (launcherFreshnessSnapshotUsable(snapshot, snapshotRawFreshness, Date.now())) {

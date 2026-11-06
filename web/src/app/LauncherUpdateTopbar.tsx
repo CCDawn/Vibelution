@@ -26,8 +26,8 @@ export function LauncherUpdateTopbar({ lang }: { lang: "zh" | "en" }) {
     // establish that it finished or returned to idle without replacing us.
     refetchInterval: (query) => confirming ? false
       : acceptedAt !== null && (query.state.dataUpdatedAt <= acceptedAt || query.state.data?.updateInProgress !== false)
-        ? 5_000 : lastAttempt?.status === "pending" || query.state.data?.updateInProgress === true
-          ? 10_000 : UPDATE_FRESHNESS_INTERVAL_MS,
+        ? 1_000 : lastAttempt?.status === "pending" || query.state.data?.updateInProgress === true
+          ? 1_000 : UPDATE_FRESHNESS_INTERVAL_MS,
     refetchOnWindowFocus: confirming ? false : "always",
     retry: false,
   });
@@ -61,9 +61,12 @@ export function LauncherUpdateTopbar({ lang }: { lang: "zh" | "en" }) {
   const taskUnknown = freshness?.activeWorkState !== "idle" && !active;
   const updatePhase = freshness?.updateInProgress === true ? freshness.updatePhase : undefined;
   const phaseStatus = updatePhase === "checking" ? (zh ? "正在检查更新" : "Checking for updates")
+    : updatePhase === "desktop" ? (zh ? "正在准备桌面程序" : "Preparing the desktop app")
+      : updatePhase === "frontend" ? (zh ? "正在准备界面" : "Preparing the interface")
+        : updatePhase === "package" ? (zh ? "正在打包桌面程序" : "Packaging the desktop app")
     : updatePhase === "preparing" ? (zh ? "正在准备桌面程序和界面" : "Preparing the desktop app and interface")
       : updatePhase === "saving" ? (zh ? "正在保存任务" : "Saving tasks")
-        : updatePhase === "replacing" ? (zh ? "正在重启 Launcher" : "Restarting Launcher") : (zh ? "更新处理中" : "Update in progress");
+        : updatePhase === "replacing" ? (zh ? "正在重启 Launcher" : "Restarting Launcher") : (zh ? "正在检查更新" : "Checking for updates");
   const status = requestFailure && progressUnknown ? (zh ? "更新失败" : "Update failed")
     : progressUnknown ? (zh ? "无法确认更新状态" : "Update status unavailable")
     : busy ? phaseStatus
@@ -102,7 +105,7 @@ export function LauncherUpdateTopbar({ lang }: { lang: "zh" | "en" }) {
     {failure ? <p className={progressUnknown && !requestFailure ? styles.metadata : styles.failure} role={progressUnknown && !requestFailure ? "status" : "alert"}>{failure}</p> : null}
     <div className={styles.pageActions}>
       {busy || (!unknown && (hasUpdate || failure))
-        ? <VButton variant="primary" isPending={busy} isDisabled={busy} onPress={() => setConfirming(true)}>{busy ? (zh ? "准备中…" : "Preparing…") : failure ? (zh ? "重试更新" : "Retry update") : (zh ? "更新并重启" : "Update and restart")}</VButton>
+        ? <VButton variant="primary" isPending={busy} isDisabled={busy} onPress={() => setConfirming(true)}>{busy ? (progressUnknown ? (zh ? "更新处理中" : "Updating") : phaseStatus) : failure ? (zh ? "重试更新" : "Retry update") : (zh ? "更新并重启" : "Update and restart")}</VButton>
         : <VButton variant="primary" isPending={freshnessQuery.isFetching} onPress={() => { void refreshUpdateFreshness(queryClient); }}>{zh ? "重新检测" : "Check again"}</VButton>}
       {busy ? <VButton isPending={freshnessQuery.isFetching} onPress={() => { void refreshUpdateFreshness(queryClient); }}>{zh ? "重新检测" : "Check again"}</VButton> : null}
     </div>

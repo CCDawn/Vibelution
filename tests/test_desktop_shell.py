@@ -1900,37 +1900,114 @@ def test_prepared_launcher_failed_promotion_restores_live_and_can_retry(tmp_path
 
 
 def test_ensure_latest_launcher_prepares_electron_and_frontend(tmp_path, monkeypatch):
+    events = []
     monkeypatch.setattr(
         desktop_shell,
         "prepare_unpackaged_electron",
-        lambda root: {"ensured": True, "rebuilt": False, "reason": "current"},
+        lambda root: events.append("prepare:desktop") or {"ensured": True, "rebuilt": False, "reason": "current"},
     )
     monkeypatch.setattr(
         "core.runtime_manager.daemon._preflight_frontend_build_for_restart",
-        lambda command_id, *, project_root: {"ok": True, "skipped": True, "reason": "frontend build is current"},
+        lambda command_id, *, project_root: events.append("prepare:frontend") or {
+            "ok": True, "skipped": True, "reason": "frontend build is current",
+        },
     )
-    result = desktop_shell.ensure_latest_launcher(tmp_path)
+    result = desktop_shell.ensure_latest_launcher(tmp_path, on_progress=lambda phase: events.append(f"progress:{phase}"))
+    assert events == ["progress:desktop", "prepare:desktop", "progress:frontend", "prepare:frontend"]
     assert result["ok"] is True
     assert result["electron"]["rebuilt"] is False
     assert result["frontend"]["skipped"] is True
 
 
-def test_ensure_latest_launcher_raises_when_frontend_preflight_fails(tmp_path, monkeypatch):
+@pytest.mark.parametrize("shell_kind", ["packaged", "unpackaged"])
+def test_ensure_latest_launcher_raises_when_frontend_preflight_fails(tmp_path, monkeypatch, shell_kind):
+    events = []
     monkeypatch.setattr(
         desktop_shell,
         "prepare_unpackaged_electron",
-        lambda root: {"ensured": True, "rebuilt": True, "reason": "current"},
+        lambda root: events.append("prepare:desktop") or {"ensured": True, "rebuilt": True, "reason": "current"},
     )
     monkeypatch.setattr(
         "core.runtime_manager.daemon._preflight_frontend_build_for_restart",
-        lambda command_id, *, project_root: {"ok": False, "skipped": False, "reason": "tsc failed"},
+        lambda command_id, *, project_root: events.append("prepare:frontend") or {
+            "ok": False, "skipped": False, "reason": "tsc failed",
+        },
     )
-    try:
-        desktop_shell.ensure_latest_launcher(tmp_path)
-    except RuntimeError as exc:
-        assert "tsc failed" in str(exc)
+    monkeypatch.setattr(desktop_shell, "run_desktop_shell_prebuild", lambda *_: pytest.fail("frontend failed"))
+    with pytest.raises(RuntimeError, match="tsc failed"):
+        desktop_shell.ensure_latest_launcher(
+            tmp_path, shell_kind=shell_kind, on_progress=lambda phase: events.append(f"progress:{phase}"),
+        )
+    expected = ["progress:frontend", "prepare:frontend"]
+    if shell_kind == "unpackaged":
+        expected = ["progress:desktop", "prepare:desktop", *expected]
+    assert events == expected
+
+
+def test_ensure_latest_launcher_desktop_failure_does_not_report_frontend(tmp_path, monkeypatch):
+    events = []
+
+    def fail_desktop(_root):
+        events.append("prepare:desktop")
+        raise RuntimeError("desktop failed")
+
+    monkeypatch.setattr(desktop_shell, "prepare_unpackaged_electron", fail_desktop)
+    monkeypatch.setattr(
+        "core.runtime_manager.daemon._preflight_frontend_build_for_restart",
+        lambda *_args, **_kwargs: pytest.fail("desktop failed"),
+    )
+    with pytest.raises(RuntimeError, match="desktop failed"):
+        desktop_shell.ensure_latest_launcher(tmp_path, on_progress=lambda phase: events.append(f"progress:{phase}"))
+    assert events == ["progress:desktop", "prepare:desktop"]
+
+
+@pytest.mark.parametrize(("shell_kind", "failure_phase"), [
+    ("unpackaged", None),
+    ("unpackaged", "desktop"),
+    ("unpackaged", "frontend"),
+    ("packaged", None),
+    ("packaged", "frontend"),
+    ("packaged", "package"),
+])
+def test_ensure_latest_launcher_progress_observer_errors_preserve_build_result(
+    tmp_path, monkeypatch, shell_kind, failure_phase,
+):
+    phases = []
+    preparations = []
+
+    def failing_observer(phase):
+        phases.append(phase)
+        raise RuntimeError("observer failed")
+
+    def prepare(phase, result):
+        preparations.append(phase)
+        if failure_phase == phase:
+            raise RuntimeError(f"{phase} failed")
+        return result
+
+    monkeypatch.setattr(
+        desktop_shell, "prepare_unpackaged_electron",
+        lambda _root: prepare("desktop", {"rebuilt": False}),
+    )
+    monkeypatch.setattr(
+        "core.runtime_manager.daemon._preflight_frontend_build_for_restart",
+        lambda *_args, **_kwargs: prepare("frontend", {"ok": True}),
+    )
+    monkeypatch.setattr(
+        desktop_shell, "run_desktop_shell_prebuild",
+        lambda _root: prepare("package", {"ok": True, "staged": True}),
+    )
+    if failure_phase is None:
+        result = desktop_shell.ensure_latest_launcher(tmp_path, shell_kind=shell_kind, on_progress=failing_observer)
+        assert result["ok"] is True
     else:
-        raise AssertionError("expected frontend preflight failure to raise")
+        with pytest.raises(RuntimeError, match=f"{failure_phase} failed"):
+            desktop_shell.ensure_latest_launcher(tmp_path, shell_kind=shell_kind, on_progress=failing_observer)
+    expected = ["desktop", "frontend"] if shell_kind == "unpackaged" else ["frontend", "package"]
+    if failure_phase is not None:
+        expected = expected[:expected.index(failure_phase) + 1]
+    assert phases == expected
+    assert preparations == expected
 
 
 def test_packaged_update_prepares_the_actual_package_before_reporting_ready(tmp_path, monkeypatch):
@@ -1938,11 +2015,13 @@ def test_packaged_update_prepares_the_actual_package_before_reporting_ready(tmp_
     monkeypatch.setattr(desktop_shell, "prepare_unpackaged_electron", lambda *_: pytest.fail("wrong build kind"))
     monkeypatch.setattr(
         "core.runtime_manager.daemon._preflight_frontend_build_for_restart",
-        lambda *_args, **_kwargs: events.append("frontend") or {"ok": True},
+        lambda *_args, **_kwargs: events.append("prepare:frontend") or {"ok": True},
     )
-    monkeypatch.setattr(desktop_shell, "run_desktop_shell_prebuild", lambda _root: events.append("package") or {"ok": True, "staged": True})
-    result = desktop_shell.ensure_latest_launcher(tmp_path, shell_kind="packaged")
-    assert events == ["frontend", "package"]
+    monkeypatch.setattr(desktop_shell, "run_desktop_shell_prebuild", lambda _root: events.append("prepare:package") or {"ok": True, "staged": True})
+    result = desktop_shell.ensure_latest_launcher(
+        tmp_path, shell_kind="packaged", on_progress=lambda phase: events.append(f"progress:{phase}"),
+    )
+    assert events == ["progress:frontend", "prepare:frontend", "progress:package", "prepare:package"]
     assert result["ok"] is True
     assert result["electron"]["prepared"] is True
 
@@ -1968,10 +2047,12 @@ def test_packaged_update_current_retry_does_not_rebuild_after_exit(tmp_path, mon
     {"ok": True},
 ])
 def test_packaged_update_rejects_failed_or_unconfirmed_preparation(tmp_path, monkeypatch, result):
+    phases = []
     monkeypatch.setattr("core.runtime_manager.daemon._preflight_frontend_build_for_restart", lambda *_args, **_kwargs: {"ok": True})
     monkeypatch.setattr(desktop_shell, "run_desktop_shell_prebuild", lambda _root: result)
     with pytest.raises(RuntimeError):
-        desktop_shell.ensure_latest_launcher(tmp_path, shell_kind="packaged")
+        desktop_shell.ensure_latest_launcher(tmp_path, shell_kind="packaged", on_progress=phases.append)
+    assert phases == ["frontend", "package"]
 
 
 def test_launch_desktop_shell_does_not_hide_unpackaged_gui(tmp_path, monkeypatch):

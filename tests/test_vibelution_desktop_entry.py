@@ -2166,25 +2166,73 @@ def test_launch_desktop_shell_skips_settlement_wait_for_non_lifecycle_ops(monkey
 @pytest.mark.parametrize("shell_kind", ["packaged", "unpackaged"])
 def test_ensure_latest_launcher_action_dispatches_to_desktop_shell(monkeypatch, capsys, shell_kind):
     captured: dict[str, object] = {}
+    payload = {
+        "schemaVersion": 1,
+        "ok": True,
+        "electron": {"rebuilt": False, "reason": "current"},
+        "frontend": {"skipped": True, "ok": True, "reason": "frontend build is current"},
+    }
+    phases = ["desktop", "frontend"] if shell_kind == "unpackaged" else ["frontend", "package"]
+    progress_flushes = []
+    original_print = builtins.print
 
-    def fake_ensure(root, *, shell_kind):
+    def capture_print(*args, **kwargs):
+        if kwargs.get("file") is sys.stderr:
+            progress_flushes.append(kwargs.get("flush"))
+        original_print(*args, **kwargs)
+
+    def fake_ensure(root, *, shell_kind, on_progress):
         captured["root"] = root
         captured["kind"] = shell_kind
-        return {
-            "schemaVersion": 1,
-            "ok": True,
-            "electron": {"rebuilt": False, "reason": "current"},
-            "frontend": {"skipped": True, "ok": True, "reason": "frontend build is current"},
-        }
+        for phase in phases:
+            on_progress(phase)
+        return payload
 
+    monkeypatch.setattr(builtins, "print", capture_print)
+    monkeypatch.setattr(desktop_entry, "_append_log", lambda *_args, **_kwargs: None)
     monkeypatch.setattr("core.launcher.desktop_shell.ensure_latest_launcher", fake_ensure)
     result = desktop_entry.main(["--action", "ensure-latest-launcher", "--output", "json", "--shell-kind", shell_kind])
     assert result == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["ok"] is True
-    assert payload["frontend"]["skipped"] is True
+    output = capsys.readouterr()
+    assert len(output.out.splitlines()) == 1
+    assert json.loads(output.out) == payload
+    assert [json.loads(line) for line in output.err.splitlines()] == [
+        {"event": "launcher-update-progress", "phase": phase} for phase in phases
+    ]
+    assert progress_flushes == [True] * len(phases)
     assert captured["root"] is not None
     assert captured["kind"] == shell_kind
+
+
+def test_ensure_latest_launcher_failure_keeps_progress_out_of_stdout(monkeypatch, capsys):
+    def fake_ensure(root, *, shell_kind, on_progress):
+        on_progress("desktop")
+        raise RuntimeError("desktop failed")
+
+    monkeypatch.setattr(desktop_entry, "_append_log", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("core.launcher.desktop_shell.ensure_latest_launcher", fake_ensure)
+    assert desktop_entry.main(["--action", "ensure-latest-launcher", "--output", "json"]) == 1
+    output = capsys.readouterr()
+    assert len(output.out.splitlines()) == 1
+    assert json.loads(output.out) == {
+        "schemaVersion": 1, "ok": False, "errorType": "RuntimeError", "message": "desktop failed",
+    }
+    assert [json.loads(line) for line in output.err.splitlines()] == [
+        {"event": "launcher-update-progress", "phase": "desktop"},
+    ]
+
+
+def test_ensure_latest_launcher_text_mode_does_not_attach_progress_observer(monkeypatch, capsys):
+    def fake_ensure(root, *, shell_kind):
+        assert shell_kind == "unpackaged"
+        return {"electron": {"rebuilt": False}, "frontend": {"skipped": True}}
+
+    monkeypatch.setattr(desktop_entry, "_append_log", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("core.launcher.desktop_shell.ensure_latest_launcher", fake_ensure)
+    assert desktop_entry.main(["--action", "ensure-latest-launcher"]) == 0
+    output = capsys.readouterr()
+    assert output.err == ""
+    assert "Latest launcher ensured electronRebuilt=False frontendSkipped=True" in output.out
 
 
 def test_ensure_frontend_build_action_uses_shared_release_builder(monkeypatch, tmp_path, capsys):

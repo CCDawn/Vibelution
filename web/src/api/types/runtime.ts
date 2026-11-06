@@ -1252,7 +1252,7 @@ export type LauncherFreshness = {
   activeWorkState?: "idle" | "active" | "unknown";
   activeWorkCount?: number;
   updateInProgress?: boolean;
-  updatePhase?: "checking" | "preparing" | "saving" | "replacing";
+  updatePhase?: "checking" | "preparing" | "desktop" | "frontend" | "package" | "saving" | "replacing";
   updateStartedAt?: number;
   refreshError?: string;
 };

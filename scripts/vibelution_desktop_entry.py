@@ -2326,7 +2326,17 @@ def _ensure_latest_launcher_bridge(args: argparse.Namespace) -> dict[str, object
     from core.launcher.desktop_shell import ensure_latest_launcher
 
     shell_kind = str(getattr(args, "shell_kind", "") or "unpackaged")
-    payload = ensure_latest_launcher(_workspace_root(args), shell_kind=shell_kind)
+    if str(getattr(args, "output", "") or "").strip().lower() == "json":
+        def report_progress(phase: str) -> None:
+            print(
+                json.dumps({"event": "launcher-update-progress", "phase": phase}, separators=(",", ":")),
+                file=sys.stderr,
+                flush=True,
+            )
+
+        payload = ensure_latest_launcher(_workspace_root(args), shell_kind=shell_kind, on_progress=report_progress)
+    else:
+        payload = ensure_latest_launcher(_workspace_root(args), shell_kind=shell_kind)
     electron = payload.get("electron") if isinstance(payload.get("electron"), dict) else {}
     frontend = payload.get("frontend") if isinstance(payload.get("frontend"), dict) else {}
     _append_log(

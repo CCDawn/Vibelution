@@ -408,6 +408,36 @@ describe("desktop shell freshness", () => {
     expect(args).toContain("ensure-latest-launcher");
   });
 
+  it("streams bounded build stages before completion, ignoring split, noisy and invalid records", async () => {
+    let stderr!: (chunk: Buffer) => void;
+    let stdout!: (chunk: Buffer) => void;
+    let close!: (code: number) => void;
+    const spawnImpl = vi.fn(() => ({
+      kill: vi.fn(),
+      once: (event: string, listener: typeof close) => { if (event === "close") close = listener; },
+      stdout: { on: (_event: string, listener: typeof stdout) => { stdout = listener; } },
+      stderr: { on: (_event: string, listener: typeof stderr) => { stderr = listener; } }
+    }));
+    const onProgress = vi.fn();
+    const pending = ensureLatestLauncher({ workspaceRoot: "C:/repo", pythonPath: "python.exe", spawnImpl, onProgress });
+    stderr(Buffer.from("x".repeat(2_000) + '\n{"event":"launcher-update-progress","phase":"desk'));
+    expect(onProgress).not.toHaveBeenCalled();
+    stderr(Buffer.from('top"}\n{"event":"launcher-update-progress","phase":"frontend"}\n'));
+    expect(onProgress.mock.calls).toEqual([["desktop"], ["frontend"]]);
+    for (const record of [
+      { event: "launcher-update-progress", phase: "complete" },
+      { event: "launcher-update-progress", phase: "package", detail: "private build output" },
+      { event: "unrelated", phase: "package" },
+    ]) stderr(Buffer.from(JSON.stringify(record) + "\n"));
+    expect(onProgress).toHaveBeenCalledTimes(2);
+    onProgress.mockImplementationOnce(() => { throw new Error("observer"); });
+    stderr(Buffer.from('{"event":"launcher-update-progress","phase":"package"}\n'));
+    stdout(Buffer.from('{"schemaVersion":1,"ok":true}'));
+    close(0);
+    expect(await pending).toMatchObject({ ok: true });
+    expect(onProgress).toHaveBeenLastCalledWith("package");
+  });
+
   it("rejects a status payload without schemaVersion", () => {
     expect(() => parseDesktopShellStatus(JSON.stringify({ stale: true }))).toThrow(
       "desktop shell status returned an invalid result shape"

@@ -655,6 +655,26 @@ describe("Launcher freshness serves the settled state-refresh snapshot before sp
     expect(input.inspectCurrentDesktopShell).not.toHaveBeenCalled();
   });
 
+  it("reads live build progress immediately without waiting for stale version or stopping task owners", async () => {
+    const input = snapshotFreshnessHarness(settledSnapshotStore({ observedAt: new Date(0) }));
+    input.app.isPackaged = true;
+    input.shellRefreshInFlight = true;
+    input.launcherUpdateProgress = { phase: "frontend", startedAt: 12345 };
+    input.residentAssistantActiveWork.mockImplementation(() => new Promise(() => {}));
+    expect(await input.readFreshness()).toMatchObject({
+      updateInProgress: true, updatePhase: "frontend", updateStartedAt: 12345,
+      current: null, activeWorkState: "unknown",
+    });
+    expect(input.orchestrateLauncherApi).not.toHaveBeenCalled();
+    expect(input.inspectCurrentDesktopShell).not.toHaveBeenCalled();
+    expect(input.residentAssistantActiveWork).not.toHaveBeenCalled();
+    input.shellRefreshInFlight = false;
+    input.residentAssistantActiveWork.mockResolvedValue({ state: "idle", message: "" });
+    input.inspectCurrentDesktopShell.mockResolvedValue(verifiedShell);
+    expect(await input.readFreshness()).toMatchObject({ updateInProgress: false, current: true });
+    expect(input.inspectCurrentDesktopShell).toHaveBeenCalledOnce();
+  });
+
   const verifiedShell: DesktopShellStatus = {
     schemaVersion: 1, stale: false, launchBlocking: false, reason: "current",
     currentElectronTree: "a".repeat(40), packagedSourceCommit: "b".repeat(40), currentCommit: "b".repeat(40),
