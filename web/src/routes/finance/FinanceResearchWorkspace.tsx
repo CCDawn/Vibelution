@@ -27,7 +27,7 @@ import { FinanceResearchReport } from "./FinanceResearchReport";
 import { FinanceResearchProcess } from "./FinanceResearchProcess";
 import { FinanceResearchOverview } from "./FinanceResearchOverview";
 import { FinanceResearchHistory } from "./FinanceResearchHistory";
-import { EMPTY_FINANCIAL_MESSAGES, isResearchSearchResult, isValidResearchDate, localResearchDate, latestResearchSubject, projectStockReport, reportMatchesStock, stockResearchPrompt, type ReportCitation, type ResearchDepth } from "./stockResearchModel";
+import { EMPTY_FINANCIAL_MESSAGES, isResearchSearchResult, isValidResearchDate, localResearchDate, latestResearchSubject, projectStockReport, reportMatchesStock, researchKindFromSession, stockResearchPrompt, type ReportCitation, type ResearchDepth } from "./stockResearchModel";
 import { useFinanceWatchlist } from "./useFinanceWatchlist";
 import { FinanceGeneralResearch } from "./FinanceGeneralResearch";
 import { FinanceKnowledgeCenter } from "./FinanceKnowledgeCenter";
@@ -178,11 +178,21 @@ export function FinanceResearchWorkspace({ assistant, sessionId, zh, lifecycle }
   const nativeWorkspace = useMemo(() => <ChatCodingRoute />, []);
   const returnTo = `${location.pathname}${location.search}`;
   const subjectKey = `${sessionId}:${JSON.stringify(latestResearchSubject(messages))}`;
+  // Topic identity must settle from the persisted request as soon as the
+  // transcript is available, independent of the visible tab. Gating it on the
+  // research/report tabs let a stale stock claim survive the overview → report
+  // click (the guarded identity sync below) and render the default stock face.
+  const kindHydratedSession = useRef("");
+  useEffect(() => {
+    if (preparing || !nativeReady || !messages.length || currentView?.transcriptPending || kindHydratedSession.current === subjectKey) return;
+    kindHydratedSession.current = subjectKey;
+    setResearchKind(researchKindFromSession(latestResearchSubject(messages), currentView?.title));
+  }, [preparing, currentView?.transcriptPending, currentView?.title, messages, nativeReady, subjectKey]);
   useEffect(() => {
     if (preparing || area !== "workspace" || !["research", "report"].includes(tab) || !nativeReady || !messages.length || currentView?.transcriptPending || hydratedSession.current === subjectKey) return;
     hydratedSession.current = subjectKey;
     const subject = latestResearchSubject(messages);
-    setResearchKind(subject?.kind ?? (currentView?.title.startsWith("主题 ·") ? "topic" : "stock"));
+    setResearchKind(researchKindFromSession(subject, currentView?.title));
     const identity = subject?.kind === "stock" ? subject.stock : null;
     if (identity && identity.symbol !== stocks.selected.symbol) { stocks.selectStock(identity); setSearchMarket(stockMarketCode(identity)); }
   }, [preparing, area, tab, currentView?.transcriptPending, messages, nativeReady, sessionId, stocks, subjectKey]);
@@ -196,7 +206,12 @@ export function FinanceResearchWorkspace({ assistant, sessionId, zh, lifecycle }
     try {
       const detail = await fetchSessionDetail(record.id, { transcriptScope: "none", includeSecondary: false });
       if (detail.id !== record.id || !isFinancialSession(detail, assistant.agentId)) {
-        throw new Error(zh ? "这条记录不属于当前金融助手" : "This research belongs to another agent");
+        // A quarantined detail is an orphaned binding, not another agent's
+        // research; report that truthfully instead of claiming foreign ownership.
+        const orphaned = !detail.agentId && detail.agentMissing === true;
+        throw new Error(zh
+          ? orphaned ? "这条研究的助手绑定已失效，暂时无法打开" : "这条记录不属于当前金融助手"
+          : orphaned ? "This research lost its agent binding and cannot open yet" : "This research belongs to another agent");
       }
       if (!mounted.current || sequence !== recordSequence.current || locationRef.current.key !== expectedLocation || !routeRef.current.matchesSelection(expected)) return;
       client.setQueryData(["finance", "session-binding", assistant.agentId, record.id], detail);
@@ -205,7 +220,7 @@ export function FinanceResearchWorkspace({ assistant, sessionId, zh, lifecycle }
       setCitation(null);
       hydratedSession.current = "";
       navigation.showSession(record.id);
-      setResearchKind(detail.title.startsWith("主题 ·") ? "topic" : "stock");
+      setResearchKind(researchKindFromSession(null, detail.title));
     } catch (error) {
       if (mounted.current && sequence === recordSequence.current) {
         setCreateError(error instanceof Error ? error.message : (zh ? "记录加载失败" : "Could not open research"));
@@ -384,7 +399,7 @@ export function FinanceResearchWorkspace({ assistant, sessionId, zh, lifecycle }
     {activeGroup.id === "market" || preparing || area === "workspace" && tab === "overview" || isBacktest ? stockLookup : null}
     {stocks.storageError ? <VStateSurface density="compact" tone="error" title={zh ? "自选保存失败" : "Watchlist save failed"}>{stocks.error}</VStateSurface> : null}
     {area === "dashboard" ? <div className={styles.workspaceCollection}><FinanceDashboard assistant={assistant} watchlist={stocks.watchlist} recentResearch={records} onNavigate={setArea} onSelectStock={selectStock} onOpenResearch={openRecord} onRefresh={() => history.refetch().then(() => undefined)} zh={zh} /></div> : area === "workspace" ? <>{tab === "research" || tab === "report" ? null : researchKind === "stock" ? <FinanceStockHeader stock={stocks.selected} query={market} starred={stocks.watchlist.some((stock) => stock.symbol === stocks.selected.symbol)} onToggleStar={() => stocks.toggleStock(market.data?.stock ?? stocks.selected)} zh={zh} compact /> : <div className={styles.workspaceTopicHeader}><strong>{currentView?.title || (zh ? "主题研究" : "Topic research")}</strong><VButton variant="ghost" onPress={() => setArea("general")}>{zh ? "新主题" : "New topic"}</VButton></div>}{tab !== "research" && !preparing ? <div className={styles.workspaceViewTabs}><VTabs listClassName={styles.workspaceGroupTabList} value={tab} onValueChange={setTab} aria-label={zh ? "股票研究视图" : "Stock research view"} items={[{ id: "overview", label: researchKind === "topic" ? (zh ? "研究设置" : "Research settings") : (zh ? "股票概览" : "Overview") }, ...(researchKind === "stock" ? [{ id: "news", label: zh ? "新闻公告" : "News" }, { id: "fundamentals", label: zh ? "财务指标" : "Financials" }] : []), { id: "research", label: zh ? "AI 研究" : "AI research" }, { id: "report", label: zh ? "研究报告" : "Report" }]} /></div> : null}
-      {tab === "news" || tab === "fundamentals" ? <div className={styles.workspaceCollection}><FinanceMarketExplorer mode={tab} stock={stocks.selected} onSelectStock={selectStock} onResearchPrompt={prepareResearchPrompt} zh={zh} /></div> : tab === "overview" && researchKind === "topic" ? <FinanceGeneralResearch onStart={startTopicResearch} disabled={researchDisabled} pending={creating || launching} zh={zh} /> : tab !== "research" ? <div className={styles.workspaceOverview}>{tab === "overview" ? <><div className={styles.researchGuide} aria-label={zh ? "当前股票" : "Current stock"}><span className={styles.small}>{zh ? "1 选择股票  →  2 确认研究范围  →  3 查看过程与报告" : "1 Choose a stock → 2 Set scope → 3 Read activity and report"}</span><h2 className={styles.researchGuideTitle}>{zh ? `研究 ${stocks.selected.name}` : `Research ${stocks.selected.name}`}</h2><p className={styles.small}>{zh ? "先在上方搜索股票，再确认本次研究设置。研究开始后可在研究概览查看进展。" : "Find a stock above, then confirm the settings. Follow progress in the research overview."}</p></div>{researchConfig}{!preparing ? <><FinanceStockFacts quote={market.data?.stock} zh={zh} /><FinanceMarketPanel query={market} period={period} onPeriodChange={setPeriod} zh={zh} /></> : null}{!preparing ? <FinanceResearchReport onSupplementEvidence={onOpenResearchChat} assistantAgentId={assistant.agentId} sessionId={sessionId} report={stockReport} zh={zh} busy={busy} summaryOnly onCitation={focusCitation} onResearch={() => { if (stockReport) setTab("report"); else startResearch(); }} /> : null}</> : <FinanceResearchReport onSupplementEvidence={onOpenResearchChat} assistantAgentId={assistant.agentId} sessionId={sessionId} report={researchKind === "topic" ? report : stockReport} zh={zh} busy={busy} onCitation={focusCitation} onResearch={researchKind === "topic" ? () => setArea("general") : startResearch} />}</div> : null}
+      {tab === "news" || tab === "fundamentals" ? <div className={styles.workspaceCollection}><FinanceMarketExplorer mode={tab} stock={stocks.selected} onSelectStock={selectStock} onResearchPrompt={prepareResearchPrompt} zh={zh} /></div> : tab === "overview" && researchKind === "topic" ? <FinanceGeneralResearch onStart={startTopicResearch} disabled={researchDisabled} pending={creating || launching} zh={zh} /> : tab !== "research" ? <div className={styles.workspaceOverview}>{tab === "overview" ? <><div className={styles.researchGuide} aria-label={zh ? "当前股票" : "Current stock"}><span className={styles.small}>{zh ? "1 选择股票  →  2 确认研究范围  →  3 查看过程与报告" : "1 Choose a stock → 2 Set scope → 3 Read activity and report"}</span><h2 className={styles.researchGuideTitle}>{zh ? `研究 ${stocks.selected.name}` : `Research ${stocks.selected.name}`}</h2><p className={styles.small}>{zh ? "先在上方搜索股票，再确认本次研究设置。研究开始后可在研究概览查看进展。" : "Find a stock above, then confirm the settings. Follow progress in the research overview."}</p></div>{researchConfig}{!preparing ? <><FinanceStockFacts quote={market.data?.stock} zh={zh} /><FinanceMarketPanel query={market} period={period} onPeriodChange={setPeriod} zh={zh} /></> : null}{!preparing ? <FinanceResearchReport onSupplementEvidence={onOpenResearchChat} assistantAgentId={assistant.agentId} sessionId={sessionId} report={stockReport} zh={zh} busy={busy} summaryOnly onCitation={focusCitation} onResearch={() => { if (stockReport) setTab("report"); else startResearch(); }} /> : null}</> : <FinanceResearchReport onSupplementEvidence={onOpenResearchChat} assistantAgentId={assistant.agentId} sessionId={sessionId} report={researchKind === "topic" ? report : stockReport} topic={researchKind === "topic"} zh={zh} busy={busy} onCitation={focusCitation} onResearch={researchKind === "topic" ? () => setArea("general") : startResearch} />}</div> : null}
     </> : area === "general" ? <FinanceGeneralResearch onStart={startTopicResearch} disabled={researchDisabled} pending={creating || launching} zh={zh} />
       : area === "screen" ? <div className={styles.workspaceCollection}><FinanceScreenWorkspace agentId={assistant.agentId} currentStock={stocks.selected} onSelectStock={selectStock} onResearchPrompt={(text) => startTopicResearch(text, zh ? "智能选股" : "Stock screening")} disabled={researchDisabled} zh={zh} /></div>
       : area === "team" ? <div className={styles.workspaceCollection}><FinanceAnalystTeam key={`${assistant.agentId}:${requestedTeamRunId}`} requestedRunId={requestedTeamRunId} onBackToBatch={requestedTeamRunId ? () => { setTaskTab("batches"); setArea("tasks"); } : undefined} assistant={assistant} stock={stocks.selected} zh={zh} onSelectedRunChange={setTeamSelectedRun} onOpenSession={(id) => routeRef.current.openSession(id, { surface: "chat", replace: false, telemetrySource: "finance_analyst_session" })} /></div>

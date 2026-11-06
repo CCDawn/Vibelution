@@ -129,6 +129,20 @@ describe("FinanceResearchReport research metadata", () => {
     expect(container.textContent).not.toContain("部分数字未通过核验");
   });
 
+  it("offers the topic face with topic wording when an empty report page is topical", async () => {
+    const startTopic = vi.fn();
+    const container = await render({ report: null, topic: true, onResearch: startTopic });
+    expect(container.textContent).toContain("本主题尚无报告");
+    expect(container.textContent).not.toContain("这只股票还没有研究报告");
+    expect(container.textContent).not.toContain("贵州茅台");
+    await act(async () => Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "发起新主题")!.click());
+    expect(startTopic).toHaveBeenCalledTimes(1);
+
+    const stock = await render({ report: null });
+    expect(stock.textContent).toContain("这只股票还没有研究报告");
+    expect(stock.textContent).not.toContain("本主题尚无报告");
+  });
+
   it("never displays a late preview from another session and exposes a retry on failure", async () => {
     let resolveOld!: (text: string) => void;
     vi.mocked(fetchFinancialReportText).mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));

@@ -261,6 +261,28 @@ describe("financial assistant page", () => {
     expect(createChatSession).not.toHaveBeenCalled();
     expect(nativeSubmit).not.toHaveBeenCalled();
   });
+  it("keeps a retitled topic session topical on the report tab instead of the default stock", async () => {
+    // Auto-generated titles drop the legacy "主题 ·" prefix; the persisted
+    // research request must still keep the topic face on the report tab.
+    nativeTitle = "主题智能选股";
+    nativeMessages = [
+      { role: "user", id: "u", timestamp: "", content: "请对以下主题开展投资研究：智能选股。分析日期 2026-10-19。生成完整研究报告。\n\n请围绕全市场基本面与事件驱动筛选候选。" },
+      { role: "assistant", id: "a", turnId: "topic-turn", timestamp: "2026-10-19T07:26:37Z", status: "completed", turnItems: [{ type: "reasoning", id: "r", itemId: "r", status: "completed", text: "仍在收集证据" }] },
+    ] as never;
+    await render("/finance?session=native-session&finance_tab=overview");
+    expect(container.querySelector('[aria-label="当前研究主题"]')).toBeNull();
+    const openReport = [...container.querySelectorAll("button")].find(item => item.textContent?.trim() === "报告");
+    expect(openReport).toBeTruthy();
+    await act(async () => { openReport!.click(); openReport!.click(); });
+    await settle();
+    expect(container.textContent).toContain("本主题尚无报告");
+    expect(container.textContent).not.toContain("这只股票还没有研究报告");
+    expect(container.textContent).not.toContain("贵州茅台");
+    expect(container.querySelector('[aria-label="当前研究主题"]')?.textContent).toContain("主题智能选股");
+    expect(container.querySelector('[aria-label="当前股票"]')).toBeNull();
+    expect(createChatSession).not.toHaveBeenCalled();
+    expect(nativeSubmit).not.toHaveBeenCalled();
+  });
   it("opens a team summary report for its own stock instead of the last selected stock", async () => {
     nativeTitle = "股票研究汇总 · SZ000001";
     nativeMessages = [
