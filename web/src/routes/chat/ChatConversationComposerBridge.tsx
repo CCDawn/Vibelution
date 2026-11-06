@@ -70,6 +70,8 @@ export type ChatConversationComposerBridgeState = {
   modeNotice: string;
   modeTargetPreview: string;
   pending: boolean;
+  submitPending: boolean;
+  stopPending: boolean;
   placeholder: string;
   references: SessionReferenceAttachment[];
   safeGuidancePending: boolean;
@@ -91,6 +93,8 @@ type BridgeManagedConversationProps =
   | "composerModeNotice"
   | "composerModeTargetPreview"
   | "composerPending"
+  | "composerSubmitPending"
+  | "composerStopPending"
   | "composerPlaceholder"
   | "composerReferences"
   | "composerSafeGuidancePending"
@@ -152,23 +156,19 @@ export function buildConversationComposerBridgeState(
 ): ChatConversationComposerBridgeState {
   const hasSession = Boolean(input.sessionId);
   const isEditingMessage = Boolean(input.editTargetMessageId);
-  // Keep the stop affordance visible until the server confirms a terminal
-  // snapshot. This makes the click feedback explicit and prevents a pending
-  // submit from looking like a new-message spinner.
+  // Submission acknowledgement and native execution are separate sources.
   const hasDraftContent = Boolean(input.value.trim());
   const hasAttachments = input.imageAttachments.length > 0;
   const hasReferences = input.references.length > 0;
   const canContinue = input.continueAvailable && !isEditingMessage && !hasDraftContent && !hasAttachments && !hasReferences
     && !input.followupQueue?.length;
   const actionMode = input.sessionBusy || input.submitPending || input.sessionStopping ? "stop" : canContinue ? "continue" : "send";
-  const pending = actionMode === "stop"
-    ? input.stopPending || input.sessionStopping
-    : input.submitPending;
+  const pending = input.submitPending || input.stopPending || input.sessionStopping;
   const disabled = Boolean(input.readOnly) || !hasSession
-    || (input.submitPending && (input.sessionBusy || input.sessionStopping));
+    || input.submitPending;
   const actionDisabled = Boolean(input.readOnly) || !hasSession || (
     actionMode === "stop"
-      ? input.sessionStopping || input.stopPending
+      ? input.submitPending || input.sessionStopping || input.stopPending
       : input.submitPending || (actionMode !== "continue" && !hasDraftContent && !hasAttachments && !hasReferences)
   );
   // ZCode chatPlaceholder tri-state parity: while a turn runs the composer
@@ -205,6 +205,8 @@ export function buildConversationComposerBridgeState(
     modeNotice: isEditingMessage ? input.labels.editMessageModeNotice : "",
     modeTargetPreview: isEditingMessage ? input.editTargetPreview?.trim() ?? "" : "",
     pending,
+    submitPending: input.submitPending,
+    stopPending: input.stopPending || input.sessionStopping,
     placeholder,
     references: [...input.references],
     safeGuidancePending: input.safeGuidancePending,
@@ -294,6 +296,8 @@ export const ChatConversationComposerBridge = memo(function ChatConversationComp
       composerActionDisabled={composer.actionDisabled}
       composerActionMode={composer.actionMode}
       composerPending={composer.pending}
+      composerSubmitPending={composer.submitPending}
+      composerStopPending={composer.stopPending}
       composerSafeGuidancePending={composer.safeGuidancePending}
       composerInterruptGuidancePending={composer.interruptGuidancePending}
       composerError={composer.error}

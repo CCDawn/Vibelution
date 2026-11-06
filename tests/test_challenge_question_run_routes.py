@@ -380,3 +380,51 @@ def test_challenge_question_run_repair_routes_map_errors_like_neighbors(monkeypa
         "/questions/SCI-096/runs/stage1-sci-096-v3/repair-registration"
     )
     assert repair_error_response.status_code == 422
+
+
+def test_challenge_question_run_publish_maps_missing_research_project_to_404(monkeypatch):
+    from core.web.services.team_workflow_orchestration_service import ResearchProjectNotFoundError
+
+    def fake_publish(team_id: str, payload: dict) -> dict:
+        raise ResearchProjectNotFoundError("Research project not found.")
+
+    monkeypatch.setattr(
+        team_workflows_experiment, "publish_research_project_challenge_question_output", fake_publish
+    )
+
+    response = _client().post(
+        "/api/teams/research-team/workflow-orchestration/challenge-program/question-runs/publish",
+        json={
+            "output": {},
+            "registeredBy": "agent-1",
+            "researchProjectId": "project-missing",
+            "questionId": "SCI-096",
+            "taskId": "task-1",
+            "turnId": "turn-1",
+            "projectEvidenceId": "evidence-1",
+        },
+    )
+
+    assert response.status_code == 404, response.text
+    assert "Research project not found." in response.json()["detail"]
+
+
+def test_research_project_agent_task_reconcile_maps_orchestration_input_error_to_422(monkeypatch):
+    from core.web.routes.team_workflows import research_projects as team_workflows_research_projects
+    from core.web.services.team_workflow_orchestration_service import TeamWorkflowOrchestrationError
+
+    def fake_reconcile(team_id: str, project_id: str, *, should_stop=...):
+        raise TeamWorkflowOrchestrationError("Research project id is required.")
+
+    monkeypatch.setattr(
+        team_workflows_research_projects,
+        "reconcile_research_project_agent_task_statuses",
+        fake_reconcile,
+    )
+
+    response = _client().post(
+        "/api/teams/research-team/workflow-orchestration/research-projects/project-1/agent-tasks/reconcile",
+    )
+
+    assert response.status_code == 422, response.text
+    assert "Research project id is required." in response.json()["detail"]
