@@ -44,36 +44,50 @@ export function resolveComposerActionLabels(input: {
   fallbackSend: string;
   fallbackStopPending: string;
   fallbackSendPending: string;
-  fallbackQueueSendPending: string;
   /** The stop request RPC is in flight (callers pass their stopping state). */
   stopPendingActive?: boolean;
-  /** The queue/send submit RPC is in flight while the turn keeps running. */
-  queueSendPendingActive?: boolean;
-  queueSendPendingLabel?: string;
+  /** A submit awaiting acknowledgement, including the first optimistic turn. */
+  submitPendingActive?: boolean;
 }) {
   const isStop = input.actionMode === "stop";
   const isContinue = input.actionMode === "continue";
-  // The queue/send RPC and the stop request are distinct pending sources.
-  // While only the queue send is in flight no stop is happening, so the busy
-  // pending label must say "queueing", never borrow the stop copy. An actual
-  // stop request (stop source active, alone or together) stays dominant.
-  const queueSendPending = isStop
-    && input.stopPendingActive !== true
-    && input.queueSendPendingActive === true;
+  // Optimistic execution ownership can appear before submit acknowledgement.
+  // Only a stop source means stopping; a submit source always means sending.
+  const submitting = input.submitPendingActive === true && input.stopPendingActive !== true;
   return {
     actionLabel: isStop
       ? (input.stopLabel ?? input.fallbackStop)
       : isContinue
         ? (input.continueLabel ?? "Continue task")
         : (input.submitLabel ?? input.fallbackSend),
-    pendingLabel: isStop
-      ? (queueSendPending
-        ? (input.queueSendPendingLabel ?? input.fallbackQueueSendPending)
-        : (input.stopPendingLabel ?? input.fallbackStopPending))
+    pendingLabel: input.stopPendingActive
+      ? (input.stopPendingLabel ?? input.fallbackStopPending)
+      : submitting
+      ? (input.submitPendingLabel ?? input.fallbackSendPending)
+      : isStop
+      ? (input.stopPendingLabel ?? input.fallbackStopPending)
       : isContinue
         ? (input.continuePendingLabel ?? "Continuing…")
         : (input.submitPendingLabel ?? input.fallbackSendPending),
   };
+}
+
+export type ComposerPrimaryAction = "send" | "stop" | "continue" | "steer" | "queue";
+
+/** One primary control; execution ownership and draft delivery stay distinct. */
+export function resolveComposerPrimaryAction(input: {
+  actionMode: ComposerActionMode;
+  composerValue: string;
+  hasAttachments: boolean;
+  hasReferences: boolean;
+  hasSafeGuidance: boolean;
+}): ComposerPrimaryAction {
+  const hasDraft = Boolean(input.composerValue.trim()) || input.hasAttachments || input.hasReferences;
+  if (input.actionMode === "stop") {
+    if (!hasDraft) return "stop";
+    return input.hasSafeGuidance && !input.hasAttachments && !input.hasReferences ? "steer" : "queue";
+  }
+  return input.actionMode === "continue" && !hasDraft ? "continue" : "send";
 }
 
 export function resolveComposerEditMode(input: {
@@ -172,11 +186,13 @@ export function resolveComposerGuidanceUi(input: {
   safeGuidancePending: boolean;
   interruptGuidancePending: boolean;
   queueCount?: number;
+  hasAttachments?: boolean;
+  hasReferences?: boolean;
 }) {
   const queueCount = input.queueCount ?? 0;
   const guidanceDraftReady = Boolean(input.composerValue.trim());
   const showQueuePrimary = input.runningGuidanceActionsEnabled && (
-    guidanceDraftReady || queueCount > 0
+    guidanceDraftReady || input.hasAttachments || input.hasReferences || queueCount > 0
   );
   const guidanceActionDisabled =
     !showQueuePrimary

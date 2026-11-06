@@ -871,8 +871,11 @@ export function createConversationTimelineRows({
               // Hover-reveal anchor: per-message action buttons fade in only
               // while the pointer (or keyboard focus) is on this row.
               "group",
-              showMinimalIdentity ? styles.turnWithoutIdentity : "",
-              groupTranscriptMessage
+              showMinimalIdentity
+                ? message.role === "assistant"
+                  ? styles.assistantTurnWithAvatarGutters
+                  : styles.userTurnWithAvatarGutters
+                : groupTranscriptMessage
                 ? styles.groupTranscriptTurn
                 : message.role === "assistant"
                   ? styles.assistantTurn
