@@ -71,6 +71,7 @@ const styles = {
   categoryGroupDetails: cx("categoryGroupDetails", "min-w-0"),
   categoryGroupDetailsInner: cx("categoryGroupDetailsInner", "grid min-w-0 gap-0 pl-1"),
   categoryGroupRow: cx("categoryGroupRow", "min-w-0"),
+  categoryGroupMeta: cx("categoryGroupMeta", "min-w-0 flex-1 truncate text-vui-xs font-normal text-[var(--fg-tertiary)]"),
   // Tool chrome stays quieter than narrative body (fg-primary).
   itemIcon: cx("itemIcon", "shrink-0 text-[color-mix(in_srgb,var(--fg-tertiary)_90%,transparent)]"),
   itemIconRunning: cx("itemIconRunning", "text-[var(--accent-cool)]"),

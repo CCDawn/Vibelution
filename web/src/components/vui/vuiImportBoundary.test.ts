@@ -40,6 +40,8 @@ const conversationParentStyleConsumers = [
 ];
 const productSharedParentStyleConsumers = [
   ...conversationParentStyleConsumers,
+  // The isolated matched-data replay is a child of the projection preview host.
+  "design/conversation-matched-replay.tsx",
   // The sidebar, center, receipts and detail share one message presentation owner.
   "components/agent-messages/AgentMessageCenter.tsx",
   "components/agent-messages/AgentMessageDetail.tsx",
