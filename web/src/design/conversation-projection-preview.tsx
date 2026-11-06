@@ -5,10 +5,13 @@ import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 
 import type { ConversationMessage, SessionTurnItem } from "../api/types";
+import { queryKeys } from "../api/queryKeys";
+import { dictionary } from "../i18n/dictionary";
 import { ConversationView } from "../components/conversation/ConversationView";
 import { ActiveTurnStreamStateContext } from "../components/conversation/activeTurnStreamState";
 import { VButton, VuiProvider } from "../components/vui";
 import styles from "./conversation-projection-preview.styles";
+import { MatchedConversationReplay } from "./conversation-matched-replay";
 import "./tokens.css";
 import "./base.css";
 import "./tailwind.css";
@@ -22,6 +25,9 @@ const scenes = ["running", "waiting", "disconnected", "background", "completed",
 type Scene = typeof scenes[number];
 const labels: Record<Scene, string> = { running: "并行运行", waiting: "等待输出", disconnected: "连接恢复", background: "后台任务", completed: "已结束", failed: "具体错误", stopped: "已停止" };
 const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+// Preview chrome needs only local language/labels; do not bootstrap product auth.
+client.setQueryData(queryKeys.configPublic(), { language: "zh" });
+client.setQueryData(["i18n", "dictionary-domains", "core,chat"], dictionary);
 
 function items(scene: Scene, assistantTools = false): SessionTurnItem[] {
   const running = scene === "running" || scene === "disconnected" || scene === "stopped";
@@ -113,5 +119,6 @@ function Preview() {
 }
 
 createRoot(document.getElementById("root")!).render(
-  <QueryClientProvider client={client}><MemoryRouter><VuiProvider><Preview /></VuiProvider></MemoryRouter></QueryClientProvider>,
+  <QueryClientProvider client={client}><MemoryRouter><VuiProvider>{new URLSearchParams(location.search).get("matched") === "1"
+    ? <MatchedConversationReplay /> : <Preview />}</VuiProvider></MemoryRouter></QueryClientProvider>,
 );

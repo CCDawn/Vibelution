@@ -52,6 +52,37 @@ function summaryContaining(html: string, marker: string) {
 }
 
 describe("ConversationToolActivity", () => {
+  it("names the active target in a collapsed group instead of only its total count", () => {
+    const read = namedToolCell("active-read", "read_file_tool");
+    const search = namedToolCell("active-search", "grep_search_tool");
+    search.status = "running";
+    search.toolArguments = { pattern: "paintState", path: "." };
+    const html = renderToStaticMarkup(<ConversationToolActivity
+      activity={createCodexTranscriptToolActivity([read, search])} language="zh" renderToolDetails={() => null}
+    />);
+    const summary = summaryContaining(html, 'data-codex-tool-category-summary="true"');
+    expect(summary).toContain("正在搜索");
+    expect(summary).toContain("paintState");
+    expect(summary).not.toContain("已完成");
+    expect(styles.categoryGroupMeta).toContain("truncate");
+  });
+
+  it("keeps a running target ahead of queued tools and labels waiting counts separately", () => {
+    const running = namedToolCell("running-read", "read_file_tool");
+    running.status = "running";
+    running.toolArguments = { path: "src/alpha.ts" };
+    const pending = namedToolCell("pending-search", "grep_search_tool");
+    pending.status = "pending";
+    pending.toolArguments = { pattern: "queued-query" };
+    const html = renderToStaticMarkup(<ConversationToolActivity
+      activity={createCodexTranscriptToolActivity([running, pending])} language="zh" renderToolDetails={() => null}
+    />);
+    const summary = summaryContaining(html, 'data-codex-tool-category-summary="true"');
+    expect(summary).toContain("正在读取文件 · alpha.ts");
+    expect(summary).toContain("1 项进行中 · 1 项等待");
+    expect(summary).not.toContain("queued-query");
+  });
+
   it("keeps completed terminal output out of the collapsed command row", () => {
     const cell = toolCell("terminal-completed", "");
     cell.title = "exec_command";
@@ -549,7 +580,7 @@ describe("ConversationToolActivity", () => {
     expect(html).toContain('data-codex-tool-activity-category-group="true"');
     expect(html).toContain('data-codex-tool-category="explore"');
     expect(html).toContain('data-conversation-part-key="tool-category-group:read-cat-1"');
-    expect(summaryContaining(html, "探索")).toContain("· 2 次");
+    expect(summaryContaining(html, "探索")).toContain("· 1 次读取 · 1 次搜索");
     // Both children stay visible (name-level rows/batches inside the category pass).
     expect(html.match(/data-codex-tool-activity-item="true"/g)).toHaveLength(2);
     // A single explore tool never gains a parent wrapper.
@@ -616,7 +647,7 @@ describe("ConversationToolActivity", () => {
     );
     const failedSummary = summaryContaining(failedHtml, "探索");
     expect(failedSummary).toContain("1 项需关注");
-    expect(failedSummary.indexOf("1 项需关注")).toBeLessThan(failedSummary.indexOf("batchCount"));
+    expect(failedSummary.indexOf("1 项需关注")).toBeLessThan(failedSummary.indexOf('data-codex-tool-category-summary="true"'));
     expect(failedSummary).not.toContain("itemChevron");
     expect(failedSummary).toContain('data-codex-tool-status-kind="failed"');
     expect(failedSummary).toContain('data-codex-tool-status-kind="failed" data-slot="tooltip-trigger"');

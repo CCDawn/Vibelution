@@ -420,6 +420,19 @@ describe("normalizeToolActivityStatus / extractToolDisplayCommand", () => {
 });
 
 describe("buildCodexToolActivityPills", () => {
+  it("names a running search by its term instead of its directory scope", () => {
+    for (const toolName of ["grep_search_tool", "search_code_tool", "query_tool"]) {
+      expect(buildCodexToolActivityPills({ toolName, status: "running", language: "zh",
+        toolArguments: { path: ".", pattern: "paintState" } }).subject).toBe("paintState");
+    }
+    expect(subjectFromToolArguments({ toolName: "read_file_tool", language: "zh",
+      toolArguments: { path: "src/alpha.ts", pattern: "paintState" } })).toBe("alpha.ts");
+    for (const toolName of ["personal_assistant_action_tool", "personal_assistant_manage_tool"]) {
+      expect(buildCodexToolActivityPills({ toolName, status: "running", language: "zh",
+        toolArguments: { action: "source_search", path: ".", query: "paintState" } }))
+        .toMatchObject({ actionLabel: "搜索源码", subject: "paintState" });
+    }
+  });
   it("names assistant entity targets without displaying prompts, bodies or credentials", () => {
     const toolArguments = {
       action: "session_update",
