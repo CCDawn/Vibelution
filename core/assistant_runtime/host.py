@@ -1729,7 +1729,15 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
 
     @app.post("/api/assistant/curation")
     def curate(payload: Curation):
-        return native.curate(payload.messageId, payload.action)
+        from core.web.services import session_service
+        try:
+            return native.curate(payload.messageId, payload.action)
+        except session_service.SessionNotFoundError as exc:
+            raise HTTPException(404, detail=str(exc)) from exc
+        except session_service.SessionMessageCurationStateError as exc:
+            raise HTTPException(409, detail=str(exc)) from exc
+        except session_service.SessionValidationError as exc:
+            raise HTTPException(422, detail=str(exc)) from exc
 
     @app.post("/api/assistant/messages")
     def message(payload: Message):
