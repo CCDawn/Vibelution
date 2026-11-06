@@ -204,6 +204,25 @@ describe("shared Launcher update topbar", () => {
     expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 
+  it("keeps a confirmed update failure when the cached native progress cannot be refreshed", async () => {
+    let rejectUpdate!: (error: Error) => void;
+    api.restartLatestLauncher.mockImplementationOnce(() => new Promise((_, reject) => { rejectUpdate = reject; }));
+    api.getLauncherFreshness.mockResolvedValue({ ...available, updateInProgress: false });
+    await mount();
+    await click("更新并重启");
+    await click("确认更新");
+    api.getLauncherFreshness.mockResolvedValue({ ...available, updateInProgress: true });
+    await click("重新检测");
+    api.getLauncherFreshness.mockRejectedValue(new Error("offline"));
+    await act(async () => { rejectUpdate(new Error("构建失败")); await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(host.textContent).toContain("构建失败");
+    expect(host.textContent).not.toContain("仍在等待 Launcher 完成更新");
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("构建失败");
+    expect(button("准备中…").disabled).toBe(true);
+    expect(button("重新检测").disabled).toBe(false);
+    expect(api.restartLatestLauncher).toHaveBeenCalledOnce();
+  });
+
   it.each([
     ["checking", "正在检查更新"],
     ["preparing", "正在准备桌面程序和界面"],

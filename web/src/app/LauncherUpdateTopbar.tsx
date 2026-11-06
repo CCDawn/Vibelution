@@ -49,10 +49,11 @@ export function LauncherUpdateTopbar({ lang }: { lang: "zh" | "en" }) {
   const requestPending = updateMutation.isPending || lastAttempt?.status === "pending";
   const busy = requestPending || awaitingReplacement || freshness?.updateInProgress === true;
   const progressUnknown = busy && freshnessQuery.isError;
-  const failure = (progressUnknown ? (requestPending
+  const requestFailure = lastAttempt?.status === "error" && lastAttempt.error instanceof Error ? lastAttempt.error.message : "";
+  const failure = requestFailure || (progressUnknown ? (requestPending
     ? (zh ? "更新进度暂时未知，仍在等待更新请求完成。可重新检测。" : "Update progress is unknown. Still waiting for the update request. You can check again.")
     : (zh ? "更新进度暂时未知，仍在等待 Launcher 完成更新。可重新检测。" : "Update progress is unknown. Still waiting for Launcher to finish updating. You can check again.")) : "")
-    || (lastAttempt?.status === "error" && lastAttempt.error instanceof Error ? lastAttempt.error.message : "") || freshness?.refreshError
+    || freshness?.refreshError
     || (settledAfterAcceptance && hasUpdate ? (zh ? "更新未完成，Launcher 仍在运行旧版本。请重试。" : "The update did not finish. Launcher is still running the previous version. Please retry.") : "");
   const unknown = freshnessQuery.isError || (!hasUpdate && freshness?.current !== true);
   const checking = freshnessQuery.isFetching && unknown;
@@ -63,7 +64,8 @@ export function LauncherUpdateTopbar({ lang }: { lang: "zh" | "en" }) {
     : updatePhase === "preparing" ? (zh ? "正在准备桌面程序和界面" : "Preparing the desktop app and interface")
       : updatePhase === "saving" ? (zh ? "正在保存任务" : "Saving tasks")
         : updatePhase === "replacing" ? (zh ? "正在重启 Launcher" : "Restarting Launcher") : (zh ? "更新处理中" : "Update in progress");
-  const status = progressUnknown ? (zh ? "无法确认更新状态" : "Update status unavailable")
+  const status = requestFailure && progressUnknown ? (zh ? "更新失败" : "Update failed")
+    : progressUnknown ? (zh ? "无法确认更新状态" : "Update status unavailable")
     : busy ? phaseStatus
     : checking ? (zh ? "正在检测" : "Checking")
       : unknown ? (zh ? "无法确认版本" : "Version unavailable")
@@ -97,7 +99,7 @@ export function LauncherUpdateTopbar({ lang }: { lang: "zh" | "en" }) {
         ? `${zh ? "桌面构建" : "Desktop build"} ${freshness.availableBuild.id.slice(0, 12)}`
         : freshness?.availableBuildState === "not_built" ? (zh ? "待构建" : "Not built yet") : (zh ? "未知" : "Unknown")}</dd>
     </dl>
-    {failure ? <p className={progressUnknown ? styles.metadata : styles.failure} role={progressUnknown ? "status" : "alert"}>{failure}</p> : null}
+    {failure ? <p className={progressUnknown && !requestFailure ? styles.metadata : styles.failure} role={progressUnknown && !requestFailure ? "status" : "alert"}>{failure}</p> : null}
     <div className={styles.pageActions}>
       {busy || (!unknown && (hasUpdate || failure))
         ? <VButton variant="primary" isPending={busy} isDisabled={busy} onPress={() => setConfirming(true)}>{busy ? (zh ? "准备中…" : "Preparing…") : failure ? (zh ? "重试更新" : "Retry update") : (zh ? "更新并重启" : "Update and restart")}</VButton>
