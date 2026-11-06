@@ -132,9 +132,9 @@ describe("ChatConversationComposerBridge", () => {
 
   it.each([
     { name: "busy", state: { sessionBusy: true }, pending: false, actionDisabled: false },
-    { name: "submit pending", state: { submitPending: true }, pending: false, actionDisabled: false },
+    { name: "submit pending", state: { submitPending: true }, pending: true, actionDisabled: true },
     { name: "stopping", state: { sessionStopping: true }, pending: true, actionDisabled: true },
-    { name: "busy with pending submit", state: { sessionBusy: true, submitPending: true }, pending: false, actionDisabled: false },
+    { name: "busy with pending submit", state: { sessionBusy: true, submitPending: true }, pending: true, actionDisabled: true },
     { name: "busy while stop is pending", state: { sessionBusy: true, stopPending: true }, pending: true, actionDisabled: true },
     { name: "busy with submit pending and stopping", state: { sessionBusy: true, submitPending: true, sessionStopping: true }, pending: true, actionDisabled: true },
   ])("prioritizes stop over continue when $name", ({ state: overrides, pending, actionDisabled }) => {
@@ -233,7 +233,7 @@ describe("ChatConversationComposerBridge", () => {
     expect(dictionary.en.messageInputPlaceholder).not.toContain("current session");
   });
 
-  it("keeps the composer enabled while submit is pending but the session is idle", () => {
+  it("disables duplicate submission while the initial acknowledgement is pending", () => {
     const state = buildConversationComposerBridgeState({
       ...emptyStateInput(),
       submitPending: true,
@@ -243,8 +243,11 @@ describe("ChatConversationComposerBridge", () => {
     });
 
     expect(state.actionMode).toBe("stop");
-    expect(state.disabled).toBe(false);
-    expect(state.actionDisabled).toBe(false);
+    expect(state.disabled).toBe(true);
+    expect(state.actionDisabled).toBe(true);
+    expect(state.submitPending).toBe(true);
+    expect(state.stopPending).toBe(false);
+    expect(state.pending).toBe(true);
     expect(state.placeholder).toBe("message");
   });
 

@@ -262,7 +262,7 @@ export const ConversationView = React.memo(function ConversationView({
   composerActionMode,
   composerPending,
   composerStopPending = false,
-  composerQueueSendPending = false,
+  composerSubmitPending = false,
   composerSafeGuidancePending = false,
   composerInterruptGuidancePending = false,
   composerError,
@@ -296,7 +296,6 @@ export const ConversationView = React.memo(function ConversationView({
   safeGuidancePendingLabel,
   interruptGuidanceLabel,
   interruptGuidancePendingLabel,
-  queueSendPendingLabel,
   editingMessageId,
   editUserMessageLabel,
   editUserMessageDisabled,
@@ -974,7 +973,7 @@ export const ConversationView = React.memo(function ConversationView({
     composerActionMode,
     composerPending,
     composerStopPending,
-    composerQueueSendPending,
+    composerSubmitPending,
     composerSafeGuidancePending,
     composerInterruptGuidancePending,
     composerError,
@@ -1009,7 +1008,6 @@ export const ConversationView = React.memo(function ConversationView({
     safeGuidancePendingLabel,
     interruptGuidanceLabel,
     interruptGuidancePendingLabel,
-    queueSendPendingLabel,
     editingMessageId,
     composerModeNotice,
     composerModeTargetPreview,
@@ -1621,10 +1619,13 @@ export const ConversationView = React.memo(function ConversationView({
         </div>
       ) : null}
 
-      <div ref={timelineAreaRef} className={styles.timelineArea}>
+      <div ref={timelineAreaRef} className={[
+        styles.timelineArea,
+        composerVariant === "codex" && !companionMode ? styles.timelineAreaWithAvatarGutters : "",
+      ].filter(Boolean).join(" ")}>
       <VScrollRegion
         ref={timelineRef}
-        className={styles.timeline}
+        className={composerVariant === "codex" && !companionMode ? styles.timelineWithAvatarGutters : styles.timeline}
         data-conversation-following={followLatestRef.current ? "true" : "false"}
         data-conversation-reading-anchor={readingViewportAnchorRef.current?.rowKey ?? ""}
       >

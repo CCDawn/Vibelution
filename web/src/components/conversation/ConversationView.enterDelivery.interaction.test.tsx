@@ -140,10 +140,9 @@ describe("composer Enter delivery (running Enter sends immediately)", () => {
       if (delivery === "enter") {
         pressEnter(textarea);
       } else {
-        const queueButton = Array.from(container?.querySelectorAll<HTMLButtonElement>("button[title]") ?? [])
-          .find((button) => (button.title || "").includes("此按钮加入队列"));
-        expect(queueButton).toBeDefined();
-        queueButton?.click();
+        const primaryButton = container?.querySelector<HTMLButtonElement>('[data-testid="composer-primary-action"]');
+        expect(primaryButton).toBeTruthy();
+        primaryButton?.click();
       }
     });
     expect(onOpenSideChat).toHaveBeenCalledWith("查一下配置", true);
@@ -213,7 +212,7 @@ describe("composer Enter delivery (running Enter sends immediately)", () => {
     expect(onSafeGuidance).not.toHaveBeenCalled();
   });
 
-  it("routes the interrupt guidance pill to its handler and never to send/stop", async () => {
+  it("routes the interrupt guidance menu action only to its handler", async () => {
     const onSubmit = vi.fn();
     const onSafeGuidance = vi.fn();
     const onInterruptGuidance = vi.fn();
@@ -225,25 +224,26 @@ describe("composer Enter delivery (running Enter sends immediately)", () => {
     });
 
     typeIntoTextarea(textarea, "停下这轮，改问预算");
-    await act(async () => {
-      const interruptButton = container?.querySelector<HTMLButtonElement>(
-        'button[data-testid="composer-interrupt-guidance"]',
-      );
-      expect(interruptButton).not.toBeNull();
-      expect(interruptButton?.getAttribute("title")).toBe(dictionary.zh.interruptGuidanceHint);
-      interruptButton?.click();
-    });
+    const menuTrigger = container?.querySelector<HTMLButtonElement>('button[aria-label="添加与更多操作"]');
+    expect(menuTrigger).toBeTruthy();
+    await act(async () => menuTrigger?.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "ArrowDown", bubbles: true, cancelable: true,
+    })));
+    const interruptButton = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+      .find(button => button.textContent === dictionary.zh.interruptGuidance);
+    expect(interruptButton).toBeTruthy();
+    expect(interruptButton?.getAttribute("title")).toBe(dictionary.zh.interruptGuidanceHint);
+    await act(async () => interruptButton?.click());
     expect(onInterruptGuidance).toHaveBeenCalledTimes(1);
     expect(onSubmit).not.toHaveBeenCalled();
     expect(onSafeGuidance).not.toHaveBeenCalled();
 
-    // An empty draft hides the pill again.
+    // An empty draft restores the single primary stop control.
     await act(async () => {
       typeIntoTextarea(textarea, "");
     });
-    expect(
-      container?.querySelector<HTMLButtonElement>('button[data-testid="composer-interrupt-guidance"]'),
-    ).toBeNull();
+    expect(container?.querySelector('[data-composer-action="stop"]')).toBeTruthy();
+    expect(container?.querySelector('[data-testid="composer-interrupt-guidance"]')).toBeNull();
   });
 
   it("queues on Enter when the draft rides attachments or references", async () => {
@@ -313,19 +313,18 @@ describe("composer Enter delivery (running Enter sends immediately)", () => {
     expect(onSafeGuidance).not.toHaveBeenCalled();
   });
 
-  it("labels the primary control with the keyboard contract per state", async () => {
+  it("names the single icon action for idle send and running guidance", async () => {
     const onSubmit = vi.fn();
     const textarea = await renderEnterDeliveryComposer({
       actionMode: "send",
       onSubmit,
     });
-    const idleHint = Array.from(container?.querySelectorAll<HTMLButtonElement>("button[title]") ?? [])
-      .map((button) => button.getAttribute("title") ?? "")
-      .find((title) => title.includes("Enter"));
-    expect(idleHint).toBe(dictionary.zh.composerSendEnterHint);
+    expect(container?.querySelector('[data-testid="composer-primary-action"]')?.getAttribute("aria-label"))
+      .toBe(dictionary.zh.send);
 
-    // Re-render in stop mode: with a draft the queue primary points at
-    // immediate Enter delivery and names itself as the queue entry.
+    await act(async () => root?.unmount());
+    container?.remove();
+    // A running text draft uses the same guidance delivery as Enter.
     const stopGuidance = vi.fn();
     const stopSubmit = vi.fn();
     const busyTextarea = await renderEnterDeliveryComposer({
@@ -337,9 +336,8 @@ describe("composer Enter delivery (running Enter sends immediately)", () => {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    const busyHint = Array.from(container?.querySelectorAll<HTMLButtonElement>("button[title]") ?? [])
-      .map((button) => button.getAttribute("title") ?? "")
-      .find((title) => title.includes("Enter") && title.includes("此按钮加入队列"));
-    expect(busyHint).toBe(dictionary.zh.composerQueueSteerEnterHint);
+    const primary = container?.querySelector<HTMLButtonElement>('[data-testid="composer-primary-action"]');
+    expect(primary?.getAttribute("aria-label")).toBe(dictionary.zh.safeGuidance);
+    expect(primary?.getAttribute("data-composer-action")).toBe("steer");
   });
 });

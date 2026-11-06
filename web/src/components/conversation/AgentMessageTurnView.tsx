@@ -10,7 +10,7 @@ type AgentMessageTurnViewProps = {
   sectionKinds?: string;
   className: string;
   compactHeader: boolean;
-  /** Single-speaker conversations keep identity in their page title. */
+  /** Single-speaker conversations keep speaker metadata in their page title. */
   minimalIdentity?: boolean;
   avatar: ReactNode;
   speakerLabel: ReactNode;
@@ -54,9 +54,9 @@ export function AgentMessageTurnView({
       data-agent-section-kinds={sectionKinds || undefined}
       data-conversation-identity={minimalIdentity ? "minimal" : "speaker"}
     >
-      {!minimalIdentity ? <div className={styles.turnAvatar} aria-hidden="true">
+      <div className={styles.turnAvatar} aria-hidden="true" data-conversation-avatar="true">
         {compactHeader ? null : avatar}
-      </div> : null}
+      </div>
       <div className={styles.turnContent}>
         {compactHeader || minimalIdentity ? null : (
           <div className={styles.turnMeta}>

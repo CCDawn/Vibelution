@@ -67,132 +67,146 @@ def import_markdown_space(
     chosen_space_name = str(space_name or "").strip() or resolved_source.name
     space_id = _safe_id(chosen_space_name, default=_safe_id(resolved_source.name, default="space"))
     space_root = _user_content_root(normalized_user_id) / space_id
+    if space_root.exists() and not overwrite:
+        raise UserContentMarkdownError("space_exists")
+
+    # Atomic-import discipline (mirrors team_knowledge source_inbox staging):
+    # the complete new space is built inside a same-volume sibling staging
+    # directory, so the canonical space name only ever flips via one
+    # ``os.replace`` at commit time. Path strings persisted in the manifest
+    # and indexes keep pointing at the FINAL layout; a staging failure removes
+    # the staging tree and leaves the live space untouched, and a commit
+    # failure restores the previous space from its backup.
     pages_root = space_root / "pages"
     index_root = space_root / "index"
     imports_root = space_root / "imports"
+    staging_root = space_root.with_name(f"{space_id}.staging.{_timestamp_token()}")
+    staging_pages_root = staging_root / "pages"
+    staging_index_root = staging_root / "index"
+    staging_imports_root = staging_root / "imports"
 
-    if space_root.exists():
-        if not overwrite:
-            raise UserContentMarkdownError("space_exists")
-        backup_root = space_root.with_name(f"{space_id}.backup.{_timestamp_token()}")
-        if backup_root.exists():
-            shutil.rmtree(backup_root)
-        shutil.move(str(space_root), str(backup_root))
+    try:
+        staging_pages_root.mkdir(parents=True, exist_ok=False)
+        staging_index_root.mkdir(parents=True, exist_ok=False)
+        staging_imports_root.mkdir(parents=True, exist_ok=False)
 
-    pages_root.mkdir(parents=True, exist_ok=True)
-    index_root.mkdir(parents=True, exist_ok=True)
-    imports_root.mkdir(parents=True, exist_ok=True)
+        indexed_at = utc_now_iso()
+        pages = []
+        links = []
+        task_rows = []
+        all_tags: set[str] = set()
 
-    indexed_at = utc_now_iso()
-    pages = []
-    links = []
-    task_rows = []
-    all_tags: set[str] = set()
+        for row in scan["pageRows"]:
+            relative_path = row["relativePath"]
+            source_file = _validated_source_file(row["sourcePath"], resolved_source)
+            if source_file is None:
+                continue
+            target_path = staging_pages_root / relative_path
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_file, target_path)
 
-    for row in scan["pageRows"]:
-        relative_path = row["relativePath"]
-        source_file = _validated_source_file(row["sourcePath"], resolved_source)
-        if source_file is None:
-            continue
-        target_path = pages_root / relative_path
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source_file, target_path)
+            page = _page_payload(relative_path, row, indexed_at=indexed_at)
+            pages.append(page)
+            all_tags.update(page["tags"])
+            if page["taskCounts"]["total"] > 0:
+                task_rows.append(
+                    {
+                        "pageId": page["pageId"],
+                        "title": page["title"],
+                        "relativePath": page["relativePath"],
+                        "taskCounts": page["taskCounts"],
+                    }
+                )
+            for wikilink in page["wikilinks"]:
+                links.append(
+                    {
+                        "sourcePageId": page["pageId"],
+                        "sourceRelativePath": page["relativePath"],
+                        "sourceTitle": page["title"],
+                        "targetTitle": wikilink,
+                    }
+                )
 
-        page = _page_payload(relative_path, row, indexed_at=indexed_at)
-        pages.append(page)
-        all_tags.update(page["tags"])
-        if page["taskCounts"]["total"] > 0:
-            task_rows.append(
-                {
-                    "pageId": page["pageId"],
-                    "title": page["title"],
-                    "relativePath": page["relativePath"],
-                    "taskCounts": page["taskCounts"],
-                }
-            )
-        for wikilink in page["wikilinks"]:
-            links.append(
-                {
-                    "sourcePageId": page["pageId"],
-                    "sourceRelativePath": page["relativePath"],
-                    "sourceTitle": page["title"],
-                    "targetTitle": wikilink,
-                }
-            )
+        pages.sort(key=lambda item: (item["relativePath"], item["pageId"]))
+        links.sort(key=lambda item: (item["sourceRelativePath"], item["targetTitle"]))
+        task_rows.sort(key=lambda item: item["relativePath"])
 
-    pages.sort(key=lambda item: (item["relativePath"], item["pageId"]))
-    links.sort(key=lambda item: (item["sourceRelativePath"], item["targetTitle"]))
-    task_rows.sort(key=lambda item: item["relativePath"])
-
-    source_hash = _sha256_for_directory(scan["pageRows"])
-    manifest = {
-        "schemaVersion": SCHEMA_VERSION,
-        "userId": normalized_user_id,
-        "spaceId": space_id,
-        "spaceName": chosen_space_name,
-        "canonicalPagesRoot": str(pages_root),
-        "indexRoot": str(index_root),
-        "importsRoot": str(imports_root),
-        "managedRoot": str(space_root),
-        "pageCount": len(pages),
-        "sourceRef": {
-            "path": str(resolved_source),
-            "sha256": source_hash,
-        },
-        "summary": scan["summary"],
-        "updatedAt": indexed_at,
-        "importedAt": indexed_at,
-    }
-    page_index = {
-        "schemaVersion": SCHEMA_VERSION,
-        "spaceId": space_id,
-        "updatedAt": indexed_at,
-        "pages": pages,
-    }
-    link_index = {
-        "schemaVersion": SCHEMA_VERSION,
-        "spaceId": space_id,
-        "updatedAt": indexed_at,
-        "linkCount": len(links),
-        "links": links,
-    }
-    task_index = {
-        "schemaVersion": SCHEMA_VERSION,
-        "spaceId": space_id,
-        "updatedAt": indexed_at,
-        "taskPageCount": len(task_rows),
-        "tasks": task_rows,
-    }
-    object_index = {
-        "schemaVersion": SCHEMA_VERSION,
-        "spaceId": space_id,
-        "updatedAt": indexed_at,
-        "objects": {
-            "tags": sorted(all_tags),
-            "pageIds": [page["pageId"] for page in pages],
-            "wikilinkCount": len(links),
-            "taskCount": sum(int(page["taskCounts"]["total"]) for page in pages),
-        },
-    }
-
-    _write_json(space_root / "manifest.json", manifest)
-    _write_json(index_root / "page_index.json", page_index)
-    _write_json(index_root / "link_index.json", link_index)
-    _write_json(index_root / "task_index.json", task_index)
-    _write_json(index_root / "object_index.json", object_index)
-    _append_jsonl(
-        imports_root / "import_log.jsonl",
-        {
+        source_hash = _sha256_for_directory(scan["pageRows"])
+        manifest = {
             "schemaVersion": SCHEMA_VERSION,
-            "importedAt": indexed_at,
             "userId": normalized_user_id,
             "spaceId": space_id,
             "spaceName": chosen_space_name,
-            "sourcePath": str(resolved_source),
-            "sourceSha256": source_hash,
+            "canonicalPagesRoot": str(pages_root),
+            "indexRoot": str(index_root),
+            "importsRoot": str(imports_root),
+            "managedRoot": str(space_root),
             "pageCount": len(pages),
-        },
-    )
+            "sourceRef": {
+                "path": str(resolved_source),
+                "sha256": source_hash,
+            },
+            "summary": scan["summary"],
+            "updatedAt": indexed_at,
+            "importedAt": indexed_at,
+        }
+        page_index = {
+            "schemaVersion": SCHEMA_VERSION,
+            "spaceId": space_id,
+            "updatedAt": indexed_at,
+            "pages": pages,
+        }
+        link_index = {
+            "schemaVersion": SCHEMA_VERSION,
+            "spaceId": space_id,
+            "updatedAt": indexed_at,
+            "linkCount": len(links),
+            "links": links,
+        }
+        task_index = {
+            "schemaVersion": SCHEMA_VERSION,
+            "spaceId": space_id,
+            "updatedAt": indexed_at,
+            "taskPageCount": len(task_rows),
+            "tasks": task_rows,
+        }
+        object_index = {
+            "schemaVersion": SCHEMA_VERSION,
+            "spaceId": space_id,
+            "updatedAt": indexed_at,
+            "objects": {
+                "tags": sorted(all_tags),
+                "pageIds": [page["pageId"] for page in pages],
+                "wikilinkCount": len(links),
+                "taskCount": sum(int(page["taskCounts"]["total"]) for page in pages),
+            },
+        }
+
+        _write_json(staging_root / "manifest.json", manifest)
+        _write_json(staging_index_root / "page_index.json", page_index)
+        _write_json(staging_index_root / "link_index.json", link_index)
+        _write_json(staging_index_root / "task_index.json", task_index)
+        _write_json(staging_index_root / "object_index.json", object_index)
+        _append_jsonl(
+            staging_imports_root / "import_log.jsonl",
+            {
+                "schemaVersion": SCHEMA_VERSION,
+                "importedAt": indexed_at,
+                "userId": normalized_user_id,
+                "spaceId": space_id,
+                "spaceName": chosen_space_name,
+                "sourcePath": str(resolved_source),
+                "sourceSha256": source_hash,
+                "pageCount": len(pages),
+            },
+        )
+    except Exception:
+        # Staging failed: drop the incomplete tree; the live space (if any)
+        # was never touched, so the previous import stays fully served.
+        shutil.rmtree(staging_root, ignore_errors=True)
+        raise
+
+    _commit_staged_markdown_space(staging_root, space_root)
 
     return {
         "ok": True,
@@ -211,6 +225,31 @@ def import_markdown_space(
         },
         "updatedAt": indexed_at,
     }
+
+
+def _commit_staged_markdown_space(staging_root: Path, space_root: Path) -> None:
+    """Swap a fully staged space into its canonical location.
+
+    Commit order keeps the previous space recoverable at every step: an
+    existing space first moves aside to its ``.backup.<token>`` sibling, then
+    the staged tree takes the canonical name in one same-volume
+    ``os.replace`` (directory rename on an absent target). If that replace
+    fails, the backup moves back so callers never observe a half-swapped
+    space, and the staging tree is removed before re-raising.
+    """
+    backup_root = None
+    if space_root.exists():
+        backup_root = space_root.with_name(f"{space_root.name}.backup.{_timestamp_token()}")
+        if backup_root.exists():
+            shutil.rmtree(backup_root)
+        shutil.move(str(space_root), str(backup_root))
+    try:
+        os.replace(staging_root, space_root)
+    except OSError:
+        if backup_root is not None and not space_root.exists():
+            shutil.move(str(backup_root), str(space_root))
+        shutil.rmtree(staging_root, ignore_errors=True)
+        raise
 
 
 def list_markdown_spaces(*, user_id: str = "default") -> dict[str, Any]:
