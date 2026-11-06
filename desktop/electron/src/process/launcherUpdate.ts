@@ -2,6 +2,7 @@ import type { OrchestratedLifecycleResult } from "../protocol/launcherIpcHost.js
 import type { ActiveWorkStatus } from "../shutdown/shutdownCoordinator.js";
 import { ACTIVE_WORK_BLOCK_MESSAGE_RESTART } from "./activeWorkGuard.js";
 import type { DesktopShellStatus } from "./desktopShellFreshness.js";
+import { parseLauncherBuild, type LauncherBuild } from "./launcherBuildIdentity.js";
 
 /** A version read is not permission to stop a workspace. Recheck after preparation. */
 export async function executeLauncherUpdate(input: {
@@ -80,19 +81,30 @@ export function projectLauncherUpdateFreshness(input: {
   shell?: DesktopShellStatus;
   activeWork: ActiveWorkStatus;
   updating: boolean;
+  runningBuild?: LauncherBuild | null;
 }): Record<string, unknown> {
   const raw = typeof input.raw === "object" && input.raw !== null ? input.raw as Record<string, unknown> : {};
   const shell = input.shell;
   const known = desktopShellVersionKnown(shell);
-  const current = input.packaged ? (known ? !shell.stale : null) : raw.current;
+  let current = input.packaged ? (known ? !shell.stale : null) : raw.current;
   const shellStale = input.packaged ? (known && shell.stale === true) : raw.shellStale === true;
+  const nativeUpdate = current === false || shellStale;
+  const hasBuildSnapshot = input.runningBuild !== undefined;
+  const availableBuild = parseLauncherBuild(raw.availableBuild, input.packaged ? "packaged" : "unpackaged");
+  const availableBuildState = raw.availableBuildState === "not_built" ? "not_built"
+    : raw.availableBuildState === "ready" && availableBuild ? "ready" : "unknown";
+  const buildsDiffer = Boolean(input.runningBuild && availableBuild && input.runningBuild.id !== availableBuild.id);
+  if (hasBuildSnapshot) {
+    current = input.runningBuild && availableBuildState === "ready"
+      ? (buildsDiffer || nativeUpdate ? false : current === true ? true : null) : null;
+  }
   return {
     ...raw,
     current: current === true ? true : current === false ? false : null,
     label: current === true ? "Launcher 已是最新" : current === false || shellStale ? "Launcher 落后本地代码" : "Launcher 版本未知",
     shellStale,
     shellReason: input.packaged ? (shell?.reason ?? "inspection_failed") : raw.shellReason,
-    updateAvailable: current === false || shellStale,
+    updateAvailable: nativeUpdate || buildsDiffer || (hasBuildSnapshot && availableBuildState === "not_built"),
     activeWorkState: input.activeWork.state,
     activeWorkCount: input.activeWork.count ?? input.activeWork.items?.length ?? 0,
     updateInProgress: input.updating,
@@ -100,6 +112,16 @@ export function projectLauncherUpdateFreshness(input: {
       runningShort: shell?.packagedSourceCommit?.slice(0, 12) || "",
       headShort: shell?.currentCommit?.slice(0, 12) || "",
       refreshError: shell?.refreshBlocked ? shell.refreshBlockedDetail || "上次 Launcher 更新失败，请重试。" : "",
+    } : {}),
+    ...(hasBuildSnapshot ? {
+      runningBuild: input.runningBuild,
+      availableBuild: availableBuildState === "ready" ? availableBuild : null,
+      availableBuildState,
+      // Commit fields remain source metadata; never refill them from a short-lived bridge's HEAD.
+      runningCommit: input.runningBuild?.sourceCommit ?? "",
+      runningShort: input.runningBuild?.sourceCommit?.slice(0, 12) ?? "",
+      headCommit: availableBuild?.sourceCommit ?? "",
+      headShort: availableBuild?.sourceCommit?.slice(0, 12) ?? "",
     } : {}),
   };
 }

@@ -212,7 +212,7 @@ describe("ConversationProcessDisclosure", () => {
     );
 
     expect(html).toContain("Tool failed 2.9s");
-    expect(html).toContain("cli_tool");
+    expect(html).toContain("Run command");
     expect(html).not.toContain("stage");
     expect(html).toContain('data-codex-process-state="failed"');
     expect(html).not.toContain('open=""');
@@ -237,17 +237,17 @@ describe("ConversationProcessDisclosure", () => {
     const label = processLabel([failed], "zh");
 
     expect(label).toContain("工具失败");
-    expect(label).toContain("cli_tool");
+    expect(label).toContain("执行命令");
     expect(label).not.toContain(failed.summary);
   });
 
-  it("uses a readable assistant action in the collapsed summary and preserves ordinary tool identity", () => {
+  it("uses the same readable action labels for assistant and ordinary failures", () => {
     const failed = { ...processCell("failed"), title: "personal_assistant_action_tool" };
     expect(processLabel([failed], "zh")).toContain("处理助理请求");
     expect(processLabel([failed], "zh")).not.toContain("personal_assistant_action_tool");
     expect(processLabel([{ ...failed, toolArguments: { action: "dispatch" } }], "zh")).toContain("派遣只读任务");
     expect(processLabel([failed], "en")).toContain("Handle assistant request");
-    expect(processLabel([processCell("failed")], "zh")).toContain("cli_tool");
+    expect(processLabel([processCell("failed")], "zh")).toContain("执行命令");
   });
 
   it("marks a failed tool call as recovered when the same tool succeeds later", () => {
@@ -304,7 +304,7 @@ describe("ConversationProcessDisclosure", () => {
     expect(processState([failed, otherTool])).toBe("failed");
     expect(processLabel([failed, otherTool], "zh")).toContain("工具失败");
     expect(processLabel([failed, otherTool], "zh")).toContain(
-      "challenge_cup_iteration_writeback_tool",
+      "Challenge Cup Iteration Writeback",
     );
   });
 });

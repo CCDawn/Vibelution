@@ -560,8 +560,14 @@ describe("Launcher freshness serves the settled state-refresh snapshot before sp
   function snapshotFreshnessHarness(launcherStateStore: ReturnType<typeof settledSnapshotStore>, afterObservation?: () => void) {
     const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
     const region = main.slice(main.indexOf("async function resolveLauncherUpdateActiveWork"), main.indexOf("async function exitAndRelaunchLauncherShell"));
+    const app = { isPackaged: false };
+    const build = () => ({ kind: app.isPackaged ? "packaged" as const : "unpackaged" as const,
+      id: "c".repeat(64), electronTree: "a".repeat(40), sourceCommit: "b".repeat(40) });
+    const candidate = { get availableBuild() { return build(); }, availableBuildState: "ready" };
     const sandbox = {
-      app: { isPackaged: false },
+      app,
+      get runningLauncherBuild() { return build(); },
+      launcherBuildCandidateObservation: { identity: JSON.stringify(["test-workspace", 0]), observedAtMs: Date.now(), raw: candidate },
       shellRefreshInFlight: false,
       lastKnownDesktopShell: undefined as DesktopShellStatus | undefined,
       lastKnownDesktopShellObservation: undefined as { identity: string; observedAtMs: number } | undefined,
@@ -582,7 +588,7 @@ describe("Launcher freshness serves the settled state-refresh snapshot before sp
       // so the fallback's task probe flows through this path-aware bridge mock.
       orchestrateLauncherApi: vi.fn(async (path: string, _payload?: unknown) => path === "status"
         ? { lifecycleProof: { activeWorkRuns: { count: 0, items: [] } } }
-        : { current: false, reason: "backend_behind_local_code" }),
+        : { current: false, reason: "backend_behind_local_code", ...candidate }),
       inspectCurrentDesktopShell: vi.fn(),
       launcherStateStore,
       readFreshness: undefined as unknown as () => Promise<Record<string, unknown>>,
@@ -621,7 +627,7 @@ describe("Launcher freshness serves the settled state-refresh snapshot before sp
     const results = await Promise.all([input.readFreshness(), input.readFreshness(), input.readFreshness()]);
     expect(results).toEqual(Array(3).fill(expect.objectContaining({ current: true })));
     expect(input.inspectCurrentDesktopShell).toHaveBeenCalledOnce();
-    expect(input.orchestrateLauncherApi.mock.calls.filter(([path]) => path === "freshness")).toHaveLength(1);
+    expect(input.orchestrateLauncherApi.mock.calls.filter(([path]) => path.startsWith("freshness?"))).toHaveLength(1);
     expect(input.orchestrateLauncherApi.mock.calls.filter(([path]) => path === "status")).toHaveLength(1);
     expect(input.recordSupervisorEventFallbackLocally).toHaveBeenCalledOnce();
   });
@@ -651,7 +657,7 @@ describe("Launcher freshness serves the settled state-refresh snapshot before sp
   it("projects the live update flag after shared inputs finish", async () => {
     const input = snapshotFreshnessHarness(settledSnapshotStore({ valid: false }));
     let finish!: (value: unknown) => void;
-    input.orchestrateLauncherApi.mockImplementation(async path => path === "freshness"
+    input.orchestrateLauncherApi.mockImplementation(async path => path.startsWith("freshness?")
       ? new Promise(resolve => { finish = resolve; })
       : { lifecycleProof: { activeWorkRuns: { count: 0, items: [] } } });
     const reading = input.readFreshness();
@@ -670,7 +676,7 @@ describe("Launcher freshness serves the settled state-refresh snapshot before sp
       return { state: "idle", message: "" };
     });
     expect(await input.readFreshness()).toMatchObject({ current: false });
-    expect(input.orchestrateLauncherApi.mock.calls.filter(([path]) => path === "freshness")).toHaveLength(1);
+    expect(input.orchestrateLauncherApi.mock.calls.filter(([path]) => path.startsWith("freshness?"))).toHaveLength(1);
   });
 
   it("rejects a result invalidated between shared observation and consumer projection", async () => {
@@ -701,7 +707,7 @@ describe("Launcher freshness serves the settled state-refresh snapshot before sp
       updateAvailable: true,
       activeWorkState: "idle"
     });
-    const freshnessCalls = input.orchestrateLauncherApi.mock.calls.filter(([path]) => path === "freshness");
+    const freshnessCalls = input.orchestrateLauncherApi.mock.calls.filter(([path]) => path.startsWith("freshness?"));
     expect(freshnessCalls).toHaveLength(1);
     expect(freshnessCalls[0][1]).toMatchObject({ path: "freshness", schemaVersion: 1 });
   });
