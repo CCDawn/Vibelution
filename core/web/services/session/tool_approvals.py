@@ -105,6 +105,10 @@ class _ApprovalRequest:
     external_task_id: str = ""
     external_arguments_json: str = field(default="", repr=False)
     external_execution_arguments_json: str = field(default="", repr=False)
+    # 「审批即证据」：沙箱受控 shell 命令的执行哈希（sha256 of normalized
+    # command text）。仅服务端持有，用于批准时签发一次性执行证据；空串表示
+    # 本请求不涉及可执行命令（如 write_stdin）或宿主沙箱自身即边界。
+    command_execution_hash: str = field(default="", repr=False)
     status: str = "pending"
     decision: str = ""
     resolved_at: str = ""
@@ -432,10 +436,12 @@ def authorize_or_wait(
         normalized_tool,
         _session_grant_key(session_grant_scope),
     )
+    command_execution_hash = _command_execution_evidence_hash(normalized_tool, tool_args)
     native_management = False
     if normalized_tool == "personal_assistant_manage_tool":
         from core.web.services.local_assistant.consent import _native_launcher
         native_management = _native_launcher({"agentId": normalized_agent, "sessionId": normalized_session})
+    grant_short_circuit = ""
     with _LOCK:
         # Assistant manage low-risk actions with an active delegation window
         # are executed directly; the tier table stays server-owned.
@@ -443,8 +449,8 @@ def authorize_or_wait(
             return ToolApprovalOutcome(True, "approved_for_action_window")
         if normalized_approval != "always":
             if grant_key in _SESSION_GRANTS:
-                return ToolApprovalOutcome(True, "approved_for_session")
-            if (
+                grant_short_circuit = "approved_for_session"
+            elif (
                 host_grant_key
                 and (
                     normalized_session,
@@ -456,8 +462,8 @@ def authorize_or_wait(
                 )
                 in _SESSION_GRANTS
             ):
-                return ToolApprovalOutcome(True, "approved_for_session")
-            if (
+                grant_short_circuit = "approved_for_session"
+            elif (
                 normalized_session,
                 normalized_agent,
                 normalized_config_revision,
@@ -465,19 +471,31 @@ def authorize_or_wait(
                 normalized_tool,
                 TOOL_LEVEL_SESSION_GRANT_KEY,
             ) in _SESSION_GRANTS:
-                return ToolApprovalOutcome(True, "approved_for_session")
-            if _has_durable_grant(
+                grant_short_circuit = "approved_for_session"
+            elif _has_durable_grant(
                 agent_id=normalized_agent,
                 tool_name=normalized_tool,
                 grant_key=_session_grant_key(session_grant_scope),
             ):
-                return ToolApprovalOutcome(True, "approved_for_agent")
-            if host_grant_key and _has_durable_grant(
+                grant_short_circuit = "approved_for_agent"
+            elif host_grant_key and _has_durable_grant(
                 agent_id=normalized_agent,
                 tool_name=normalized_tool,
                 grant_key=host_grant_key,
             ):
-                return ToolApprovalOutcome(True, "approved_for_agent")
+                grant_short_circuit = "approved_for_agent"
+
+    if grant_short_circuit:
+        # 会话/持久授权源自用户更早的显式批准：Windows 未验证沙箱下，被授权的
+        # 本次执行同样需要一次性执行证据，否则「批准过」也会撞沙箱死路。
+        _mint_command_execution_evidence(
+            session_id=normalized_session,
+            turn_id=normalized_turn,
+            call_id=normalized_call,
+            tool_name=normalized_tool,
+            command_execution_hash=command_execution_hash,
+        )
+        return ToolApprovalOutcome(True, grant_short_circuit)
 
     if not reminder_recovery and _can_auto_approve(
         permission_preset=normalized_permission_preset,
@@ -508,6 +526,7 @@ def authorize_or_wait(
         external_task_id=external_task_id,
         external_arguments_json=external_arguments_json or "",
         external_execution_arguments_json=external_execution_arguments_json or "",
+        command_execution_hash=command_execution_hash,
     )
     if reminder_recovery:
         from core.assistant_runtime.actions import bind_reminder_recovery_request
@@ -686,6 +705,7 @@ def _get_or_create_request(
     external_task_id: str = "",
     external_arguments_json: str = "",
     external_execution_arguments_json: str = "",
+    command_execution_hash: str = "",
 ) -> _ApprovalRequest:
     key = (session_id, turn_id, call_id)
     with _LOCK:
@@ -744,6 +764,7 @@ def _get_or_create_request(
             external_task_id=external_task_id,
             external_arguments_json=external_arguments_json,
             external_execution_arguments_json=external_execution_arguments_json,
+            command_execution_hash=command_execution_hash,
         )
         _REQUESTS[request.request_id] = request
         _REQUEST_IDS_BY_CALL[key] = request.request_id
@@ -849,6 +870,20 @@ def _resolve_request_locked(request: _ApprovalRequest, decision: str, *, record_
         request.status = "declined"
     else:
         request.status = "cancelled"
+    if (
+        decision in {"accept", "acceptForSession", "acceptForSessionTool", "acceptAlways"}
+        and not request.external_task_id
+    ):
+        # 「审批即证据」：操作者显式批准的沙箱受控命令在批准落账时签发一次性
+        # 执行证据；拒绝/取消/过期路径绝不签发。外部任务批准的执行不在本进程
+        # 沙箱链路，不签发。
+        _mint_command_execution_evidence(
+            session_id=request.session_id,
+            turn_id=request.turn_id,
+            call_id=request.call_id,
+            tool_name=request.tool_name,
+            command_execution_hash=request.command_execution_hash,
+        )
     if request.external_task_id:
         request.external_arguments_json = ""
         request.external_execution_arguments_json = ""
@@ -1262,6 +1297,65 @@ def _is_safe_readonly_git_cli(tool_args: Mapping[str, Any]) -> bool:
     return True
 
 
+def _command_execution_evidence_hash(tool_name: str, tool_args: Mapping[str, Any]) -> str:
+    """Server-side execution hash for sandbox-contained shell commands, else ""."""
+
+    if tool_name not in _SANDBOX_CONTAINED_TOOLS:
+        return ""
+    command = _cli_command_text(tool_args)
+    if not command:
+        return ""
+    from core.web.services.session.execution_evidence import command_execution_hash
+
+    return command_execution_hash(command)
+
+
+def _mint_command_execution_evidence(
+    *,
+    session_id: str,
+    turn_id: str,
+    call_id: str,
+    tool_name: str,
+    command_execution_hash: str,
+) -> None:
+    """Mint one-shot execution evidence for an operator-approved shell command.
+
+    只有当前宿主的沙箱门确实会拦截（Windows 原生离线隔离未验证）时才需要证据：
+    其他平台沙箱自身就是执行边界，签发无意义。任何签发失败都不升级授权——
+    缺证据时沙箱门维持 fail-closed 拦截。
+    """
+
+    if not command_execution_hash or tool_name not in _SANDBOX_CONTAINED_TOOLS:
+        return
+    try:
+        from core.infrastructure.codex_cli_sandbox import windows_offline_shell_unverified
+
+        if not windows_offline_shell_unverified():
+            return
+        from core.web.services.session.execution_evidence import record_execution_evidence
+
+        record_execution_evidence(
+            session_id=session_id,
+            turn_id=turn_id,
+            call_id=call_id,
+            command_hash=command_execution_hash,
+        )
+    except Exception:
+        return
+
+
+def _sandbox_containment_unverified_for_current_runtime() -> bool:
+    """True when the live host cannot prove sandboxed shell containment."""
+
+    try:
+        from core.infrastructure.codex_cli_sandbox import windows_offline_shell_unverified
+
+        return bool(windows_offline_shell_unverified())
+    except Exception:
+        # 探测失败从不静默自动批准执行；宁可多问一次。
+        return True
+
+
 def _can_auto_approve(
     *,
     permission_preset: str,
@@ -1280,7 +1374,11 @@ def _can_auto_approve(
     if permission_preset == "request_approval":
         return tool_name in {"cli_tool", "exec_command"} and _is_safe_readonly_git_cli(tool_args)
     if tool_name in _SANDBOX_CONTAINED_TOOLS:
-        return True
+        # Silent auto-approval is premised on the call being sandbox-contained.
+        # On a host where native offline containment is unverified (Windows),
+        # that premise is false: the call must reach a real operator decision
+        # instead of silently passing into an executor that will fail closed.
+        return not _sandbox_containment_unverified_for_current_runtime()
     if tool_name in _WORKSPACE_PATH_TOOLS:
         return _workspace_path_call_is_contained(tool_name, tool_args)
     return False

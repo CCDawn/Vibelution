@@ -1388,7 +1388,10 @@ def _build_key_tools() -> List[BaseTool]:
         max_output_chars: int = 6000,
         _cancel_checker=None,
     ) -> str:
-        from core.infrastructure.codex_cli_sandbox import execute_codex_sandbox_command
+        from core.infrastructure.codex_cli_sandbox import (
+            execute_codex_sandbox_command,
+            is_sandbox_unverified_block,
+        )
         from tools.shell_tools import (
             is_shell_execution_failure,
             record_shell_failure,
@@ -1416,7 +1419,10 @@ def _build_key_tools() -> List[BaseTool]:
             _cancel_checker=_cancel_checker,
         )
         result_text = str(result or "")
-        failed = is_shell_execution_failure(result_text)
+        # SANDBOX_UNVERIFIED 是环境拒绝（无用户批准凭据），不是命令本身失败：
+        # 不计入失败冷却，避免模型因环境拦截被劝退。
+        sandbox_env_block = is_sandbox_unverified_block(result_text)
+        failed = is_shell_execution_failure(result_text) and not sandbox_env_block
         if failed:
             count = record_shell_failure(command, result_text)
             if count >= 1 and "工具纪律" not in result_text:
@@ -1452,7 +1458,10 @@ def _build_key_tools() -> List[BaseTool]:
         max_output_chars: int = 6000,
         _cancel_checker=None,
     ) -> str:
-        from core.infrastructure.codex_cli_sandbox import start_codex_sandbox_terminal_session
+        from core.infrastructure.codex_cli_sandbox import (
+            SANDBOX_UNVERIFIED_BLOCK_CODE,
+            start_codex_sandbox_terminal_session,
+        )
         from tools.shell_tools import (
             is_shell_execution_failure,
             record_shell_failure,
@@ -1488,7 +1497,14 @@ def _build_key_tools() -> List[BaseTool]:
             status = str(result.get("status") or result.get("outcomeStatus") or "").lower()
             message = str(result.get("message") or result.get("stderr") or result.get("stdout") or "")
             combined = json.dumps(result, ensure_ascii=False)
-            if (
+            # SANDBOX_UNVERIFIED 是环境拒绝（无用户批准凭据），不是命令本身
+            # 失败：不计入失败冷却，避免模型因环境拦截被劝退。
+            sandbox_env_block = (
+                str(result.get("code") or "") == SANDBOX_UNVERIFIED_BLOCK_CODE
+            )
+            if sandbox_env_block:
+                pass
+            elif (
                 status in {"failed", "error", "blocked"}
                 or is_shell_execution_failure(message)
                 or is_shell_execution_failure(combined)
