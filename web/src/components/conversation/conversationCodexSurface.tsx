@@ -465,6 +465,7 @@ export function createConversationCodexSurface({
             language={lang === "en" ? "en" : "zh"}
             renderToolDetails={renderCodexTranscriptToolDetailContent}
             toolDetailIsEmpty={codexTranscriptToolDetailIsEmpty}
+            showAggregateSummary={options?.reasoningPresentation !== "flow"}
             approvalSlot={attachApproval && toolApproval ? toolApproval.content : null}
             sessionId={sessionId}
             turnFailed={turnWorkForceExpand(message)}

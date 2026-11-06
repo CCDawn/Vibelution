@@ -80,6 +80,8 @@ type ConversationToolActivityProps = {
   sessionId?: string;
   /** Failed/interrupted turn: initially open its work scene until the user chooses. */
   turnFailed?: boolean;
+  /** A parent work disclosure already summarizes this trail; keep only its semantic groups. */
+  showAggregateSummary?: boolean;
 };
 
 const STAGGERED_DETAILS_CLOSE_DURATION_MS = 520;
@@ -892,6 +894,7 @@ export function ConversationToolActivity({
   approvalSlot = null,
   sessionId = "",
   turnFailed = false,
+  showAggregateSummary = true,
 }: ConversationToolActivityProps) {
   // Category pass runs on top of the same-name batches: distinct same-category
   // runs (read + grep + glob → "探索") escalate to one anchored parent group.
@@ -904,7 +907,7 @@ export function ConversationToolActivity({
   const isRunning = digest.state === "running";
   // Codex: multi-tool completed groups can collapse under a one-line summary,
   // but default open so the chrono tool trail stays visible after stop/settle.
-  const collapsibleGroup = digest.count >= 3 && digest.state !== "running";
+  const collapsibleGroup = showAggregateSummary && digest.count >= 3 && digest.state !== "running";
   const groupDetails = useStaggeredDetails(true);
 
   useEffect(() => {

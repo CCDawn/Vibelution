@@ -79,6 +79,49 @@ function expectCollapsedThoughts(html: string, itemIds: string[]) {
 }
 
 describe("ConversationView native Codex transcript surface", () => {
+  it.each(["completed", "failed"] as const)("keeps %s tool groups directly under their work disclosure", (status) => {
+    const html = renderConversation([{
+      id: `assistant-work-groups-${status}`,
+      role: "assistant",
+      timestamp: "2026-11-06T02:00:00Z",
+      turnId: `turn-work-groups-${status}`,
+      status,
+      turnItems: [
+        ...["read_file_tool", "grep_search_tool", "read_file_tool"].map((toolName, index) => ({
+          id: `work-group-${index}`,
+          itemId: `work-group-${index}`,
+          version: 3 as const,
+          sessionId: "session-1",
+          turnId: `turn-work-groups-${status}`,
+          type: "tool_call" as const,
+          callId: `work-call-${index}`,
+          toolName,
+          input: JSON.stringify({ path: `file-${index}.ts`, pattern: "work" }),
+          status: index === 1 ? status : "completed" as const,
+          revision: 1,
+          sequence: index + 1,
+          terminal: true,
+        })),
+        {
+          id: "work-groups-answer", itemId: "work-groups-answer", version: 3,
+          sessionId: "session-1", turnId: `turn-work-groups-${status}`,
+          type: "agent_message", phase: "final_answer", text: "WORK_GROUP_FINAL",
+          status: "completed", revision: 1, sequence: 4, terminal: true,
+        },
+      ],
+    }]);
+    const body = transcriptDom(html);
+    expect(body.querySelector('[data-codex-process-presentation="flow"]')).toBeTruthy();
+    expect(body.querySelector('[data-codex-tool-activity-category-group="true"]')).toBeTruthy();
+    expect(body.querySelector('[data-codex-tool-activity-group="true"]')).toBeNull();
+    expect(body.textContent).not.toContain("运行了 3 个工具");
+    expect(body.textContent).toContain("WORK_GROUP_FINAL");
+    if (status === "failed") {
+      expect(body.querySelector('[data-codex-tool-status-kind="failed"]')).toBeTruthy();
+      expect(body.querySelector('[data-codex-process-work-expanded="true"]')).toBeTruthy();
+    }
+  });
+
   it("renders the derived todo checklist card above the process trail", () => {
     const html = renderConversation([
       {
