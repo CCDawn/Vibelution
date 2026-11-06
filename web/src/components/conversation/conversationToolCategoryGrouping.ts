@@ -5,6 +5,7 @@ import {
 import {
   conversationToolActivityHasNonzeroTerminalExit,
   conversationToolActivityIsNoMatchTerminalExit,
+  conversationToolActivityRendererForCell,
   type ConversationToolActivityPresentationItem,
 } from "./conversationToolActivityPresentation";
 import {
@@ -56,6 +57,43 @@ export type ConversationToolCategoryGroupItem = {
 export type ConversationToolCategorizedItem =
   | ConversationToolActivityPresentationItem
   | ConversationToolCategoryGroupItem;
+
+/** Count calls by their established semantic renderer, never infer file counts from results. */
+export function conversationToolCategoryGroupCountLabel(
+  group: ConversationToolCategoryGroupItem,
+  language: ConversationToolPresentationLanguage,
+): string {
+  const fallback = language === "zh" ? `${group.count} 次` : `${group.count} calls`;
+  if (group.category !== "explore") return fallback;
+  const counts = new Map<string, number>();
+  for (const item of group.items) {
+    for (const cell of cellsOfItem(item)) {
+      const family = conversationToolActivityRendererForCell(cell, language).family;
+      // The files renderer also owns Glob, fetch and context tools; only an
+      // explicit file-read tool may be counted as a read.
+      const kind = family === "files" && codexTranscriptToolRawName(cell).trim().toLowerCase() === "read_file_tool"
+        ? "reads" : family;
+      counts.set(kind, (counts.get(kind) ?? 0) + 1);
+    }
+  }
+  const labels: Record<string, [string, string]> = {
+    reads: ["次读取", "read"], files: ["次文件浏览", "file inspection"],
+    search: ["次搜索", "search"], conversation: ["次查询", "query"],
+    code: ["次检索", "inspection"], git: ["次 Git 检查", "Git check"],
+  };
+  const parts: string[] = [];
+  let remaining = group.count;
+  for (const [family, [zh, en]] of Object.entries(labels)) {
+    const count = counts.get(family) ?? 0;
+    if (!count) continue;
+    remaining -= count;
+    const plural = en === "search" ? "searches" : en === "query" ? "queries" : `${en}s`;
+    parts.push(language === "zh" ? `${count} ${zh}` : `${count} ${count === 1 ? en : plural}`);
+  }
+  if (!parts.length) return fallback;
+  if (remaining > 0) parts.push(language === "zh" ? `其他 ${remaining} 次` : `${remaining} other calls`);
+  return parts.join(" · ");
+}
 
 export interface ConversationToolCategoryGroupOptions {
   enableExploreGrouping?: boolean;
