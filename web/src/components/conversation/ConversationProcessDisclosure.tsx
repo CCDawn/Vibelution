@@ -144,9 +144,7 @@ function firstFailedToolIdentity(
   // The expanded transcript row owns failure details. Keep the collapsed
   // summary identifiable without repeating its full error message.
   const identity = codexTranscriptToolRawName(failed) || String(failed.title || "").trim();
-  return identity.startsWith("personal_assistant_")
-    ? conversationToolPresentationLabel(identity, language, codexTranscriptToolArguments(failed))
-    : identity;
+  return conversationToolPresentationLabel(identity, language, codexTranscriptToolArguments(failed));
 }
 
 function isRetryCell(cell: CodexTranscriptCell) {
