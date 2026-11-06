@@ -1,7 +1,7 @@
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 import type { SessionDetail } from "../../api/types";
-import { acceptSessionSubmit, beginSessionSubmit, mergeSessionSubmitDetail, removeSessionSubmitPaint, sameSubmittedReferenceSnapshot } from "./sessionSubmitProjection";
+import { acceptSessionSubmit, beginSessionSubmit, isLocalQueuedSubmit, mergeSessionSubmitDetail, removeSessionSubmitPaint, sameSubmittedReferenceSnapshot } from "./sessionSubmitProjection";
 
 const input = { sessionId: "s", clientSubmissionId: "request-1", content: "hello", createdAt: "2026-11-06T02:00:00Z" };
 const detail = (): SessionDetail => ({ id: "s", status: "ready", currentPhase: "ready", messages: [], queuedTurns: [] } as unknown as SessionDetail);
@@ -27,6 +27,13 @@ describe("shared native conversation submit projection", () => {
     expect(queued.activeTurnId).toBe("existing");
     expect(queued.queuedTurns).toEqual([expect.objectContaining({ id: "queue-1", content: "hello", position: 2, clientSubmissionId: "request-1" })]);
     expect(acceptSessionSubmit(queued, input, receipt)?.queuedTurns).toHaveLength(1);
+    const waiting = mergeSessionSubmitDetail(queued, detail());
+    expect(waiting.queuedTurns).toHaveLength(1);
+    expect(isLocalQueuedSubmit(waiting.queuedTurns![0])).toBe(true);
+    const { localSubmissionReceipt: _local, ...nativeRow } = waiting.queuedTurns![0] as typeof waiting.queuedTurns[0] & { localSubmissionReceipt?: boolean };
+    const observed = mergeSessionSubmitDetail(waiting, { ...detail(), queuedTurns: [nativeRow] });
+    expect(isLocalQueuedSubmit(observed.queuedTurns![0])).toBe(false);
+    expect(mergeSessionSubmitDetail(observed, detail()).queuedTurns).toEqual([]);
     expect(acceptSessionSubmit({ id: "s", queuedTurns: [] } as unknown as SessionDetail, input, receipt)?.queuedTurns).toHaveLength(1);
   });
 

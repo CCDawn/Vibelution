@@ -1142,11 +1142,15 @@ describe("Launcher assistant route lifecycle", () => {
     await act(async () => conversation?.onSubmit());
     await settle();
     const initialReads = bridge.getLauncherAssistantDetail.mock.calls.length;
-    bridge.getLauncherAssistantDetail.mockResolvedValue({ id: "s", status: "ready", lastTurnTerminalTurnId: "turn-new", terminalReason: "success", messages: [{ id: "answer", role: "assistant", content: "done" }] });
+    const requestId = bridge.sendLauncherAssistantMessage.mock.calls[0][1];
+    bridge.getLauncherAssistantDetail.mockResolvedValue({ id: "s", status: "ready", lastTurnTerminalTurnId: "turn-new", terminalReason: "success", messages: [
+      { id: "native-user", role: "user", content: "hello", metadata: { clientSubmissionId: requestId, turnId: "turn-new" } },
+      { id: "answer", role: "assistant", content: "done" },
+    ] });
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 2100)); });
     await settle();
     expect(bridge.getLauncherAssistantDetail.mock.calls.length).toBeGreaterThan(initialReads);
-    expect(conversation?.messages).toEqual([expect.objectContaining({ id: "answer" })]);
+    expect(conversation?.messages).toEqual([expect.objectContaining({ id: "native-user" }), expect.objectContaining({ id: "answer" })]);
     const terminalReads = bridge.getLauncherAssistantDetail.mock.calls.length;
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 2100)); });
     expect(bridge.getLauncherAssistantDetail).toHaveBeenCalledTimes(terminalReads);

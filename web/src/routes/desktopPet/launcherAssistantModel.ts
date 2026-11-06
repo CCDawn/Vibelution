@@ -2,6 +2,7 @@ import type { LauncherAssistantDispatch, LauncherAssistantSessionEvent } from ".
 import type { PetActivityTone, PetAnimationState } from "../../api/types/petActivity";
 import type { ConversationMessage, SessionDetail, SessionPendingQuestion, SessionQueuedTurn, SessionReferenceAttachment } from "../../api/types";
 import { exactAcceptedSubmitTurnId, findSubmitAcceptanceEvidence } from "../chat/chatSubmitAcceptanceReadback";
+import { isLocalQueuedSubmit } from "../chat/sessionSubmitProjection";
 import {
   buildComposerContextRingModel, resolveComposerContextUsage,
   type ComposerContextRingModel,
@@ -36,7 +37,7 @@ export function launcherAssistantQueueReadback(
 ): { receipt: LauncherAssistantQueuedAcceptance | null; admittedTurnId: string; removed: boolean } {
   if (!source || !receipt) return { receipt, admittedTurnId: "", removed: false };
   const row = source.queuedTurns?.find(item => item.id === receipt.id && item.clientSubmissionId === receipt.clientSubmissionId);
-  if (row) return { receipt: receipt.observed ? receipt : { ...receipt, observed: true }, admittedTurnId: "", removed: false };
+  if (row) return { receipt: isLocalQueuedSubmit(row as SessionQueuedTurn) || receipt.observed ? receipt : { ...receipt, observed: true }, admittedTurnId: "", removed: false };
   const detail = source as SessionDetail;
   const evidence = findSubmitAcceptanceEvidence(detail, receipt.clientSubmissionId);
   const admittedTurnId = evidence ? exactAcceptedSubmitTurnId(detail, receipt.clientSubmissionId, evidence) : "";

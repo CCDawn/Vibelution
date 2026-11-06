@@ -33,7 +33,7 @@ import { continuationSnapshotKey, resolveConversationContinuation } from "../cha
 import { resolveSessionStopTurnId } from "../chat/chatStopTurnModel";
 import { resolveChatUserDisplayName } from "../chatCompactPanel";
 import { exactAcceptedSubmitTurnId, findSubmitAcceptanceEvidence, readbackSubmitAcceptance } from "../chat/chatSubmitAcceptanceReadback";
-import { acceptSessionSubmit, beginSessionSubmit, mergeSessionSubmitDetail, removeSessionSubmitPaint, sameSubmittedReferenceSnapshot } from "../chat/sessionSubmitProjection";
+import { acceptSessionSubmit, beginSessionSubmit, isLocalQueuedSubmit, mergeSessionSubmitDetail, removeSessionSubmitPaint, sameSubmittedReferenceSnapshot } from "../chat/sessionSubmitProjection";
 import { sessionReferenceId } from "../chat/chatComposerSubmitModel";
 import { appendStoredPromptHistoryEntry } from "../../components/conversation/conversationPromptHistory";
 import { applyOptimisticRegenerate, markSessionDetailStopping, clearSessionDetailStopping, type OptimisticUserMessageInput } from "../chatSessionState";
@@ -1445,7 +1445,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       || (question.turnId && question.turnId !== current.lastTurnTerminalTurnId) || !answerValue.trim()) return;
     void submit({ message: answerValue.trim(), requestId: crypto.randomUUID(), preserveDraft: true, answerQuestion: { ...question } });
   }
-  const queueRow = detail.data?.queuedTurns?.find(row => row.id === queuedAcceptance?.id) || detail.data?.queuedTurns?.[0];
+  const nativeQueueRows = detail.data?.queuedTurns?.filter(row => !isLocalQueuedSubmit(row));
+  const queueRow = nativeQueueRows?.find(row => row.id === queuedAcceptance?.id) || nativeQueueRows?.[0];
   const waitingQueueText = lang === "zh" ? "已排队，正在读取原生队列…" : "Queued; reading the native queue…";
   const removedQueueText = lang === "zh" ? "排队消息已移除" : "Queued message removed";
   const queueStatusText = queueReadback.removed ? removedQueueText : queueRow ? launcherAssistantQueueLabel(queueRow.status, lang)

@@ -1,10 +1,16 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
-import type { SessionDetail, SessionReferenceAttachment } from "../../api/types";
+import type { SessionDetail, SessionQueuedTurn, SessionReferenceAttachment } from "../../api/types";
 import {
   appendOptimisticUserMessage, markOptimisticUserMessageAccepted, markSessionDetailRunning,
   mergeSessionDetailMessageWindow, removeOptimisticUserMessage, removeSettledOptimisticUserMessages, type OptimisticUserMessageInput,
 } from "../chatSessionState";
 import { sessionReferenceId } from "./chatComposerSubmitModel";
+
+/** Cache-only receipt annotation. The ACK proves queue acceptance, but this
+ * local paint is not evidence that an authoritative queue read has seen it. */
+export function isLocalQueuedSubmit(row: SessionQueuedTurn) {
+  return (row as SessionQueuedTurn & { localSubmissionReceipt?: boolean }).localSubmissionReceipt === true;
+}
 
 /** Transport-independent paint only. A local row never proves native admission. */
 export function beginSessionSubmit(detail: SessionDetail | undefined, input: OptimisticUserMessageInput, queued = false) {
@@ -23,7 +29,8 @@ export function acceptSessionSubmit(
   const at = receipt.queuedAt || receipt.acceptedAt || input.createdAt || new Date().toISOString();
   return { ...next, queuedTurns: [...rows, { id: receipt.queuedTurnId,
     position: receipt.queuePosition ?? rows.length + 1, status: "queued", content: input.content,
-    clientSubmissionId: input.clientSubmissionId, createdAt: at, updatedAt: at }] };
+    clientSubmissionId: input.clientSubmissionId, createdAt: at, updatedAt: at,
+    localSubmissionReceipt: true, attachments: input.attachments, references: input.references }] };
 }
 
 /** Some small hosts/tests omit messageWindow. Preserve uncommitted user paint
@@ -42,7 +49,16 @@ export function mergeSessionSubmitDetail(previous: SessionDetail | undefined, ne
     if (turnId) merged = markOptimisticUserMessageAccepted(merged, input, turnId)!;
   }
   const messages = removeSettledOptimisticUserMessages(merged.messages);
-  return messages === merged.messages ? merged : { ...merged, messages };
+  if (messages !== merged.messages) merged = { ...merged, messages };
+  for (const row of previous.queuedTurns ?? []) {
+    if (!isLocalQueuedSubmit(row) || !row.clientSubmissionId) continue;
+    const requestId = row.clientSubmissionId;
+    const admitted = next.messages.some(message => message.role === "user" && message.metadata?.optimisticUserMessage !== true
+      && message.metadata?.clientSubmissionId === requestId) || next.activeTask?.metadata?.clientSubmissionId === requestId;
+    if (admitted || merged.queuedTurns?.some(candidate => candidate.id === row.id || candidate.clientSubmissionId === requestId)) continue;
+    merged = { ...merged, queuedTurns: [...(merged.queuedTurns ?? []), row] };
+  }
+  return merged;
 }
 
 /** Deliberate removals bypass the window UNION structuralSharing policy. */
