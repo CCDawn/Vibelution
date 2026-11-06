@@ -36,6 +36,7 @@ from core.web.routes.session_side_models import (
     SessionMessageCurationResponse,
     SessionMessageCurationStateResponse,
     SessionToolApprovalItem,
+    SessionToolBundleResponse,
 )
 from core.web.routes.session_turn_models import (
     SessionAttachmentResponse,
@@ -66,6 +67,7 @@ from core.web.services.session.tool_approvals import (
     ToolApprovalConflictError,
     ToolApprovalError,
     ToolApprovalNotFoundError,
+    grant_session_development_tool_bundle,
     list_tool_approval_requests,
     resolve_tool_approval_request,
 )
@@ -1482,6 +1484,23 @@ def session_resolve_tool_approval(
             request_id,
             decision=payload.decision,
         )
+    except ToolApprovalNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ToolApprovalConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ToolApprovalError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post(
+    "/sessions/{session_id}/tool-approvals/{request_id}/trust-development-session",
+    response_model=SessionToolBundleResponse,
+    response_model_exclude_unset=True,
+)
+def session_trust_development_tools(session_id: str, request_id: str) -> dict:
+    """b3 one-click: trust the execute/write development tools for this session."""
+    try:
+        return grant_session_development_tool_bundle(session_id, request_id)
     except ToolApprovalNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ToolApprovalConflictError as exc:

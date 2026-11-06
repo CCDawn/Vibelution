@@ -203,12 +203,12 @@ describe("ChatToolApprovalDialog interactions", () => {
         <ChatToolApprovalDialog
           lang="zh"
           pending={false}
-          rawTitle="exec_command"
+          rawTitle="web_search_tool"
           riskLabel="需要审批"
           scopeLabel="本次调用"
-          actionPreview="$ pytest -q"
-          toolName="exec_command"
-          toolLabels={[{ id: "exec_command", label: "exec_command" }]}
+          actionPreview="query"
+          toolName="web_search_tool"
+          toolLabels={[{ id: "web_search_tool", label: "web_search" }]}
           onApprove={onApprove}
           onApproveForSession={onApproveForSession}
           onApproveForSessionTool={onApproveForSessionTool}
@@ -221,6 +221,46 @@ describe("ChatToolApprovalDialog interactions", () => {
     await act(async () => button!.click());
     expect(onApproveForSessionTool).toHaveBeenCalledTimes(1);
     expect(onApproveForSession).not.toHaveBeenCalled();
+    expect(onApprove).not.toHaveBeenCalled();
+    expect(onReject).not.toHaveBeenCalled();
+  });
+
+  it("fires the session-scoped always mapping for shell tools and the dev bundle (A2b/b3)", async () => {
+    const onApprove = vi.fn();
+    const onApproveForSession = vi.fn();
+    const onApproveForDevelopmentBundle = vi.fn();
+    const onReject = vi.fn();
+    await act(async () => {
+      root!.render(
+        <ChatToolApprovalDialog
+          lang="zh"
+          pending={false}
+          rawTitle="exec_command"
+          riskLabel="需要审批"
+          scopeLabel="本次调用"
+          actionPreview="$ pytest -q"
+          toolName="exec_command"
+          toolLabels={[{ id: "exec_command", label: "exec_command" }]}
+          onApprove={onApprove}
+          onApproveForSession={onApproveForSession}
+          onApproveForDevelopmentBundle={onApproveForDevelopmentBundle}
+          onReject={onReject}
+        />,
+      );
+    });
+    // Real bridge props: the "A" button itself is the tool-session action for
+    // shell tools; the standalone tool-session button is not provided again.
+    const alwaysButton = findButtonByText("本会话此工具");
+    expect(alwaysButton?.getAttribute("data-chat-approval-accept-session")).toBe("tool-session");
+    expect(container?.querySelector('[data-chat-approval-accept-tool-session="true"]')).toBeNull();
+    await act(async () => alwaysButton!.click());
+    expect(onApproveForSession).toHaveBeenCalledTimes(1);
+
+    // b3 one click: trust every execute/write development tool for the session.
+    const bundleButton = findButtonByText("本会话信任开发操作");
+    expect(bundleButton?.getAttribute("data-chat-approval-trust-development-session")).toBe("true");
+    await act(async () => bundleButton!.click());
+    expect(onApproveForDevelopmentBundle).toHaveBeenCalledTimes(1);
     expect(onApprove).not.toHaveBeenCalled();
     expect(onReject).not.toHaveBeenCalled();
   });
