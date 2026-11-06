@@ -814,6 +814,10 @@ def team_workflow_hypothesis_round_get(team_id: str, round_id: str) -> dict:
 def _etag_matches(if_none_match: str | None, representation_version: str) -> bool:
     for token in str(if_none_match or "").split(","):
         normalized = token.strip()
+        if normalized == "*":
+            # RFC 9110 13.1.2: the resource exists whenever this comparison runs
+            # (the route always projects a state payload), so "*" matches.
+            return True
         if normalized.startswith("W/"):
             normalized = normalized[2:].strip()
         if normalized.strip('"') == representation_version:
