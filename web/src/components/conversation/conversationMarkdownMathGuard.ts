@@ -128,7 +128,86 @@ function normalizeSingleDollarMathInText(text: string): string {
   return output;
 }
 
-/** Same scan with backtick inline-code spans preserved verbatim. */
+/**
+ * True when this (already guarded) markdown contains math the remark-math pass
+ * will actually parse: `$$…$$` block math (never touched by the guard) or a
+ * surviving unescaped `$…$` pair passing the same plausibility heuristic the
+ * guard keeps. Used to lazy-load the KaTeX pipeline only for messages that
+ * render formulas — by construction it agrees with the guard's decisions.
+ */
+export function containsDeliberateConversationMath(markdown: string): boolean {
+  if (!markdown.includes("$")) {
+    return false;
+  }
+  if (markdown.includes("$$")) {
+    return true;
+  }
+  let fence: { marker: string; length: number } | null = null;
+  for (const line of markdown.split("\n")) {
+    const fenceMatch = FENCE_PATTERN.exec(line);
+    const lineFence = fenceMatch
+      ? { marker: fenceMatch[1]![0]!, length: fenceMatch[1]!.length }
+      : null;
+    if (fence) {
+      if (lineFence && lineFence.marker === fence.marker && lineFence.length >= fence.length) {
+        fence = null;
+      }
+      continue;
+    }
+    if (lineFence) {
+      fence = lineFence;
+      continue;
+    }
+    // Mirror normalizeSingleDollarMathOutsideInlineCode's code-span skipping:
+    // scan outside inline code spans only.
+    let cursor = 0;
+    while (cursor <= line.length) {
+      const codeStart = line.indexOf("`", cursor);
+      const segmentEnd = codeStart === -1 ? line.length : codeStart;
+      if (hasKeptMathPair(line.slice(cursor, segmentEnd))) {
+        return true;
+      }
+      if (codeStart === -1) {
+        break;
+      }
+      let codeFenceEnd = codeStart + 1;
+      while (line[codeFenceEnd] === "`") {
+        codeFenceEnd++;
+      }
+      const codeMarker = line.slice(codeStart, codeFenceEnd);
+      const codeEnd = line.indexOf(codeMarker, codeFenceEnd);
+      if (codeEnd === -1) {
+        // Unterminated inline-code span: the guard scans the rest as text, so
+        // mirror that here.
+        if (hasKeptMathPair(line.slice(codeStart))) {
+          return true;
+        }
+        break;
+      }
+      cursor = codeEnd + codeMarker.length;
+    }
+  }
+  return false;
+}
+
+/** Guard's keep-criterion applied to one stretch of text without inline code. */
+function hasKeptMathPair(text: string): boolean {
+  for (let index = 0; index < text.length; index++) {
+    if (!isSingleDollarDelimiter(text, index)) {
+      continue;
+    }
+    const closingIndex = findClosingSingleDollarDelimiter(text, index + 1);
+    if (closingIndex === -1) {
+      break;
+    }
+    const content = text.slice(index + 1, closingIndex);
+    if (!isLikelyCompactCurrencyRangeText(text, closingIndex, content) && isLikelySingleDollarMath(content)) {
+      return true;
+    }
+    index = closingIndex;
+  }
+  return false;
+}
 function normalizeSingleDollarMathOutsideInlineCode(line: string): string {
   let output = "";
   let cursor = 0;

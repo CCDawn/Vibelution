@@ -1,0 +1,15 @@
+/* Finance route utilities. Loaded with the lazy FinanceRoute chunk (the route
+ * entry imports this file); the shell entry no longer scans the finance tree.
+ * The chat-embedded advisor note stays in the shell entry (chat-primary). */
+@import "tailwindcss" source(none);
+@import "../theme.tailwind.css";
+
+/* Shared recipe class literals (import constants are not followed by Tailwind). */
+@source "../vuiSurfaceRecipes.ts";
+@source "../vuiSurfaceAlphaPolicy.ts";
+@source "../vuiChromeRecipes.ts";
+
+@source "../../routes/FinanceRoute.tsx";
+@source "../../routes/FinanceRoute.styles.ts";
+@source "../../routes/finance/**/*.{ts,tsx}";
+@source not "../../routes/finance/**/*.test.{ts,tsx}";

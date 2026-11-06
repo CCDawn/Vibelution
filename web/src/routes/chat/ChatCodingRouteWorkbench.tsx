@@ -29,6 +29,7 @@ import {
   Trash2,
 } from "lucide-react";
 import {
+  Suspense,
   useCallback,
   useEffect,
   lazy,
@@ -167,9 +168,13 @@ import {
 } from "../DirectSessionIndexItem";
 import { agentCenterConfigRoute, agentCenterMemoryRoute } from "../agentCenterRoutes";
 import { useFinancialResearchSessionBridge } from "../finance/FinancialResearchBridge";
-import { FinancialResearchLiveProjection } from "../finance/FinancialResearchLiveProjection";
-import { EMPTY_FINANCIAL_MESSAGES } from "../finance/stockResearchModel";
 import { useFinancialAssistants } from "../finance/useFinancialAssistants";
+import {
+  CompanionLifeRailLazy,
+  CompanionPersonRailLazy,
+  CompanionSceneWorkspaceLazy,
+  FinancialResearchLiveProjectionLazy,
+} from "./chatCompanionLazySurfaces";
 import { useChatToolApprovalBridge } from "./useChatToolApprovalBridge";
 import { useChatComposerBridgeState } from "./useChatComposerBridgeState";
 import { useChatConversationSurfaceModel } from "./useChatConversationSurfaceModel";
@@ -192,15 +197,12 @@ import {
 } from "./chatCodingRouteViewModel";
 import { ChatCenterSessionSurface } from "./ChatCenterSessionSurface";
 import centerSurfaceStyles from "./ChatCenterSessionSurface.styles";
-import { ChatSessionBrowser } from "./ChatSessionBrowser";
+import type { ChatSessionBrowserProps } from "./ChatSessionBrowser";
 import { ChatCodingCenterTabs } from "./ChatCodingCenterTabs";
 import { ChatCodingGroupSurface } from "./ChatCodingGroupSurface";
 import { ChatConversationIndexPanel } from "./ChatConversationIndexPanel";
 import { ChatSessionWorkbenchShell } from "./ChatSessionWorkbenchShell";
-import { CompanionConversationHeader } from "../companions/CompanionConversationHeader";
-import { CompanionSceneWorkspace } from "../companions/CompanionSceneWorkspace";
-import { CompanionLifeRail } from "../companions/CompanionLifeRail";
-import { CompanionPersonRail, type CompanionRailState } from "../companions/CompanionPersonRail";
+import type { CompanionRailState } from "../companions/CompanionPersonRail";
 import {
   companionAgentIdForDirectSession,
   sessionsForChatRoute,
@@ -336,12 +338,28 @@ const CliAgentRunTerminalPanel = lazy(() =>
   })),
 );
 
+// Opt-in session browser (center-tabs toggle, initially closed): same lazy
+// surface pattern as the terminal panel, loaded on first activation only.
+const ChatSessionBrowserLazy = lazy(() =>
+  import("./ChatSessionBrowser").then((module) => ({
+    default: module.ChatSessionBrowser as typeof import("./ChatSessionBrowser")["ChatSessionBrowser"],
+  })),
+);
+
 /**
  * Module-level shared default so `changedFiles: detail.changedFiles ?? []` in
  * the memoized conversation model keeps a stable reference across renders
  * (a fresh `[]` per render would defeat the ConversationView memo gate).
  */
 const EMPTY_SESSION_CHANGED_FILES: string[] = [];
+
+/**
+ * Same contract as the finance model's `EMPTY_FINANCIAL_MESSAGES` (a stable
+ * empty message list); declared locally so the workbench does not pull the
+ * stockResearchModel family (research + screening projection models used by
+ * the finance workspace panels) into the chat route chunk.
+ */
+const EMPTY_FINANCIAL_MESSAGES: ConversationMessage[] = [];
 
 export function ChatCodingRouteWorkbench() {
   // evolution: the companion rail shows evolution labels (otherwise raw keys leak).
@@ -3323,18 +3341,29 @@ export function ChatCodingRouteWorkbench() {
 
   return (
     <ActiveTurnLayersStoreProvider store={activeTurnLayersStore}>
-    {financeSurface ? <FinancialResearchLiveProjection sessionId={activeSessionId ?? ""} agentId={detail?.agentId} messages={detail?.messages ?? EMPTY_FINANCIAL_MESSAGES} /> : null}
+    {financeSurface ? (
+      // The finance live projection only renders inside the finance-embedded
+      // workbench (/finance); keep its chunk out of the /chat first paint.
+      <Suspense fallback={null}>
+        <FinancialResearchLiveProjectionLazy sessionId={activeSessionId ?? ""} agentId={detail?.agentId} messages={detail?.messages ?? EMPTY_FINANCIAL_MESSAGES} />
+      </Suspense>
+    ) : null}
     {verifiedCompanionMode && activeCompanion ? (
-      <CompanionSceneWorkspace
-        key={activeCompanion.agentId}
-        companion={activeCompanion}
-        lang={lang}
-        sessionId={conversationModel?.sessionId}
-        messages={conversationModel?.messages ?? []}
-        conversation={nativeSessionWorkspace}
-        onReturnToConversation={conversationWorkspaceTab !== "agent" ? () => { if (activeSessionId) setActiveTab(activeSessionId, "agent"); } : undefined}
-        onOpenLifeSteward={(id) => openSession(id, { replace: false, telemetrySource: "virtual_human_life_steward" })}
-      />
+      // Companion scene replaces the whole workbench shell in companion mode;
+      // the ordinary workspace stays mounted as the loading fallback so there
+      // is no blank flash while the companion surface chunk lands.
+      <Suspense fallback={nativeSessionWorkspace}>
+        <CompanionSceneWorkspaceLazy
+          key={activeCompanion.agentId}
+          companion={activeCompanion}
+          lang={lang}
+          sessionId={conversationModel?.sessionId}
+          messages={conversationModel?.messages ?? []}
+          conversation={nativeSessionWorkspace}
+          onReturnToConversation={conversationWorkspaceTab !== "agent" ? () => { if (activeSessionId) setActiveTab(activeSessionId, "agent"); } : undefined}
+          onOpenLifeSteward={(id) => openSession(id, { replace: false, telemetrySource: "virtual_human_life_steward" })}
+        />
+      </Suspense>
     ) : (
     <ChatSessionWorkbenchShell
       layoutRef={layoutRef}
@@ -3521,28 +3550,32 @@ export function ChatCodingRouteWorkbench() {
                 : null)
               : nativeSessionWorkspace}
             browser={sessionBrowserVisible ? (
-              <ChatSessionBrowser
-                sessions={allVisibleSessions}
-                agentsById={agentsById}
-                activeSessionId={activeSessionId}
-                lang={lang}
-                resolveModelLabel={resolveModelLabel}
-                runtimeRunningSessionIds={runtimeRunningSessionIds}
-                sessionIdsNeedingApproval={sessionIdsNeedingApproval}
-                loading={conversationIndexLoading || (!agentsQuery.data && agentsQuery.isPending)}
-                error={sessionsErrorMessage || (agentsQuery.isError ? describeError(agentsQuery.error, t("loadFailed")) : "")}
-                createPending={createSessionMutation.isPending}
-                createDisabled={!selectedChatAgentId}
-                onOpen={(sessionId) => {
-                  setSessionBrowserOpen(false);
-                  handleOpenDirectSession(sessionId);
-                }}
-                onCreate={() => {
-                  setSessionBrowserOpen(false);
-                  handleCreateSession();
-                }}
-                onRetry={() => { void Promise.allSettled([rawSessionsQuery.refetch(), agentsQuery.refetch()]); }}
-              />
+              // Opt-in surface (toggle from the center tabs, initially closed):
+              // the browser chunk loads on first activation only.
+              <Suspense fallback={<div className={centerSurfaceStyles.dockHost} data-chat-session-browser="loading" />}>
+                <ChatSessionBrowserLazy
+                  sessions={allVisibleSessions}
+                  agentsById={agentsById}
+                  activeSessionId={activeSessionId}
+                  lang={lang}
+                  resolveModelLabel={resolveModelLabel}
+                  runtimeRunningSessionIds={runtimeRunningSessionIds}
+                  sessionIdsNeedingApproval={sessionIdsNeedingApproval}
+                  loading={conversationIndexLoading || (!agentsQuery.data && agentsQuery.isPending)}
+                  error={sessionsErrorMessage || (agentsQuery.isError ? describeError(agentsQuery.error, t("loadFailed")) : "")}
+                  createPending={createSessionMutation.isPending}
+                  createDisabled={!selectedChatAgentId}
+                  onOpen={(sessionId) => {
+                    setSessionBrowserOpen(false);
+                    handleOpenDirectSession(sessionId);
+                  }}
+                  onCreate={() => {
+                    setSessionBrowserOpen(false);
+                    handleCreateSession();
+                  }}
+                  onRetry={() => { void Promise.allSettled([rawSessionsQuery.refetch(), agentsQuery.refetch()]); }}
+                />
+              </Suspense>
             ) : paneDock.showCenterPane ? (
               <div ref={paneDock.onCenterHostChange} className={centerSurfaceStyles.dockHost} data-chat-center-dock="" />
             ) : undefined}
@@ -3580,19 +3613,21 @@ export function ChatCodingRouteWorkbench() {
       />) : null
       }
       conversationIndex={embeddedSurface ? null : verifiedCompanionMode ? (
-      <CompanionPersonRail
-        className={conversationIndexPaneClassName}
-        onCollapse={() => {
-          if (conversationIndexOverlayOpen) closeResponsiveOverlayPane();
-          else setLeftRailCollapsed(true);
-        }}
-        collapsed={conversationIndexCollapsed}
-        overlayOpen={conversationIndexOverlayOpen}
-        companion={activeCompanion}
-        state={companionRailState}
-        errorMessage={companionRailError}
-        lang={lang}
-      />
+      <Suspense fallback={<div className={conversationIndexPaneClassName} data-companion-rail="loading" />}>
+        <CompanionPersonRailLazy
+          className={conversationIndexPaneClassName}
+          onCollapse={() => {
+            if (conversationIndexOverlayOpen) closeResponsiveOverlayPane();
+            else setLeftRailCollapsed(true);
+          }}
+          collapsed={conversationIndexCollapsed}
+          overlayOpen={conversationIndexOverlayOpen}
+          companion={activeCompanion}
+          state={companionRailState}
+          errorMessage={companionRailError}
+          lang={lang}
+        />
+      </Suspense>
       ) : (
       <ChatConversationIndexRail
         conversationIndexPaneClassName={conversationIndexPaneClassName}
