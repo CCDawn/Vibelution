@@ -575,11 +575,14 @@ describe("Launcher freshness serves the settled state-refresh snapshot before sp
   type SnapshotStoreOverrides = { observedAt?: Date; snapshotFreshness?: string; freshnessSource?: unknown; valid?: boolean };
 
   function settledSnapshotStore(overrides: SnapshotStoreOverrides = {}) {
+    // One settled observation has one timestamp. Generating it inside the
+    // getter can put it after the reader's captured `now` by a clock tick.
+    const observedAt = overrides.observedAt ?? new Date();
     return {
       snapshot: () => ({
         schemaVersion: 1,
         revision: 7,
-        observedAt: (overrides.observedAt ?? new Date()).toISOString(),
+        observedAt: observedAt.toISOString(),
         freshness: overrides.snapshotFreshness ?? "fresh",
         main: { id: "main", kind: "main", current: true },
         instances: [],
@@ -587,7 +590,7 @@ describe("Launcher freshness serves the settled state-refresh snapshot before sp
       }),
       projectFreshness: () => "freshnessSource" in overrides ? overrides.freshnessSource : { current: true, reason: "current" },
       observationEpoch: () => 0,
-      projectFreshnessObservation: () => ({ observedAtMs: (overrides.observedAt ?? new Date()).getTime(), epoch: 0, valid: overrides.valid ?? true }),
+      projectFreshnessObservation: () => ({ observedAtMs: observedAt.getTime(), epoch: 0, valid: overrides.valid ?? true }),
       projectStatus: () => ({ lifecycleProof: { activeWorkRuns: { count: 0, items: [] } } }),
       projectBranchInstances: () => ({ schemaVersion: 1, items: [] }),
     };
