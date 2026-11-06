@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from core.infrastructure import developer_sandbox
-from core.ui.chat_state import load_session_chat_state, save_chat_state
+from core.ui.chat_state import load_chat_state, load_session_chat_state, save_chat_state
 from core.web.services import session_service
 from core.web.services.session import queued_turns
 
@@ -464,6 +464,71 @@ def test_unsealed_child_return_still_queues_after_normal_completion(sessions, mo
     assert queued["kind"] == "subagent_message"
     assert [row["kind"] for row in _rows(sessions)] == ["subagent_message"]
     assert store.load_state(CHILD_ID)["notificationSealed"] is False
+
+
+def _stamp_child_turn_terminal(tmp_path, *, turn_id: str, reason: str) -> None:
+    """Mirror what the worker settle path persists for a finished child turn."""
+
+    state = load_chat_state(tmp_path)
+    for conversation in state["conversations"]:
+        if conversation["conversation_id"] == CHILD_ID:
+            conversation["last_turn_terminal_turn_id"] = turn_id
+            conversation["last_turn_terminal_reason"] = reason
+    save_chat_state(tmp_path, state)
+
+
+def test_user_stopped_child_return_lands_stopped_not_completed(sessions, monkeypatch):
+    from core.web.services import runtime_task_registry as runtime_tasks
+
+    store = runtime_tasks.store_for(sessions)
+    monkeypatch.setattr(runtime_tasks, "default_store", lambda: store)
+    _register_child_task(store, CHILD_ID, parent=PARENT_ID)
+    # The user stopped the child session: the registry carries the stop intent
+    # and the worker settled the turn as stopped_by_user (ISS-041 evidence).
+    assert store.request_stop(CHILD_ID, "user") is not None
+    _stamp_child_turn_terminal(sessions, turn_id="turn-1", reason="stopped_by_user")
+
+    queued = queued_turns.notify_parent_session_of_child_return(CHILD_ID, turn_id="turn-1")
+
+    assert queued["status"] == "queued"
+    state = store.load_state(CHILD_ID)
+    assert state["status"] == "stopped"
+    assert state["terminalReason"] == "child_session_return_stopped"
+    assert state["stopInitiator"] == "user"
+
+
+def test_interrupted_turn_anchor_alone_lands_stopped(sessions, monkeypatch):
+    from core.web.services import runtime_task_registry as runtime_tasks
+
+    store = runtime_tasks.store_for(sessions)
+    monkeypatch.setattr(runtime_tasks, "default_store", lambda: store)
+    _register_child_task(store, CHILD_ID, parent=PARENT_ID)
+    # Stop intent recorded only on the turn journal (no registry stop verb):
+    # the turn-id-anchored stopped_by_user reason still forbids "completed".
+    _stamp_child_turn_terminal(sessions, turn_id="turn-1", reason="stopped_by_user")
+
+    queued_turns.notify_parent_session_of_child_return(CHILD_ID, turn_id="turn-1")
+
+    state = store.load_state(CHILD_ID)
+    assert state["status"] == "stopped"
+    assert state["terminalReason"] == "child_session_return_stopped"
+
+
+def test_stale_stop_from_earlier_turn_does_not_mislabel_later_completion(sessions, monkeypatch):
+    from core.web.services import runtime_task_registry as runtime_tasks
+
+    store = runtime_tasks.store_for(sessions)
+    monkeypatch.setattr(runtime_tasks, "default_store", lambda: store)
+    _register_child_task(store, CHILD_ID, parent=PARENT_ID)
+    # An earlier turn was stopped; the settling turn is a different, genuine
+    # completion. The terminal anchor must match the returning turn.
+    _stamp_child_turn_terminal(sessions, turn_id="turn-0", reason="stopped_by_user")
+
+    queued_turns.notify_parent_session_of_child_return(CHILD_ID, turn_id="turn-1")
+
+    state = store.load_state(CHILD_ID)
+    assert state["status"] == "completed"
+    assert state["terminalReason"] == "child_session_return"
 
 
 def test_seal_drops_independently_of_generation_and_stacks_with_fencing(sessions, monkeypatch):

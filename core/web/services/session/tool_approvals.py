@@ -425,7 +425,9 @@ def authorize_or_wait(
         return ToolApprovalOutcome(True, "full_access_auto_approved")
 
     args_hash = _arguments_hash(tool_args)
-    session_grant_scope = _session_grant_scope(normalized_tool, tool_args, args_hash)
+    session_grant_scope = _session_grant_scope(
+        normalized_tool, tool_args, args_hash, risk=normalized_risk
+    )
     host_grant_scope = _url_host_scope(normalized_tool, tool_args)
     host_grant_key = _session_grant_key(host_grant_scope) if host_grant_scope else ""
     grant_key = (
@@ -504,6 +506,18 @@ def authorize_or_wait(
         approval=normalized_approval,
         risk=normalized_risk,
     ):
+        # 自动批（request_approval 档只读 git 观察是唯一放行面）与显式批准、
+        # 授权短路同处一条 Windows 沙箱死路：无一次性证据时沙箱门 fail-closed
+        # 拦截，自动批会无限重试、永无出口。签发与消费语义完全一致；_mint
+        # 内部含 windows_offline_shell_unverified() 门，非 Windows 或非沙箱
+        # 受控命令无副作用。白名单判定本身保持原样，不在此放松。
+        _mint_command_execution_evidence(
+            session_id=normalized_session,
+            turn_id=normalized_turn,
+            call_id=normalized_call,
+            tool_name=normalized_tool,
+            command_execution_hash=command_execution_hash,
+        )
         return ToolApprovalOutcome(True, "auto_approved")
     request = _get_or_create_request(
         session_id=normalized_session,
@@ -681,6 +695,65 @@ def list_durable_tool_approval_grants(*, agent_id: str = "") -> list[dict[str, A
         )
     )
     return [dict(item) for item in records]
+
+
+# b3 一键「本会话信任开发操作」的工具面：execute/write 类非阻断风险开发工具
+# （沙箱受控 shell 族 + 工作区文件写入族）。CUA、network/destructive 红线
+# 工具永不入包；包内授权与单工具 acceptForSessionTool 完全同键同失效语义。
+_SESSION_DEV_TOOL_BUNDLE_TOOLS = frozenset(_SANDBOX_CONTAINED_TOOLS | _WORKSPACE_PATH_TOOLS)
+
+
+def grant_session_development_tool_bundle(session_id: str, request_id: str) -> dict[str, Any]:
+    """One click trusts the execute/write development tools for this session.
+
+    以当前 pending 请求冻结的 session/agent/config 身份为唯一边界：先按单工具
+    ``acceptForSessionTool`` 终态化本请求（同键授权 + 一次性执行证据签发 +
+    唤醒等待方），再对包内其余工具逐个落 ``TOOL_LEVEL_SESSION_GRANT_KEY``。
+    不新增任何授权机制、存储或失效语义；CUA/network/destructive 请求与
+    always 钉死的请求在这里同样被拒，红线原样生效。
+    """
+
+    normalized_session = _required_identity(session_id, "sessionId")
+    normalized_request = _required_identity(request_id, "requestId")
+    with _LOCK:
+        request = _REQUESTS.get(normalized_request)
+        if request is None or request.session_id != normalized_session:
+            raise ToolApprovalNotFoundError(
+                f"tool approval request does not exist in the named session: {normalized_request}"
+            )
+        if request.status != "pending":
+            raise ToolApprovalConflictError(
+                f"tool approval request is already {request.status}: {request.request_id}"
+            )
+        if request.tool_name not in _SESSION_DEV_TOOL_BUNDLE_TOOLS:
+            raise ToolApprovalConflictError(
+                "development tool bundle is only available for execute/write development tools"
+            )
+        ineligibility = _tool_level_session_grant_ineligibility(request)
+        if ineligibility:
+            raise ToolApprovalConflictError(
+                f"tool-level session grant is not allowed for this request: {ineligibility}"
+            )
+        _resolve_request_locked(request, "acceptForSessionTool")
+        granted_tools = [request.tool_name]
+        for tool_name in sorted(_SESSION_DEV_TOOL_BUNDLE_TOOLS - {request.tool_name}):
+            _SESSION_GRANTS.add(
+                (
+                    request.session_id,
+                    request.agent_id,
+                    request.config_revision,
+                    request.config_hash,
+                    tool_name,
+                    TOOL_LEVEL_SESSION_GRANT_KEY,
+                )
+            )
+            granted_tools.append(tool_name)
+    return {
+        "sessionId": normalized_session,
+        "requestId": request.request_id,
+        "grantedTools": granted_tools,
+        "request": request.public_projection(),
+    }
 
 
 def _get_or_create_request(
@@ -1868,7 +1941,21 @@ def _session_grant_scope(
     tool_name: str,
     tool_args: Mapping[str, Any],
     arguments_hash: str,
+    *,
+    risk: str = "",
 ) -> dict[str, Any]:
+    """Server-derived grant scope; the model can never construct these keys.
+
+    - ``write_stdin`` stays scoped to one terminal session.
+    - ``cli_tool``/``exec_command`` widen to a command-family scope (executable
+      + first subcommand-like word) so a session grant actually hits again:
+      exact-args hashes never repeat for shell commands. Chained/quoted or
+      unparseable commands fall back to the exact scope (never widen).
+    - Workspace file tools widen to a path-family scope (parent directory).
+    - Destructive/network-risk calls and CUA tools keep the exact scope: the
+      family tiers only apply to execute/write-class non-blocked-risk tools.
+    """
+
     if tool_name == "write_stdin":
         terminal_session_id = str(
             tool_args.get("session_id")
@@ -1880,10 +1967,141 @@ def _session_grant_scope(
                 "kind": "terminal_session",
                 "terminalSessionId": terminal_session_id,
             }
+    if risk not in _TOOL_GRANT_BLOCKED_RISKS:
+        if tool_name in _SHELL_FAMILY_SCOPE_TOOLS:
+            family = _shell_command_family_scope(tool_args)
+            if family is not None:
+                return family
+        elif tool_name in _WORKSPACE_PATH_TOOLS:
+            family = _file_path_family_scope(tool_name, tool_args)
+            if family is not None:
+                return family
     return {
         "kind": "exact_arguments",
         "argumentsHash": arguments_hash,
     }
+
+
+# 命令族/路径族只放宽 execute/write 类开发工具；任何其他工具（含 CUA、
+# network/destructive 风险档）保持 exact-args 最窄授权。
+_SHELL_FAMILY_SCOPE_TOOLS = {"cli_tool", "exec_command"}
+_SHELL_FAMILY_METACHAR_PATTERN = re.compile(r"[|;&><`$\"]|&&|\|\|")
+# 子命令样 token：纯词（字母/数字/_/- 开头不为连字符），不含路径分隔、点号、
+# 引号或等号；这是族键的取词边界，不是安全边界（沙箱内容门逐命令仍在）。
+_SHELL_FAMILY_WORD_PATTERN = re.compile(r"^[a-z0-9_][a-z0-9_-]{0,63}$")
+
+
+def _shell_command_family_scope(tool_args: Mapping[str, Any]) -> dict[str, Any] | None:
+    """命令族 scope：可执行名 + 第一个子命令样位置参数；不可解析返回 None。"""
+
+    command = _cli_command_text(tool_args)
+    if not command or _SHELL_FAMILY_METACHAR_PATTERN.search(command):
+        return None
+    tokens = command.split()
+    if not tokens:
+        return None
+    head = tokens[0].strip().lower().replace("\\", "/")
+    executable = head.rsplit("/", 1)[-1]
+    if not executable:
+        return None
+    if executable.endswith(".exe"):
+        executable = executable[: -len(".exe")]
+    if not _SHELL_FAMILY_WORD_PATTERN.match(executable):
+        return None
+    family = executable
+    for token in tokens[1:]:
+        lowered = token.lower()
+        if lowered.startswith("-") or lowered in {".", ".."}:
+            continue
+        if _SHELL_FAMILY_WORD_PATTERN.match(lowered):
+            family = f"{executable} {lowered}"
+        break
+    return {"kind": "shell_command_family", "family": family}
+
+
+def _normalized_relative_path_parts(raw_path: str) -> list[str] | None:
+    """Workspace-relative path parts; None stays exact-scoped (never widens).
+
+    纯字符串归一化，不触盘：绝对路径、含 ``..``、空路径一律不入族（保守）。
+    ``workspace/`` 前缀约定与 ``_workspace_path_call_is_contained`` 一致。
+    """
+
+    text = str(raw_path or "").strip().replace("\\", "/")
+    if not text or text.startswith("/"):
+        return None
+    raw_parts = [part for part in text.split("/") if part and part != "."]
+    if not raw_parts or any(part == ".." for part in raw_parts):
+        return None
+    if len(raw_parts[0]) == 2 and raw_parts[0][1] == ":":
+        return None
+    if raw_parts[0].lower() == "workspace":
+        raw_parts = raw_parts[1:]
+    if not raw_parts:
+        return None
+    return raw_parts
+
+
+def _path_family_key(parent_parts: list[str]) -> str:
+    joined = "/".join(parent_parts) or "."
+    try:
+        import os
+
+        if os.name == "nt":
+            # Windows 路径大小写不敏感：族键大小写归一，避免同目录大小写
+            # 变体永不命中；族键不是执行边界，执行器仍按真实路径校验。
+            return joined.lower()
+    except Exception:
+        pass
+    return joined
+
+
+def _file_path_family_scope(tool_name: str, tool_args: Mapping[str, Any]) -> dict[str, Any] | None:
+    """路径族 scope：目标文件的父目录（多目标取公共祖先）；解析不了返回 None。"""
+
+    parent_lists: list[list[str]]
+    if tool_name == "apply_patch_tool":
+        cwd_parts: list[str] = []
+        cwd_text = str(tool_args.get("cwd") or "").strip()
+        if cwd_text:
+            normalized_cwd = _normalized_relative_path_parts(cwd_text)
+            if normalized_cwd is None:
+                return None
+            cwd_parts = normalized_cwd
+        targets = [
+            str(match.group("path") or "").strip()
+            for match in _PATCH_TARGET_PATTERN.finditer(str(tool_args.get("patch_text") or ""))
+            if str(match.group("path") or "").strip()
+        ]
+        if not targets:
+            return None
+        parent_lists = []
+        for target in targets:
+            parts = _normalized_relative_path_parts(target)
+            if parts is None or len(parts) < 1:
+                return None
+            parent_lists.append([*cwd_parts, *parts[:-1]])
+    else:
+        raw_path = str(tool_args.get("file_path") or "").strip()
+        if not raw_path:
+            return None
+        parts = _normalized_relative_path_parts(raw_path)
+        if parts is None or len(parts) < 1:
+            return None
+        parent_lists = [parts[:-1]]
+    if not parent_lists:
+        return None
+    prefix = parent_lists[0]
+    for candidate in parent_lists[1:]:
+        common_length = 0
+        while (
+            common_length < min(len(prefix), len(candidate))
+            and prefix[common_length] == candidate[common_length]
+        ):
+            common_length += 1
+        prefix = prefix[:common_length]
+        if not prefix:
+            break
+    return {"kind": "path_family", "path": _path_family_key(prefix)}
 
 
 def _url_host_scope(

@@ -636,7 +636,7 @@ def test_builtin_tool_test_runs_allowlisted_tool(tmp_path, monkeypatch):
     assert result["agentCompatibility"]["toolCall"]["name"] == "get_current_goal_tool"
 
 
-@pytest.mark.parametrize("status", ["blocked", "policy_blocked", "failed", "failure", "fail", "cancelled", "no_result", "submitted", "in_progress", "timed_out"])
+@pytest.mark.parametrize("status", ["blocked", "policy_blocked", "failed", "failure", "fail", "cancelled", "no_result", "timed_out"])
 def test_builtin_tool_test_marks_structured_failure_status_as_failed(tmp_path, monkeypatch, status):
     monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
 
@@ -651,6 +651,25 @@ def test_builtin_tool_test_marks_structured_failure_status_as_failed(tmp_path, m
     assert json.loads(result["resultPreview"])["status"] == status
     assert result["called"] is True
     assert result["agentCompatibility"]["status"] in {"succeeded", "failed"}
+
+
+@pytest.mark.parametrize("status", ["submitted", "in_progress"])
+def test_builtin_tool_test_passes_through_accepted_pending_status(tmp_path, monkeypatch, status):
+    # Accepted/pending statuses are deliberate non-failures (see
+    # ACCEPTED_PENDING_STATUSES): flagging them as tool failures induces
+    # upstream retries and duplicate submissions of async receipts.
+    monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
+
+    monkeypatch.setattr(
+        "core.infrastructure.tool_executor.ToolExecutor.execute",
+        lambda self, tool_name, tool_args: (json.dumps({"status": status}), None),
+    )
+
+    result = registry.test_tool("get_current_goal_tool")
+
+    assert result["status"] != "failed"
+    assert json.loads(result["resultPreview"])["status"] == status
+    assert result["called"] is True
 
 
 @pytest.mark.parametrize(
