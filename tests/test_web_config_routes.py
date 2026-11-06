@@ -28,6 +28,7 @@ from core.web.services.model_reference_service import ModelReferenceConflictErro
 from core.web.services import (
     config_editor_schema,
     config_service,
+    diagnostics_service,
     log_service,
     provider_config_service,
     runtime_scene_service,
@@ -1442,6 +1443,56 @@ def test_health_diagnostics_endpoint_returns_log_helpers(tmp_path, monkeypatch):
     assert any(item["source"] == "reset" and item["protected"] is True for item in payload["findings"])
     assert payload["quickActions"][0]["findingId"] == "runtime_scene_failed"
     assert any(item["resetItemId"] == "stopped_runtime_scenes" for item in payload["quickActions"])
+
+
+def test_health_diagnostics_failed_finding_routes_to_failed_session(tmp_path, monkeypatch):
+    runtime_log = tmp_path / "logs" / "agent_realtime.log"
+    runtime_log.parent.mkdir(parents=True, exist_ok=True)
+    runtime_log.write_text("runtime line\n", encoding="utf-8")
+    monkeypatch.setattr(log_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        diagnostics_service,
+        "list_sessions",
+        lambda *, repair_collisions: [
+            {
+                "id": "session-live",
+                "title": "活跃会话",
+                "status": "ready",
+                "currentPhase": "ready",
+                "activeSessionId": "session-live",
+                "updatedAt": "2026-05-18T12:00:00",
+            },
+            {
+                "id": "session-broken",
+                "title": "失败会话",
+                "status": "failed",
+                "currentPhase": "failed",
+                "activeSessionId": "",
+                "updatedAt": "2026-05-18T11:00:00",
+            },
+        ],
+    )
+
+    response = client.get("/api/diagnostics/health")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "blocked"
+    session_helpers = {item["id"]: item for item in payload["sessionHelpers"]}
+    assert session_helpers["chat_sessions"]["sessionCount"] == 2
+    assert session_helpers["chat_sessions"]["failedCount"] == 1
+    assert session_helpers["chat_sessions"]["failedSessionId"] == "session-broken"
+    assert session_helpers["chat_sessions"]["activeSessionId"] == "session-live"
+    assert session_helpers["chat_sessions"]["route"] == "/chat?session=session-live"
+    failed_finding = next(item for item in payload["findings"] if item["id"] == "session_failed")
+    assert failed_finding["severity"] == "blocked"
+    assert failed_finding["route"] == "/chat?session=session-broken"
+    assert any(
+        item["label"] == "失败会话" and item["value"] == "session-broken"
+        for item in failed_finding["evidence"]
+    )
+    assert payload["quickActions"][0]["route"] == "/chat?session=session-broken"
 
 
 def test_config_workspace_surfaces_llm_security_diagnostics_without_blocking_read(monkeypatch):
