@@ -32,6 +32,25 @@ function detail(items: SessionTurnItem[] = [], patch: Partial<SessionDetail> = {
 }
 
 describe("launcher assistant native stream", () => {
+  it("shares the native optimistic and accepted layer handoff without losing an early stream", () => {
+    const stream = createLauncherAssistantStream("session-1");
+    expect(stream.beginSubmission("request-1")).toMatchObject({ clientSubmissionId: "request-1", status: "pending", turnItems: [] });
+    const early = stream.apply(event()).layer;
+    expect(early?.turnItems).toEqual([item()]);
+    expect(stream.acceptSubmission("request-1", "turn-1")?.turnItems).toEqual([item()]);
+    expect(stream.rejectSubmission("request-1")?.turnItems).toEqual([item()]);
+  });
+
+  it("withdraws a rejected waiting shell and leaves another turn alone for queued acceptance", () => {
+    const stream = createLauncherAssistantStream("session-1");
+    stream.beginSubmission("request-1");
+    expect(stream.rejectSubmission("request-1")).toBeUndefined();
+    stream.beginSubmission("accepted-request");
+    expect(stream.acceptSubmission("accepted-request", "turn-1")?.processStage).toBe("user_submit");
+    stream.rejectSubmission("accepted-request");
+    const running = stream.apply(event()).layer;
+    expect(stream.acceptSubmission("queued-request", "", true)).toBe(running);
+  });
   it.each(["你好🐳", "🧑🏽‍💻一起工作", "𠮷野家"])("continues native codepoint appends after %s", seed => {
     const stream = createLauncherAssistantStream("session-1");
     stream.apply(event({ turnItems: [item(seed)] }));

@@ -5,7 +5,7 @@ import { sessionOwnsExecution } from "../sessionActivityState";
  * live, so submit, edit-resubmit, and regenerate still share one readback.
  */
 import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
-import type { QueryClient } from "@tanstack/react-query";
+import type { QueryClient, QueryKey } from "@tanstack/react-query";
 
 import { queryKeys } from "../../api/queryKeys";
 import type { SessionDetail } from "../../api/types";
@@ -130,9 +130,12 @@ export function reconcileAcceptedSubmitActiveTurnLayer(
 
   // A late receipt must not replace the layer for a later submission/turn.
   if (layer && !submissionOwnsLayer && !turnOwnsLayer) return current;
-  const boundLayer = layer
+  const boundLayerBeforeAcceptance = layer
     ? bindActiveTurnLayerToTurnId(layer, input.turnId)
     : undefined;
+  const boundLayer = boundLayerBeforeAcceptance?.processStage === "sending"
+    ? { ...boundLayerBeforeAcceptance, processStage: "user_submit" }
+    : boundLayerBeforeAcceptance;
   const matchingLayer = boundLayer ?? createOptimisticActiveTurnLayer({
     sessionId: input.sessionId,
     turnId: input.turnId,
@@ -195,8 +198,13 @@ export async function readbackSubmitAcceptance(
   queryClient: QueryClient,
   sessionId: string,
   clientSubmissionId: string,
+  runtime?: {
+    detailQueryKey: (sessionId: string) => QueryKey;
+    readDetail: (sessionId: string, signal: AbortSignal) => Promise<SessionDetail>;
+    mergeDetail?: (previous: SessionDetail | undefined, next: SessionDetail) => SessionDetail;
+  },
 ): Promise<SubmitAcceptanceReadback> {
-  const queryKey = queryKeys.session(sessionId);
+  const queryKey = runtime?.detailQueryKey(sessionId) ?? queryKeys.session(sessionId);
   const cachedEvidence = findSubmitAcceptanceEvidence(
     queryClient.getQueryData<SessionDetail>(queryKey),
     clientSubmissionId,
@@ -210,11 +218,20 @@ export async function readbackSubmitAcceptance(
     () => controller.abort(),
     SUBMIT_ACCEPTANCE_READBACK_TIMEOUT_MS,
   );
+  let onAbort: (() => void) | undefined;
   try {
-    const readback = await fetchSessionDetailWindow(sessionId, {
-      includeSecondary: false,
-      signal: controller.signal,
-    });
+    // IPC reads cannot necessarily cancel their native work. Bound our wait and
+    // reject late results without claiming the underlying RPC was cancelled.
+    const readback = await Promise.race([
+      runtime ? runtime.readDetail(sessionId, controller.signal) : fetchSessionDetailWindow(sessionId, {
+        includeSecondary: false, signal: controller.signal,
+      }),
+      new Promise<never>((_resolve, reject) => {
+        onAbort = () => reject(controller.signal.reason);
+        controller.signal.addEventListener("abort", onAbort, { once: true });
+      }),
+    ]);
+    controller.signal.throwIfAborted();
     if (String(readback.id ?? "").trim() !== sessionId) {
       return { evidence: null, status: "not_found" };
     }
@@ -231,7 +248,7 @@ export async function readbackSubmitAcceptance(
       ) {
         return current;
       }
-      return mergeSessionDetailMessageWindow(current, readback);
+      return (runtime?.mergeDetail ?? mergeSessionDetailMessageWindow)(current, readback);
     });
     const evidence = findSubmitAcceptanceEvidence(
       queryClient.getQueryData<SessionDetail>(queryKey) ?? readback,
@@ -246,6 +263,7 @@ export async function readbackSubmitAcceptance(
     return { evidence: null, status: "readback_failed" };
   } finally {
     globalThis.clearTimeout(timeoutId);
+    if (onAbort) controller.signal.removeEventListener("abort", onAbort);
   }
 }
 

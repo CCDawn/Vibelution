@@ -2,10 +2,12 @@ import { parseLauncherAssistantSessionEvent, type LauncherAssistantSessionEvent 
 import type { SessionAssistantDeltaStreamEvent, SessionDetail, SessionTurnItem } from "../../api/types";
 import {
   isActiveTurnSettledByDetail,
+  createOptimisticActiveTurnLayer,
   mergeAssistantDeltaIntoActiveTurnLayer,
   reconcileActiveTurnLayerItemsWithMessages,
   type ActiveTurnLayerState,
 } from "../chatActiveTurnLayer";
+import { reconcileAcceptedSubmitActiveTurnLayer } from "../chat/chatSubmitAcceptanceReadback";
 import { sessionStreamAppendBaseline } from "../chat/sessionStreamAppendBaseline";
 import { createSessionStreamAppendReassembler } from "../chatSessionStreamProtocol";
 import { mergeSessionDetailMessageWindowWithOutcome } from "../chatSessionState";
@@ -225,5 +227,22 @@ export function createLauncherAssistantStream(sessionId: string) {
     return { layer, needsRefresh: payload.done };
   }
 
-  return { apply, reconcile };
+  function beginSubmission(clientSubmissionId: string, updatedAt = new Date().toISOString()) {
+    layer = createOptimisticActiveTurnLayer({ sessionId, clientSubmissionId, updatedAt, accepted: false });
+    return layer;
+  }
+
+  function acceptSubmission(clientSubmissionId: string, turnId: string, queued = false) {
+    layer = reconcileAcceptedSubmitActiveTurnLayer(layer ? { [sessionId]: layer } : {}, {
+      sessionId, clientSubmissionId, turnId, queued, detail: undefined, updatedAt: new Date().toISOString(),
+    })[sessionId];
+    return layer;
+  }
+
+  function rejectSubmission(clientSubmissionId: string) {
+    if (layer?.clientSubmissionId === clientSubmissionId && !layer.ledgerSeq) layer = undefined;
+    return layer;
+  }
+
+  return { apply, reconcile, beginSubmission, acceptSubmission, rejectSubmission };
 }

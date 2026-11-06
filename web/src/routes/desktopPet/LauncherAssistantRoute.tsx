@@ -32,7 +32,11 @@ import { hasExecutionOwnership, resolveSessionActivity, sessionActivityStatusLab
 import { continuationSnapshotKey, resolveConversationContinuation } from "../chat/conversationContinuationModel";
 import { resolveSessionStopTurnId } from "../chat/chatStopTurnModel";
 import { resolveChatUserDisplayName } from "../chatCompactPanel";
-import { exactAcceptedSubmitTurnId, findSubmitAcceptanceEvidence } from "../chat/chatSubmitAcceptanceReadback";
+import { exactAcceptedSubmitTurnId, findSubmitAcceptanceEvidence, readbackSubmitAcceptance } from "../chat/chatSubmitAcceptanceReadback";
+import { acceptSessionSubmit, beginSessionSubmit, mergeSessionSubmitDetail, removeSessionSubmitPaint, sameSubmittedReferenceSnapshot } from "../chat/sessionSubmitProjection";
+import { sessionReferenceId } from "../chat/chatComposerSubmitModel";
+import { appendStoredPromptHistoryEntry } from "../../components/conversation/conversationPromptHistory";
+import { applyOptimisticRegenerate, markSessionDetailStopping, clearSessionDetailStopping, type OptimisticUserMessageInput } from "../chatSessionState";
 import { DesktopPetCharacter } from "./DesktopPetCharacter";
 import {
   beginDesktopPetDrag, desktopPetWindowDragBridge, updateDesktopPetDrag,
@@ -52,7 +56,7 @@ import { launcherAssistantComputer } from "../../api/launcherAssistantComputer";
 import { useLauncherComputerAccess } from "./useLauncherComputerAccess";
 import petStyles from "./DesktopAssistantRoute.styles";
 import { useLauncherAttachmentHistory } from "./useLauncherAttachmentHistory";
-import { classifyComposerFiles, mergeComposerAttachmentsWithRejections, type ComposerImageAttachment } from "../chat/chatComposerSubmitModel";
+import { applyComposerAttachmentUploadOutcomes, classifyComposerFiles, mergeComposerAttachmentsWithRejections, type ComposerAttachmentUploadOutcome, type ComposerImageAttachment } from "../chat/chatComposerSubmitModel";
 import {
   launcherAssistantActivity, launcherAssistantMessageOverLimit, launcherAssistantPollInterval, launcherAssistantSubmission,
   launcherAssistantQueueReadback, launcherAssistantQueueLabel, launcherAssistantRequestReadback,
@@ -353,6 +357,26 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     void client.invalidateQueries({ queryKey: ["launcher-assistant", "assistant-avatar"], refetchType: "none" });
   }, [client]);
   const composerKey = ["launcher-assistant", "composer", sessionId];
+  const detailKey = ["launcher-assistant", "detail", sessionId];
+  const submitReadbackRuntime = {
+    detailQueryKey: (id: string) => ["launcher-assistant", "detail", id],
+    readDetail: async (id: string, signal: AbortSignal) => {
+      signal.throwIfAborted();
+      const result = await getLauncherAssistantDetail(id);
+      signal.throwIfAborted();
+      return result;
+    },
+    mergeDetail: mergeSessionSubmitDetail,
+  };
+  function submissionPaint(submission: LauncherAssistantSubmission): OptimisticUserMessageInput {
+    return { sessionId, clientSubmissionId: submission.requestId, content: submission.message,
+      attachmentIds: submission.attachmentIds, references: submission.references,
+      attachments: attachmentsRef.current.filter(item => submission.attachmentSnapshotIds?.includes(item.id) && item.artifactId).map(item => ({
+        artifactId: item.artifactId!, filename: item.file.name, contentType: item.file.type,
+        sizeBytes: item.file.size, kind: item.kind === "secret" ? "user_secret" : item.kind === "image" ? "user_image" : "user_document", status: "ready",
+        url: "", imageUrl: "", downloadUrl: "",
+      })) };
+  }
   function saveComposer(patch: Partial<ComposerSnapshot>) {
     client.setQueryDefaults(composerKey, { gcTime: Infinity });
     const previous = client.getQueryData<ComposerSnapshot>(composerKey);
@@ -447,7 +471,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     queryFn: async ({ signal }) => {
       const result = await getLauncherAssistantDetail(sessionId);
       signal.throwIfAborted();
-      return mergeSessionDetailMessageWindow(client.getQueryData<SessionDetail>(["launcher-assistant", "detail", sessionId]), result);
+      return mergeSessionSubmitDetail(client.getQueryData<SessionDetail>(["launcher-assistant", "detail", sessionId]), result);
     },
     // A hidden window must keep the self-healing readback alive for an
     // outstanding send, so these are states (not the outstanding ref): an
@@ -528,6 +552,11 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     const submission = outstanding.current;
     const recovered = submission && launcherAssistantRequestReadback(detail.data, submission.requestId);
     if (!submission || !recovered) return;
+    appendStoredPromptHistoryEntry(submission.message);
+    client.setQueryData<SessionDetail>(detailKey, previous => acceptSessionSubmit(previous, submissionPaint(submission), {
+      turnId: recovered.turnId, queuedTurnId: recovered.queuedAcceptance?.id,
+    }));
+    setActiveLayer(sessionStream.acceptSubmission(submission.requestId, recovered.turnId, Boolean(recovered.queuedAcceptance)));
     // A collapse may invalidate the transport ACK epoch. Only exact native
     // submission evidence may retire that original request, preserving new B.
     outstanding.current = null;
@@ -935,7 +964,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   // candidates await a session-list IPC verb). Same dedupe and cap as the chat
   // composer: six per turn, keyed by the reference's own id.
   function composerReferenceId(reference: SessionReferenceAttachment): string {
-    return String(reference.referenceId || reference.sessionId || "").trim();
+    return sessionReferenceId(reference);
   }
   function updateComposerReferences(next: SessionReferenceAttachment[]) {
     composerReferencesRef.current = next;
@@ -956,8 +985,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   function clearAcceptedReferences(submission: LauncherAssistantSubmission) {
     const sent = submission.references;
     if (!sent?.length) return;
-    const sentIds = new Set(sent.map(item => composerReferenceId(item)).filter(Boolean));
-    updateComposerReferences(composerReferencesRef.current.filter(item => !sentIds.has(composerReferenceId(item))));
+    updateComposerReferences(composerReferencesRef.current.filter(item => !sent.some(reference => sameSubmittedReferenceSnapshot(item, reference))));
   }
   async function uploadAttachments(onlyId?: string): Promise<boolean> {
     if (uploadGate.current || status.data?.attachmentVersion !== 1 || !sessionId) return false;
@@ -969,12 +997,10 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     const ids = new Set(targets.map(item => item.id));
     updateAttachments(attachmentsRef.current.map(item => ids.has(item.id) ? { ...item, uploadStatus: "uploading" } : item));
     const results = await Promise.allSettled(targets.map(item => uploadLauncherAttachment(item.file)));
-    const byId = new Map(targets.map((item, index) => [item.id, results[index]]));
-    const updateOutcomes = (items: ComposerImageAttachment[]): ComposerImageAttachment[] => items.map(item => {
-      const result = byId.get(item.id);
-      return !result ? item : result.status === "fulfilled" ? { ...item, uploadStatus: "uploaded", artifactId: result.value }
-        : { ...item, uploadStatus: "failed" };
-    });
+    const outcomes: ComposerAttachmentUploadOutcome[] = results.map((result, index) => result.status === "fulfilled"
+      ? { id: targets[index].id, status: "uploaded", artifactId: result.value }
+      : { id: targets[index].id, status: "failed", error: result.reason });
+    const updateOutcomes = (items: ComposerImageAttachment[]) => applyComposerAttachmentUploadOutcomes(items, outcomes);
     if (sessionIdRef.current !== uploadSessionId || !mounted.current) {
       client.setQueryData<ComposerSnapshot>(["launcher-assistant", "composer", uploadSessionId], previous => previous
         ? { ...previous, attachments: updateOutcomes(previous.attachments || []) } : previous);
@@ -1013,9 +1039,9 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     if (priorSubmission) {
       requestReadbackGate.current = true;
       try {
-        const readback = await detail.refetch();
+        const readback = await readbackSubmitAcceptance(client, sessionId, priorSubmission.requestId, submitReadbackRuntime);
         if (!mounted.current || sessionIdRef.current !== sessionId || outstanding.current !== priorSubmission) return true;
-        if (readback.isError || launcherAssistantRequestReadback(readback.data, priorSubmission.requestId)) return false;
+        if (readback.status === "readback_failed" || readback.evidence) return false;
       } finally { requestReadbackGate.current = false; }
     }
     const snapshot = attachmentsRef.current;
@@ -1031,6 +1057,11 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       setRecoverySaveFailed(true);
       return false;
     }
+    const paint = submissionPaint(submission);
+    const beforeSubmitDetail = client.getQueryData<SessionDetail>(detailKey);
+    client.setQueryData<SessionDetail>(detailKey, previous => beginSessionSubmit(previous, paint, busy));
+    const paintedDetail = client.getQueryData<SessionDetail>(detailKey);
+    if (!busy) setActiveLayer(sessionStream.beginSubmission(submission.requestId));
     const flight = { submission };
     sending.current = flight;
     setSendPending(true);
@@ -1042,6 +1073,9 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       const acceptance = await sendLauncherAssistantMessage(submission.message, submission.requestId,
         submission.attachmentIds, submission.references);
       if (!mounted.current || requestEpoch !== epochRef.current || sending.current !== flight || outstanding.current !== submission) return true;
+      client.setQueryData<SessionDetail>(detailKey, previous => acceptSessionSubmit(previous, paint, acceptance));
+      setActiveLayer(sessionStream.acceptSubmission(submission.requestId, acceptance.turnId, Boolean(acceptance.queuedTurnId)));
+      appendStoredPromptHistoryEntry(submission.message);
       outstanding.current = null;
       clearAcceptedAttachments(submission);
       clearAcceptedReferences(submission);
@@ -1060,6 +1094,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     } catch (error) {
       if (mounted.current && requestEpoch === epochRef.current && sending.current === flight && outstanding.current === submission) {
         if (launcherAssistantSendDefinitelyRejected(error)) {
+          removeSessionSubmitPaint(client, detailKey, paint, { previous: beforeSubmitDetail, optimistic: paintedDetail });
+          setActiveLayer(sessionStream.rejectSubmission(submission.requestId));
           // A provable pre-admission refusal left nothing queued, so the
           // conservative unconfirmed lock would only dead-end the composer.
           // Draft and tray stay editable for an immediate corrected resend.
@@ -1068,6 +1104,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
           setSendUnconfirmed(false);
           setFeedback(copy.sendRejected);
         } else if (launcherAssistantSendRetryableBusy(error)) {
+          removeSessionSubmitPaint(client, detailKey, paint, { previous: beforeSubmitDetail, optimistic: paintedDetail });
+          setActiveLayer(sessionStream.rejectSubmission(submission.requestId));
           // These host codes are pre-admission quiescence gates (the native
           // layer asks callers to retain and retry) or the idempotent 409
           // session-changed conflict: nothing is executing, so a verbatim
@@ -1082,6 +1120,9 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
         } else {
           setSendUnconfirmed(true);
           setSendUnknownDetail(boundedErrorDetail(error));
+          // Confirm the original request through this surface's IPC reader;
+          // shared evidence rules never mistake local paint for admission.
+          await readbackSubmitAcceptance(client, sessionId, submission.requestId, submitReadbackRuntime);
         }
       }
     } finally {
@@ -1161,10 +1202,19 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     controlGate.current = true;
     setControlPending(true);
     setFeedback("");
+    const previous = client.getQueryData<SessionDetail>(detailKey);
+    const requestedAt = new Date().toISOString();
+    client.setQueryData<SessionDetail>(detailKey, current => markSessionDetailStopping(current, { requestedAt }));
     try {
-      await stopLauncherAssistantTurn(sessionId, turnId);
+      const next = await stopLauncherAssistantTurn(sessionId, turnId);
+      if (mounted.current && sessionIdRef.current === sessionId) {
+        client.setQueryData<SessionDetail>(detailKey, current => mergeSessionSubmitDetail(current, next));
+      }
     } catch (error) {
-      if (mounted.current) setFeedback(errorMessage(error));
+      if (mounted.current && sessionIdRef.current === sessionId) {
+        client.setQueryData<SessionDetail>(detailKey, current => current ? clearSessionDetailStopping(current, { requestedAt, previous }) : current);
+        setFeedback(errorMessage(error));
+      }
     } finally {
       controlGate.current = false;
       if (mounted.current) { setControlPending(false); void detail.refetch(); }
@@ -1178,10 +1228,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       if (previous.expected.agentId !== assistantAgentId) return;
       requestReadbackGate.current = true;
       try {
-        const readback = await detail.refetch();
-        if (!mounted.current || sessionIdRef.current !== sessionId || readback.isError) return;
-        const evidence = findSubmitAcceptanceEvidence(readback.data, previous.requestId);
-        if (evidence && exactAcceptedSubmitTurnId(readback.data, previous.requestId, evidence)) return;
+        const readback = await readbackSubmitAcceptance(client, sessionId, previous.requestId, submitReadbackRuntime);
+        if (!mounted.current || sessionIdRef.current !== sessionId || readback.status === "readback_failed" || readback.evidence) return;
       } finally { requestReadbackGate.current = false; }
     }
     const expected = resolveConversationContinuation(detail.data, sessionId);
@@ -1200,10 +1248,14 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       const accepted = await continueLauncherAssistantTurn(attempt.expected, attempt.requestId);
       if (!mounted.current || sessionIdRef.current !== sessionId) return;
       saveComposer({ continuation: { ...attempt, accepted: true }, acceptedTurnId: accepted.turnId });
+      setActiveLayer(sessionStream.acceptSubmission(attempt.requestId, accepted.turnId));
       setContinuationUnconfirmed(false);
       if (mounted.current) setAcceptedTurnId(accepted.turnId);
     } catch (error) {
-      if (mounted.current && sessionIdRef.current === sessionId) { setContinuationUnconfirmed(true); setFeedback(errorMessage(error)); }
+      if (mounted.current && sessionIdRef.current === sessionId) {
+        setContinuationUnconfirmed(true); setFeedback(errorMessage(error));
+        await readbackSubmitAcceptance(client, sessionId, attempt.requestId, submitReadbackRuntime);
+      }
     } finally {
       controlGate.current = false;
       if (mounted.current) { setControlPending(false); void detail.refetch(); }
@@ -1222,6 +1274,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     setSwitchHeadPending(true);
     setFeedback("");
     try {
+      await client.cancelQueries({ queryKey: detailKey, exact: true });
       const next = await switchLauncherAssistantHead(sessionId, nodeId);
       if (!mounted.current || sessionIdRef.current !== sessionId) return;
       // A head switch republishes the whole active path; replace the cached
@@ -1269,16 +1322,36 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     controlGate.current = true;
     setRegeneratePending(true);
     setFeedback("");
+    await client.cancelQueries({ queryKey: detailKey, exact: true });
+    const previousDetail = client.getQueryData<SessionDetail>(detailKey);
+    client.setQueryData<SessionDetail>(detailKey, current => applyOptimisticRegenerate(current, { messageId }));
+    const optimisticDetail = client.getQueryData<SessionDetail>(detailKey);
+    setActiveLayer(sessionStream.beginSubmission(attempt.requestId));
     try {
       const next = await regenerateLauncherAssistantMessage(sessionId, attempt.messageId, attempt.requestId);
       regenerateAttempt.current = null;
       if (!mounted.current || sessionIdRef.current !== sessionId) return;
       client.setQueryData<SessionDetail>(["launcher-assistant", "detail", sessionId], previous =>
         mergeSessionDetailMessageWindow(previous, next));
-      if (mounted.current) setAcceptedTurnId(String(next.activeTurnId || ""));
+      const evidence = findSubmitAcceptanceEvidence(next, attempt.requestId);
+      const turnId = evidence ? exactAcceptedSubmitTurnId(next, attempt.requestId, evidence) : String(next.activeTurnId || "");
+      setActiveLayer(sessionStream.acceptSubmission(attempt.requestId, turnId));
+      if (mounted.current) setAcceptedTurnId(turnId);
     } catch (error) {
       // The attempt is retained so an immediate retry replays the same id.
-      if (mounted.current) setFeedback(errorMessage(error));
+      const readback = await readbackSubmitAcceptance(client, sessionId, attempt.requestId, submitReadbackRuntime);
+      if (mounted.current && sessionIdRef.current === sessionId) {
+        if (readback.evidence) {
+          regenerateAttempt.current = null;
+          const turnId = exactAcceptedSubmitTurnId(client.getQueryData<SessionDetail>(detailKey), attempt.requestId, readback.evidence);
+          setAcceptedTurnId(turnId);
+          setActiveLayer(sessionStream.acceptSubmission(attempt.requestId, turnId));
+        } else {
+          client.setQueryData<SessionDetail>(detailKey, current => current === optimisticDetail ? previousDetail : current);
+          setActiveLayer(sessionStream.rejectSubmission(attempt.requestId));
+          setFeedback(errorMessage(error));
+        }
+      }
     } finally {
       controlGate.current = false;
       if (mounted.current) { setRegeneratePending(false); void detail.refetch(); }
@@ -1296,11 +1369,13 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     setGuidancePendingMode(mode);
     setFeedback("");
     try {
-      await guideLauncherAssistantTurn(sessionId, content, mode);
+      const next = await guideLauncherAssistantTurn(sessionId, content, mode);
       if (!mounted.current || sessionIdRef.current !== sessionId) return;
-      draftRef.current = "";
-      saveComposer({ draft: "" });
-      setDraft("");
+      client.setQueryData<SessionDetail>(detailKey, current => mergeSessionSubmitDetail(current, next));
+      const remaining = draftRef.current.trim() === content ? "" : draftRef.current;
+      draftRef.current = remaining;
+      saveComposer({ draft: remaining });
+      setDraft(remaining);
     } catch (error) {
       if (mounted.current) setFeedback(errorMessage(error));
     } finally {

@@ -38,15 +38,12 @@ import {
 } from "../chatActiveTurnLayer";
 import type { ActiveTurnLayersStore } from "./activeTurnLayersStore";
 import {
-  appendOptimisticUserMessage,
   applyOptimisticEditResubmit,
   applyOptimisticRegenerate,
   clearSessionDetailStopping,
-  markOptimisticUserMessageAccepted,
   markSessionDetailRunning,
   markSessionDetailStopping,
   markSessionSummaryRunning,
-  removeOptimisticUserMessage,
   type OptimisticUserMessageInput,
 } from "../chatSessionState";
 import { updateSessionSummaryCaches } from "../chatSessionIndexQuery";
@@ -62,7 +59,6 @@ import {
   encodeUtf8Base64,
   optimisticTurnIdForSubmission,
   restoreSubmittedDraftIfComposerStillEmpty,
-  sessionReferenceId,
   type ComposerAttachmentUploadOutcome,
   type ComposerImageAttachment,
 } from "./chatComposerSubmitModel";
@@ -85,6 +81,7 @@ import {
   useAcceptedSubmitProjectionReadback,
 } from "./chatSubmitAcceptanceReadback";
 import { removeOptimisticUserMessagePaint } from "./chatSessionPaintCache";
+import { acceptSessionSubmit, beginSessionSubmit, removeSessionSubmitPaint, sameSubmittedReferenceSnapshot } from "./sessionSubmitProjection";
 import { startUserAction, type UserActionTracker } from "../../app/userActionTelemetry";
 import { isEditAcknowledged, rollbackEditResubmit } from "./chatEditResubmitState";
 import {
@@ -116,17 +113,7 @@ export function removeOptimisticUserMessageFromCache(
   input: OptimisticUserMessageInput,
 ): void {
   removeOptimisticUserMessagePaint(sessionId, input);
-  const query = queryClient
-    .getQueryCache()
-    .find<SessionDetail>({ queryKey: queryKeys.session(sessionId), exact: true });
-  if (!query) {
-    return;
-  }
-  const next = removeOptimisticUserMessage(query.state.data, input);
-  if (next === query.state.data) {
-    return;
-  }
-  query.setState({ data: next, dataUpdatedAt: Date.now() });
+  removeSessionSubmitPaint(queryClient, queryKeys.session(sessionId), input);
 }
 
 export function restoreSubmittedDraftAfterFailure(
@@ -141,24 +128,6 @@ export function restoreSubmittedDraftAfterFailure(
     return;
   }
   setSessionDrafts((current) => restoreSubmittedDraftIfComposerStillEmpty(current, sessionId, content));
-}
-
-function sameSubmittedReferenceSnapshot(
-  current: SessionReferenceAttachment,
-  submitted: SessionReferenceAttachment,
-): boolean {
-  if (sessionReferenceId(current) !== sessionReferenceId(submitted)) {
-    return false;
-  }
-  // A message reference's id names the source message, while its quote is the
-  // actual payload. Preserve a re-quoted reference added during the request.
-  if (current.kind === "message" || submitted.kind === "message") {
-    return current.kind === submitted.kind
-      && current.sourceSessionId === submitted.sourceSessionId
-      && current.sourceMessageId === submitted.sourceMessageId
-      && current.quote === submitted.quote;
-  }
-  return true;
 }
 
 function clearSubmittedReferenceSnapshot(
@@ -539,9 +508,7 @@ export function useChatComposerTurnMutations({
         );
       }
       queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detailState) =>
-        variables.queuedBehindActiveTurn
-          ? detailState
-          : markSessionDetailRunning(appendOptimisticUserMessage(detailState, variables)),
+        beginSessionSubmit(detailState, variables, variables.queuedBehindActiveTurn),
       );
       updateSessionSummaryCaches(queryClient, (sessions) =>
         markSessionSummaryRunning(sessions, variables.sessionId),
@@ -616,32 +583,15 @@ export function useChatComposerTurnMutations({
           // bar immediately (from the response's queue facts); the
           // listSessionQueuedTurns rebase below refreshes the authoritative rows.
           const queuedAt = acceptedTurn.queuedAt || acceptedTurn.acceptedAt || new Date().toISOString();
-          queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detailState) => {
-            if (!detailState) {
-              return detailState;
-            }
-            const rows = detailState.queuedTurns ?? [];
-            if (rows.some((row) => row.id === queuedTurnId)) {
-              return detailState;
-            }
-            const optimisticQueuedRow: SessionQueuedTurn = {
-              id: queuedTurnId,
-              position: acceptedTurn.queuePosition ?? rows.length + 1,
-              status: "queued",
-              content: variables.content,
-              clientSubmissionId: variables.clientSubmissionId,
-              createdAt: queuedAt,
-              updatedAt: queuedAt,
-            };
-            return { ...detailState, queuedTurns: [...rows, optimisticQueuedRow] };
-          });
+          queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), detailState =>
+            acceptSessionSubmit(detailState, variables, { ...acceptedTurn, queuedAt }));
         }
       } else {
         const currentDetail = queryClient.getQueryData<SessionDetail>(queryKeys.session(variables.sessionId));
         const acceptedTurnId = responseTurnId
           || exactSubmitTurnId(currentDetail, variables.clientSubmissionId);
         queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detailState) => {
-          const acceptedDetail = markOptimisticUserMessageAccepted(detailState, variables, acceptedTurnId);
+          const acceptedDetail = acceptSessionSubmit(detailState, variables, { turnId: acceptedTurnId });
           if (!acceptedTurnId || !isCurrentRunningSessionTurn(acceptedDetail, variables.sessionId, acceptedTurnId)) {
             // SSE may have committed this turn (or a later one) before the HTTP
             // receipt arrived. A receipt is acceptance evidence, not authority

@@ -181,6 +181,101 @@ describe("Launcher task approval handoff through the real Shell and Route", () =
 });
 
 describe("Launcher original request recovery with a fresh QueryClient", () => {
+  it("keeps a submitted message visible before ACK and through a delayed or stale detail read", async () => {
+    const fallback = invoke.getMockImplementation()!;
+    let accept!: (value: unknown) => void;
+    let read!: (value: SessionDetail) => void;
+    let submitted = false;
+    invoke.mockImplementation(async request => {
+      if (request.operation === "send") {
+        submitted = true;
+        return new Promise(resolve => { accept = resolve; });
+      }
+      if (request.operation === "detail" && submitted) return new Promise(resolve => { read = resolve; });
+      return fallback(request);
+    });
+    await mount();
+    await act(async () => surface.onComposerChange!("始终可见的消息"));
+    await act(async () => surface.onSubmit()); await settle();
+    expect(surface.messages.filter(row => row.role === "user" && row.content === "始终可见的消息")).toHaveLength(1);
+    await act(async () => accept({ accepted: true, turnId: "accepted-turn" })); await settle();
+    expect(surface.composerValue).toBe("");
+    expect(surface.messages.filter(row => row.role === "user" && row.content === "始终可见的消息")).toHaveLength(1);
+    await act(async () => read(detail)); await settle();
+    expect(surface.messages.filter(row => row.role === "user" && row.content === "始终可见的消息")).toHaveLength(1);
+    const requestId = calls("send")[0].requestId;
+    detail = { ...detail, messages: [{ id: "native-user", role: "user", content: "始终可见的消息", timestamp: "2026-11-06T02:00:00Z",
+      metadata: { clientSubmissionId: requestId, turnId: "accepted-turn" } }] } as SessionDetail;
+    const refresh = client.invalidateQueries({ queryKey: ["launcher-assistant", "detail", "session"] });
+    await settle(); await act(async () => { read(detail); await refresh; }); await settle();
+    expect(surface.messages.filter(row => row.role === "user")).toHaveLength(1);
+    expect(surface.messages[0].id).toBe("native-user");
+  });
+
+  it("withdraws only a definitely rejected local echo and retains the draft", async () => {
+    const fallback = invoke.getMockImplementation()!;
+    invoke.mockImplementation(async request => {
+      if (request.operation === "send") throw new Error("ASSISTANT_REQUEST_INVALID");
+      return fallback(request);
+    });
+    detail = { ...detail, messages: [{ id: "old-user", role: "user", content: "保留的历史", timestamp: "" }] } as SessionDetail;
+    await mount(); await act(async () => surface.onComposerChange!("被拒绝的消息"));
+    await act(async () => surface.onSubmit()); await settle();
+    expect(surface.composerValue).toBe("被拒绝的消息");
+    expect(surface.messages.map(row => row.id)).toEqual(["old-user"]);
+    expect(client.getQueryData<SessionDetail>(["launcher-assistant", "detail", "session"])?.status).toBe("ready");
+  });
+
+  it("shows the accepted queued message before the queue detail read completes", async () => {
+    const fallback = invoke.getMockImplementation()!;
+    let sent = false;
+    invoke.mockImplementation(async request => {
+      if (request.operation === "status") return { ...await fallback(request), followupQueueVersion: 1 };
+      if (request.operation === "send") { sent = true; return { accepted: true, status: "queued", turnId: "", queuedTurnId: "q-new", clientSubmissionId: request.requestId }; }
+      if (request.operation === "detail" && sent) return new Promise(() => {});
+      return fallback(request);
+    });
+    detail = { ...detail, status: "running", currentPhase: "thinking", activeTurnId: "running-turn", queuedTurns: [] } as SessionDetail;
+    await mount(); await act(async () => surface.onComposerChange!("排队仍然可见"));
+    await act(async () => surface.onSubmit()); await settle();
+    expect(surface.composerValue).toBe("");
+    expect(surface.followupQueue?.map(row => row.text)).toContain("排队仍然可见");
+    expect(surface.messages.filter(row => row.role === "user")).toHaveLength(0);
+    expect(client.getQueryData<SessionDetail>(["launcher-assistant", "detail", "session"])?.activeTurnId).toBe("running-turn");
+  });
+
+  it("applies stop's native detail immediately instead of waiting for another GET", async () => {
+    const fallback = invoke.getMockImplementation()!;
+    let stopped = false;
+    invoke.mockImplementation(async request => {
+      if (request.operation === "stop") { stopped = true; return { ...detail, currentPhase: "ready", status: "ready", activeTurnId: "", stopRequested: false,
+        ledgerSeq: 2, lastTurnTerminalTurnId: "running-turn", lastTurnStatus: "stopped_by_user" }; }
+      if (request.operation === "detail" && stopped) return new Promise(() => {});
+      return fallback(request);
+    });
+    detail = { ...detail, currentPhase: "thinking", status: "running", activeTurnId: "running-turn", ledgerSeq: 1 } as SessionDetail;
+    await mount(); await act(async () => surface.onStop!()); await settle();
+    expect(client.getQueryData<SessionDetail>(["launcher-assistant", "detail", "session"])).toMatchObject({ status: "ready", stopRequested: false });
+  });
+
+  it("applies guidance's native message and preserves a newer draft while the control is pending", async () => {
+    const fallback = invoke.getMockImplementation()!;
+    let finish!: (value: SessionDetail) => void;
+    let guided = false;
+    invoke.mockImplementation(async request => {
+      if (request.operation === "guidance") { guided = true; return new Promise(resolve => { finish = resolve; }); }
+      if (request.operation === "detail" && guided) return new Promise(() => {});
+      return fallback(request);
+    });
+    detail = { ...detail, currentPhase: "thinking", status: "running", activeTurnId: "running-turn" } as SessionDetail;
+    await mount(); await act(async () => surface.onComposerChange!("原引导"));
+    await act(async () => surface.onSafeGuidance!()); await settle();
+    await act(async () => surface.onComposerChange!("下一条草稿"));
+    await act(async () => finish({ ...detail, messages: [{ id: "guidance", role: "user", content: "原引导", timestamp: "" }] } as SessionDetail));
+    await settle(); expect(surface.composerValue).toBe("下一条草稿");
+    expect(surface.messages.map(row => row.content)).toContain("原引导");
+  });
+
   it("restores reference-only sends and resolves a lost ACK by native readback without a second send", async () => {
     await mount();
     const reference = { kind: "message", referenceId: "message:m1", sourceSessionId: "source", sourceMessageId: "m1", quote: "原引用" };
