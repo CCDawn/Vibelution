@@ -1,15 +1,15 @@
 /** Closed, bounded private browser protocol. Page content remains untrusted. */
-export type BrowserAction = "browser_state" | "browser_open" | "browser_read" | "browser_navigate" | "browser_back" | "browser_forward" | "browser_reload" | "browser_scroll" | "browser_interact";
+export type BrowserAction = "browser_state" | "browser_open" | "browser_ensure" | "browser_select" | "browser_show" | "browser_read" | "browser_navigate" | "browser_back" | "browser_forward" | "browser_reload" | "browser_scroll" | "browser_interact";
 export type BrowserMainControlRequest = { deliveryId: string } & (
-  | { action: "browser_state" }
-  | { action: "browser_open"; url: string }
-  | { action: "browser_read" | "browser_back" | "browser_forward" | "browser_reload"; pageId: string }
+  | { action: "browser_state" | "browser_show" }
+  | { action: "browser_open" | "browser_ensure"; url: string }
+  | { action: "browser_read" | "browser_select" | "browser_back" | "browser_forward" | "browser_reload"; pageId: string }
   | { action: "browser_navigate"; pageId: string; url: string }
   | { action: "browser_scroll"; pageId: string; direction: "up" | "down" }
   | { action: "browser_interact"; pageId: string; snapshotId: string; elementRef: string; url: string; elementName: string; operation: "click" }
   | { action: "browser_interact"; pageId: string; snapshotId: string; elementRef: string; url: string; elementName: string; operation: "fill"; value: string }
 );
-const actions: readonly string[] = ["browser_state", "browser_open", "browser_read", "browser_navigate", "browser_back", "browser_forward", "browser_reload", "browser_scroll", "browser_interact"];
+const actions: readonly string[] = ["browser_state", "browser_open", "browser_ensure", "browser_select", "browser_show", "browser_read", "browser_navigate", "browser_back", "browser_forward", "browser_reload", "browser_scroll", "browser_interact"];
 export const browserErrorCodes: readonly string[] = ["BROWSER_URL_INVALID", "BROWSER_PAGE_LIMIT", "BROWSER_SOURCE_INVALID", "BROWSER_SOURCE_FORBIDDEN", "BROWSER_DISPOSED", "BROWSER_PAGE_NOT_FOUND", "BROWSER_NAVIGATION_FAILED", "BROWSER_SNAPSHOT_FAILED", "BROWSER_SNAPSHOT_STALE", "BROWSER_PAGE_NOT_VISIBLE", "BROWSER_TARGET_UNAVAILABLE", "BROWSER_VALUE_INVALID", "BROWSER_ACTION_FAILED", "BROWSER_ACTION_OUTCOME_UNKNOWN", "BROWSER_DIRECTION_INVALID", "BROWSER_BOUNDS_INVALID", "BROWSER_TAKEOVER_ACTIVE", "BROWSER_UNAVAILABLE"];
 export const isBrowserAction = (value: unknown): value is BrowserAction => typeof value === "string" && actions.includes(value);
 export function closed(value: unknown, required: string[], optional: string[] = []): value is Record<string, unknown> {
@@ -38,7 +38,7 @@ const invalid = (): never => { throw new Error("ASSISTANT_MAIN_CONTROL_INVALID")
 export function parseBrowserClaim(value: unknown): BrowserMainControlRequest {
   if (!closed(value, ["deliveryId", "action"], ["pageId", "snapshotId", "elementRef", "url", "elementName", "operation", "value", "direction"]) || typeof value.deliveryId !== "string" || !/^[0-9a-f]{32}$/.test(value.deliveryId) || !isBrowserAction(value.action)) return invalid();
   const keys: Record<BrowserAction, string[]> = {
-    browser_state: [], browser_open: ["url"], browser_read: ["pageId"], browser_navigate: ["pageId", "url"],
+    browser_state: [], browser_open: ["url"], browser_ensure: ["url"], browser_select: ["pageId"], browser_show: [], browser_read: ["pageId"], browser_navigate: ["pageId", "url"],
     browser_back: ["pageId"], browser_forward: ["pageId"], browser_reload: ["pageId"], browser_scroll: ["pageId", "direction"],
     browser_interact: ["pageId", "snapshotId", "elementRef", "url", "elementName", "operation", ...(value.operation === "fill" ? ["value"] : [])],
   };

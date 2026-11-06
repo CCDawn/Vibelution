@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AssistantConversationTurn, ConversationMessage, SessionSummary, SessionTurnItem } from "../../api/types";
-import { cleanResearchPreview, isResearchSearchResult, isValidResearchDate, latestResearchSubject, localResearchDate, movingAverage, projectStockReport, reportMatchesStock, researchRecordStatus, researchTablePreview, stockFromResearchRequest, stockIdentityFromUnknown, stockResearchPrompt } from "./stockResearchModel";
+import { cleanResearchPreview, isResearchSearchResult, isValidResearchDate, latestResearchSubject, localResearchDate, movingAverage, projectStockReport, reportMatchesStock, researchKindFromSession, researchRecordStatus, researchTablePreview, stockFromResearchRequest, stockIdentityFromUnknown, stockResearchPrompt } from "./stockResearchModel";
 
 const stock = { symbol: "sh600519", ticker: "600519", name: "贵州茅台", market: "上交所" };
 function turn(status = "completed", items: unknown[] = []): AssistantConversationTurn { return { role: "assistant", id: "a", turnId: "t", status: status as AssistantConversationTurn["status"], timestamp: "2026-10-04T12:00:00Z", turnItems: items as SessionTurnItem[] }; }
@@ -122,6 +122,15 @@ describe("stock research projections", () => {
     expect(reportMatchesStock(projectStockReport(messages), messages, stock)).toBe(false);
     expect(latestResearchSubject(messages.slice(0, 2))).toEqual({ kind: "stock", stock });
     expect(latestResearchSubject([request("follow-only", "600519现金流如何？")])).toBeNull();
+  });
+
+  it("derives the research face from the persisted subject and keeps the title prefix only as a fallback", () => {
+    expect(researchKindFromSession({ kind: "topic" }, "年度研究")).toBe("topic");
+    expect(researchKindFromSession({ kind: "stock", stock }, "主题智能选股")).toBe("stock");
+    expect(researchKindFromSession(null, "主题 · 平安银行公开行情验收")).toBe("topic");
+    expect(researchKindFromSession(null, "主题智能选股")).toBe("stock");
+    expect(researchKindFromSession(null, "")).toBe("stock");
+    expect(researchKindFromSession(null, undefined)).toBe("stock");
   });
 
   it("uses each new native team synthesis as a research report and keeps its stock", () => {

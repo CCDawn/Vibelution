@@ -11,15 +11,19 @@ import { useShellI18n } from "../../i18n/useShellI18n";
 import COMPUTER_COPY from "./personalAssistantComputerCopy";
 import styles from "./PersonalAssistantComputerPanel.styles";
 
-type Command = { kind: "grant"; selectionId: string } | { kind: "control"; grantId: string; action: ComputerControlAction }
-  | { kind: "confirm"; grantId: string; pendingId: string; approved: boolean };
+type Command = ({ kind: "grant"; selectionId: string; authorizationRequestId?: string } | { kind: "control"; grantId: string; action: ComputerControlAction }
+  | { kind: "confirm"; grantId: string; pendingId: string; approved: boolean }) & {
+    continueAfterSuccess?: (state: ComputerState) => void; onGrantedAfterSuccess?: (state: ComputerState) => void;
+  };
 type CommandError = { kind: "fallback" } | { kind: "backend"; message: string };
 const defaultTransport: ComputerTransport = { scope: "workbench", state: fetchPersonalAssistantComputer,
   windows: fetchPersonalAssistantComputerWindows, grant: grantPersonalAssistantComputer,
   control: controlPersonalAssistantComputer, confirm: confirmPersonalAssistantComputer };
 
-export function PersonalAssistantComputerPanel({ active = true, onCollapse, transport = defaultTransport, presentation = "panel", onGranted, authorizationRequestId }: {
+export function PersonalAssistantComputerPanel({ active = true, onCollapse, transport = defaultTransport, presentation = "panel", onGranted, authorizationRequestId, prepareContinuation, cancelContinuation }: {
   active?: boolean; onCollapse: () => void; transport?: ComputerTransport; presentation?: "panel" | "conversation"; onGranted?: (state: ComputerState) => void; authorizationRequestId?: string;
+  prepareContinuation?: (action: "grant" | "return" | "resume") => ((state: ComputerState) => void) | undefined;
+  cancelContinuation?: () => void;
 }) {
   const { lang } = useShellI18n();
   const copy = COMPUTER_COPY[lang];
@@ -47,7 +51,7 @@ export function PersonalAssistantComputerPanel({ active = true, onCollapse, tran
   const windows = useQuery({ queryKey: windowsKey, queryFn: ({ signal }) => transport.windows({ signal }),
     enabled: active && (!conversation || Boolean(state?.available && !granted)), staleTime: Infinity, refetchOnMount: "always", refetchOnWindowFocus: false, refetchOnReconnect: false, retry: false });
   const mutation = useMutation({ mutationFn: (command: Command) => command.kind === "grant"
-    ? transport.grant({ selectionId: command.selectionId, allowVision: true, ...(authorizationRequestId ? { authorizationRequestId } : {}) })
+    ? transport.grant({ selectionId: command.selectionId, allowVision: true, ...(command.authorizationRequestId ? { authorizationRequestId: command.authorizationRequestId } : {}) })
     : command.kind === "control" ? transport.control({ grantId: command.grantId, action: command.action })
       : transport.confirm({ grantId: command.grantId, pendingId: command.pendingId, approved: command.approved }),
     onMutate: async () => { setCommandError(null); await client.cancelQueries({ queryKey: stateKey, exact: true }); },
@@ -55,7 +59,9 @@ export function PersonalAssistantComputerPanel({ active = true, onCollapse, tran
       await client.cancelQueries({ queryKey: stateKey, exact: true });
       client.setQueryData(stateKey, data);
       if (command.kind === "grant" || !data.grantId) { setSelectionId(""); setAllowVision(false); }
-      if (command.kind === "grant" && data.grantId && data.available && !["ended", "error"].includes(data.status)) onGranted?.(data);
+      if (command.kind === "grant" && data.grantId && data.available && !["ended", "error"].includes(data.status)) command.onGrantedAfterSuccess?.(data);
+      if (command.continueAfterSuccess && data.available && data.grantId && !data.pending
+        && data.status === "ready" && (command.kind !== "grant" || data.window?.selectionId === command.selectionId)) command.continueAfterSuccess(data);
       if (command.kind === "control" && command.action === "end" && !data.grantId) {
         if (presentation === "conversation") onCollapse();
         else void windows.refetch();
@@ -73,6 +79,15 @@ export function PersonalAssistantComputerPanel({ active = true, onCollapse, tran
   function run(command: Command) {
     if (inFlight.current) return;
     inFlight.current = true;
+    if (command.kind === "grant") {
+      command.authorizationRequestId = authorizationRequestId;
+      command.onGrantedAfterSuccess = onGranted;
+      command.continueAfterSuccess = prepareContinuation?.("grant");
+    } else if (command.kind === "control" && (command.action === "return" || command.action === "resume")) {
+      command.continueAfterSuccess = prepareContinuation?.(command.action);
+    } else if (command.kind === "control") {
+      cancelContinuation?.();
+    }
     mutation.mutate(command);
   }
   function control(action: ComputerControlAction) { if (state?.grantId) run({ kind: "control", grantId: state.grantId, action }); }
@@ -84,11 +99,11 @@ export function PersonalAssistantComputerPanel({ active = true, onCollapse, tran
     <header className={styles.header}>
       <h2 className={styles.heading}>{conversation && !granted ? copy.requestTitle : copy.section} <span className={styles.badge}>{state ? statusLabels[state.status] : copy.loading}</span></h2>
       <div className={styles.actions}>
-        {operational && state.status !== "manual" ? <VIconButton variant="ghost" label={state.status === "paused" ? copy.resume : copy.pause}
+        {operational && state.status !== "manual" ? <VIconButton variant="ghost" label={state.status === "paused" ? prepareContinuation ? copy.resumeAndContinue : copy.resume : copy.pause}
           icon={state.status === "paused" ? <Play size={14} /> : <Pause size={14} />} isDisabled={busy}
           onClick={() => control(state.status === "paused" ? "resume" : "pause")} /> : null}
         {operational ? <VButton variant="secondary" icon={<Hand size={13} />} isDisabled={busy}
-          onClick={() => control(state.status === "manual" ? "return" : "takeover")}>{state.status === "manual" ? copy.returnControl : copy.takeControl}</VButton> : null}
+          onClick={() => control(state.status === "manual" ? "return" : "takeover")}>{state.status === "manual" ? prepareContinuation ? copy.returnAndContinue : copy.returnControl : copy.takeControl}</VButton> : null}
         {conversation && granted ? <VButton variant="ghost" isDisabled={busy} onClick={() => control("end")}>{copy.end}</VButton> : null}
         {!conversation ? <VIconButton variant="ghost" label={copy.collapse} icon={<PanelRightClose size={14} />} onClick={onCollapse} /> : null}
       </div>
@@ -142,7 +157,7 @@ export function PersonalAssistantComputerPanel({ active = true, onCollapse, tran
             <VCheckbox className={styles.checkbox} isSelected isDisabled>{copy.confirmSensitiveActions}</VCheckbox>
           </div> : null}
           <VButton className={styles.full} variant="primary" isPending={busy} isDisabled={!state.available || !selected || (!conversation && !allowVision) || windows.isFetching || windows.isError || computer.isError}
-            onClick={() => { if (selected && (conversation || allowVision)) run({ kind: "grant", selectionId: selected.selectionId }); }}>{conversation ? copy.grantConversation : copy.grantWindow}</VButton>
+            onClick={() => { if (selected && (conversation || allowVision)) run({ kind: "grant", selectionId: selected.selectionId }); }}>{conversation && authorizationRequestId && prepareContinuation ? copy.grantAndContinue : conversation ? copy.grantConversation : copy.grantWindow}</VButton>
         </>}
       </> : null}
       {conversation && !granted ? <VButton variant="ghost" isDisabled={busy} onClick={onCollapse}>{copy.notNow}</VButton> : null}

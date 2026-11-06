@@ -945,6 +945,22 @@ def _summary_from_directory_row(
     if not isinstance(agent, dict) and agent_id:
         loaded = s.get_agent(agent_id, include_archived=True)
         agent = loaded if isinstance(loaded, dict) else None
+    if not isinstance(agent, dict):
+        # Mirror the detail projection's recovery for a stored row whose
+        # declared Agent no longer resolves: when a live Agent claims the
+        # session as its direct session, project the summary under that
+        # claimant instead of a dead owner. The directory store forbids
+        # live-row re-ownership (only the archive-sealed owner repair may
+        # rebind, with the same dead-owner + proven-claimant shape), so the
+        # list reconciles at read time and keeps the stored row untouched.
+        recovered = s._recover_active_direct_session_agent(
+            session_id,
+            agent_by_id=agent_by_id,
+            preferred_agent_id=agent_id,
+        )
+        if isinstance(recovered, dict):
+            agent = recovered
+            agent_id = str(recovered.get("agentId") or "").strip() or agent_id
     stored_status = str(row.get("status") or "ready").strip() or "ready"
     phase_source = {
         "id": session_id,

@@ -120,6 +120,12 @@ export class AssistantBrowser {
     try { await this.load(p, target); } catch { return fail("BROWSER_NAVIGATION_FAILED"); }
     return this.getState(); } finally { done(); }
   }
+  async ensure(url: string, source: BrowserSource): Promise<BrowserState> {
+    this.requireSource(source); const target = validUrl(url);
+    // Match only the current complete URL, never an earlier request or redirect alias.
+    const existing = this.getState().pages.find(p => p.url && validUrl(p.url) === target);
+    return existing ? this.select(existing.id, source) : this.open(target, source);
+  }
   select(id: string, source: BrowserSource): BrowserState { this.requireSource(source); this.getPage(id); this.activePageId = id; this.layout(); this.changed(); return this.getState(); }
   async navigate(id: string, url: string, source: BrowserSource): Promise<BrowserState> { const done = this.beginAction(source); try { const p = this.getPage(id), target = validUrl(url); this.invalidate(p); try { await this.load(p, target); } catch { return fail("BROWSER_NAVIGATION_FAILED"); } return this.getState(); } finally { done(); } }
   private navigateUntilReady(p: Page, startNavigation: () => void | Promise<void>): Promise<void> {

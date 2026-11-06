@@ -54,6 +54,7 @@ import { readStoredWorkbenchTheme, requestWorkbenchTheme, subscribeWorkbenchThem
 import { PersonalAssistantComputerPanel } from "../personalAssistant/PersonalAssistantComputerPanel";
 import { launcherAssistantComputer } from "../../api/launcherAssistantComputer";
 import { useLauncherComputerAccess } from "./useLauncherComputerAccess";
+import { useLauncherControlContinuation, type LauncherControlContinuation } from "./useLauncherControlContinuation";
 import petStyles from "./DesktopAssistantRoute.styles";
 import { useLauncherAttachmentHistory } from "./useLauncherAttachmentHistory";
 import { applyComposerAttachmentUploadOutcomes, classifyComposerFiles, mergeComposerAttachmentsWithRejections, type ComposerAttachmentUploadOutcome, type ComposerImageAttachment } from "../chat/chatComposerSubmitModel";
@@ -193,9 +194,10 @@ export function resolveAssistantSecretRequest(detail: SessionDetail | undefined)
   return null;
 }
 
-export function LauncherAssistantRoute({ embedded = false, navigationOwned = false, computerRequested = false, entryIntent }: {
+export function LauncherAssistantRoute({ embedded = false, navigationOwned = false, computerRequested = false, entryIntent, onControlContinuationReady }: {
   embedded?: boolean; navigationOwned?: boolean; computerRequested?: boolean;
   entryIntent?: { key: string; title: string; label: string; message: string };
+  onControlContinuationReady?: (control: LauncherControlContinuation | null) => void;
 }) {
   useLauncherThemeControl();
   const client = useQueryClient();
@@ -1070,7 +1072,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     const requestEpoch = epochRef.current;
     try {
       const acceptance = await sendLauncherAssistantMessage(submission.message, submission.requestId,
-        submission.attachmentIds, submission.references);
+        submission.attachmentIds, submission.references, submission.controlContinuation);
       if (!mounted.current || requestEpoch !== epochRef.current || sending.current !== flight || outstanding.current !== submission) return true;
       client.setQueryData<SessionDetail>(detailKey, previous => acceptSessionSubmit(previous, paint, acceptance));
       setActiveLayer(sessionStream.acceptSubmission(submission.requestId, acceptance.turnId, Boolean(acceptance.queuedTurnId)));
@@ -1134,12 +1136,6 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     }
     return true;
   }
-
-  const computerAccess = useLauncherComputerAccess({
-    detail: detail.data, agentId: status.data?.assistant.agentId || "", reading,
-    manualOpen: computerOpen, onCloseManual: () => setComputerOpen(false),
-    lang,
-  });
 
   async function decide(request: SessionToolApprovalRequest, decision: "accept" | "decline") {
     if (approvalGate.current || request.requestId !== approval?.requestId || !request.availableDecisions.includes(decision)
@@ -1402,6 +1398,25 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   const followupQueue = useLauncherAssistantFollowupQueue({
     sessionId, activeTurnId: acceptedTurnId || undefined, detail: detail.data, enabled: queueEnabled, lang,
     blocked: sendPending || sendUnconfirmed || controlPending || stopping || modelConfigPending || Boolean(guidancePendingMode),
+  });
+  function readControlContext() {
+    const currentStatus = client.getQueryData<typeof status.data>(["launcher-assistant", "status"]);
+    const currentDetail = client.getQueryData<SessionDetail>(detailKey);
+    const currentApprovals = client.getQueryData<SessionToolApprovalRequest[]>(["launcher-assistant", "approvals", sessionId, epoch]);
+    return { detail: currentDetail, agentId: currentStatus?.assistant.agentId || "",
+      blocked: !reading || status.isError || detail.isError || approvals.isError
+        || currentStatus?.assistant.directSessionId !== sessionId || Boolean(currentDetail?.stopRequested)
+        || Boolean(sending.current || outstanding.current || requestReadbackGate.current || uploadGate.current || controlGate.current
+          || approvalGate.current || continuationUnconfirmed || sendUnconfirmed || controlPending || modelConfigPending || guidancePendingMode
+          || followupQueue.guidancePending || currentApprovals?.some(row => row.status === "pending" && row.sessionId === sessionId)) };
+  }
+  const controlContinuation = useLauncherControlContinuation({
+    context: readControlContext(), readCurrent: readControlContext, submit,
+    onReady: onControlContinuationReady,
+  });
+  const computerAccess = useLauncherComputerAccess({
+    detail: detail.data, agentId: status.data?.assistant.agentId || "", reading,
+    manualOpen: computerOpen, onCloseManual: () => setComputerOpen(false), lang, continuation: controlContinuation,
   });
   // "待你回答" banner above the composer. Same gates as the chat page: a
   // running turn (execution ownership) or an unfinished send hides the banner,
@@ -1733,7 +1748,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
           });
         }}>{entryIntent.label}</VButton><VButton variant="ghost" onClick={() => setDismissedEntry(entryIntent.key)}>{lang === "zh" ? "暂不处理" : "Dismiss"}</VButton></>} /> : null}
       {computerAccess.show ? <PersonalAssistantComputerPanel key={computerAccess.request?.id || "computer-grant"} active={reading} transport={launcherAssistantComputer}
-        authorizationRequestId={computerAccess.request?.id} presentation="conversation" onGranted={computerAccess.onGranted} onCollapse={computerAccess.onDismiss} /> : null}
+        authorizationRequestId={computerAccess.request?.id} presentation="conversation" onGranted={computerAccess.onGranted} onCollapse={computerAccess.onDismiss}
+        prepareContinuation={computerAccess.prepareContinuation} cancelContinuation={computerAccess.cancelContinuation} /> : null}
       {computerAccess.notice ? <p className={petStyles.computerNotice} role="status">{computerAccess.notice}</p> : null}
       {approvalPrompt}</>}
       fallback={<VStateSurface fill tone="loading" title={copy.loading} />}

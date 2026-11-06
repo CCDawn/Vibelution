@@ -9,6 +9,12 @@ import {
 } from "./assistantActionLabels";
 
 describe("assistant action presentation metadata", () => {
+  it.each([
+    ["browser_ensure", "复用或打开网页"], ["browser_select", "切换网页"], ["browser_show", "显示网页"],
+  ])("names and groups %s with the existing browser actions", (action, label) => {
+    expect(assistantActionLabelForTool("personal_assistant_action_tool", { action }, "zh")).toBe(label);
+    expect(assistantActionKindForTool("personal_assistant_action_tool", { action })).toBe("browser");
+  });
   it("keeps approval label pairs and conversation labels on the same curated actions", () => {
     for (const [action, labels] of Object.entries(ASSISTANT_ACTION_LABELS)) {
       expect(labels).toHaveLength(2);

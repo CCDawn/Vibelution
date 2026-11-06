@@ -65,7 +65,7 @@ describe("native computer authorization", () => {
     await render(); await ready();
     await act(async () => state.onGranted(granted));
     expect(state.show).toBe(true);
-    expect(state.notice).toContain("在对话中");
+    expect(state.notice).toContain("已授权");
     expect(state.request).toBeNull();
   });
   it("hides a cancelled request and stops reading while inactive", async () => {
@@ -75,6 +75,20 @@ describe("native computer authorization", () => {
     const count = vi.mocked(launcherAssistantComputer.state).mock.calls.length;
     props.reading = false; await render();
     expect(state.show).toBe(false); expect(launcherAssistantComputer.state).toHaveBeenCalledTimes(count);
+  });
+  it("captures only a bound grant before the RPC and completes that exact intent afterwards", async () => {
+    const intent = { origin: { agentId: "assistant", sessionId: "session", turnId: "turn", userMessageId: "user", branchId: "" }, requestId: "same-request", toolIds: [], pendingToolIds: [] };
+    const continuation = { capture: vi.fn(() => intent), complete: vi.fn(), cancel: vi.fn() };
+    props.continuation = continuation;
+    await render(); await ready();
+    const finish = state.prepareContinuation("grant");
+    expect(continuation.capture).toHaveBeenCalledOnce();
+    expect(continuation.complete).not.toHaveBeenCalled();
+    await act(async () => state.onGranted(granted));
+    expect(state.request).toBeNull();
+    finish?.(granted);
+    expect(continuation.complete).toHaveBeenCalledWith(intent, expect.any(Function));
+    expect(state.prepareContinuation("grant")).toBeUndefined();
   });
   it("keeps existing grant controls visible during a state read failure", async () => {
     vi.mocked(launcherAssistantComputer.state).mockResolvedValue(granted);
