@@ -57,6 +57,7 @@ import {
   type ProviderRegistryRow,
 } from "./configProviderLogic";
 import styles from "./ConfigProviderRegistryPanel.styles";
+import { ChatGPTSubscriptionPanel, type AddSubscriptionModels } from "./config/ChatGPTSubscriptionPanel";
 
 export type ConfigProviderRegistryTab = "connection" | "models" | "protocols" | "diagnostics";
 
@@ -70,6 +71,9 @@ export type ProviderActionFeedback = {
 } | null;
 
 export type ConfigProviderRegistryPanelProps = {
+  language?: "zh" | "en";
+  onAddSubscriptionModels?: AddSubscriptionModels;
+  subscriptionSetupBlockedReason?: string;
   /** Show the flat service home; the complete workspace opens from Manage. */
   compactHome?: boolean;
   /** Bilingual copy table (wave 4): every user-facing string comes from here. */
@@ -1251,6 +1255,9 @@ function DiagnosticsTab({
 }
 
 export function ConfigProviderRegistryPanel({
+  language = "zh",
+  onAddSubscriptionModels,
+  subscriptionSetupBlockedReason,
   compactHome = false,
   copy,
   rows,
@@ -1802,6 +1809,7 @@ export function ConfigProviderRegistryPanel({
   return (
     <>
       <VSurface as="section" id="config-models" className={styles.compactHome} padding="none" data-vui-region="config-model-services-home">
+        {onAddSubscriptionModels ? <ChatGPTSubscriptionPanel language={language} disabled={disabled || saveBusy} setupBlockedReason={subscriptionSetupBlockedReason} onAddModels={onAddSubscriptionModels} /> : null}
         {actionFeedback ? (
           <p
             className={actionFeedback.phase === "error" ? styles.actionFeedbackError : actionFeedback.phase === "success" ? styles.actionFeedbackSuccess : styles.actionFeedback}

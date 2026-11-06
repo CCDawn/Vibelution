@@ -13,6 +13,7 @@
 | `LauncherToolsRoute` / `LauncherProcessMonitorPanel` / `LauncherProjectMaintenancePanel` | [product/personal-assistant.md](./product/personal-assistant.md#launchertoolsroute--launcherprocessmonitorpanel--launcherprojectmaintenancepanel) |
 | `PersonalAssistantComputerPanel` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantcomputerpanel) |
 | `HumanAttentionNotifier` | [product/personal-assistant.md](./product/personal-assistant.md#humanattentionnotifier) |
+| `ChatGPTSubscriptionPanel` | [product/chatgpt-subscription.md](./product/chatgpt-subscription.md#chatgptsubscriptionpanel) |
 
 选型与反冗余入口。路径均为 `designs/` 相对路径。
 

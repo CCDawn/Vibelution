@@ -222,6 +222,11 @@ def _resolve_explicit_fallback_profile_id(client: Any) -> str:
     Empty (the default) means the operator declared nothing for this route, so
     the adapter keeps today's fail-fast behaviour.
     """
+    from config.chatgpt_subscription import is_subscription_provider
+
+    if is_subscription_provider(getattr(client, "provider", None)):
+        # A plan-usage failure never opts the user into another billing path.
+        return ""
     profile = getattr(client, "profile", None)
     target = str(getattr(profile, "fallback", "") or "").strip()
     current = str(getattr(client, "profile_id", "") or "").strip()

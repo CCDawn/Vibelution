@@ -2547,6 +2547,10 @@ def _litellm_responses_api_base(value: Any) -> str:
 
 def _default_responses_backend(payload: Dict[str, Any]) -> Any:
     _raise_if_llm_cancelled()
+    if "_subscription_collect_response" in payload:
+        # Existing config probes wrap this entrypoint to capture safe shape
+        # metadata. Preserve their wrapper while keeping plan inference native.
+        return _default_subscription_responses_backend(payload)
     try:
         from litellm import responses
     except Exception as exc:  # pragma: no cover
@@ -2670,7 +2674,24 @@ def _default_anthropic_native_backend(payload: Dict[str, Any]) -> Any:
     return iter_sse()
 
 
+def _default_subscription_responses_backend(payload: Dict[str, Any]) -> Any:
+    from .chatgpt_subscription import get_chatgpt_subscription_auth
+    from .chatgpt_subscription.inference import call_subscription_responses
+
+    manager = get_chatgpt_subscription_auth()
+    request_payload = {**payload, "api_key": manager.get_access_token()}
+    return call_subscription_responses(
+        request_payload, client_factory=_llm_new_httpx_client, check_cancelled=_raise_if_llm_cancelled,
+        auth_rejected=lambda token: get_chatgpt_subscription_auth().mark_auth_rejected(token),
+    )
+
+
 _default_responses_backend._vibelution_default_responses_backend = True
+_default_subscription_responses_backend._vibelution_default_responses_backend = True
+
+
+def _new_cancellable_native_http_client(payload: Dict[str, Any]) -> Any:
+    return _llm_new_httpx_client(timeout=payload.get("timeout"), verify=True)
 
 
 def _cancellable_client_cache_key(payload: Dict[str, Any]) -> tuple:
@@ -2956,6 +2977,10 @@ class LLMClient:
         self.bound_tools = list(bound_tools or [])
         self._backend = backend or _default_completion_backend
         self._responses_backend = responses_backend or backend or _default_responses_backend
+        from config.chatgpt_subscription import is_subscription_provider
+
+        if is_subscription_provider(self.provider) and responses_backend is None and backend is None:
+            self._responses_backend = _default_subscription_responses_backend
         self._anthropic_backend = anthropic_backend or backend or _default_anthropic_native_backend
         self._cancellable_responses_http_handler: Any = None
         self._cancellable_responses_http_handler_key: Any = None
@@ -3274,7 +3299,9 @@ class LLMClient:
             with self._cancellable_responses_http_handler_lock:
                 handler = self._get_or_create_cancellable_client(
                     "_cancellable_responses_http_handler",
-                    _new_cancellable_responses_http_handler,
+                    (_new_cancellable_native_http_client
+                     if self.protocol_route.adapter_id == "chatgpt_subscription_responses"
+                     else _new_cancellable_responses_http_handler),
                     payload,
                 )
         except Exception:
@@ -3443,7 +3470,9 @@ class LLMClient:
             handler_attr = "_cancellable_responses_http_handler"
             handler_lock = self._cancellable_responses_http_handler_lock
             request_lock = self._cancellable_responses_request_lock
-            factory = _new_cancellable_responses_http_handler
+            factory = (_new_cancellable_native_http_client
+                       if self.protocol_route.adapter_id == "chatgpt_subscription_responses"
+                       else _new_cancellable_responses_http_handler)
         elif "messages" in payload:
             abort_enabled = _chat_provider_abort_enabled(checker)
             native_adapter = self.protocol_route.adapter_id == "anthropic_messages_native"
@@ -3898,6 +3927,10 @@ class LLMClient:
             final_payload,
             route=self.protocol_route,
         )
+        if self.protocol_route.adapter_id == "chatgpt_subscription_responses":
+            from .chatgpt_subscription.inference import prepare_subscription_runtime_payload
+
+            final_payload = prepare_subscription_runtime_payload(final_payload)
         self._last_payload_protocol_summary = dict(
             built.summary or payload_protocol_summary(final_payload, self.protocol_route)
         )
@@ -4363,6 +4396,13 @@ class LLMClient:
                     details={"payloadValidationResult": "blocked_before_provider"},
                 )
             return payload
+        if self.protocol_route.adapter_id == "chatgpt_subscription_responses":
+            raise LLMError(
+                "capability_error",
+                "ChatGPT 订阅接口不支持硬性输出 token 上限，不能用于要求该预算保证的任务。",
+                retryable=False, provider=self.provider.kind, model=self.profile.model,
+                details={"payloadValidationResult": "blocked_before_provider", "unsupportedCapability": "hard_output_token_limit"},
+            )
         context = self._receipt_context(metadata, invocation_scope)
         if context is None:
             raise LLMError(

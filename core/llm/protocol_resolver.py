@@ -374,6 +374,10 @@ def _runtime_endpoint(
 
 
 def _wire_adapter_id(provider: ProviderConfig, wire_protocol: WireProtocol) -> str:
+    from config.chatgpt_subscription import is_subscription_provider
+
+    if is_subscription_provider(provider):
+        return "chatgpt_subscription_responses"
     if wire_protocol == WireProtocol.ANTHROPIC_MESSAGES:
         driver = _read_optional_string(provider, "driver").lower()
         service_class = _read_optional_string(provider, "service_class").lower()
@@ -385,6 +389,8 @@ def _wire_adapter_id(provider: ProviderConfig, wire_protocol: WireProtocol) -> s
 
 
 def _backend_identity(wire_protocol: WireProtocol, adapter_id: str) -> str:
+    if adapter_id == "chatgpt_subscription_responses":
+        return "chatgpt_subscription_http_native"
     if adapter_id == "anthropic_messages_native":
         return "anthropic_messages_http_native"
     if wire_protocol == WireProtocol.RESPONSES:
@@ -661,6 +667,16 @@ def resolve_model_protocol(
         effective_model=effective_model,
         warnings=warnings,
     )
+    from config.chatgpt_subscription import is_subscription_provider, validate_subscription_provider
+
+    if is_subscription_provider(provider):
+        from dataclasses import replace
+
+        validate_subscription_provider(provider)
+        if wire_protocol != WireProtocol.RESPONSES:
+            raise ProtocolResolutionError("protocol_mismatch", "ChatGPT plan inference requires Responses",
+                                          provider_id=provider.provider_id, model_ref=profile.model_ref)
+        compat = replace(compat, responses_continuation=False, responses_websocket=False, stream_usage_options=False)
     configured_endpoint = _read_optional_string(provider, "base_url")
     runtime_endpoint = _runtime_endpoint(
         provider,

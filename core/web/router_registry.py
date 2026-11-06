@@ -71,6 +71,7 @@ _ROUTE_MODULE_NAMES: tuple[str, ...] = (
     "core.web.routes.shadow_approvals",
     "core.web.routes.evolution",
     "core.web.routes.config",
+    "core.web.routes.chatgpt_subscription",
     "core.web.routes.reset",
     "core.web.routes.pet",
 )

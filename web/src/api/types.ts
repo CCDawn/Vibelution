@@ -7,6 +7,7 @@ export * from "./types/runtime";
 export * from "./types/memory";
 export * from "./types/evolution";
 export * from "./types/config";
+export * from "./types/chatgptSubscription";
 export * from "./types/hypothesisFirst";
 export * from "./types/virtualHumanLife";
 export * from "./types/teamBundles";

@@ -69,9 +69,11 @@ def build_default_wire_adapter_registry() -> WireAdapterRegistry:
     from .anthropic_messages import AnthropicMessagesNativeWireAdapter
     from .compat_native import AnthropicMessagesLiteLLMCompatWireAdapter, GeminiGenerateContentWireAdapter
     from .responses import ResponsesWireAdapter
+    from ..chatgpt_subscription.wire import ChatGPTSubscriptionWireAdapter
 
     registry = WireAdapterRegistry()
     registry.register(ResponsesWireAdapter())
+    registry.register(ChatGPTSubscriptionWireAdapter())
     registry.register(ChatCompletionsWireAdapter())
     registry.register(AnthropicMessagesNativeWireAdapter())
     registry.register(AnthropicMessagesLiteLLMCompatWireAdapter())

@@ -9,6 +9,9 @@ import { ConfigRoute } from "./ConfigRoute";
 import type { ConfigProviderRegistryPanelProps } from "./ConfigProviderRegistryPanel";
 
 vi.mock("./ConfigProviderRegistryPanel", () => ({ ConfigProviderRegistryPanel: (props: ConfigProviderRegistryPanelProps) => <div>
+  <button data-testid="add-subscription" disabled={props.disabled || Boolean(props.subscriptionSetupBlockedReason)} onClick={() => void props.onAddSubscriptionModels?.([
+    { slug: "test-plan", display_name: "Plan", visibility: "list", supported_in_api: true, supported_reasoning_levels: [], input_modalities: ["text"] },
+  ], { label: "ChatGPT", auth_kind: "oauth", credential_ref: "oauth:chatgpt", driver: "openai", service_class: "official_api", base_url: "https://api.openai.com/v1", protocols: { default: "responses", allowed: ["responses"], routes: { responses: "responses" } } })}>Add subscription</button>
   <button data-testid="stage-provider" disabled={props.disabled} onClick={() => props.onUpdateModel?.("relay", "model.v1", { label: "Draft model" })}>Stage label</button>
   <button data-testid="toggle-provider" disabled={props.disabled} onClick={() => props.onToggleEnabled?.("relay", false)}>Disable</button>
   <output data-testid="provider-enabled">{String(props.rows.find((row) => row.providerId === "relay")?.enabled)}</output>
@@ -31,7 +34,7 @@ function workspace(config: typeof BASE | Record<string, unknown> = BASE, meta = 
     modelCatalog: { schemaVersion: 2, providerCount: Object.keys(providers).length, modelCount: 0, providers: {} }, modelAliasUsage: { aliases: [], totalLiveReferenceCount: 0 },
   };
 }
-function installFetch(options: { failApply?: boolean; failProjectionAfterSave?: boolean; waitForApply?: Promise<void> } = {}) {
+function installFetch(options: { failApply?: boolean; failProjectionAfterSave?: boolean; waitForApply?: Promise<void>; waitForPin?: Promise<void> } = {}) {
   let disk = structuredClone(BASE);
   let hash = "saved-1";
   const applyCalls: Record<string, any>[] = [];
@@ -39,6 +42,18 @@ function installFetch(options: { failApply?: boolean; failProjectionAfterSave?: 
     const url = String(input); const body = init?.body ? JSON.parse(String(init.body)) : {};
     const response = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
     if (url.includes("/api/config/workspace")) return response(workspace(disk, EMPTY_META, hash));
+    if (url.endsWith("/api/config/draft/providers/id-suggestion")) return response({ suggestedProviderId: "chatgpt" });
+    if (url.endsWith("/api/config/draft/providers")) {
+      const draft = structuredClone(body.publicConfig);
+      draft.llm.providers[body.providerId] = body.provider;
+      return response(workspace(draft, body.draftMeta, hash));
+    }
+    if (url.endsWith("/api/config/draft/providers/chatgpt/models")) {
+      await options.waitForPin;
+      const draft = structuredClone(body.publicConfig);
+      draft.llm.providers.chatgpt.models[body.upstreamId] = { upstream_id: body.upstreamId, label: body.label };
+      return response(workspace(draft, body.draftMeta, hash));
+    }
     if (url.includes("/api/config/draft/providers/relay")) {
       const draft = structuredClone(body.publicConfig);
       draft.llm.providers.relay = body.provider;
@@ -111,6 +126,21 @@ describe("provider enable auto-save isolation", () => {
     await wait(() => calls.length === 1); expect(calls).toHaveLength(1);
     await act(async () => release()); await wait(() => container.querySelector('[data-testid="provider-enabled"]')?.textContent === "false");
     expect([...container.querySelectorAll('button')].some((button) => button.textContent?.trim() === "保存更改")).toBe(false);
+  });
+  it("holds the shared settings busy state throughout subscription pinning and releases it after save", async () => {
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => { release = resolve; });
+    const calls = installFetch({ waitForPin: waiting }); await ready();
+    await click("add-subscription");
+    await wait(() => container.querySelector('[data-testid="provider-ids"]')?.textContent?.includes("chatgpt") === true);
+    expect((container.querySelector('[data-testid="toggle-provider"]') as HTMLButtonElement).disabled).toBe(true);
+    await click("toggle-provider");
+    expect(calls).toHaveLength(0);
+    await act(async () => release());
+    await wait(() => calls.length === 1 && !(container.querySelector('[data-testid="toggle-provider"]') as HTMLButtonElement).disabled);
+    expect(calls[0].publicConfig.llm.providers.chatgpt.models).toHaveProperty("test-plan");
+    expect(calls[0].publicConfig.llm.providers.relay.enabled).toBe(true);
+    expect(calls[0].publicConfig.llm.decision_handoff_model_id).toBe("local.v1");
   });
   it("saves a decision toggle and unbinds handoff atomically without publishing its text draft", async () => {
     const calls = installFetch(); await ready();

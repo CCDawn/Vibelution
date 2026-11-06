@@ -379,6 +379,10 @@ class ProviderConfig(BaseModel):
 
         normalize_provider_endpoint(self.base_url)
         canonical_ref = canonicalize_credential_ref(self.credential_ref or "none")
+        self.credential_ref = canonical_ref
+        from .chatgpt_subscription import validate_subscription_provider
+
+        validate_subscription_provider(self)
         if self.auth_kind == "none" and canonical_ref != "none":
             raise ValueError("auth_kind none requires credential_ref none")
         if self.auth_kind != "none" and canonical_ref == "none" and self.requires_credential:
@@ -397,7 +401,7 @@ class ProviderConfig(BaseModel):
         if self.credential_ref:
             from .llm_credentials import resolve_credential_ref
 
-            resolution = resolve_credential_ref(self.credential_ref)
+            resolution = resolve_credential_ref(self.credential_ref, resolve_secret=True)
             return resolution.secret or None
         env_candidates: List[str] = []
         if self.api_key_env:
@@ -830,6 +834,10 @@ class LLMConfig(BaseModel):
     def resolve_api_key_for_profile(self, profile_id: Optional[str] = None, role: str = "primary") -> Optional[str]:
         profile = self.get_profile(profile_id=profile_id, role=role)
         provider = self.get_provider(profile.provider_id)
+        from .chatgpt_subscription import is_subscription_provider
+
+        if is_subscription_provider(provider):
+            return provider.resolve_api_key()
         profile_model_env = str(getattr(profile, "api_key_env", "") or "").strip()
         if profile_model_env:
             value = _read_env_var(profile_model_env)
@@ -847,6 +855,10 @@ class LLMConfig(BaseModel):
     def get_api_key_source_label_for_profile(self, profile_id: Optional[str] = None, role: str = "primary") -> str:
         profile = self.get_profile(profile_id=profile_id, role=role)
         provider = self.get_provider(profile.provider_id)
+        from .chatgpt_subscription import is_subscription_provider
+
+        if is_subscription_provider(provider):
+            return "oauth:chatgpt"
         profile_model_env = str(getattr(profile, "api_key_env", "") or "").strip()
         _, model_entry = self.get_model_library_entry_for_profile(profile)
         model_env = ""

@@ -126,6 +126,7 @@ import {
 } from "./config/configFieldEditorsModel";
 import { useConfigProviderDraftActions } from "./config/useConfigProviderDraftActions";
 import { useConfigProviderQuickSetupActions } from "./config/useConfigProviderQuickSetupActions";
+import { useChatGPTSubscriptionModelSetup } from "./config/useChatGPTSubscriptionModelSetup";
 import { useConfigMigrationActions } from "./config/useConfigMigrationActions";
 import { ConfigOverviewPanel } from "./ConfigOverviewPanel";
 import {
@@ -249,7 +250,8 @@ export function ConfigRoute() {
   const [activeWorkspace, setActiveWorkspace] = useState<ConfigWorkspace | null>(null);
   const [jsonText, setJsonText] = useState("{}");
   const [notice, setNotice] = useState<{ tone: NoticeTone; text: string }>({ tone: "neutral", text: "" });
-  const [busyAction, setBusyAction] = useState("");
+  const [configBusyAction, setBusyAction] = useState("");
+  const [subscriptionSetupBusy, setSubscriptionSetupBusy] = useState(false);
   const [providerConnecting, setProviderConnecting] = useState(false);
   const [discardDraftOpen, setDiscardDraftOpen] = useState(false);
   const [providerShowMore, setProviderShowMore] = useState(false);
@@ -322,6 +324,9 @@ export function ConfigRoute() {
 
   const workspace = activeWorkspace ?? workspaceQuery.data;
   const currentLanguage = getDraftLanguage(draftConfig, workspace?.language === "en" ? "en" : "zh");
+  const busyAction = configBusyAction || (subscriptionSetupBusy
+    ? currentLanguage === "en" ? "Adding ChatGPT models…" : "正在添加 ChatGPT 模型…"
+    : "");
   const copy = CONFIG_COPY[currentLanguage];
   const requestedSectionId = String(searchParams.get("section") || "").trim();
   const requestedPageId = String(searchParams.get("page") || "").trim();
@@ -1018,6 +1023,20 @@ export function ConfigRoute() {
       await persistImmediateDraft(copy.applying);
     }
   }
+
+  const subscriptionSetupBlockedReason = pendingConfigDraftCount > 0 || hasEditorChanges
+    ? currentLanguage === "en"
+      ? "Save or discard other settings drafts before adding subscription models."
+      : "请先保存或还原其他设置草稿，再添加订阅模型。"
+    : configBusyAction && !subscriptionSetupBusy
+      ? currentLanguage === "en" ? "Wait for the current settings operation to finish." : "请等待当前设置操作结束。"
+      : "";
+  const handleAddSubscriptionModels = useChatGPTSubscriptionModelSetup({
+    providerDraftRequestRef, baseConfigRef: editBaselineRef, syncWorkspace,
+    handleApply, setSelectedProviderId, language: currentLanguage,
+    setupBlockedReason: subscriptionSetupBlockedReason,
+    onSetupBusyChange: setSubscriptionSetupBusy,
+  });
 
   async function handleApplyProviderRoutePreview() {
     await applyProviderRoutePreview(routePreview);
@@ -1809,6 +1828,9 @@ export function ConfigRoute() {
                 <ConfigProviderRegistryPanel
                   compactHome
                   copy={copy}
+                  language={currentLanguage}
+                  onAddSubscriptionModels={handleAddSubscriptionModels}
+                  subscriptionSetupBlockedReason={subscriptionSetupBlockedReason}
                   routeEditor={routeEditProviderId ? <>
                 {routeEditProviderId && !routePreview ? (
                   <VSurface as="section" padding="compact" tone="row" className={styles.providerRouteEditSurface}>
