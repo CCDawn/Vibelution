@@ -76,6 +76,7 @@ describe("one composer action across native hosts", () => {
     expect(view.primary().disabled).toBe(true);
     expect(view.primary().getAttribute("aria-busy")).toBe("true");
     expect(view.primary().querySelector(".lucide-loader-circle")).toBeTruthy();
+    expect(view.primary().querySelectorAll("svg")).toHaveLength(1);
     expect(container.textContent).not.toContain("正在排队");
     await act(async () => view.primary().click());
     expect(view.onSubmit).toHaveBeenCalledOnce();

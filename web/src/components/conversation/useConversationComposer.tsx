@@ -886,7 +886,7 @@ export function useConversationComposer({
         label={primaryLabel}
         tooltip={primaryPending ? primaryPendingLabel : primaryAction === "send" ? t("composerSendEnterHint")
           : primaryAction === "steer" ? t("composerSteerEnterHint") : primaryLabel}
-        icon={primaryAction === "stop" ? <Square size={14} aria-hidden="true" />
+        icon={primaryPending ? null : primaryAction === "stop" ? <Square size={14} aria-hidden="true" />
           : primaryAction === "continue" ? <Play size={16} aria-hidden="true" />
           : <ArrowUp size={16} aria-hidden="true" />}
       />
