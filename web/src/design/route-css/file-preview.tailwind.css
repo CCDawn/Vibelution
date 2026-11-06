@@ -1,0 +1,15 @@
+/* File preview utilities. Both entry components (LazyFilePreview and the
+ * direct FilePreview dynamic import) render through a dynamic chunk, and
+ * every consumer (chat file preview rail, LogsRoute, RuntimeScenesPane)
+ * reaches them through one of those chunks — so this CSS entry always loads
+ * alongside the preview surface. */
+@import "tailwindcss" source(none);
+@import "../theme.tailwind.css";
+
+/* Shared recipe class literals (import constants are not followed by Tailwind). */
+@source "../vuiSurfaceRecipes.ts";
+@source "../vuiSurfaceAlphaPolicy.ts";
+@source "../vuiChromeRecipes.ts";
+
+@source "../../components/preview/**/*.{ts,tsx}";
+@source not "../../components/preview/**/*.test.{ts,tsx}";

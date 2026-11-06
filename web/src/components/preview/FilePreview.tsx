@@ -1,5 +1,9 @@
 import { Component, type ErrorInfo, type ReactNode, useEffect, useMemo, useState } from "react";
 
+// Preview utilities live in the lazy preview CSS entry (design/route-css);
+// every consumer reaches this component through a dynamic chunk.
+import "../../design/route-css/file-preview.tailwind.css";
+
 import CodeMirror from "@uiw/react-codemirror";
 import { RangeSetBuilder } from "@codemirror/state";
 import type { Extension } from "@codemirror/state";

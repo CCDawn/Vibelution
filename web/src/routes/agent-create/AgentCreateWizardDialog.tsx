@@ -2,6 +2,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, MessageSquare, Settings2 } from "lucide-react";
 import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
 
+// Agent-create utilities live in the lazy wizard CSS entry (design/route-css);
+// every entry point reaches these panels through this dialog chunk.
+import "../../design/route-css/agent-create.tailwind.css";
+
 import {
   createAgent,
   fetchAgentConfigWorkspace,

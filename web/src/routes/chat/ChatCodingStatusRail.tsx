@@ -1,9 +1,9 @@
-import type { Dispatch, SetStateAction } from "react";
+import { Suspense, type Dispatch, type SetStateAction } from "react";
 
 import type { SessionDetail, VirtualHumanCompanion } from "../../api/types";
 import type { TranslationKey } from "../../i18n/dictionary";
 import { FinancialAssistantChatNote } from "../finance/FinancialAssistantChatNote";
-import { CompanionLifeRail } from "../companions/CompanionLifeRail";
+import { CompanionLifeRailLazy } from "./chatCompanionLazySurfaces";
 import type { CompanionRailState } from "../companions/CompanionPersonRail";
 import { ChatRightRail, type ChatRightRailPaneDock } from "./ChatRightRail";
 import type { ChatRightRailModel } from "./chatRightRailModel";
@@ -94,22 +94,26 @@ export function ChatCodingStatusRail({
 }) {
   if (verifiedCompanionMode) {
     return (
-      <CompanionLifeRail
-        className={statusRailClassName}
-        collapsed={statusRailCollapsed}
-        overlayOpen={statusRailOverlayOpen}
-        companion={activeCompanion}
-        state={companionRailState}
-        errorMessage={companionRailError}
-        lang={lang}
-        onCollapse={onCollapseStatusRail}
-        onOpenLifeSteward={(stewardSessionId) => {
-          openSession(stewardSessionId, {
-            replace: false,
-            telemetrySource: "virtual_human_life_steward",
-          });
-        }}
-      />
+      // Companion surface family is lazy (companion sessions only); the rail
+      // pane class keeps the column geometry while the chunk lands.
+      <Suspense fallback={<div className={statusRailClassName} data-companion-rail="loading" />}>
+        <CompanionLifeRailLazy
+          className={statusRailClassName}
+          collapsed={statusRailCollapsed}
+          overlayOpen={statusRailOverlayOpen}
+          companion={activeCompanion}
+          state={companionRailState}
+          errorMessage={companionRailError}
+          lang={lang}
+          onCollapse={onCollapseStatusRail}
+          onOpenLifeSteward={(stewardSessionId) => {
+            openSession(stewardSessionId, {
+              replace: false,
+              telemetrySource: "virtual_human_life_steward",
+            });
+          }}
+        />
+      </Suspense>
     );
   }
   if (!(ordinaryChangeRail && (changeRail.show || changeRailOpened))) {
