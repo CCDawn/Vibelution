@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import threading
 
+from core.web.services.team_workflow import research_projects
 from tests._support.team_workflow.helpers import *  # noqa: F403
 from tests._support.team_workflow.cases_source_collection import _create_owned_source_collection_processing_run
 
@@ -185,3 +186,82 @@ def test_register_candidate_source_non_manifest_type_is_not_identity_deduped(tmp
     assert first.get("duplicate") is None
     assert second.get("duplicate") is None
     assert second["candidate"]["candidateId"] != first["candidate"]["candidateId"]
+
+
+def test_cross_team_run_import_is_rejected_and_target_store_unchanged(tmp_path, monkeypatch):
+    """ISS-044 回归：团队 B 路径导入团队 A 的 run/record 必须 fail-closed 拒绝。
+
+    两个团队各自 ensure 同一个 canonical question project（projectId 确定性
+    相同，正是事故里 B 能解析到 run owner 根并 201 写入的形态）。拒绝必须
+    发生在查重/幂等与任何存储写入之前，因此重复请求持续拒绝、B 候选库不
+    产生候选；归属团队自身的导入不受影响。
+    """
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    scene_events = _capture_workflow_events(monkeypatch)
+    team_a = team_service.create_team(name="Team A")
+    team_b = team_service.create_team(name="Team B")
+    question_a = research_projects.ensure_challenge_question_project(
+        team_a["teamId"],
+        question_id="ISS-044",
+        title="Shared canonical question",
+        topic="跨团队归属校验回归。",
+    )["project"]
+    research_projects.ensure_challenge_question_project(
+        team_b["teamId"],
+        question_id="ISS-044",
+        title="Shared canonical question",
+        topic="跨团队归属校验回归。",
+    )
+    run = data_processing_service.create_processing_run(
+        title="Team A collection",
+        scope={
+            "teamId": team_a["teamId"],
+            "workflowStage": "knowledge_collection",
+            "researchProjectId": question_a["projectId"],
+        },
+        metadata={
+            "startedFrom": "team_workflow_source_collection",
+            "teamId": team_a["teamId"],
+            "researchProjectId": question_a["projectId"],
+        },
+    )
+    record = data_processing_service.add_record(
+        run["runId"],
+        {
+            "sourceType": "url",
+            "sourceRef": "https://example.test/team-a-only-source",
+            "title": "Team A source",
+            "summary": "A candidate that only team A may import.",
+        },
+    )
+
+    for _attempt in range(2):
+        with pytest.raises(
+            team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
+            match="does not belong to this team",
+        ):
+            team_workflow_orchestration_service.import_data_record_as_source_candidate(
+                team_b["teamId"],
+                run["runId"],
+                record["recordId"],
+                {"createdByAgent": "cross_team_attacker"},
+            )
+
+    source_list = team_workflow_orchestration_service.list_candidate_store(
+        team_b["teamId"], candidate_type="source_manifest",
+    )
+    assert source_list["candidateCount"] == 0
+
+    blocked_events = _workflow_scene_events_by_code(scene_events, "candidate.import_cross_team_run_blocked")
+    assert blocked_events
+    assert blocked_events[-1]["fields"]["runTeamId"] == team_a["teamId"]
+    assert blocked_events[-1]["fields"]["recordId"] == record["recordId"]
+
+    owner_import = team_workflow_orchestration_service.import_data_record_as_source_candidate(
+        team_a["teamId"],
+        run["runId"],
+        record["recordId"],
+        {"createdByAgent": "data_intake_coordinator"},
+    )
+    assert owner_import["created"] is True
+    assert owner_import["candidate"]["metadata"]["importedFromDataRecord"]["runId"] == run["runId"]

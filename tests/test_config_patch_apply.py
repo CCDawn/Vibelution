@@ -1,10 +1,19 @@
 import copy
+import threading
+import time
 from pathlib import Path
 
 import pytest
 
 from config.llm_schema_upgrader import convert_legacy_llm_config
-from config.public_config import load_public_config, public_config_hash
+from config.paths import resolve_config_lock_path, resolve_config_path
+from config.public_config import (
+    HEADER_LINES,
+    _config_edit_lock,
+    load_public_config,
+    public_config_hash,
+)
+from config.toml_writer import dumps_public_config
 from core.web.services import config_service
 from core.web.services.config_service import (
     ConfigConflictError,
@@ -271,3 +280,201 @@ def test_apply_git_validation_rejects_unknown_and_cyclic_v2_reference(model_id, 
     public["git"] = {"commit_message_model_ref": model_id}
     with pytest.raises(ValueError, match="unknown Git commit message model"):
         config_service._validate_git_commit_settings(public)
+
+
+def _seed_v2_provider_config(tmp_path, monkeypatch) -> Path:
+    """Write the schema-v2 fixture to a real operator config under tmp.
+
+    Isolation note: the save/load defaults in config.public_config resolve via
+    the import-time CONFIG_PATH global (not per-call env), so the global itself
+    plus its resolved-path and signature caches must be repointed at the tmp
+    file; otherwise real file-backed applies would read and write the live
+    operator config.
+    """
+
+    import config.public_config as public_config
+
+    fixture = Path(__file__).parent / "fixtures/config/llm_schema_v2_provider.toml"
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        dumps_public_config(load_public_config(fixture), HEADER_LINES),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(config_path))
+    monkeypatch.setattr(public_config, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(public_config, "_RESOLVED_DEFAULT_PATHS", {})
+    monkeypatch.setattr(public_config, "_PUBLIC_CONFIG_CACHE", {})
+    monkeypatch.setattr(public_config, "_PUBLIC_CONFIG_SNAPSHOT", None)
+    monkeypatch.setattr(config_service, "CONFIG_PATH", config_path)
+    return config_path
+
+
+def _patch_apply_side_effects(monkeypatch, tmp_path) -> None:
+    """Keep apply's post-save side effects (reload/scene/catalog pins) local."""
+
+    monkeypatch.setattr(config_service, "reload_config", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(config_service, "_record_config_scene_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(config_service, "materialize_observed_binding_pins", lambda payload: payload)
+    monkeypatch.setattr(config_service, "MODEL_REFERENCE_PROJECT_ROOT", tmp_path)
+
+
+def test_apply_config_workspace_concurrent_patch_applies_keep_every_change(tmp_path, monkeypatch):
+    """ISS-033 regression: concurrent whole-config applies used to read the same
+    on-disk baseline outside any lock and last-writer-win, dropping the other
+    applier's change. The read-baseline -> merge -> validate -> persist span now
+    holds the shared config edit lock, so the second applier re-reads the first
+    applier's persisted result and both disjoint changes survive.
+
+    The gates below pin the interleaving deterministically: both appliers load
+    before either persists, and applier B persists strictly after applier A.
+    Without the fix that ordering provably loses A's change; with the fix B is
+    queued on the edit lock before its load, so A's short gate timeout just
+    serializes them and both changes land."""
+
+    config_path = _seed_v2_provider_config(tmp_path, monkeypatch)
+    _patch_apply_side_effects(monkeypatch, tmp_path)
+
+    base = _with_config_workspace_defaults(load_public_config())
+    base_hash = public_config_hash(base)
+    submitted_a = copy.deepcopy(base)
+    submitted_a["ui"]["apply_race_flag_a"] = "value-a"
+    submitted_b = copy.deepcopy(base)
+    submitted_b["ui"]["apply_race_flag_b"] = "value-b"
+
+    second_load_landed = threading.Event()
+    original_load = config_service.load_public_config
+    original_save = config_service.save_public_config
+    load_state = {"count": 0}
+    load_state_lock = threading.Lock()
+
+    def gated_load():
+        payload = original_load()
+        with load_state_lock:
+            load_state["count"] += 1
+            if load_state["count"] >= 2:
+                second_load_landed.set()
+        return payload
+
+    def gated_save(public_config_payload, **kwargs):
+        # Deterministic lost-update window: both appliers must have loaded the
+        # baseline before either persists, so without the edit lock the second
+        # writer provably overwrites the first. Bounded so the fixed path (the
+        # second applier is still queued on the edit lock and cannot load yet)
+        # proceeds serialized instead of deadlocking the test.
+        second_load_landed.wait(2.0)
+        return original_save(public_config_payload, **kwargs)
+
+    monkeypatch.setattr(config_service, "load_public_config", gated_load)
+    monkeypatch.setattr(config_service, "save_public_config", gated_save)
+
+    barrier = threading.Barrier(2, timeout=10)
+    failures: list[Exception] = []
+
+    def apply_one(submitted: dict) -> None:
+        try:
+            barrier.wait()
+            config_service.apply_config_workspace(submitted, base_config=base, base_hash=base_hash)
+        except Exception as exc:  # collected and asserted below
+            failures.append(exc)
+
+    worker_a = threading.Thread(target=apply_one, args=(submitted_a,))
+    worker_b = threading.Thread(target=apply_one, args=(submitted_b,))
+    for worker in (worker_a, worker_b):
+        worker.start()
+    for worker in (worker_a, worker_b):
+        worker.join(timeout=60)
+    assert failures == []
+
+    final = _with_config_workspace_defaults(load_public_config())
+    assert final["ui"]["apply_race_flag_a"] == "value-a"
+    assert final["ui"]["apply_race_flag_b"] == "value-b"
+    # Every holder released the sidecar cleanly.
+    assert not resolve_config_lock_path(config_path).exists()
+
+
+def test_apply_config_workspace_holds_config_edit_lock_across_read_merge_span(tmp_path, monkeypatch):
+    """Deterministic ISS-033 mechanism check: the config edit sidecar must be
+    held while the apply spans baseline read and merge, not only during the
+    final save_public_config write. load_public_config's transient bootstrap
+    lock has already been released by the time this observation runs, so a
+    missing apply-level lock reads as False."""
+
+    config_path = _seed_v2_provider_config(tmp_path, monkeypatch)
+    _patch_apply_side_effects(monkeypatch, tmp_path)
+    lock_sidecar = resolve_config_lock_path(config_path)
+
+    base = _with_config_workspace_defaults(load_public_config())
+    observed: dict = {}
+    original_prepare = config_service._prepare_submitted_public_config
+
+    def observing_prepare(submitted_payload, old_public):
+        observed["lock_held_during_apply_span"] = lock_sidecar.exists()
+        return original_prepare(submitted_payload, old_public)
+
+    monkeypatch.setattr(config_service, "_prepare_submitted_public_config", observing_prepare)
+
+    submitted = copy.deepcopy(base)
+    submitted["ui"]["apply_lock_probe_flag"] = "value"
+    config_service.apply_config_workspace(submitted, base_config=base, base_hash=public_config_hash(base))
+
+    assert observed["lock_held_during_apply_span"] is True
+
+
+def test_apply_config_workspace_fails_closed_when_config_edit_lock_is_busy(tmp_path, monkeypatch):
+    """A concurrent holder must surface a readable busy error, never silently
+    drop or partially write the apply."""
+
+    config_path = _seed_v2_provider_config(tmp_path, monkeypatch)
+    _patch_apply_side_effects(monkeypatch, tmp_path)
+    before = config_path.read_bytes()
+
+    base = _with_config_workspace_defaults(load_public_config())
+    submitted = copy.deepcopy(base)
+    submitted["ui"]["apply_busy_flag"] = "value"
+    real_lock = _config_edit_lock
+    # raising=False: without the fix the apply path imports no edit lock at
+    # all; the test must then fail on the assertion below (apply completes
+    # under a held lock) instead of on a missing attribute.
+    monkeypatch.setattr(
+        config_service,
+        "_config_edit_lock",
+        lambda path: real_lock(path, timeout_seconds=1.0),
+        raising=False,
+    )
+
+    outcome: dict = {}
+
+    def apply_elsewhere() -> None:
+        try:
+            config_service.apply_config_workspace(submitted, base_config=base, base_hash=public_config_hash(base))
+            outcome["error"] = None
+        except Exception as exc:  # collected and asserted below
+            outcome["error"] = exc
+
+    with _config_edit_lock(resolve_config_path()):
+        worker = threading.Thread(target=apply_elsewhere)
+        worker.start()
+        worker.join(timeout=30)
+    assert worker.is_alive() is False
+    # _config_edit_lock layers the model-reference fence (TimeoutError) ahead
+    # of the O_EXCL sidecar (RuntimeError); contention must surface as one of
+    # these readable lock failures, never as a silent partial write.
+    assert isinstance(outcome["error"], (RuntimeError, TimeoutError))
+    assert "lock" in str(outcome["error"]).lower()
+    assert config_path.read_bytes() == before
+    assert "apply_busy_flag" not in _with_config_workspace_defaults(load_public_config()).get("ui", {})
+
+
+def test_config_edit_lock_allows_same_thread_reentry(tmp_path, monkeypatch):
+    """Nested same-thread acquisition (apply -> save_public_config, bootstrap ->
+    schema upgrader) must re-enter instead of self-deadlocking on its own
+    O_EXCL sidecar; other threads/processes still serialize."""
+
+    config_path = tmp_path / "nested" / "config.toml"
+    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(config_path))
+    target = resolve_config_path()
+    with _config_edit_lock(target):
+        with _config_edit_lock(target):
+            pass
+    assert config_path.parent.joinpath("config-edit.lock").exists() is False
+    assert resolve_config_lock_path(target).exists() is False

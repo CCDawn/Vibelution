@@ -235,11 +235,16 @@ def _llm_options_chain_ensure(session_id: str, *, source: str) -> bool:
             )
         )
     if slot["ensure"] is _LLM_OPTIONS_CHAIN_UNSET:
+        # Inside the GET chain this ensure is a pure read: re-syncing an
+        # existing row must not refresh the directory recency stamp, or a
+        # bare options read (e.g. the financial team's readiness probe) would
+        # reorder the user's session list without any real interaction.
         slot["ensure"] = bool(
             s._ensure_session_conversation_record(
                 normalized_session_id,
                 source=source,
                 sync_wait=False,
+                touch_recency=False,
             )
         )
     return bool(slot["ensure"])

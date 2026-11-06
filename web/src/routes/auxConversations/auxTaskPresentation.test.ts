@@ -58,6 +58,21 @@ describe("auxTaskPresentation", () => {
     expect(isTerminalRuntimeTask({})).toBe(false);
   });
 
+  // ISS-041 regression: a user-stopped child session lands in the registry
+  // with status "stopped" (never "completed"), so the directory must render
+  // an explicit stopped verdict and keep "completed" for genuine finishes.
+  it("shows stopped as its own verdict, distinct from completed", () => {
+    expect(auxTaskStatusLabel("stopped", "zh")).toBe("已停止");
+    expect(auxTaskStatusLabel("completed", "zh")).toBe("已完成");
+    expect(auxTaskStatusLabel("stopped", "en")).toBe("stopped");
+    expect(auxTaskStatusLabel("completed", "en")).toBe("completed");
+    expect(auxTaskStatusTone("stopped")).toBe("warning");
+    expect(auxTaskStatusTone("completed")).toBe("success");
+    expect(auxTaskStatusIcon("stopped").Icon).toBe(Ban);
+    expect(auxTaskStatusIcon("completed").Icon).toBe(CheckCircle2);
+    expect(auxTaskStatusIcon("stopped").spin).toBe(false);
+  });
+
   it("maps every status word to a neutral directory glyph and only running spins", () => {
     expect(auxTaskStatusIcon("running")).toEqual({ Icon: LoaderCircle, spin: true });
     expect(auxTaskStatusIcon("stopping")).toEqual({ Icon: LoaderCircle, spin: false });
