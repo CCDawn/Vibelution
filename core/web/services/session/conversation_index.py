@@ -2683,6 +2683,7 @@ def _ensure_session_conversation_record(
     *,
     source: str,
     sync_wait: bool = True,
+    touch_recency: bool = True,
 ) -> bool:
     """Ensure chat_state has a conversation row for this session.
 
@@ -2693,6 +2694,11 @@ def _ensure_session_conversation_record(
     ``sync_wait=False`` keeps read-path callers (GET llm-options) from blocking
     on the directory SQLite upsert: the write is still enqueued (eventually
     consistent) instead of joining the writer queue before the response.
+
+    ``touch_recency=False`` is for pure read callers: re-syncing an existing
+    row must not refresh ``recency_at_ms``, or a bare GET (e.g. the financial
+    team's model-readiness probe) would reorder the user's session list
+    without any real user interaction.
     """
     s = _service()
     normalized_session_id = str(session_id or "").strip()
@@ -2731,7 +2737,9 @@ def _ensure_session_conversation_record(
     if snapshot is not None:
         from . import directory_bridge
 
-        directory_bridge.sync_conversation_record(snapshot, wait=sync_wait)
+        directory_bridge.sync_conversation_record(
+            snapshot, wait=sync_wait, touch_recency=touch_recency
+        )
     return snapshot is not None
 
 
