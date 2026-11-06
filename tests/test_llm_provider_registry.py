@@ -331,6 +331,26 @@ def test_provider_id_suggestion_is_readable_and_collision_deterministic() -> Non
     assert len(suggested.rsplit("_", 1)[1]) == 8
 
 
+def test_provider_id_suggestion_returns_unique_id_when_truncated_and_hash_candidates_exist() -> None:
+    provider = {**_provider("env:VIBELUTION_LLM_PROVIDER_RELAY_A_API_KEY"), "label": "R" * 80}
+    truncated = suggest_provider_id(provider, [])
+    assert truncated == "r" * 64
+
+    hashed = suggest_provider_id(provider, [truncated])
+    assert hashed.startswith("r" * 55 + "_")
+    assert len(hashed.rsplit("_", 1)[1]) == 8
+
+    fallback = suggest_provider_id(provider, [truncated, hashed])
+    assert fallback not in {truncated, hashed}
+    assert len(fallback) <= 64
+
+    assert suggest_provider_id(provider, [truncated, hashed, fallback]) not in {
+        truncated,
+        hashed,
+        fallback,
+    }
+
+
 def test_provider_options_expose_credential_state_without_reference_or_secret() -> None:
     provider = {**_provider("none"), "auth_kind": "none", "requires_credential": False}
     provider["deployment"] = {
