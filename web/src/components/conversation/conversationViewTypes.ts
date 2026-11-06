@@ -154,10 +154,10 @@ export type ConversationViewProps = {
   composerActionDisabled?: boolean;
   composerActionMode?: "send" | "stop" | "continue";
   composerPending: boolean;
-  /** The stop request RPC is in flight; keeps stop copy dominant over queueing. */
+  /** The stop request is in flight or its native acknowledgement is pending. */
   composerStopPending?: boolean;
-  /** The queue/send submit RPC is in flight while the turn keeps running. */
-  composerQueueSendPending?: boolean;
+  /** Submit request awaiting acknowledgement; never a queued receipt. */
+  composerSubmitPending?: boolean;
   composerSafeGuidancePending?: boolean;
   composerInterruptGuidancePending?: boolean;
   composerError?: string;
@@ -220,8 +220,6 @@ export type ConversationViewProps = {
   safeGuidancePendingLabel?: string;
   interruptGuidanceLabel?: string;
   interruptGuidancePendingLabel?: string;
-  /** Busy queue/send submit label; distinguishes queueing from stopping. */
-  queueSendPendingLabel?: string;
   editingMessageId?: string;
   editUserMessageLabel?: string;
   editUserMessageDisabled?: boolean;

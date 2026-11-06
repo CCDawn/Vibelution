@@ -99,7 +99,6 @@ const COPY = {
     editAsNew: "编辑为新消息",
     safeGuidance: "引导", safeGuidancePending: "正在引导",
     interruptGuidance: "打断并引导", interruptGuidancePending: "正在打断引导",
-    queueSendPending: "正在排队…",
   },
   en: {
     title: "Personal assistant", expand: "Open assistant chat", chat: "Chat", hide: "Hide assistant",
@@ -118,7 +117,6 @@ const COPY = {
     editAsNew: "Edit as new message",
     safeGuidance: "Steer", safeGuidancePending: "Steering",
     interruptGuidance: "Interrupt & steer", interruptGuidancePending: "Interrupting steer",
-    queueSendPending: "Queueing…",
   },
 } as const;
 
@@ -269,7 +267,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   const [decidedDispatchKey, setDecidedDispatchKey] = useState("");
   const controlGate = useRef(false);
   const refreshedTerminal = useRef<{ sessionId: string; turnId: string } | null>(null);
-  const [controlPending, setControlPending] = useState(false);
+  const [controlPendingMode, setControlPendingMode] = useState<"" | "stop" | "continue">("");
+  const controlPending = Boolean(controlPendingMode);
   // First-failure timestamp of the never-succeeded status read. query.state only
   // exposes the LAST error time, and the backoff must grow across failures, so
   // the wait start is held here and reset once any status read succeeds.
@@ -1200,7 +1199,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     const turnId = resolveSessionStopTurnId(detail.data, acceptedTurnId);
     if (!turnId) return;
     controlGate.current = true;
-    setControlPending(true);
+    setControlPendingMode("stop");
     setFeedback("");
     const previous = client.getQueryData<SessionDetail>(detailKey);
     const requestedAt = new Date().toISOString();
@@ -1217,7 +1216,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       }
     } finally {
       controlGate.current = false;
-      if (mounted.current) { setControlPending(false); void detail.refetch(); }
+      if (mounted.current) { setControlPendingMode(""); void detail.refetch(); }
     }
   }
 
@@ -1243,7 +1242,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     if (attempt.accepted) return;
     if (!saveComposer({ continuation: attempt })) return;
     controlGate.current = true;
-    setControlPending(true);
+    setControlPendingMode("continue");
     setFeedback("");
     try {
       const accepted = await continueLauncherAssistantTurn(attempt.expected, attempt.requestId);
@@ -1259,7 +1258,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       }
     } finally {
       controlGate.current = false;
-      if (mounted.current) { setControlPending(false); void detail.refetch(); }
+      if (mounted.current) { setControlPendingMode(""); void detail.refetch(); }
     }
   }
 
@@ -1667,8 +1666,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       composerPending={sendPending || controlPending || stopping} composerActionMode={actionMode}
       // While busy, a control RPC is the stop request; the queue/send submit is
       // its own pending source so queueing never borrows the stopping copy.
-      composerStopPending={controlPending || stopping} composerQueueSendPending={sendPending}
-      queueSendPendingLabel={copy.queueSendPending}
+      composerStopPending={controlPendingMode === "stop" || stopping} composerSubmitPending={sendPending}
       followupQueue={followupQueue.followupQueue}
       onFollowupQueueUpdate={queueEnabled ? followupQueue.handleFollowupQueueUpdate : undefined}
       onFollowupQueueRemove={queueEnabled ? followupQueue.handleFollowupQueueRemove : undefined}

@@ -129,8 +129,7 @@ function renderConversation(
     interruptGuidanceLabel?: string;
     interruptGuidancePendingLabel?: string;
     composerStopPending?: boolean;
-    composerQueueSendPending?: boolean;
-    queueSendPendingLabel?: string;
+    composerSubmitPending?: boolean;
     composerError?: string;
     composerGuidance?: string;
     followupQueue?: Array<{ id: string; text: string }>;
@@ -213,8 +212,7 @@ function renderConversation(
         interruptGuidanceLabel={options.interruptGuidanceLabel}
         interruptGuidancePendingLabel={options.interruptGuidancePendingLabel}
         composerStopPending={options.composerStopPending}
-        composerQueueSendPending={options.composerQueueSendPending}
-        queueSendPendingLabel={options.queueSendPendingLabel}
+        composerSubmitPending={options.composerSubmitPending}
         composerError={options.composerError}
         composerGuidance={options.composerGuidance}
         followupQueue={options.followupQueue}
@@ -273,7 +271,7 @@ describe("ConversationView VUI control contract", () => {
     expect(conversationComposerSource).not.toMatch(/<input\b/);
     expect(conversationComposerSource).not.toMatch(/<select\b/);
     expect(conversationComposerSource).not.toMatch(/<textarea\b/);
-    expect(conversationComposerSource).toContain("primaryActionIsQueueSubmit");
+    expect(conversationComposerSource).toContain("resolveComposerPrimaryAction");
     expect(conversationComposerSource).toContain("ConversationFollowupQueueBar");
   });
 });
@@ -338,20 +336,20 @@ describe("ConversationView stop feedback", () => {
       composerPending: true,
       stopPendingLabel: "正在停止…",
     });
-    expect(html).toContain('data-testid="composer-stop-pending-feedback"');
+    expect(html).toContain('data-testid="composer-pending-feedback"');
     expect(html).toContain("正在停止…");
   });
 
-  it("never borrows the stopping copy while only the queue send is in flight", () => {
+  it("never reports queueing while the first submit awaits acknowledgement", () => {
     const html = renderConversation([], {
       showComposer: true,
       composerActionMode: "stop",
       composerPending: true,
-      composerQueueSendPending: true,
-      queueSendPendingLabel: "正在排队…",
+      composerSubmitPending: true,
     });
-    expect(html).toContain('data-testid="composer-stop-pending-feedback"');
-    expect(html).toContain("正在排队…");
+    expect(html).toContain('data-testid="composer-pending-feedback"');
+    expect(html).toContain("发送中");
+    expect(html).not.toContain("正在排队");
     expect(html).not.toContain("终止中");
   });
 });
@@ -653,7 +651,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(styles.timelineArea).toContain("flex-1");
     expect(styles.timelineArea).toContain("min-h-0");
     const timelineAreaSource = conversationViewSource.slice(
-      conversationViewSource.indexOf('<div ref={timelineAreaRef} className={styles.timelineArea}>'),
+      conversationViewSource.indexOf('<div ref={timelineAreaRef}'),
       conversationViewSource.indexOf("{toolApproval && !toolApprovalConsumedRef.current"),
     );
     expect(timelineAreaSource).toContain("styles.backToBottomButton");
@@ -962,8 +960,8 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(styles.input).toContain("!shadow-none");
 
     const composerActionStackSource = conversationComposerSource.slice(
-      conversationComposerSource.indexOf("const composerActions = ("),
-      conversationComposerSource.indexOf("\n\n  const composerSurface", conversationComposerSource.indexOf("const composerActions = (")),
+      conversationComposerSource.indexOf("const composerActions = "),
+      conversationComposerSource.indexOf("\n\n  const composerSurface", conversationComposerSource.indexOf("const composerActions = ")),
     );
     expect(composerActionStackSource).not.toContain("className={styles.attachButton}");
     expect(composerActionStackSource).toContain("className={primaryActionClassName}");
@@ -990,13 +988,10 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(styles.composerToolbar).toContain("items-center");
     expect(styles.composerToolbarEnd).toContain("max-w-full");
     expect(styles.composerToolbarEnd).not.toContain("max-w-[min(200px");
-    expect(conversationComposerSource).toContain("const primaryActionClassName = primaryActionIsEditSubmit");
-    expect(conversationComposerSource).toContain("styles.composerEditSubmitButton");
-    // Labeled edit/rerun must not inherit square icon-only geometry.
-    expect(conversationComposerSource).not.toContain("composerEditSubmitButton} ${styles.composerRoundButtonPrimary}");
+    expect(conversationComposerSource).toContain('data-testid="composer-primary-action"');
     expect(conversationComposerSource).toContain("styles.composerRoundButtonPrimary");
-    expect(conversationComposerSource).toContain("icon={");
-    expect(conversationComposerSource).toContain("<RefreshCw");
+    expect(conversationComposerSource).toContain("resolveComposerPrimaryAction");
+
   });
   it("keeps inline edit chrome compact after the composer edit bar removal", () => {
     // The composer bottom edit bar is gone: no orphaned keys may linger.
@@ -1738,7 +1733,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(errorHtml).toContain("技能目录加载失败");
   });
 
-  it("keeps the configured user identity accessible without a repeated avatar rail", () => {
+  it("keeps the configured user identity accessible with an external avatar rail", () => {
     const html = renderConversation(
       [
         {
@@ -1751,9 +1746,10 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
       { userAvatarPreset: "codex", userDisplayName: "Vibe Owner", composerVariant: "codex" },
     );
 
-    expect(html).not.toContain(">C</div>");
+    expect(html).toContain(">C</div>");
     expect(html).toContain('data-conversation-identity="minimal"');
     expect(html).toContain("Vibe Owner");
+    expect(html).toContain('data-conversation-avatar="true"');
     expect(styles.turnAvatar).toContain("ring-[var(--vui-border-strong)]");
     expect(styles.turnAvatar).toContain("text-[var(--fg-primary)]");
   });it("renders agent inbox turns with the resolved source agent avatar", () => {
@@ -1883,118 +1879,29 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(html).toContain("Use my local avatar");
     expect(html).not.toContain(">C</div>");
   });
-  it("keeps the composer writable while a running turn shows a labeled queue action and stop", () => {
-    const html = renderConversation([], {
-      composerValue: "下一句先写在这里",
-      composerDisabled: true,
-      composerActionMode: "stop",
-      composerActionDisabled: false,
-      composerGuidance: "当前轮仍在运行。安全引导会记录到会话上下文；打断引导会先记录再请求停止当前轮。",
-      onSafeGuidance: () => undefined,
-      onInterruptGuidance: () => undefined,
-    });
-
-    expect(html).toContain("下一句先写在这里");
-    expect(html).toContain("当前轮仍在运行");
-    expect(html).toContain("打断引导会先记录再请求停止当前轮");
-    expect(html).toContain('aria-label="排队"');
-    expect(html).toContain(">排队</");
-    // Draft + running turn + handler now render the interrupt guidance entry
-    // (disabled here because the composer is disabled).
-    expect(html).toContain('data-testid="composer-interrupt-guidance"');
-    expect(html).toContain('aria-label="打断并引导"');
-    expect(html).toContain('title="发送草稿并结束当前轮次"');
-    expect(html).toContain('aria-label="终止"');
-    expect(html).toContain("composerEditSubmitButton");
-    expect(html).toContain("stopButton");
-    const textarea = html.match(/<textarea[^>]*>/)?.[0] ?? "";
-    expect(textarea).not.toMatch(/\sdisabled(?:[=>\s]|$)/);
-  });
-
-  it("renders the interrupt guidance entry only while a draft rides a running turn with a handler", () => {
-    const withDraft = renderConversation([], {
-      composerValue: "换成先查依赖再动手",
-      composerActionMode: "stop",
-      onInterruptGuidance: () => undefined,
-      interruptGuidanceLabel: "打断并引导",
-    });
-    expect(withDraft).toContain('data-testid="composer-interrupt-guidance"');
-    expect(withDraft).toContain('aria-label="打断并引导"');
-    expect(withDraft).toContain('title="发送草稿并结束当前轮次"');
-    expect(withDraft).not.toMatch(/data-testid="composer-interrupt-guidance"[^>]*\sdisabled(?:[=>\s]|$)/);
-
-    const withoutHandler = renderConversation([], {
-      composerValue: "换成先查依赖再动手",
-      composerActionMode: "stop",
-    });
-    expect(withoutHandler).not.toContain('data-testid="composer-interrupt-guidance"');
-
-    const idle = renderConversation([], {
-      composerValue: "换成先查依赖再动手",
-      composerActionMode: "send",
-      onInterruptGuidance: () => undefined,
-    });
-    expect(idle).not.toContain('data-testid="composer-interrupt-guidance"');
-
-    const emptyDraft = renderConversation([], {
-      composerValue: "",
-      composerActionMode: "stop",
-      onInterruptGuidance: () => undefined,
-    });
-    expect(emptyDraft).not.toContain('data-testid="composer-interrupt-guidance"');
-  });
-
-  it("shows the interrupt pending label disabled while the interrupt guidance is in flight", () => {
-    const html = renderConversation([], {
-      composerValue: "换成先查依赖再动手",
-      composerActionMode: "stop",
-      onInterruptGuidance: () => undefined,
-      composerInterruptGuidancePending: true,
-      interruptGuidancePendingLabel: "正在打断引导",
-    });
-    expect(html).toContain('data-testid="composer-interrupt-guidance"');
-    expect(html).toContain("正在打断引导");
-    const button = html.match(/<button[^>]*data-testid="composer-interrupt-guidance"[^>]*>/)?.[0] ?? "";
-    expect(button).toMatch(/\sdisabled(?:[=>\s]|$)/);
-  });
-
-  it("keeps the running composer stop-only until a draft or queue exists", () => {
-    const html = renderConversation([], {
-      composerValue: "",
-      composerPlaceholder: "",
-      composerDisabled: true,
-      composerActionMode: "stop",
-      composerActionDisabled: false,
-      onSafeGuidance: () => undefined,
-      onInterruptGuidance: () => undefined,
-    });
-
-    expect(html).toContain("输入后排队，当前轮结束后自动发出");
-    expect(html).not.toContain('aria-label="排队"');
-    expect(html).not.toContain('aria-label="立刻引导"');
+  it("uses one send control while a running draft can guide the task", () => {
+    const html = renderConversation([], { composerValue: "下一句先写在这里", composerActionMode: "stop", onSafeGuidance: () => undefined, onInterruptGuidance: () => undefined });
+    expect(html).toContain('data-composer-action="steer"');
+    expect(html.match(/data-testid="composer-primary-action"/g)).toHaveLength(1);
     expect(html).not.toContain('data-testid="composer-interrupt-guidance"');
-    expect(html).toContain('aria-label="终止"');
-    expect(html.match(/composerRoundButton/g)?.length).toBe(1);
-    expect(html).not.toContain("sendButton");
+    expect(html).not.toContain("composerEditSubmitButton");
+    expect(html).not.toContain('data-composer-action="stop"');
   });
 
-  it("shows queued follow-ups above the composer and offers immediate steer when the draft is empty", () => {
-    const html = renderConversation([], {
-      composerValue: "",
-      composerPlaceholder: "",
-      composerDisabled: true,
-      composerActionMode: "stop",
-      composerActionDisabled: false,
-      followupQueue: [{ id: "q-1", text: "先不要改测试，只汇报改了哪些文件。" }],
-    });
+  it("shows one pending control while interrupt guidance is in flight", () => {
+    const html = renderConversation([], { composerValue: "换成先查依赖再动手", composerActionMode: "stop", onInterruptGuidance: () => undefined, composerInterruptGuidancePending: true, interruptGuidancePendingLabel: "正在打断引导" });
+    expect(html).toContain("正在打断引导");
+    expect(html.match(/data-testid="composer-primary-action"/g)).toHaveLength(1);
+    expect(html).toContain('aria-busy="true"');
+  });
 
+  it("keeps a running empty composer on stop even when followups are queued", () => {
+    const html = renderConversation([], { composerValue: "", composerActionMode: "stop", onSafeGuidance: () => undefined, followupQueue: [{ id: "q-1", text: "先不要改测试，只汇报改了哪些文件。" }] });
     expect(html).toContain("先不要改测试，只汇报改了哪些文件。");
     expect(html).toContain("followupQueueTray");
-    expect(html).toContain("排队中 · 1 条");
-    expect(html).toContain('aria-label="立刻引导"');
-    expect(html).toContain(">立刻引导</");
-    expect(html).toContain("再输入则追加；空输入再 Enter 立刻引导");
-    expect(html).toContain('aria-label="终止"');
+    expect(html).toContain('data-composer-action="stop"');
+    expect(html.match(/data-testid="composer-primary-action"/g)).toHaveLength(1);
+    expect(html).toContain("补充消息以引导当前任务");
   });
 
   it("renders edit controls for every user message on the active path", () => {

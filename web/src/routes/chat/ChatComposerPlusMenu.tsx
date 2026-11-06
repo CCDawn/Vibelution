@@ -4,6 +4,8 @@ import {
   BookOpen,
   BrainCircuit,
   Check,
+  Clock3,
+  CornerDownLeft,
   Gauge,
   ImagePlus,
   KeyRound,
@@ -19,6 +21,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { SessionReferenceAttachment } from "../../api/types";
 import { VButton, VDialog, VInput, VNativeInput, VPopover, VStateSurface } from "../../components/vui";
 import { rankByScore } from "../../components/conversation/conversationFuzzyMatch";
+import { ConversationComposerActionsContext } from "../../components/conversation/ConversationComposerActionsContext";
 import { ChatComposerBudgetPopover, type ChatComposerBudgetControl, type ChatComposerBudgetPanelLabels } from "./ChatComposerBudgetPopover";
 import { composerAttachmentAcceptAttribute } from "./chatComposerSubmitModel";
 import styles from "./ChatComposerPlusMenu.styles";
@@ -145,6 +148,7 @@ function ItemIcon({ children }: { children: ReactNode }) {
 }
 
 export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
+  const deliveryActions = useContext(ConversationComposerActionsContext);
   const {
     lang,
     labels,
@@ -361,6 +365,7 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
     icon: ReactNode;
     disabled?: boolean;
     disabledReason?: string;
+    title?: string;
     onSelect: () => void;
   }) {
     return (
@@ -373,6 +378,7 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
         className={styles.menuItem}
         variant="ghost"
         isDisabled={options.disabled}
+        title={options.title}
         disabledReason={options.disabled ? options.disabledReason : undefined}
         onPress={() => selectAction(options.onSelect)}
       >
@@ -524,6 +530,14 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
           aria-label={lang === "zh" ? "更多操作菜单" : "More actions menu"}
           onKeyDown={handleMenuKeyDown}
         >
+          {deliveryActions.length ? renderSection({ id: "delivery", label: lang === "zh" ? "发送方式" : "Delivery" },
+            deliveryActions.map(action => renderAction({
+              ...action,
+              icon: action.id === "queue" ? <Clock3 size={16} /> : <CornerDownLeft size={16} />,
+              disabledReason: action.hint,
+              title: action.hint,
+            })),
+          ) : null}
           {showAddReference ? renderSection(addReferenceSection, (
             <>
               {renderAction({

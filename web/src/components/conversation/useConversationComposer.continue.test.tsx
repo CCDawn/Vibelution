@@ -98,7 +98,7 @@ describe("ConversationView continue primary action", () => {
     }));
   }
 
-  it("uses Play and routes click/empty Enter only to continue without clearing the draft", async () => {
+  it("continues an empty draft and switches to send when the user enters a new message", async () => {
     const onContinueTurn = vi.fn();
     const onSubmit = vi.fn();
     const onStop = vi.fn();
@@ -106,7 +106,7 @@ describe("ConversationView continue primary action", () => {
     const button = container?.querySelector<HTMLButtonElement>('button[aria-label="继续任务"]');
 
     expect(button).toBeDefined();
-    expect(button?.getAttribute("title")).toBe("继续任务");
+    expect(button?.getAttribute("aria-label")).toBe("继续任务");
     expect(button?.querySelector("svg.lucide-play")).not.toBeNull();
 
     await act(async () => button?.click());
@@ -116,21 +116,21 @@ describe("ConversationView continue primary action", () => {
 
     await act(async () => typeIntoTextarea(textarea, "保留草稿"));
     await act(async () => button?.click());
-    expect(onContinueTurn).toHaveBeenCalledTimes(2);
-    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onContinueTurn).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(onStop).not.toHaveBeenCalled();
     expect(textarea.value).toBe("保留草稿");
 
     await act(async () => typeIntoTextarea(textarea, ""));
     await act(async () => pressEnter(textarea));
-    expect(onContinueTurn).toHaveBeenCalledTimes(3);
-    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onContinueTurn).toHaveBeenCalledTimes(2);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(onStop).not.toHaveBeenCalled();
     expect(textarea.value).toBe("");
 
     await act(async () => pressEnter(textarea, { shiftKey: true }));
     await act(async () => pressEnter(textarea, { isComposing: true }));
-    expect(onContinueTurn).toHaveBeenCalledTimes(3);
+    expect(onContinueTurn).toHaveBeenCalledTimes(2);
   });
 
   it("disables continue when its handler is absent", async () => {

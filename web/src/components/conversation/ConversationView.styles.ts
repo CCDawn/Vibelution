@@ -30,6 +30,9 @@ const assistantMessageMeasure = "w-full max-w-full";
 const transcriptMeasure = "max-w-[760px]";
 const transcriptTurnRail = `w-full ${transcriptMeasure} justify-self-center`;
 const assistantTranscriptGrid = `grid min-w-0 ${transcriptTurnRail} grid-cols-[2rem_minmax(0,1fr)] items-start gap-x-3 max-[719px]:gap-x-2`;
+// The center column keeps the composer's 760px measure; the two avatar gutters
+// sit outside it. Narrow panes reserve smaller gutters inside the scroll area.
+const avatarGutterTranscriptGrid = "turnWithAvatarGutters mx-auto grid min-w-0 w-full max-w-[848px] justify-self-center grid-cols-[2rem_minmax(0,1fr)_2rem] items-start gap-x-3 [&_.turnAvatar]:row-start-1 [&_.turnAvatar]:mt-0 [&_.turnContent]:col-start-2 [&_.turnContent]:row-start-1 [&_.turnContent]:max-w-full max-[719px]:grid-cols-[1.75rem_minmax(0,1fr)_1.75rem] max-[719px]:gap-x-2 max-[719px]:[&_.turnAvatar]:size-7";
 const answerOnlyProcessShell = cv(
   "answerOnlyProcessGroup",
   "min-w-0 grid",
@@ -202,8 +205,10 @@ const styles: Record<string, string> = {
     `vui-components-conversationview assistantTurn ${assistantTranscriptGrid} [&_.turnAvatar]:col-start-1 [&_.turnAvatar]:row-start-1 [&_.turnContent]:col-start-2 [&_.turnContent]:row-start-1 [&_.turnContent]:w-full [&_.turnContent]:p-0 [&_.turnContent]:border-l-0`,
   assistantTurnContinuation:
     "vui-components-conversationview assistantTurnContinuation min-w-0 [&_.turnContent]:w-full [&_.turnContent]:gap-1",
-  turnWithoutIdentity:
-    "vui-components-conversationview turnWithoutIdentity !grid-cols-[minmax(0,1fr)] !gap-x-0 [&_.turnContent]:!col-start-1 [&_.turnContent]:!row-start-1 [&_.turnFooter]:justify-start [&.userTurn_.turnFooter]:justify-end",
+  assistantTurnWithAvatarGutters:
+    `vui-components-conversationview assistantTurn ${avatarGutterTranscriptGrid} [&_.turnAvatar]:col-start-1 [&_.turnContent]:w-full [&_.turnFooter]:justify-start`,
+  userTurnWithAvatarGutters:
+    `vui-components-conversationview userTurn ${avatarGutterTranscriptGrid} [&_.turnAvatar]:col-start-3 [&_.turnContent]:w-fit [&_.turnContent]:justify-self-end [&_.turnFooter]:justify-end`,
   companionTypingTurn:
     `vui-components-conversationview companionTypingTurn ${assistantTranscriptGrid}`,
   companionTypingAvatar:
@@ -1240,6 +1245,10 @@ backToBottomButton:
 timeline:
     "vui-components-conversationview timeline flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden bg-[var(--vui-surface-chat)] pl-[clamp(1rem,3vw,3rem)] pr-[clamp(3rem,3vw,3.5rem)] @min-[864px]/conversation:pl-14 pt-7 pb-4 max-[719px]:px-5 max-[719px]:py-[22px] [scrollbar-gutter:stable]",  timelineArea:
     "vui-components-conversationview timelineArea @container/conversation relative flex min-h-0 min-w-0 flex-1 flex-col",
+  timelineWithAvatarGutters:
+    "vui-components-conversationview timeline timelineWithAvatarGutters flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden bg-[var(--vui-surface-chat)] px-3 pt-7 pb-4 max-[719px]:py-[22px] [scrollbar-gutter:stable_both-edges]",
+  timelineAreaWithAvatarGutters:
+    "[&_.turnNavigatorRail]:!hidden @min-[960px]/conversation:[&_.turnNavigatorRail]:!block",
   timelineContent:
     "vui-components-conversationview timelineContent grid min-w-0 w-full content-start gap-7 max-[719px]:gap-5",
   timelineVirtualSpacer:

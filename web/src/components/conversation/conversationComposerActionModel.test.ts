@@ -8,6 +8,7 @@ import {
   resolveComposerEnterDelivery,
   resolveComposerGuidanceUi,
   resolveComposerPrimaryActionFlags,
+  resolveComposerPrimaryAction,
   shouldStopComposerOnEscape,
 } from "./conversationComposerActionModel";
 
@@ -49,7 +50,6 @@ describe("conversationComposerActionModel", () => {
       fallbackSend: "Send",
       fallbackStopPending: "Stopping",
       fallbackSendPending: "Sending",
-      fallbackQueueSendPending: "Queueing",
     })).toEqual({ actionLabel: "Stop", pendingLabel: "Stopping" });
     expect(resolveComposerActionLabels({
       actionMode: "continue",
@@ -59,7 +59,6 @@ describe("conversationComposerActionModel", () => {
       fallbackSend: "Send",
       fallbackStopPending: "Stopping",
       fallbackSendPending: "Sending",
-      fallbackQueueSendPending: "Queueing",
     })).toEqual({ actionLabel: "继续任务", pendingLabel: "正在继续…" });
     expect(resolveComposerActionLabels({
       actionMode: "continue",
@@ -67,30 +66,27 @@ describe("conversationComposerActionModel", () => {
       fallbackSend: "Send",
       fallbackStopPending: "Stopping",
       fallbackSendPending: "Sending",
-      fallbackQueueSendPending: "Queueing",
     })).toEqual({ actionLabel: "Continue task", pendingLabel: "Continuing…" });
   });
 
-  it("keeps the queue-send pending label separate from the stop pending copy", () => {
+  it("distinguishes submission acknowledgement from stop confirmation", () => {
     const base = {
       actionMode: "stop" as const,
       stopPendingLabel: "正在停止…",
-      queueSendPendingLabel: "正在排队…",
       fallbackStop: "终止",
       fallbackSend: "发送",
       fallbackStopPending: "终止中",
       fallbackSendPending: "正在发送…",
-      fallbackQueueSendPending: "正在排队…",
     };
     // Queue/send RPC in flight while the turn runs: no stop is happening, so
     // the pending feedback must say "queueing", never borrow the stop copy.
-    expect(resolveComposerActionLabels({ ...base, queueSendPendingActive: true }))
-      .toEqual({ actionLabel: "终止", pendingLabel: "正在排队…" });
+    expect(resolveComposerActionLabels({ ...base, submitPendingActive: true }))
+      .toEqual({ actionLabel: "终止", pendingLabel: "正在发送…" });
     // An actual stop request stays dominant, alone or together with a send.
     expect(resolveComposerActionLabels({ ...base, stopPendingActive: true }))
       .toEqual({ actionLabel: "终止", pendingLabel: "正在停止…" });
     expect(resolveComposerActionLabels({
-      ...base, stopPendingActive: true, queueSendPendingActive: true,
+      ...base, stopPendingActive: true, submitPendingActive: true,
     })).toEqual({ actionLabel: "终止", pendingLabel: "正在停止…" });
     // Neither source in flight keeps the legacy stop fallback.
     expect(resolveComposerActionLabels(base))
@@ -98,12 +94,23 @@ describe("conversationComposerActionModel", () => {
     // The queue-send source only speaks in stop mode; idle sends keep the
     // submit pending copy even while a queue/send RPC is in flight.
     expect(resolveComposerActionLabels({
-      ...base, actionMode: "send" as const, queueSendPendingActive: true,
+      ...base, actionMode: "send" as const, submitPendingActive: true,
     })).toEqual({ actionLabel: "发送", pendingLabel: "正在发送…" });
-    // Without a caller label the fallback still says queueing.
-    expect(resolveComposerActionLabels({
-      ...base, queueSendPendingLabel: undefined, queueSendPendingActive: true,
-    }).pendingLabel).toBe("正在排队…");
+
+  });
+
+  it.each([
+    ["send", "", false, false, true, "send"],
+    ["stop", "", false, false, true, "stop"],
+    ["stop", "draft", false, false, true, "steer"],
+    ["stop", "draft", false, false, false, "queue"],
+    ["stop", "", true, false, true, "queue"],
+    ["stop", "draft", false, true, true, "queue"],
+    ["continue", "", false, false, true, "continue"],
+    ["continue", "draft", false, false, true, "send"],
+  ])("resolves one primary action for %s / %s", (actionMode, composerValue, hasAttachments, hasReferences, hasSafeGuidance, expected) => {
+    expect(resolveComposerPrimaryAction({ actionMode: actionMode as string, composerValue: composerValue as string,
+      hasAttachments: Boolean(hasAttachments), hasReferences: Boolean(hasReferences), hasSafeGuidance: Boolean(hasSafeGuidance) })).toBe(expected);
   });
 
   it("resolves edit mode and guidance UI flags", () => {
