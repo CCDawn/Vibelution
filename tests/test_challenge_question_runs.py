@@ -8,6 +8,7 @@ import pytest
 
 from core.chat.turn_journal import EVENT_ASSISTANT_ITEM_COMMITTED, append_turn_event
 from core.research.competition.question_result_package import canonical_model_policy
+from core.web.routes.team_workflows._models import ChallengeQuestionOutputPayload
 from core.research.workflow.contracts.model_invocation_receipt import (
     ModelInvocationReceipt,
 )
@@ -691,6 +692,58 @@ def test_register_valid_pending_candidate_counts_sample_but_not_completion(tmp_p
     assert summary["latestCandidate"]["validation"][
         "modelInvocationReceiptIssue"
     ] == "canonical_result_package_missing"
+
+
+def test_route_style_minimal_registration_saves_unverified_record(tmp_path, monkeypatch):
+    """A minimal registration whose policy fields were omitted must save.
+
+    The route materializes the full pydantic model via ``model_dump()``, so the
+    service payload always carries ``authorizedModelPolicySha256=""`` and
+    ``resultPackage=None``; package-mode detection must treat those blank
+    defaults as "not provided" instead of entering the authorization-gated
+    package path (ISS-047 regression).
+    """
+    _isolate_store(tmp_path, monkeypatch)
+    output = _output()
+    payload = ChallengeQuestionOutputPayload(
+        output=output,
+        citationChecks=_citation_checks(output),
+        registeredBy="test-agent",
+    ).model_dump()
+    assert payload["authorizedModelPolicySha256"] == ""
+    assert payload["resultPackage"] is None
+
+    response = challenge_question_runs.register_challenge_question_output(
+        "research-team",
+        payload,
+    )
+
+    record = response["record"]
+    assert record["validation"]["schemaValidation"] == "passed"
+    assert record["validation"]["officialModelCall"] is True
+    assert record["validation"]["modelInvocationReceiptIssue"] == "canonical_result_package_missing"
+    assert "resultPackage" not in record
+    store = json.loads(challenge_question_runs._store_path("research-team").read_text(encoding="utf-8"))
+    assert len(store["records"]) == 1
+    assert store["records"][0]["recordId"] == record["recordId"]
+
+
+def test_explicit_result_package_still_requires_policy_authorization_hash(tmp_path, monkeypatch):
+    """An explicit authorization package keeps the strict policy-hash gate."""
+    _isolate_store(tmp_path, monkeypatch)
+    output = _output()
+    payload = ChallengeQuestionOutputPayload(
+        output=output,
+        citationChecks=_citation_checks(output),
+        registeredBy="test-agent",
+        resultPackage={"schemaVersion": 1},
+    ).model_dump()
+
+    with pytest.raises(ValueError, match="policy_authorization_missing"):
+        challenge_question_runs.register_challenge_question_output(
+            "research-team",
+            payload,
+        )
 
 
 _EXECUTION_DESIGN_SECTIONS = (

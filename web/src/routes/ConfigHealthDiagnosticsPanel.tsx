@@ -1,4 +1,5 @@
 import { ExternalLink, RefreshCw } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 import { type HealthDiagnostics, type HealthFinding, type HealthQuickAction, type LogHelper, type SessionHelper } from "../api/types";
 import { VButton, VSection, VStatusChip, VTooltip, type VStatusTone } from "../components/vui";
@@ -275,8 +276,37 @@ function HealthQuickActionLink({ action, copy }: { action: HealthQuickAction; co
   );
 }
 
+function sessionHelperTarget(route: string): { ok: true; target: string } | { ok: false } {
+  // The helper route contract is "/chat?session=<id>" (ISS-094 owns the
+  // producer side). A target without a parsable session id cannot jump to
+  // the intended session, so it must surface as a visible failure instead
+  // of silently opening the chat shell.
+  const trimmed = String(route || "").trim();
+  if (!trimmed) {
+    return { ok: false };
+  }
+  try {
+    const parsed = new URL(trimmed, "http://vibelution.local");
+    const sessionId = String(parsed.searchParams.get("session") || "").trim();
+    if (!sessionId) {
+      return { ok: false };
+    }
+    return { ok: true, target: `${parsed.pathname}${parsed.search}` };
+  } catch {
+    return { ok: false };
+  }
+}
+
 function SessionHelperCard({ helper, lang, copy }: { helper: SessionHelper; lang: ConfigLanguage; copy: ConfigHealthDiagnosticsPanelCopy }) {
+  const navigate = useNavigate();
   const updatedLabel = formatTimestamp(helper.updatedAt, lang, copy.healthNotRecorded);
+  const target = sessionHelperTarget(helper.route);
+  const navTarget = target.ok ? target.target : "";
+  const invalidTargetMessage = target.ok
+    ? ""
+    : lang === "zh"
+      ? "会话入口无效：诊断数据缺少目标会话地址，刷新诊断后重试。"
+      : "Invalid session entry: no target session address in the diagnostics. Refresh diagnostics and retry.";
   return (
     <article className={styles.logHelperCard}>
       <div className={styles.logHelperHeader}>
@@ -332,11 +362,33 @@ function SessionHelperCard({ helper, lang, copy }: { helper: SessionHelper; lang
       </div>
       {helper.protectedReason ? <p className={styles.helperText}>{helper.protectedReason}</p> : null}
       <div className={styles.actionsRow}>
-        <a className={styles.actionButton} href={helper.route || "/chat"}>
-          <ExternalLink size={14} />
-          {copy.healthOpenChat}
-        </a>
+        {target.ok ? (
+          <a
+            className={styles.actionButton}
+            href={navTarget}
+            onClick={(event) => {
+              // In-app SPA navigation: a bare href here reloads the entire
+              // workbench, leaving the user parked on the old page for
+              // several seconds with no feedback.
+              event.preventDefault();
+              navigate(navTarget);
+            }}
+          >
+            <ExternalLink size={14} />
+            {copy.healthOpenChat}
+          </a>
+        ) : (
+          <span className={styles.actionButton} role="link" aria-disabled="true">
+            <ExternalLink size={14} />
+            {copy.healthOpenChat}
+          </span>
+        )}
       </div>
+      {invalidTargetMessage ? (
+        <p className={styles.helperText} role="alert">
+          {invalidTargetMessage}
+        </p>
+      ) : null}
     </article>
   );
 }

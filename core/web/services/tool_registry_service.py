@@ -454,7 +454,7 @@ def set_image2_default_model(model_ref: str) -> dict[str, Any]:
     available_model_refs = {
         str(item.get("model_id") or "").strip()
         for item in list_llm_model_options(public_config)
-        if str(item.get("source") or "") == "model_library" and str(item.get("model_id") or "").strip()
+        if str(item.get("source") or "") in _IMAGE2_MODEL_OPTION_SOURCES and str(item.get("model_id") or "").strip()
     }
     if normalized_ref and normalized_ref not in available_model_refs:
         raise ToolRegistryError(f"Unknown image2 model reference: {normalized_ref}")
@@ -1997,9 +1997,17 @@ def _image2_model_config_payload(public_config: dict[str, Any]) -> dict[str, Any
     }
 
 
+# Sources eligible for the image2 selector: v1 model-library entries and v2
+# provider-bound models (``make_model_ref`` refs). Both share the same
+# option shape, so the list and the default-model persistence must accept
+# exactly the same set or configured models silently vanish after a config
+# schema upgrade.
+_IMAGE2_MODEL_OPTION_SOURCES = {"model_library", "provider_model"}
+
+
 def _image2_model_option_payload(option: dict[str, Any], *, discover: bool = False) -> dict[str, Any]:
     model_ref = str(option.get("model_id") or "").strip()
-    if not model_ref or str(option.get("source") or "") != "model_library":
+    if not model_ref or str(option.get("source") or "") not in _IMAGE2_MODEL_OPTION_SOURCES:
         return {}
     configured_model = str(option.get("model") or "").strip()
     discovery = _discover_image2_option_model(option) if discover else {}

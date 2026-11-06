@@ -84,6 +84,38 @@ def test_agent_bulk_prompt_template_rejects_empty_template_id(tmp_path, monkeypa
     assert agent_directory_service.get_agent(agent["agentId"])["promptTemplateId"] == agent["promptTemplateId"]
 
 
+def test_agent_bulk_prompt_template_rejects_unknown_template_and_keeps_original_binding(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Bulk Prompt Unknown", prompt_template_id="prompt-chat-default")
+
+    response = client.post(
+        "/api/agents/bulk-prompt-template",
+        json={"agentIds": [agent["agentId"]], "promptTemplateId": "prompt-never-existed"},
+    )
+
+    assert response.status_code == 422, response.text
+    assert "Unknown prompt template: prompt-never-existed" in response.json()["detail"]
+    assert agent_directory_service.get_agent(agent["agentId"])["promptTemplateId"] == "prompt-chat-default"
+
+
+def test_agent_bulk_config_rejects_unknown_prompt_template_and_keeps_original_binding(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Bulk Config Unknown", prompt_template_id="prompt-chat-default")
+
+    response = client.post(
+        "/api/agents/bulk-config",
+        json={
+            "agentIds": [agent["agentId"]],
+            "applyFields": ["promptTemplateId"],
+            "patch": {"promptTemplateId": "prompt-never-existed"},
+        },
+    )
+
+    assert response.status_code == 422, response.text
+    assert "Unknown prompt template: prompt-never-existed" in response.json()["detail"]
+    assert agent_directory_service.get_agent(agent["agentId"])["promptTemplateId"] == "prompt-chat-default"
+
+
 def test_agent_bulk_config_updates_selected_fields_and_preserves_other_llm_slots(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = agent_directory_service.create_agent_instance(

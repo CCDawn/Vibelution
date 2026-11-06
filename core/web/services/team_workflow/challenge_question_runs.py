@@ -2712,6 +2712,26 @@ def _stage_one_official_model_call(package: QuestionResultPackage) -> bool:
     )
 
 
+def _has_explicit_authorization_input(value: Any) -> bool:
+    """True when the caller supplied a meaningful package-authorization value.
+
+    Key presence alone is not enough: ``ChallengeQuestionOutputPayload.model_dump()``
+    (without ``exclude_unset``) materializes every field, so a minimal registration
+    that omits policy and receipts still arrives with ``authorizedModelPolicySha256=""``.
+    Blank strings and empty containers mean "not provided"; any non-empty value means
+    the caller explicitly entered package mode and must pass the full policy plus
+    receipt validation below.
+    """
+
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (dict, list, tuple)):
+        return bool(value)
+    return True
+
+
 def register_challenge_question_output(team_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     team_service.get_team(team_id)
     raw_output = payload.get("output")
@@ -2788,8 +2808,12 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
     stage_one_package = False
     package_metadata: dict[str, Any] | None = None
     package_input = payload.get("resultPackage")
+    # Package mode is entered by an explicit package or a non-empty
+    # authorization input — not by bare key presence, which full-model
+    # dumps always satisfy and which misrouted minimal registrations
+    # into the policy-authorization error path.
     package_mode = isinstance(package_input, dict) or any(
-        key in payload
+        _has_explicit_authorization_input(payload.get(key))
         for key in (
             "packageReceipts",
             "modelInvocationReceipts",
