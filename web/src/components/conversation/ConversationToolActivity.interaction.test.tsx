@@ -512,7 +512,7 @@ describe("ConversationToolActivity batch open persistence", () => {
     }
   });
 
-  it("persists nested batch and child choices through a settled activity remount", async () => {
+  it("persists category and direct child choices through a settled activity remount", async () => {
     const cells: CodexTranscriptCell[] = [
       namedToolCell("nested-read-1", "read_file_tool"),
       namedToolCell("nested-read-2", "read_file_tool"),
@@ -524,26 +524,24 @@ describe("ConversationToolActivity batch open persistence", () => {
       await act(async () => mount.render());
       const category = mount.host.querySelector('[data-codex-tool-activity-category-group="true"]')!;
       await act(async () => category.querySelector("summary")!.click());
-      const batch = category.querySelector('[data-codex-tool-activity-batch="true"]')!;
-      await act(async () => batch.querySelector("summary")!.click());
-      const row = batch.querySelector('[data-codex-tool-detail="true"]')!;
+      expect(category.querySelector('[data-codex-tool-activity-batch="true"]')).toBeNull();
+      const row = category.querySelector('[data-codex-tool-detail="true"]')!;
       await act(async () => row.querySelector("summary")!.click());
 
       await act(async () => mount.render(cells.map((cell): CodexTranscriptCell => ({ ...cell, status: "completed", tone: "neutral" }))));
       expect(mount.host.querySelector('[data-codex-tool-activity-group="true"]')).not.toBeNull();
       const settledCategory = mount.host.querySelector('[data-codex-tool-activity-category-group="true"]')!;
-      const settledBatch = settledCategory.querySelector('[data-codex-tool-activity-batch="true"]')!;
       expect(settledCategory.hasAttribute("open")).toBe(true);
-      expect(settledBatch.hasAttribute("open")).toBe(true);
-      expect(settledBatch.querySelector('[data-codex-tool-detail="true"]')!.hasAttribute("open")).toBe(true);
+      expect(settledCategory.querySelector('[data-codex-tool-activity-batch="true"]')).toBeNull();
+      expect(settledCategory.querySelector('[data-codex-tool-detail="true"]')!.hasAttribute("open")).toBe(true);
       expect(readOpenToolKeys(DEFAULT_SESSION).has("nested-read-1")).toBe(true);
-      expect(readOpenToolKeys(DEFAULT_SESSION).has("tool-batch:nested-read-1")).toBe(true);
+      expect(readOpenToolKeys(DEFAULT_SESSION).has(settledCategory.getAttribute("data-conversation-part-key")!)).toBe(true);
     } finally {
       await mount.unmount();
     }
   });
 
-  it("passes failed-turn scene preservation through a category into its batch and rows", async () => {
+  it("passes failed-turn scene preservation through a category into its direct rows", async () => {
     const mount = mountActivity([
       namedToolCell("failed-nested-read-1", "read_file_tool"),
       namedToolCell("failed-nested-read-2", "read_file_tool"),
@@ -551,9 +549,12 @@ describe("ConversationToolActivity batch open persistence", () => {
     ], { turnFailed: true });
     try {
       await act(async () => mount.render());
-      const batch = mount.host.querySelector('[data-codex-tool-activity-batch="true"]')!;
-      expect(batch.hasAttribute("open")).toBe(true);
-      for (const row of batch.querySelectorAll('[data-codex-tool-detail="true"]')) {
+      const category = mount.host.querySelector('[data-codex-tool-activity-category-group="true"]')!;
+      expect(category.hasAttribute("open")).toBe(true);
+      expect(category.querySelector('[data-codex-tool-activity-batch="true"]')).toBeNull();
+      const rows = category.querySelectorAll('[data-codex-tool-detail="true"]');
+      expect(rows).toHaveLength(3);
+      for (const row of rows) {
         expect(row.hasAttribute("open")).toBe(true);
       }
     } finally {

@@ -130,7 +130,7 @@ describe("conversation process trace styles", () => {
   it("keeps thought scroll body and final answer readable while tools stay quiet", () => {
     expect(styles.thoughtScrollBody).toContain("max-h-[12rem]");
     expect(styles.thoughtScrollBody).toContain("overflow-y-auto");
-    expect(styles.codexTranscriptReasoningHeader).toContain("grid-cols-[20px_minmax(0,1fr)]");
+    expect(styles.codexTranscriptReasoningHeader).toContain("grid-cols-[15px_minmax(0,1fr)]");
     expect(styles.codexTranscriptReasoningHeader).not.toContain("24px");
     expect(styles.codexTranscriptFinalCell).toContain("leading-[var(--vui-line-readable)]");
     expect(styles.codexTranscriptFinalCell).toContain("text-[var(--fg-primary)]");
