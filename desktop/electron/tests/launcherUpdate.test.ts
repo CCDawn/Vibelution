@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import { createSourceFile, isFunctionDeclaration, ScriptTarget, transpileModule } from "typescript";
 import { describe, expect, it, vi } from "vitest";
-import { executeLauncherUpdate, projectLauncherUpdateFreshness, retainKnownDesktopShell } from "../src/process/launcherUpdate.js";
+import { executeLauncherUpdate, projectLauncherUpdateFreshness, retainKnownDesktopShell, type LauncherUpdateProgress } from "../src/process/launcherUpdate.js";
 import { decidePackagedDesktopShellRefresh, type DesktopShellStatus } from "../src/process/desktopShellFreshness.js";
 import { createLauncherFreshnessObservation } from "../src/process/launcherFreshnessObservation.js";
 import { parseBranchInstanceRecords } from "../src/protocol/launcherControlClient.js";
@@ -27,6 +27,33 @@ function desktopExitHelper(mainSource: string): string {
 }
 
 describe("guarded local Launcher update", () => {
+  it("reports native phases at the real asynchronous boundaries", async () => {
+    const input = updateInputs();
+    const phases: string[] = [];
+    let prepared!: () => void;
+    input.prepare.mockImplementation(() => new Promise<void>((resolve) => { prepared = resolve; }));
+    const updating = executeLauncherUpdate({ ...input, onPhase: (phase) => phases.push(phase) });
+    await vi.waitFor(() => expect(phases).toEqual(["checking", "preparing"]));
+    expect(input.stopWorkspaces).not.toHaveBeenCalled();
+    prepared();
+    expect(await updating).toMatchObject({ accepted: true });
+    expect(phases).toEqual(["checking", "preparing", "saving", "replacing"]);
+  });
+
+  it("does not report replacement after task saving fails", async () => {
+    const input = updateInputs();
+    const phases: string[] = [];
+    input.stopWorkspaces.mockRejectedValue(new Error("save failed"));
+    await expect(executeLauncherUpdate({ ...input, onPhase: (phase) => phases.push(phase) })).rejects.toThrow("save failed");
+    expect(phases).toEqual(["checking", "preparing", "saving"]);
+    expect(input.scheduleReplacement).not.toHaveBeenCalled();
+  });
+
+  it("keeps progress observers outside update admission", async () => {
+    const input = updateInputs();
+    expect(await executeLauncherUpdate({ ...input, onPhase: () => { throw new Error("observer failed"); } })).toMatchObject({ accepted: true });
+    expect(input.scheduleReplacement).toHaveBeenCalledOnce();
+  });
   // Parse/transpile the large main module once during collection. The tests
   // below measure controlled shutdown promises, not a cold TypeScript JIT.
   const automaticMain = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
@@ -40,6 +67,7 @@ describe("guarded local Launcher update", () => {
     const sandbox = {
       app: { isPackaged: true, exit: vi.fn() },
       desktopCliArgs: {}, shellRefreshInFlight: false, shellRefreshRequest: null, shutdownApproved: false,
+      launcherUpdateProgress: null as LauncherUpdateProgress | null,
       decidePackagedDesktopShellRefresh,
       inspectCurrentDesktopShellLaunchReadiness: vi.fn().mockResolvedValue({ launchBlocking: true }),
       inspectCurrentDesktopShell: vi.fn().mockResolvedValue({ stale: true, launchBlocking: true }),
@@ -501,6 +529,14 @@ describe("guarded local Launcher update", () => {
 });
 
 describe("Launcher freshness is based on the real packaged shell", () => {
+  it("projects only the native transaction's live progress", () => {
+    const progress = { phase: "saving" as const, startedAt: 12345 };
+    const read = { raw: { current: true, updatePhase: "spoofed", updateStartedAt: 1 }, packaged: false,
+      activeWork: { state: "idle" as const, message: "" }, updating: true, progress };
+    expect(projectLauncherUpdateFreshness(read)).toMatchObject({ updateInProgress: true, updatePhase: "saving", updateStartedAt: 12345 });
+    expect(projectLauncherUpdateFreshness({ ...read, updating: false }).updatePhase).toBeUndefined();
+    expect(projectLauncherUpdateFreshness({ ...read, progress: null }).updateStartedAt).toBeUndefined();
+  });
   const input = { raw: { current: true, runningShort: "wrong-head-label" }, packaged: true, activeWork: { state: "idle", message: "" } as ActiveWorkStatus, updating: false };
   it("never turns a failed inspection into an up-to-date verdict", () => {
     expect(projectLauncherUpdateFreshness(input)).toMatchObject({ current: null, updateAvailable: false, runningShort: "", activeWorkState: "idle" });
@@ -539,11 +575,14 @@ describe("Launcher freshness serves the settled state-refresh snapshot before sp
   type SnapshotStoreOverrides = { observedAt?: Date; snapshotFreshness?: string; freshnessSource?: unknown; valid?: boolean };
 
   function settledSnapshotStore(overrides: SnapshotStoreOverrides = {}) {
+    // One settled observation has one timestamp. Generating it inside the
+    // getter can put it after the reader's captured `now` by a clock tick.
+    const observedAt = overrides.observedAt ?? new Date();
     return {
       snapshot: () => ({
         schemaVersion: 1,
         revision: 7,
-        observedAt: (overrides.observedAt ?? new Date()).toISOString(),
+        observedAt: observedAt.toISOString(),
         freshness: overrides.snapshotFreshness ?? "fresh",
         main: { id: "main", kind: "main", current: true },
         instances: [],
@@ -551,7 +590,7 @@ describe("Launcher freshness serves the settled state-refresh snapshot before sp
       }),
       projectFreshness: () => "freshnessSource" in overrides ? overrides.freshnessSource : { current: true, reason: "current" },
       observationEpoch: () => 0,
-      projectFreshnessObservation: () => ({ observedAtMs: (overrides.observedAt ?? new Date()).getTime(), epoch: 0, valid: overrides.valid ?? true }),
+      projectFreshnessObservation: () => ({ observedAtMs: observedAt.getTime(), epoch: 0, valid: overrides.valid ?? true }),
       projectStatus: () => ({ lifecycleProof: { activeWorkRuns: { count: 0, items: [] } } }),
       projectBranchInstances: () => ({ schemaVersion: 1, items: [] }),
     };
@@ -569,6 +608,7 @@ describe("Launcher freshness serves the settled state-refresh snapshot before sp
       get runningLauncherBuild() { return build(); },
       launcherBuildCandidateObservation: { identity: JSON.stringify(["test-workspace", 0]), observedAtMs: Date.now(), raw: candidate },
       shellRefreshInFlight: false,
+      launcherUpdateProgress: null as LauncherUpdateProgress | null,
       lastKnownDesktopShell: undefined as DesktopShellStatus | undefined,
       lastKnownDesktopShellObservation: undefined as { identity: string; observedAtMs: number } | undefined,
       createLauncherFreshnessObservation: <T>(identity: () => string, load: () => Promise<T>) => {

@@ -181,6 +181,120 @@ describe("shared Launcher update topbar", () => {
     expect(button("重试更新").disabled).toBe(false);
   });
 
+  it.each(["poll", "focus", "manual"] as const)("permits a read-only %s check while the update request is pending", async (trigger) => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    api.restartLatestLauncher.mockImplementationOnce(() => new Promise(() => {}));
+    api.getLauncherFreshness.mockResolvedValue({ ...available, updateInProgress: false });
+    await mount();
+    await click("更新并重启");
+    await click("确认更新");
+    const readsBefore = api.getLauncherFreshness.mock.calls.length;
+    if (trigger === "poll") {
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_100); });
+    } else if (trigger === "focus") {
+      await act(async () => { window.dispatchEvent(new Event("focus")); await vi.advanceTimersByTimeAsync(20); });
+    } else {
+      expect(button("重新检测").disabled).toBe(false);
+      await click("重新检测");
+    }
+    expect(api.getLauncherFreshness).toHaveBeenCalledTimes(readsBefore + 1);
+    expect(button("准备中…").disabled).toBe(true);
+    button("准备中…").click();
+    expect(api.restartLatestLauncher).toHaveBeenCalledOnce();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it("keeps a confirmed update failure when the cached native progress cannot be refreshed", async () => {
+    let rejectUpdate!: (error: Error) => void;
+    api.restartLatestLauncher.mockImplementationOnce(() => new Promise((_, reject) => { rejectUpdate = reject; }));
+    api.getLauncherFreshness.mockResolvedValue({ ...available, updateInProgress: false });
+    await mount();
+    await click("更新并重启");
+    await click("确认更新");
+    api.getLauncherFreshness.mockResolvedValue({ ...available, updateInProgress: true });
+    await click("重新检测");
+    api.getLauncherFreshness.mockRejectedValue(new Error("offline"));
+    await act(async () => { rejectUpdate(new Error("构建失败")); await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(host.textContent).toContain("构建失败");
+    expect(host.textContent).not.toContain("仍在等待 Launcher 完成更新");
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("构建失败");
+    expect(button("准备中…").disabled).toBe(true);
+    expect(button("重新检测").disabled).toBe(false);
+    expect(api.restartLatestLauncher).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["checking", "正在检查更新"],
+    ["preparing", "正在准备桌面程序和界面"],
+    ["saving", "正在保存任务"],
+    ["replacing", "正在重启 Launcher"],
+  ])("shows the native %s phase without inventing a percentage", async (updatePhase, status) => {
+    api.getLauncherFreshness.mockResolvedValue({ ...available, updateInProgress: true, updatePhase });
+    await mount();
+    expect(host.querySelector('[role="status"]')?.textContent).toBe(status);
+    expect(host.textContent).not.toContain("%");
+    expect(button("准备中…").disabled).toBe(true);
+    expect(button("重新检测").disabled).toBe(false);
+    expect(api.restartLatestLauncher).not.toHaveBeenCalled();
+  });
+
+  it("preserves native phase and elapsed time across remount while the request is pending", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-11-06T04:00:00Z"));
+    api.restartLatestLauncher.mockImplementationOnce(() => new Promise(() => {}));
+    await mount();
+    await click("更新并重启");
+    await click("确认更新");
+    api.getLauncherFreshness.mockResolvedValue({ ...available, updateInProgress: true, updatePhase: "saving", updateStartedAt: Date.now() - 30_000 });
+    await click("重新检测");
+    expect(host.querySelector('[role="status"]')?.textContent).toBe("正在保存任务");
+    expect(host.textContent).toContain("已用时 30 秒");
+    const readsBefore = api.getLauncherFreshness.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(host.textContent).toContain("已用时 31 秒");
+    expect(api.getLauncherFreshness).toHaveBeenCalledTimes(readsBefore);
+    const elapsed = host.querySelector('[aria-live="off"]');
+    expect(elapsed?.textContent).toContain("已用时");
+    expect(elapsed?.closest('[aria-live="polite"]')).toBeNull();
+    await act(async () => root.render(<QueryClientProvider client={client}><div /></QueryClientProvider>));
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+    await act(async () => root.render(<QueryClientProvider client={client}><LauncherUpdateTopbar lang="zh" /></QueryClientProvider>));
+    await act(async () => { await vi.advanceTimersByTimeAsync(20); });
+    expect(host.querySelector('[role="status"]')?.textContent).toBe("正在保存任务");
+    expect(host.textContent).toContain("已用时 33 秒");
+    expect(button("准备中…").disabled).toBe(true);
+    expect(api.restartLatestLauncher).toHaveBeenCalledOnce();
+  });
+
+  it.each([undefined, Number.NaN, Number.POSITIVE_INFINITY, 0, 2_000_000_000_000])("uses the request start time when native start %s is invalid and a progress read fails", async (updateStartedAt) => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-11-06T04:00:00Z"));
+    api.restartLatestLauncher.mockImplementationOnce(() => new Promise(() => {}));
+    await mount();
+    await click("更新并重启");
+    await click("确认更新");
+    api.getLauncherFreshness.mockResolvedValue({ ...available, updateInProgress: true, updatePhase: "saving", updateStartedAt });
+    await click("重新检测");
+    expect(host.querySelector('[role="status"]')?.textContent).toBe("正在保存任务");
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+    expect(host.textContent).toContain("已用时 2 秒");
+    api.getLauncherFreshness.mockRejectedValue(new Error("offline"));
+    await click("重新检测");
+    expect(host.querySelector('[role="status"]')?.textContent).toBe("无法确认更新状态");
+    expect(host.textContent).toContain("更新进度暂时未知，仍在等待更新请求完成");
+    expect(host.textContent).not.toContain("正在保存任务");
+    expect(host.textContent).not.toContain("更新失败");
+    expect(host.textContent).not.toContain("已是最新版本");
+    expect(host.textContent).toContain("已用时 2 秒");
+    expect(button("准备中…").disabled).toBe(true);
+    expect(button("重新检测").disabled).toBe(false);
+    const readsBefore = api.getLauncherFreshness.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(host.textContent).toContain("已用时 3 秒");
+    expect(api.getLauncherFreshness).toHaveBeenCalledTimes(readsBefore);
+    expect(api.restartLatestLauncher).toHaveBeenCalledOnce();
+  });
+
   it("keeps update acceptance separate from a failed status read and permits read-only recovery", async () => {
     await mount();
     await click("更新并重启");
@@ -256,6 +370,7 @@ describe("shared Launcher update topbar", () => {
     await mount();
     await click("更新并重启");
     const callsBefore = api.getLauncherFreshness.mock.calls.length;
+    await act(async () => { window.dispatchEvent(new Event("focus")); window.dispatchEvent(new Event("pageshow")); });
     await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
     expect(api.getLauncherFreshness).toHaveBeenCalledTimes(callsBefore);
     await click("取消");

@@ -239,7 +239,7 @@ import {
   type LauncherBootstrapResult
 } from "./process/launcherBootstrap.js";
 import { listActiveWorkRuns } from "./process/activeWorkGuard.js";
-import { executeLauncherUpdate, projectLauncherUpdateFreshness, retainKnownDesktopShell } from "./process/launcherUpdate.js";
+import { executeLauncherUpdate, projectLauncherUpdateFreshness, retainKnownDesktopShell, type LauncherUpdateProgress } from "./process/launcherUpdate.js";
 import { createLauncherFreshnessObservation } from "./process/launcherFreshnessObservation.js";
 import { captureRunningLauncherBuild } from "./process/launcherBuildIdentity.js";
 import { assertTrustedIpcSender } from "./security/ipcSenderValidation.js";
@@ -569,6 +569,7 @@ let trayQuitAllInFlight = false;
 let trayRestartLauncherInFlight = false;
 type MainLineLaunchRequest = LaunchRequestMetadata & { receipt: LaunchRequestReceipt };
 let shellRefreshInFlight = false;
+let launcherUpdateProgress: LauncherUpdateProgress | null = null;
 let startupMainLineLaunchRequest: MainLineLaunchRequest | undefined;
 let shellRefreshRequest: {
   result: Promise<OrchestratedLifecycleResult>;
@@ -4739,6 +4740,7 @@ async function restartLauncherToLatestBuild(
     };
   }
   shellRefreshInFlight = true;
+  launcherUpdateProgress = { phase: "checking", startedAt: Date.now() };
   const request = {
     result: performLauncherUpdate(interruptActiveWork, operationToRestore, { ...options, shellKind }),
     operationToRestore,
@@ -4763,6 +4765,9 @@ async function performLauncherUpdate(
   try {
     const result = await executeLauncherUpdate({
       interruptActiveWork,
+      onPhase: (phase) => {
+        if (launcherUpdateProgress) launcherUpdateProgress = { ...launcherUpdateProgress, phase };
+      },
       activeWork: () => resolveLauncherUpdateActiveWork(true),
       ...(!interruptActiveWork ? { acquireShutdownGuard: acquireResidentAssistantShutdownGuard } : {}),
       prepare: () => ensureLatestLauncher({
@@ -4791,6 +4796,7 @@ async function performLauncherUpdate(
     });
     if (!result.accepted) {
       shellRefreshInFlight = false;
+      launcherUpdateProgress = null;
       return result;
     }
     shutdownApproved = true;
@@ -4798,6 +4804,7 @@ async function performLauncherUpdate(
     return result;
   } catch (error: unknown) {
     shellRefreshInFlight = false;
+    launcherUpdateProgress = null;
     throw error;
   }
 }
@@ -4895,7 +4902,8 @@ async function currentLauncherUpdateFreshness(): Promise<Record<string, unknown>
         shell: app.isPackaged ? lastKnownDesktopShell : undefined,
         activeWork: combineAssistantActiveWork(launcherActiveWorkFromSnapshot(), assistant),
         packaged: app.isPackaged,
-        updating: shellRefreshInFlight
+        updating: shellRefreshInFlight,
+        progress: launcherUpdateProgress
       });
     }
   }
@@ -4931,7 +4939,8 @@ async function currentLauncherUpdateFreshness(): Promise<Record<string, unknown>
     shell: app.isPackaged ? displayShell : undefined,
     activeWork,
     packaged: app.isPackaged,
-    updating: shellRefreshInFlight
+    updating: shellRefreshInFlight,
+    progress: launcherUpdateProgress
   });
 }
 
