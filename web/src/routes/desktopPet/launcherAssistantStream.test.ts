@@ -49,6 +49,7 @@ describe("launcher assistant native stream", () => {
     expect(stream.acceptSubmission("accepted-request", "turn-1")?.processStage).toBe("user_submit");
     stream.rejectSubmission("accepted-request");
     const running = stream.apply(event()).layer;
+    expect(stream.beginSubmission("queued-request")).toBe(running);
     expect(stream.acceptSubmission("queued-request", "", true)).toBe(running);
   });
   it.each(["你好🐳", "🧑🏽‍💻一起工作", "𠮷野家"])("continues native codepoint appends after %s", seed => {

@@ -1041,7 +1041,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       try {
         const readback = await readbackSubmitAcceptance(client, sessionId, priorSubmission.requestId, submitReadbackRuntime);
         if (!mounted.current || sessionIdRef.current !== sessionId || outstanding.current !== priorSubmission) return true;
-        if (readback.status === "readback_failed" || readback.evidence) return false;
+        if (readback.status === "readback_failed" || launcherAssistantRequestReadback(client.getQueryData<SessionDetail>(detailKey), priorSubmission.requestId)) return false;
       } finally { requestReadbackGate.current = false; }
     }
     const snapshot = attachmentsRef.current;
@@ -1229,7 +1229,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       requestReadbackGate.current = true;
       try {
         const readback = await readbackSubmitAcceptance(client, sessionId, previous.requestId, submitReadbackRuntime);
-        if (!mounted.current || sessionIdRef.current !== sessionId || readback.status === "readback_failed" || readback.evidence) return;
+        if (!mounted.current || sessionIdRef.current !== sessionId || readback.status === "readback_failed") return;
+        if (readback.evidence && exactAcceptedSubmitTurnId(client.getQueryData<SessionDetail>(detailKey), previous.requestId, readback.evidence)) return;
       } finally { requestReadbackGate.current = false; }
     }
     const expected = resolveConversationContinuation(detail.data, sessionId);
@@ -1341,9 +1342,9 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       // The attempt is retained so an immediate retry replays the same id.
       const readback = await readbackSubmitAcceptance(client, sessionId, attempt.requestId, submitReadbackRuntime);
       if (mounted.current && sessionIdRef.current === sessionId) {
-        if (readback.evidence) {
+        const turnId = readback.evidence ? exactAcceptedSubmitTurnId(client.getQueryData<SessionDetail>(detailKey), attempt.requestId, readback.evidence) : "";
+        if (turnId) {
           regenerateAttempt.current = null;
-          const turnId = exactAcceptedSubmitTurnId(client.getQueryData<SessionDetail>(detailKey), attempt.requestId, readback.evidence);
           setAcceptedTurnId(turnId);
           setActiveLayer(sessionStream.acceptSubmission(attempt.requestId, turnId));
         } else {

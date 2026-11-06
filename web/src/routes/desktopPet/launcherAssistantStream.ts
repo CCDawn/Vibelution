@@ -228,6 +228,10 @@ export function createLauncherAssistantStream(sessionId: string) {
   }
 
   function beginSubmission(clientSubmissionId: string, updatedAt = new Date().toISOString()) {
+    // A lagging detail can still say ready after native deltas started. A new
+    // input may be queued, but it never owns that already executing turn.
+    if (layer && layer.ledgerSeq > 0 && layer.status !== "completed" && layer.status !== "failed"
+      && !hasTerminalTurnOutcomeItems(layer.turnItems)) return layer;
     layer = createOptimisticActiveTurnLayer({ sessionId, clientSubmissionId, updatedAt, accepted: false });
     return layer;
   }

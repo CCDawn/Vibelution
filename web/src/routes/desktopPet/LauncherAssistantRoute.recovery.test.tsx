@@ -244,6 +244,27 @@ describe("Launcher original request recovery with a fresh QueryClient", () => {
     expect(client.getQueryData<SessionDetail>(["launcher-assistant", "detail", "session"])?.activeTurnId).toBe("running-turn");
   });
 
+  it("preserves native streaming output when lagging ready detail lets a new message enter the queue", async () => {
+    const fallback = invoke.getMockImplementation()!;
+    let listener!: (event: unknown) => void;
+    let sent = false;
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke, onSessionEvent: (callback: typeof listener) => { listener = callback; return () => {}; } });
+    invoke.mockImplementation(async request => {
+      if (request.operation === "send") { sent = true; return { accepted: true, status: "queued", turnId: "", queuedTurnId: "q-next", clientSubmissionId: request.requestId }; }
+      if (request.operation === "detail" && sent) return new Promise(() => {});
+      return fallback(request);
+    });
+    await mount();
+    await act(async () => listener({ type: "assistant_delta", sessionId: "session", turnId: "native-turn", at: 1,
+      ledgerSeq: 5, deltaSeq: 1, deltaSeqFrom: 1, stage: "responding", done: false, updatedAt: "2026-11-06T02:00:00Z",
+      turnItems: [{ version: 3, id: "answer-r1", itemId: "answer", sessionId: "session", turnId: "native-turn", type: "agent_message",
+        phase: "final_answer", text: "已显示的实时正文", status: "running", revision: 1, sequence: 1 }] }));
+    expect(surface.activeTurnMessage?.turnItems).toEqual([expect.objectContaining({ text: "已显示的实时正文" })]);
+    await act(async () => surface.onComposerChange!("下一条消息"));
+    await act(async () => surface.onSubmit()); await settle();
+    expect(surface.activeTurnMessage?.turnItems).toEqual([expect.objectContaining({ text: "已显示的实时正文" })]);
+  });
+
   it("applies stop's native detail immediately instead of waiting for another GET", async () => {
     const fallback = invoke.getMockImplementation()!;
     let stopped = false;
@@ -334,6 +355,41 @@ describe("Launcher original request recovery with a fresh QueryClient", () => {
     const original = calls("send")[0];
     await act(async () => { surface.onSubmit(); surface.onSubmit(); }); await settle();
     expect(calls("send")).toEqual([original, original]);
+  });
+
+  it.each(["canonical", "active_task"])("replays the same original request when %s acceptance lacks the turn binding", async kind => {
+    const fallback = invoke.getMockImplementation()!;
+    invoke.mockImplementation(async request => {
+      if (request.operation === "send" && calls("send").length > 1) return { accepted: true, turnId: "bound-turn" };
+      return fallback(request);
+    });
+    await mount(); await act(async () => surface.onComposerChange!("原消息"));
+    await act(async () => surface.onSubmit()); await settle();
+    const original = calls("send")[0];
+    detail = kind === "canonical" ? { ...detail, messages: [{ id: "native", role: "user", content: "原消息", timestamp: "",
+      metadata: { clientSubmissionId: original.requestId } }] } as SessionDetail
+      : { ...detail, activeTask: { metadata: { clientSubmissionId: original.requestId } } } as SessionDetail;
+    await act(async () => { await client.invalidateQueries({ queryKey: ["launcher-assistant", "detail", "session"] }); }); await settle();
+    await act(async () => surface.onSubmit()); await settle();
+    expect(calls("send")).toEqual([original, original]);
+    expect(loadLauncherComposer("session", "embedded")?.outstanding).toBeNull();
+  });
+
+  it("replays the original continuation when acceptance has not supplied a turn binding", async () => {
+    const fallback = invoke.getMockImplementation()!;
+    invoke.mockImplementation(async request => {
+      if (request.operation === "continue" && calls("continue").length > 1) return { accepted: true, turnId: "continued-turn" };
+      return fallback(request);
+    });
+    detail = { ...detail, activeLeafId: "head", ledgerSeq: 12, lastTurnTerminalTurnId: "stopped-turn",
+      lastTurnStatus: "stopped_by_user", terminalReason: "stopped_by_user", currentPhase: "ready", activeTurnId: "" } as SessionDetail;
+    await mount(); await act(async () => surface.onContinueTurn!()); await settle();
+    const original = calls("continue")[0];
+    detail = { ...detail, activeTask: { metadata: { clientSubmissionId: original.requestId } } } as SessionDetail;
+    await act(async () => { await client.invalidateQueries({ queryKey: ["launcher-assistant", "detail", "session"] }); }); await settle();
+    await act(async () => surface.onContinueTurn!()); await settle();
+    expect(calls("continue")).toEqual([original, original]);
+    expect(loadLauncherComposer("session", "embedded")?.continuation?.accepted).toBe(true);
   });
 
   it("blocks a new write and explains when durable recovery cannot be saved", async () => {
