@@ -463,6 +463,12 @@ describe("runPythonJsonBridge", () => {
 });
 
 describe("launcherApiBridgeTimeoutMs", () => {
+  it("allows the native build metadata read without widening ordinary freshness requests", () => {
+    expect(launcherApiBridgeTimeoutMs("freshness?shellKind=packaged", "GET")).toBe(PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS);
+    expect(launcherApiBridgeTimeoutMs("freshness?shellKind=unpackaged", "GET")).toBe(PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS);
+    expect(launcherApiBridgeTimeoutMs("freshness", "GET")).toBe(PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS);
+    expect(launcherApiBridgeTimeoutMs("freshness?shellKind=invalid", "GET")).toBe(PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS);
+  });
   it("keeps ordinary reads on the query budget", () => {
     expect(launcherApiBridgeTimeoutMs("status", "GET")).toBe(PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS);
   });

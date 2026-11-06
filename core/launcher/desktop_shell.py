@@ -3100,6 +3100,8 @@ def _write_unpackaged_provenance(project_root: Path, tree_hash: str, *, dist: Pa
     payload = {
         "schemaVersion": 1,
         "electronTreeHash": str(tree_hash or "").strip(),
+        "sourceCommit": _git_tree_hash(project_root, "HEAD"),
+        "builtAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 

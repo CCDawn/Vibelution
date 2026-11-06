@@ -241,6 +241,7 @@ import {
 import { listActiveWorkRuns } from "./process/activeWorkGuard.js";
 import { executeLauncherUpdate, projectLauncherUpdateFreshness, retainKnownDesktopShell } from "./process/launcherUpdate.js";
 import { createLauncherFreshnessObservation } from "./process/launcherFreshnessObservation.js";
+import { captureRunningLauncherBuild } from "./process/launcherBuildIdentity.js";
 import { assertTrustedIpcSender } from "./security/ipcSenderValidation.js";
 import { isExternalOpenableUrl, normalizeAbsoluteOpenPath } from "./security/externalOpenPolicy.js";
 import { isLiveWorkbenchWindowUrl } from "./security/urlPolicy.js";
@@ -328,6 +329,10 @@ protocol.registerSchemesAsPrivileged([
   }
 ]);
 
+const runningLauncherBuild = captureRunningLauncherBuild({
+  packaged: app.isPackaged, desktopBundleRoot: resolveDesktopBundleRoot(import.meta.url), resourcesRoot: process.resourcesPath,
+});
+let launcherBuildCandidateObservation: { identity: string; observedAtMs: number; raw: Record<string, unknown> } | undefined;
 const DESKTOP_ACTION_POLL_MS = 2000;
 const DESKTOP_ACTION_WAIT_MS = 1750;
 const DESKTOP_ACTION_LEASE_SECONDS = 30;
@@ -4846,6 +4851,8 @@ function launcherFreshnessObservationRecent(observedAtMs: number, nowMs: number)
 function launcherFreshnessSnapshotUsable(snapshot: LauncherStateSnapshotV1, rawFreshness: unknown, nowMs: number): boolean {
   if (snapshot.freshness !== "fresh") return false;
   if (typeof rawFreshness !== "object" || rawFreshness === null) return false;
+  if (!launcherBuildCandidateObservation || launcherBuildCandidateObservation.identity !== launcherFreshnessObservationIdentity()
+    || !launcherFreshnessObservationRecent(launcherBuildCandidateObservation.observedAtMs, nowMs)) return false;
   const observation = launcherStateStore.projectFreshnessObservation();
   if (!observation?.valid || observation.epoch !== launcherStateStore.observationEpoch()
     || !launcherFreshnessObservationRecent(observation.observedAtMs, nowMs)) return false;
@@ -4858,7 +4865,7 @@ const observeLauncherFreshness = createLauncherFreshnessObservation(launcherFres
   const observedAtMs = Date.now();
   const identity = launcherFreshnessObservationIdentity();
   const [rawResult, shellResult, activeWorkResult] = await Promise.allSettled([
-    orchestrateLauncherApi("freshness", { schemaVersion: 1, path: "freshness" }),
+    orchestrateLauncherApi(`freshness?shellKind=${app.isPackaged ? "packaged" : "unpackaged"}`, { schemaVersion: 1, path: "freshness" }),
     app.isPackaged ? inspectCurrentDesktopShell() : Promise.resolve(undefined),
     resolveLauncherUpdateActiveWork()
   ]);
@@ -4881,7 +4888,10 @@ async function currentLauncherUpdateFreshness(): Promise<Record<string, unknown>
     if (snapshotIdentity === launcherFreshnessObservationIdentity()
       && launcherFreshnessSnapshotUsable(snapshot, snapshotRawFreshness, Date.now())) {
       return projectLauncherUpdateFreshness({
-        raw: snapshotRawFreshness,
+        raw: { ...snapshotRawFreshness as Record<string, unknown>,
+          availableBuild: launcherBuildCandidateObservation?.raw.availableBuild,
+          availableBuildState: launcherBuildCandidateObservation?.raw.availableBuildState },
+        runningBuild: runningLauncherBuild,
         shell: app.isPackaged ? lastKnownDesktopShell : undefined,
         activeWork: combineAssistantActiveWork(launcherActiveWorkFromSnapshot(), assistant),
         packaged: app.isPackaged,
@@ -4909,11 +4919,15 @@ async function currentLauncherUpdateFreshness(): Promise<Record<string, unknown>
   if (rawResult.status !== "fulfilled") {
     throw rawResult.reason;
   }
+  if (rawResult.value && typeof rawResult.value === "object" && !Array.isArray(rawResult.value)) {
+    launcherBuildCandidateObservation = { identity, observedAtMs, raw: rawResult.value as Record<string, unknown> };
+  }
   const activeWork = activeWorkResult.status === "fulfilled"
     ? activeWorkResult.value
     : { state: "unknown" as const, message: "Launcher task status is unavailable." };
   return projectLauncherUpdateFreshness({
     raw: rawResult.value,
+    runningBuild: runningLauncherBuild,
     shell: app.isPackaged ? displayShell : undefined,
     activeWork,
     packaged: app.isPackaged,

@@ -2068,7 +2068,8 @@ def _run_launcher_api_bridge(args: argparse.Namespace) -> dict[str, object]:
         elif path == "freshness" and method == "GET":
             from core.launcher.freshness import get_launcher_freshness
 
-            response = get_launcher_freshness()
+            shell_kind = query.get("shellKind")
+            response = get_launcher_freshness(shell_kind=shell_kind) if shell_kind else get_launcher_freshness()
         elif path == "branch-instances" and method == "GET":
             if _query_flag(query.get("cleanupMetadata", "")):
                 response = launcher_service.list_launcher_branch_instances(include_cleanup_metadata=True)

@@ -1,0 +1,69 @@
+/* Reuse the Launcher/VUI palette and compact, single-column content footprint. */
+body { overflow: auto; background: var(--vui-surface-panel); }
+.preview-layout { min-height: 100dvh; display: flex; flex-direction: column; }
+.preview-main { flex: 1; min-width: 0; padding: 40px 32px 32px; }
+.update-page { width: 100%; max-width: 576px; margin-inline: auto; gap: 0; }
+.preview-caption { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-bottom: 32px; color: var(--fg-secondary); font-size: var(--vui-type-control-size); }
+.preview-label { color: var(--fg-tertiary); font-size: var(--vui-type-caption-size); }
+.update-heading { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 32px; }
+.status-icon { display: inline-grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: var(--vui-radius-panel-soft); background: var(--vui-status-info-bg); color: var(--vui-status-info-fg); }
+.status-icon--current { background: var(--vui-status-success-bg); color: var(--state-success); }
+.status-icon--error { background: var(--vui-status-danger-bg); color: var(--state-error); }
+.status-icon--unknown, .status-icon--not-built { background: var(--vui-surface-inset); color: var(--fg-secondary); }
+.update-heading h1 { margin: 0; font-size: var(--vui-type-title-size); font-weight: 600; line-height: 1.5; }
+.update-description { margin: 8px 0 0; color: var(--fg-secondary); font-size: var(--vui-type-body-size); line-height: 1.7; }
+.section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.section-heading h2, .empty-update h2 { margin: 0; font-size: var(--vui-type-body-size); font-weight: 600; }
+.section-heading > span { color: var(--fg-tertiary); font-size: var(--vui-type-caption-size); }
+.example-note { margin: 8px 0 0; color: var(--fg-tertiary); font-size: var(--vui-type-caption-size); line-height: 1.7; }
+.change-list { list-style: none; padding: 0; margin: 20px 0 0; display: grid; gap: 20px; }
+.change-list li { display: flex; align-items: flex-start; gap: 12px; }
+.change-dot { width: 4px; height: 4px; flex: none; border-radius: 50%; background: var(--fg-tertiary); margin-top: 10px; }
+.change-title { margin: 0; font-size: var(--vui-type-body-size); line-height: 1.7; }
+.change-detail { margin: 4px 0 0; color: var(--fg-secondary); font-size: var(--vui-type-control-size); line-height: 1.7; }
+.empty-update { padding-block: 20px; border-block: 1px solid var(--vui-border-subtle); }
+.empty-update p { margin: 8px 0 0; color: var(--fg-secondary); font-size: var(--vui-type-control-size); line-height: 1.7; }
+.update-error { margin: 24px 0 0; color: var(--state-error); font-size: var(--vui-type-control-size); line-height: 1.7; }
+.update-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 32px; }
+.preview-action { min-height: 44px; height: auto; padding-inline: 16px; }
+.restart-note { margin: 12px 0 0; color: var(--fg-secondary); font-size: var(--vui-type-caption-size); line-height: 1.8; }
+.action-feedback { min-height: 24px; margin: 8px 0 16px; color: var(--fg-secondary); font-size: var(--vui-type-caption-size); line-height: 1.8; }
+.build-details { border-top: 1px solid var(--vui-border-subtle); padding-top: 8px; }
+.details-toggle { min-height: 44px; height: auto; max-width: 100%; padding: 8px 0; color: var(--fg-secondary); }
+.details-toggle:hover { background: transparent; color: var(--fg-primary); }
+.details-chevron { transition: transform var(--vui-transition); }
+.details-chevron.is-open { transform: rotate(180deg); }
+.details-content { padding-bottom: 16px; }
+.details-content > .example-note { margin-top: 4px; }
+.build-versions { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px 16px; margin: 16px 0 0; font-size: var(--vui-type-caption-size); line-height: 1.7; }
+.build-versions dt { color: var(--fg-secondary); }
+.build-versions dd { min-width: 0; margin: 0; text-align: right; overflow-wrap: anywhere; font-family: var(--font-mono); }
+.commit-section { margin-top: 24px; }
+.commit-section h3 { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin: 0; font-size: var(--vui-type-control-size); font-weight: 500; }
+.commit-section h3 span { color: var(--fg-tertiary); font-size: var(--vui-type-caption-size); font-weight: 400; }
+.commit-list { display: grid; gap: 12px; list-style: none; margin: 16px 0 0; padding: 0; font-size: var(--vui-type-caption-size); }
+.commit-list li { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 12px; line-height: 1.7; }
+.commit-list code { color: var(--fg-tertiary); font-size: inherit; }
+.commit-list span { min-width: 0; color: var(--fg-secondary); overflow-wrap: anywhere; }
+.no-commits { margin: 20px 0 0; color: var(--fg-secondary); font-size: var(--vui-type-caption-size); }
+.preview-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 24px; border-top: 1px solid var(--vui-border-subtle); background: var(--vui-surface-workspace); color: var(--fg-secondary); font-size: var(--vui-type-caption-size); }
+.preview-controls label { flex: none; }
+.scene-select { width: 160px; min-height: 44px; height: auto; }
+.preview-controls p { margin: 0 0 0 auto; color: var(--fg-tertiary); }
+.preparing-icon { animation: preview-spin 1.2s linear infinite; }
+@keyframes preview-spin { to { transform: rotate(360deg); } }
+@media (max-width: 600px) {
+  .preview-main { padding: 24px 20px; }
+  .preview-caption { margin-bottom: 24px; }
+  .update-heading { margin-bottom: 24px; }
+  .preview-controls { padding: 12px 20px; gap: 8px 12px; }
+  .preview-controls p { flex-basis: 100%; margin: 0; }
+  .scene-select { flex: 1; max-width: 240px; font-size: 16px; }
+  .build-versions { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .build-versions dd { text-align: left; margin-bottom: 8px; }
+  .commit-list li { grid-template-columns: minmax(0, 1fr); gap: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .details-chevron { transition: none; }
+  .preparing-icon { animation: none; }
+}

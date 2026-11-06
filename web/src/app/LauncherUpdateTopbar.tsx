@@ -58,7 +58,8 @@ export function LauncherUpdateTopbar({ lang }: { lang: "zh" | "en" }) {
     : checking ? (zh ? "正在检测" : "Checking")
       : unknown ? (zh ? "无法确认版本" : "Version unavailable")
         : failure ? (zh ? "更新失败" : "Update failed")
-          : hasUpdate ? (zh ? "发现更新" : "Update available")
+          : hasUpdate ? (freshness?.availableBuildState === "not_built"
+            ? (zh ? "有更新，待构建" : "Update requires a build") : (zh ? "发现更新" : "Update available"))
             : (zh ? "已是最新版本" : "Up to date");
   const notice = active
     ? (zh ? `有 ${freshness?.activeWorkCount || 1} 个进行中的任务。更新会中断任务并保存已有记录，启动后可回到会话继续。` : "Updating will interrupt active tasks and save existing records. You can return to the conversation after restart.")
@@ -68,8 +69,10 @@ export function LauncherUpdateTopbar({ lang }: { lang: "zh" | "en" }) {
   return <div className={styles.pageContent}>
     <div role="status" aria-live="polite" className={styles.pageStatus}>{status}</div>
     <dl className={styles.versions}>
-      <dt className={styles.metadata}>{zh ? "当前版本" : "Current version"}</dt><dd className={styles.version}>{freshness?.runningShort ? `@${freshness.runningShort}` : (zh ? "未知" : "Unknown")}</dd>
-      <dt className={styles.metadata}>{zh ? "可用版本" : "Available version"}</dt><dd className={styles.version}>{freshness?.headShort ? `@${freshness.headShort}` : (zh ? "未知" : "Unknown")}</dd>
+      <dt className={styles.metadata}>{zh ? "当前版本" : "Current version"}</dt><dd className={styles.version} title={freshness?.runningBuild?.id}>{freshness?.runningBuild ? `${zh ? "桌面构建" : "Desktop build"} ${freshness.runningBuild.id.slice(0, 12)}` : (zh ? "未知" : "Unknown")}</dd>
+      <dt className={styles.metadata}>{zh ? "可用版本" : "Available version"}</dt><dd className={styles.version} title={freshness?.availableBuild?.id}>{freshness?.availableBuildState === "ready" && freshness.availableBuild
+        ? `${zh ? "桌面构建" : "Desktop build"} ${freshness.availableBuild.id.slice(0, 12)}`
+        : freshness?.availableBuildState === "not_built" ? (zh ? "待构建" : "Not built yet") : (zh ? "未知" : "Unknown")}</dd>
     </dl>
     {failure ? <p className={styles.failure} role="alert">{failure}</p> : null}
     <div className={styles.pageActions}>
