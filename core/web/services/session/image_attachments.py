@@ -179,7 +179,14 @@ def store_session_user_image_attachment(
             "status": "ready",
             "filename": original_filename or artifact["filename"],
         }
-        s._remember_session_uploaded_attachment(session_id, attachment)
+        try:
+            s._remember_session_uploaded_attachment(session_id, attachment)
+        except BaseException:
+            # Metadata write failed: the on-disk artifact has no conversation
+            # reference and would be an unreachable orphan. Roll the just
+            # written file back best-effort, then surface the original error.
+            _unlink_orphan_session_image_artifact(artifact)
+            raise
     s._record_session_attachment_event(
         session_id,
         "stored",
@@ -187,6 +194,30 @@ def store_session_user_image_attachment(
         outcome="stored",
     )
     return attachment
+
+
+def _unlink_orphan_session_image_artifact(artifact: dict[str, Any]) -> None:
+    """Best-effort rollback of an artifact whose metadata write just failed.
+
+    Only unlinks the exact file this call stored (name must match the
+    artifactId); an unlink failure is logged and swallowed so it never masks
+    the original metadata error.
+    """
+    s = _service()
+    artifact_id = str(artifact.get("artifactId") or "").strip()
+    artifact_path_value = str(artifact.get("path") or "").strip()
+    if not artifact_id or not artifact_path_value:
+        return
+    artifact_path = Path(artifact_path_value)
+    if artifact_path.name != artifact_id or not artifact_path.is_file():
+        return
+    try:
+        artifact_path.unlink()
+    except OSError as exc:
+        s._debug_logger.warning(
+            f"session image artifact rollback skipped: {type(exc).__name__}: {exc}",
+            tag="LOGS",
+        )
 
 
 def _remember_session_uploaded_attachment(session_id: str, attachment: dict[str, Any]) -> None:

@@ -52,6 +52,16 @@ export type TeamsRouteEffectiveTeamIdInput = {
   fallbackTeamId: string;
 };
 
+/**
+ * Requested team identity from the URL, shared by the main Teams route and the
+ * generic workflow workspace. `team` is the generic workspace param
+ * (workflowTeamParams), `teamId` is the canonical Teams-route param; both name
+ * the same team identity, so either must be honored (ISS-029).
+ */
+export function resolveRequestedRouteTeamId(params: URLSearchParams): string {
+  return params.get("team") || params.get("teamId") || "";
+}
+
 export function resolveKnownRouteTeamId(requestedTeamId: string, visibleTeamIds: ReadonlySet<string>) {
   return requestedTeamId && (visibleTeamIds.has(requestedTeamId) || TEAM_PICKER_TEAM_ID_SET.has(requestedTeamId))
     ? requestedTeamId

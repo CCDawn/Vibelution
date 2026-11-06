@@ -1286,6 +1286,7 @@ export function ChatCodingRouteWorkbench() {
     loadEarlierSessionMessagesMutation,
     resolveToolApprovalMutation,
     resolveSessionToolApprovalMutation,
+    trustDevelopmentToolsMutation,
   } = useChatSessionDetailMutations({
     queryClient,
     chatWorkspaceCache,
@@ -1930,6 +1931,7 @@ export function ChatCodingRouteWorkbench() {
     lang,
     resolveSessionToolApprovalMutation,
     resolveToolApprovalMutation,
+    trustDevelopmentToolsMutation,
   });
   // Rebuilt only when the running-session key changes (a status transition),
   // not on every committed streaming frame; reads the store's latest snapshot.

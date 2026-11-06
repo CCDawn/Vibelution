@@ -96,6 +96,8 @@ def kernel_event_create(payload: KernelEventPayload) -> dict:
 def kernel_event_detail(event_id: str) -> dict:
     try:
         return get_kernel_event(event_id)
+    except KernelValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except KernelNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -131,6 +133,8 @@ def kernel_task_timeline(task_id: str) -> dict:
 def kernel_task_detail(task_id: str) -> dict:
     try:
         return get_kernel_task(task_id)
+    except KernelValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except KernelNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

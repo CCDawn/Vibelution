@@ -21,6 +21,10 @@ NOISE_SIGNAL_PATTERNS = (
     re.compile(r'(?i)\b(GET|HEAD)\s+/api/(?:runtime/summary|runtime/events)\b.*\b(?:200|204)\b'),
     re.compile(r'(?i)\b(GET|HEAD)\s+/api/(?:evolution/active-run|sessions(?:/[^"\s]+)?/events)\b.*\b(?:200|204)\b'),
 )
+STRUCTURED_ERROR_LEVELS = {"error", "fatal", "critical", "severe", "exception"}
+STRUCTURED_WARNING_LEVELS = {"warning", "warn"}
+JSON_ERROR_KEYS = ("error", "exception", "err", "errormessage", "error_message", "failure", "failed", "traceback")
+JSON_WARNING_KEYS = ("warning", "warn")
 
 
 def analyze_log_content(
@@ -51,15 +55,17 @@ def analyze_log_content(
         stripped = line.strip()
         if not stripped:
             continue
-        if _is_noise_signal_line(stripped):
+        # 先判错误/警告信号，再考虑噪声吞行：噪声过滤不得吞掉同一行上的明确错误。
+        signal = _line_signal(stripped)
+        if not signal and _is_noise_signal_line(stripped):
             ignored_signal_count += 1
             event_type = _extract_structured_event_type(stripped)
             if event_type:
                 structured_event_count += 1
                 type_counts[event_type] += 1
             continue
-        is_error = bool(ERROR_SIGNAL_PATTERN.search(stripped))
-        is_warning = bool(WARNING_SIGNAL_PATTERN.search(stripped))
+        is_error = signal == "error"
+        is_warning = signal == "warning"
         if is_error:
             error_count += 1
         elif is_warning:
@@ -133,6 +139,68 @@ def _extract_structured_event_type(line: str) -> str:
         if value:
             return value[:80]
     return "json_object"
+
+
+def _line_signal(line: str) -> str:
+    """Return "error", "warning" or "" for a single log line."""
+
+    payload = _structured_payload(line)
+    if payload is not None:
+        return _structured_signal(payload)
+    if ERROR_SIGNAL_PATTERN.search(line):
+        return "error"
+    if WARNING_SIGNAL_PATTERN.search(line):
+        return "warning"
+    return ""
+
+
+def _structured_payload(line: str) -> dict[str, Any] | None:
+    if not line.startswith("{"):
+        return None
+    try:
+        payload = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _structured_signal(payload: dict[str, Any]) -> str:
+    # JSON 行按解析出的 level 与非空错误值判定；空的 error/exception 字段不算错误信号。
+    level = str(payload.get("level") or payload.get("severity") or "").strip().lower()
+    if level in STRUCTURED_ERROR_LEVELS:
+        return "error"
+    if level in STRUCTURED_WARNING_LEVELS:
+        return "warning"
+    if any(_is_meaningful_signal_value(payload.get(key)) for key in JSON_ERROR_KEYS):
+        return "error"
+    if ERROR_SIGNAL_PATTERN.search(_structured_value_text(payload)):
+        return "error"
+    if any(_is_meaningful_signal_value(payload.get(key)) for key in JSON_WARNING_KEYS):
+        return "warning"
+    if WARNING_SIGNAL_PATTERN.search(_structured_value_text(payload)):
+        return "warning"
+    return ""
+
+
+def _structured_value_text(payload: dict[str, Any]) -> str:
+    # 只拼值文本，不拼键名：键名（如 "error"）不参与信号匹配。
+    parts = []
+    for value in payload.values():
+        if isinstance(value, str):
+            parts.append(value)
+        elif isinstance(value, bool) or isinstance(value, (int, float)):
+            parts.append(str(value))
+    return " ".join(parts)
+
+
+def _is_meaningful_signal_value(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    if value is None or value is False:
+        return False
+    if isinstance(value, (list, dict, tuple)):
+        return bool(value)
+    return True
 
 
 def _is_noise_signal_line(line: str) -> bool:
