@@ -1814,6 +1814,20 @@ class ConversationRepository:
             model_references=True,
         )
 
+    def repair_live_directory_owner(self, **values: Any) -> Future[dict[str, str]]:
+        """CAS-rebind a live directory row to its claim-proven Agent."""
+
+        from .directory_lifecycle import repair_live_directory_owner
+
+        frozen = dict(values)
+        return self._writer.submit(
+            lambda unit_of_work: repair_live_directory_owner(
+                unit_of_work.sessions._connection, **frozen, now_ms=_now_ms(),
+            ),
+            force_flush=True,
+            model_references=True,
+        )
+
     def touch_directory_session(self, **values: Any) -> Future[dict[str, Any] | None]:
         return self._writer.submit(
             lambda unit_of_work: unit_of_work.sessions.touch_directory_session(**values),

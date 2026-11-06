@@ -986,3 +986,215 @@ def test_agent_directory_stub_merge_reports_failure_and_keeps_summaries(
     assert merged == seeded
     assert "agent direct session stubs" in caplog.text
     assert "RuntimeError" in caplog.text
+
+
+def test_rebinding_session_agent_repairs_drifted_live_owner_on_sync(
+    isolated_directory_runtime: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Agent rebind drift (ISS-037): the payload moves to B, the row stays on A.
+
+    The next sync must detect the split, prove B's live direct-session
+    claim, CAS-rebind the row to B, and record the repair — instead of
+    failing every future sync with the row pinned to the released Agent.
+    """
+    project_root = isolated_directory_runtime
+    _write_agents_registry(agent_directory_service.registry_path())
+    directory_runtime.initialize_session_directory_runtime(project_root=project_root)
+    created = session_service.create_chat_session(title="Rebind me", agent_id="agent-alpha")
+    session_id = str(created.get("id") or "").strip()
+    beta = agent_directory_service.create_agent_instance(display_name="Beta")
+    beta_id = str((beta or {}).get("agentId") or "").strip()
+    assert beta_id
+
+    events: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        directory_runtime, "_record",
+        lambda event, **kwargs: events.append((event, kwargs)),
+    )
+    session_service.update_chat_session(session_id, agent_id=beta_id)
+
+    store = directory_runtime.get_open_directory_store()
+    assert store is not None
+    row = store.repository.get_session(session_id, include_archived=True)
+    assert row is not None and row["agentId"] == beta_id
+    # The repair must not seal the row: the live read keeps resolving it.
+    assert store.repository.get_session(session_id) is not None
+    assert any(event == "session_directory.owner.live_repaired" for event, _kwargs in events)
+    assert not any(event == "session_directory.sync.failed" for event, _kwargs in events)
+
+    # A follow-up sync of the same payload is quiet: the row is already bound.
+    persisted = load_chat_state(project_root)
+    conversation = next(
+        item for item in persisted.get("conversations") or []
+        if str(item.get("conversation_id") or "") == session_id
+    )
+    events.clear()
+    directory_bridge.sync_conversation_record(conversation, wait=True)
+    assert events == []
+
+
+def test_agent_tabs_follow_repaired_live_owner(
+    isolated_directory_runtime: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """After the repair, A's tab loses the session and B's gains it.
+
+    The list and the detail must agree on the rebound owner straight from
+    the store row — no read-time recovery needed for a live drifted owner.
+    """
+    project_root = isolated_directory_runtime
+    _write_agents_registry(agent_directory_service.registry_path())
+    directory_runtime.initialize_session_directory_runtime(project_root=project_root)
+    created = session_service.create_chat_session(title="Tab mover", agent_id="agent-alpha")
+    session_id = str(created.get("id") or "").strip()
+    beta = agent_directory_service.create_agent_instance(display_name="Beta")
+    beta_id = str((beta or {}).get("agentId") or "").strip()
+
+    monkeypatch.setattr(directory_runtime, "_record", lambda *_args, **_kwargs: None)
+    session_service.update_chat_session(session_id, agent_id=beta_id)
+
+    alpha_ids = {
+        item["id"]
+        for item in session_service.query_sessions(agent_id="agent-alpha", limit=50)["items"]
+    }
+    beta_items = session_service.query_sessions(agent_id=beta_id, limit=50)["items"]
+    assert session_id not in alpha_ids
+    assert session_id in {item["id"] for item in beta_items}
+    summary = next(item for item in beta_items if item["id"] == session_id)
+    assert summary["agentId"] == beta_id
+    detail = session_service.get_session_detail(
+        session_id, transcript_scope="none", include_secondary=False,
+    )
+    assert detail["agentId"] == beta_id
+    assert detail["agentId"] == summary["agentId"]
+
+
+def test_sync_keeps_refusing_unproven_live_owner_splits(
+    isolated_directory_runtime: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A payload Agent without the direct-session claim must not steal the row."""
+    project_root = isolated_directory_runtime
+    _write_agents_registry(agent_directory_service.registry_path())
+    directory_runtime.initialize_session_directory_runtime(project_root=project_root)
+    created = session_service.create_chat_session(title="Unclaimed", agent_id="agent-alpha")
+    session_id = str(created.get("id") or "").strip()
+    beta = agent_directory_service.create_agent_instance(display_name="Beta")
+    beta_id = str((beta or {}).get("agentId") or "").strip()
+    agent_directory_service.update_agent_instance(beta_id, direct_session_id="other-session")
+
+    events: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        directory_runtime, "_record",
+        lambda event, **kwargs: events.append((event, kwargs)),
+    )
+    directory_bridge.sync_conversation_record(
+        {
+            "conversation_id": session_id,
+            "title": "Unclaimed",
+            "agent_id": beta_id,
+            "status": "ready",
+        },
+        wait=True,
+    )
+
+    store = directory_runtime.get_open_directory_store()
+    assert store is not None
+    row = store.repository.get_session(session_id, include_archived=True)
+    assert row is not None and row["agentId"] == "agent-alpha"
+    assert any(event == "session_directory.sync.failed" for event, _kwargs in events)
+    assert not any(event == "session_directory.owner.live_repaired" for event, _kwargs in events)
+
+
+def test_sync_does_not_repair_when_payload_agent_is_archived(
+    isolated_directory_runtime: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """An archived payload Agent cannot reclaim a live row, claim or not."""
+    project_root = isolated_directory_runtime
+    _write_agents_registry(agent_directory_service.registry_path())
+    directory_runtime.initialize_session_directory_runtime(project_root=project_root)
+    created = session_service.create_chat_session(title="Archived claimant", agent_id="agent-alpha")
+    session_id = str(created.get("id") or "").strip()
+    beta = agent_directory_service.create_agent_instance(display_name="Beta")
+    beta_id = str((beta or {}).get("agentId") or "").strip()
+    agent_directory_service.update_agent_instance(beta_id, direct_session_id=session_id)
+    agent_directory_service.archive_agent_instance(beta_id, repair_mode_bindings=False)
+
+    events: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        directory_runtime, "_record",
+        lambda event, **kwargs: events.append((event, kwargs)),
+    )
+    directory_bridge.sync_conversation_record(
+        {
+            "conversation_id": session_id,
+            "title": "Archived claimant",
+            "agent_id": beta_id,
+            "status": "ready",
+        },
+        wait=True,
+    )
+
+    store = directory_runtime.get_open_directory_store()
+    assert store is not None
+    row = store.repository.get_session(session_id, include_archived=True)
+    assert row is not None and row["agentId"] == "agent-alpha"
+    assert any(event == "session_directory.sync.failed" for event, _kwargs in events)
+    assert not any(event == "session_directory.owner.live_repaired" for event, _kwargs in events)
+
+
+def test_sealed_owner_split_still_routes_to_seal_repair(
+    isolated_directory_runtime: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """An archived row with a canonical payload seal keeps the seal path.
+
+    The same drifted-row preconditions plus an agent_archive seal must emit
+    owner.repaired (not the live repair) and keep the row sealed under the
+    payload-proven Agent; the live repair refuses sealed rows outright.
+    """
+    project_root = isolated_directory_runtime
+    _write_agents_registry(agent_directory_service.registry_path())
+    directory_runtime.initialize_session_directory_runtime(project_root=project_root)
+    created = session_service.create_chat_session(title="Sealed drift", agent_id="agent-alpha")
+    session_id = str(created.get("id") or "").strip()
+    beta = agent_directory_service.create_agent_instance(display_name="Beta")
+    beta_id = str((beta or {}).get("agentId") or "").strip()
+    agent_directory_service.update_agent_instance(beta_id, direct_session_id=session_id)
+    state = agent_directory_service.load_state()
+    for agent in list(state.get("agents") or []):
+        if isinstance(agent, dict) and str(agent.get("agentId") or "") == beta_id:
+            agent["createdBy"] = "session_repair"
+    agent_directory_service.save_state(state)
+
+    store = directory_runtime.get_open_directory_store()
+    assert store is not None
+    alpha_revision = str(store.repository.get_agent("agent-alpha")["currentConfigRevisionId"])
+    store.repository.upsert_directory_session(
+        session_id=session_id, agent_id="agent-alpha",
+        agent_config_revision_id=alpha_revision, title="Sealed drift", archived=True,
+    ).result(timeout=5)
+    payload = {
+        "conversation_id": session_id,
+        "title": "Sealed drift",
+        "agent_id": beta_id,
+        "status": "ready",
+        "archive_state": {"status": "archived", "source": "agent_archive", "agentId": beta_id},
+    }
+    from core.ui.chat_state import save_session_chat_state
+
+    save_session_chat_state(project_root, session_id, payload)
+    events: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        directory_runtime, "_record",
+        lambda event, **kwargs: events.append((event, kwargs)),
+    )
+    directory_bridge.sync_conversation_record(payload, wait=True)
+
+    row = store.repository.get_session(session_id, include_archived=True)
+    assert row is not None and row["agentId"] == beta_id
+    assert store.repository.get_session(session_id) is None  # stays sealed
+    assert any(event == "session_directory.owner.repaired" for event, _kwargs in events)
+    assert not any(event == "session_directory.owner.live_repaired" for event, _kwargs in events)

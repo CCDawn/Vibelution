@@ -508,6 +508,26 @@ def sync_conversation_record(
                 directory_runtime._record(
                     "session_directory.owner.repaired", outcome="completed", fields=result,
                 )
+            elif (isinstance(agent, dict)
+                    and str(agent.get("status") or "active").strip().lower() != "archived"
+                    and str(agent.get("directSessionId") or "") == session_id
+                    and not _directory_archived_from_payload(conversation)
+                    and _is_direct_main_conversation(conversation)):
+                # Live owner drift behind an Agent rebind (ISS-037): the
+                # payload moved to a live Agent that claims the session as
+                # its direct session, so the row owner is proven stale —
+                # including when the stale owner is already archived or
+                # deleted (get_agent no longer resolves deleted Agents at
+                # all). Archived payloads keep the seal path as their only
+                # ownership proof, and unproven splits keep the upsert
+                # refusal below.
+                result = store.repository.repair_live_directory_owner(
+                    session_id=session_id, expected_agent_id=str(existing["agentId"]),
+                    agent_id=agent_id, agent_config_revision_id=revision_id,
+                ).result(timeout=_SYNC_TIMEOUT_SECONDS)
+                directory_runtime._record(
+                    "session_directory.owner.live_repaired", outcome="completed", fields=result,
+                )
         future = store.repository.upsert_directory_session(
             session_id=session_id,
             agent_id=agent_id,
@@ -664,6 +684,25 @@ def _ensure_agent_revision(store: Any, agent_id: str) -> str:
     if not snapshots:
         raise ValueError("Session directory Agent snapshot import returned no revision.")
     return str(snapshots[0]["configRevisionId"])
+
+
+def _is_direct_main_conversation(conversation: Mapping[str, Any]) -> bool:
+    """The live-owner repair only applies to an Agent's own main session.
+
+    Child/supervised sessions carry family edges the store refuses to
+    migrate, so an unproven kind must keep the honest sync refusal instead
+    of a guaranteed-to-fail repair call.
+    """
+
+    session_kind = str(
+        conversation.get("session_kind") or conversation.get("sessionKind") or "main"
+    ).strip().lower()
+    if session_kind not in {"", "main"}:
+        return False
+    parent_session_id = str(
+        conversation.get("parent_session_id") or conversation.get("parentSessionId") or ""
+    ).strip()
+    return not parent_session_id
 
 
 def _directory_archived_from_payload(conversation: Mapping[str, Any]) -> bool:
@@ -949,9 +988,9 @@ def _summary_from_directory_row(
         # Mirror the detail projection's recovery for a stored row whose
         # declared Agent no longer resolves: when a live Agent claims the
         # session as its direct session, project the summary under that
-        # claimant instead of a dead owner. The directory store forbids
-        # live-row re-ownership (only the archive-sealed owner repair may
-        # rebind, with the same dead-owner + proven-claimant shape), so the
+        # claimant instead of a dead owner. Sync repairs drifted live owners
+        # and archive-sealed owners behind their proof shapes, but a dead
+        # owner (no resolvable Agent record) has no sync-side proof, so the
         # list reconciles at read time and keeps the stored row untouched.
         recovered = s._recover_active_direct_session_agent(
             session_id,
