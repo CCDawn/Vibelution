@@ -77,7 +77,8 @@ export type AssistantHostRequest =
   | { operation: "previewDispatchApproval"; dispatchId: string; taskId: string; approvalId: string }
   | { operation: "declineDispatchApproval"; dispatchId: string; taskId: string; approvalId: string; revision: string }
   | { operation: "decideDispatchApproval"; dispatchId: string; taskId: string; approvalId: string; revision: string; decision: "accept" | "decline" }
-  | { operation: "send"; message: string; requestId: string; attachmentIds?: string[]; references?: unknown[] }
+  | { operation: "send"; message: string; requestId: string; attachmentIds?: string[]; references?: unknown[];
+      controlContinuation?: { agentId: string; sessionId: string; turnId: string; headId: string; ledgerSeq: number } }
   | { operation: "uploadAttachment"; filename: string; contentType: string; dataBase64: string }
   | { operation: "upload_attachment"; kind: "user_secret"; value: string; secretKind?: "api_key" | "token" | "password" | "secret"; label?: string }
   | { operation: "readAttachment"; artifactId: string }
@@ -1262,8 +1263,8 @@ export class AssistantHost {
           || result.grantId === null || result.status !== "waiting_confirmation")) throw new HostError("ASSISTANT_RESPONSE_INVALID");
         return result;
       }
-      case "send":
-        if (!ownKeys(payload, ["operation", "message", "requestId", "attachmentIds", "references"])
+      case "send": {
+        if (!ownKeys(payload, ["operation", "message", "requestId", "attachmentIds", "references", "controlContinuation"])
           || typeof payload.message !== "string" || payload.message.length > 64_000
           || (payload.attachmentIds !== undefined && (!Array.isArray(payload.attachmentIds) || payload.attachmentIds.length > 8
             || payload.attachmentIds.some(id => typeof id !== "string" || !/^[A-Za-z0-9_.-]{1,255}$/.test(id) || id === "." || id === "..")))
@@ -1271,9 +1272,24 @@ export class AssistantHost {
             || payload.references.some(reference => !object(reference) || JSON.stringify(reference).length > 16_000)))
           || (!payload.message.trim() && !payload.attachmentIds?.length)
           || typeof payload.requestId !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(payload.requestId)) throw new HostError("ASSISTANT_REQUEST_INVALID");
+        if ("controlContinuation" in payload) {
+          const expected = payload.controlContinuation;
+          if (!object(expected) || Object.keys(expected).length !== 5
+            || !ownKeys(expected, ["agentId", "sessionId", "turnId", "headId", "ledgerSeq"])
+            || ![expected.agentId, expected.sessionId, expected.turnId, expected.headId].every(value =>
+              typeof value === "string" && value.trim() && value === value.trim() && value.length <= 200)
+            || [expected.agentId, expected.sessionId, expected.turnId].some(value => value.length > 160)
+            || !positiveInteger(expected.ledgerSeq)
+            || payload.message !== "控制已交回，请先重新观察当前页面或授权窗口，再继续当前任务；不要重放未经确认的操作。"
+            || payload.attachmentIds?.length || payload.references?.length) throw new HostError("ASSISTANT_REQUEST_INVALID");
+          if (expected.agentId !== generation.agentId || expected.sessionId !== generation.sessionId)
+            throw new HostError("ASSISTANT_IDENTITY_INVALID");
+        }
         return await this.rpc(generation, "/api/assistant/messages", "POST", { message: payload.message, requestId: payload.requestId,
           ...(payload.attachmentIds?.length ? { attachmentIds: payload.attachmentIds } : {}),
-          ...(payload.references?.length ? { references: payload.references } : {}) });
+          ...(payload.references?.length ? { references: payload.references } : {}),
+          ...(payload.controlContinuation ? { controlContinuation: payload.controlContinuation } : {}) });
+      }
       case "uploadAttachment": {
         if (!ownKeys(payload, ["operation", "filename", "contentType", "dataBase64"])
           || typeof payload.filename !== "string" || !payload.filename.length || payload.filename.length > 255

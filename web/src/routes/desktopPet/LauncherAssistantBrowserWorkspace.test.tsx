@@ -4,7 +4,12 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { browserState, safeBrowserUrl } from "../../api/launcherAssistantBrowser";
 import { LauncherAssistantBrowserWorkspace } from "./LauncherAssistantBrowserWorkspace";
-vi.mock("./LauncherAssistantRoute", () => ({ LauncherAssistantRoute: () => <div>原生对话<input aria-label="对话草稿" /></div> }));
+import type { LauncherControlContinuation } from "./useLauncherControlContinuation";
+const control = vi.hoisted(() => ({ capture: vi.fn(), complete: vi.fn(), cancel: vi.fn() }));
+vi.mock("./LauncherAssistantRoute", () => ({ LauncherAssistantRoute: ({ onControlContinuationReady }: { onControlContinuationReady?: (value: LauncherControlContinuation | null) => void }) => {
+  React.useEffect(() => { onControlContinuationReady?.(control); return () => onControlContinuationReady?.(null); }, [onControlContinuationReady]);
+  return <div>原生对话<input aria-label="对话草稿" /></div>;
+} }));
 vi.mock("../../i18n/useShellI18n", () => ({ useShellI18n: () => ({ lang: "zh" }) }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const page = { id: "one", url: "https://example.com/path?secret=1#part", title: "Example", loading: false, canGoBack: true, canGoForward: false };
@@ -12,6 +17,7 @@ const initial = { pages: [page], activePageId: "one", takeover: false };
 let root: Root, host: HTMLDivElement, invoke: ReturnType<typeof vi.fn>, onChanged: ReturnType<typeof vi.fn>;
 function button(label: string) { const found = [...host.querySelectorAll("button")].find(node => node.getAttribute("aria-label") === label || node.textContent?.trim() === label); if (!found) throw new Error(`Missing ${label}`); return found; }
 beforeEach(() => {
+  control.capture.mockReset(); control.complete.mockReset(); control.cancel.mockReset();
   Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1000 });
   window.localStorage.clear();
   invoke = vi.fn(async () => initial); onChanged = vi.fn(() => () => {});
@@ -103,11 +109,32 @@ describe("Launcher browser workspace", () => {
     expect(button("等待当前操作").disabled).toBe(true);
     expect(invoke.mock.calls.filter(([payload]) => payload.operation === "takeover")).toHaveLength(1);
     await act(async () => resolve({ ...initial, takeover: true }));
-    expect(button("交给助理")).toBeTruthy();
+    expect(button("交给助理并继续")).toBeTruthy();
     await act(async () => { window.innerWidth = 600; window.dispatchEvent(new Event("resize")); });
     await act(async () => button("对话").click());
     expect(host.textContent).toContain("原生对话");
     expect(invoke.mock.calls.some(([payload]) => payload.operation === "bounds" && payload.bounds === null)).toBe(true);
+  });
+  it("continues the click-time task only after an explicit successful handoff", async () => {
+    const intent = { requestId: "frozen" }; control.capture.mockReturnValue(intent);
+    let resolve!: (value: unknown) => void;
+    invoke.mockImplementation((payload: { operation: string }) => payload.operation === "resume"
+      ? new Promise(done => { resolve = done; }) : Promise.resolve({ ...initial, takeover: true }));
+    await render(); expect(control.capture).not.toHaveBeenCalled(); expect(control.complete).not.toHaveBeenCalled();
+    await act(async () => button("交给助理并继续").click());
+    expect(control.capture).toHaveBeenCalledOnce(); expect(control.complete).not.toHaveBeenCalled();
+    await act(async () => resolve(initial));
+    expect(control.complete).toHaveBeenCalledWith(intent, expect.any(Function));
+    expect(control.complete).toHaveBeenCalledOnce();
+  });
+  it("does not continue if resume fails or control is still held by the user", async () => {
+    control.capture.mockReturnValue({ requestId: "frozen" });
+    invoke.mockResolvedValue({ ...initial, takeover: true });
+    await render(); await act(async () => button("交给助理并继续").click());
+    expect(control.complete).not.toHaveBeenCalled();
+    invoke.mockRejectedValue(new Error("failed"));
+    await act(async () => button("交给助理并继续").click());
+    expect(control.complete).not.toHaveBeenCalled();
   });
   it("shows the page again when an explicit open arrives while narrow chat is selected", async () => {
     let show: (() => void) | undefined;

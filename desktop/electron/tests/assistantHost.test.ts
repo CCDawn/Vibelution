@@ -78,6 +78,53 @@ function usageSnapshot() {
 }
 
 describe("AssistantHost", () => {
+  it("binds control continuation sends to the captured identity and preserves the exact retry body", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const controlContinuation = { agentId: "a", sessionId: "s", turnId: "old-turn", headId: "head", ledgerSeq: 4 };
+    const request = { operation: "send" as const, requestId: "control-1", controlContinuation,
+      message: "控制已交回，请先重新观察当前页面或授权窗口，再继续当前任务；不要重放未经确认的操作。" };
+    fetchImpl.mockRejectedValueOnce(new Error("ack lost"));
+    await expect(host.request(request)).rejects.toThrow("ASSISTANT_TRANSPORT_FAILED");
+    const failedBody = fetchImpl.mock.calls.at(-1)?.[1]?.body;
+    await host.request(request);
+    expect(fetchImpl.mock.calls.at(-1)?.[1]?.body).toBe(failedBody);
+    expect(JSON.parse(String(failedBody))).toEqual({ message: request.message, requestId: "control-1", controlContinuation });
+    const before = fetchImpl.mock.calls.length;
+    for (const changes of [{ agentId: "new-agent" }, { sessionId: "new-session" }])
+      await expect(host.request({ ...request, controlContinuation: { ...controlContinuation, ...changes } }))
+        .rejects.toThrow("ASSISTANT_IDENTITY_INVALID");
+    for (const changes of [{ message: "continue freely" }, { attachmentIds: ["file-1"] }, { references: [{ messageId: "m" }] },
+      { controlContinuation: null }, { controlContinuation: { ...controlContinuation, ledgerSeq: true } },
+      { controlContinuation: { ...controlContinuation, headId: " head " } },
+      { controlContinuation: { ...controlContinuation, extra: true } }])
+      await expect(host.request({ ...request, ...changes } as unknown as AssistantHostRequest)).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    expect(fetchImpl.mock.calls.length).toBe(before);
+    await host.stop();
+  });
+
+  it("rejects a control send retained across migration once the new native identity is ready", async () => {
+    const { host, fetchImpl, native, root } = fixture({ graceful: true });
+    Object.assign(native, { exitCode: vi.fn(() => 0) });
+    await host.start();
+    const request = { operation: "send" as const, requestId: "old-control", controlContinuation:
+      { agentId: "a", sessionId: "s", turnId: "old-turn", headId: "head", ledgerSeq: 4 },
+      message: "控制已交回，请先重新观察当前页面或授权窗口，再继续当前任务；不要重放未经确认的操作。" };
+    const admission = host.beginMigrationAdmission();
+    await admission.seal();
+    const queued = host.request(request);
+    expect(await host.retireForMigration()).toBe(true);
+    host.prepareForMigrationRestart({ schemaVersion: 1, revision: 0, projects: { project: root } }, false);
+    const originalFetch = fetchImpl.getMockImplementation()!;
+    fetchImpl.mockImplementation(async (...args) => String(args[0]).endsWith("/api/assistant")
+      ? Response.json({ assistant: { agentId: "new-agent", directSessionId: "new-session" } }) : originalFetch(...args));
+    await host.startForMigration();
+    admission.release();
+    await expect(queued).rejects.toThrow("ASSISTANT_IDENTITY_INVALID");
+    expect(fetchImpl.mock.calls.filter(([url]) => String(url).endsWith("/api/assistant/messages"))).toHaveLength(0);
+    await host.stop();
+  });
+
   it("reads a fixed compact usage snapshot and refuses identity or scope injection", async () => {
     const { host, fetchImpl } = fixture({ graceful: true });
     await host.start();

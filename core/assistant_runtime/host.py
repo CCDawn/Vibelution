@@ -172,15 +172,30 @@ async def migration_runtime_quiescence(native, dispatch, history_control, main_c
             raise MigrationQuiescenceUnavailable("session_release_unknown")
 
 
+class ControlContinuation(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    agentId: str = Field(min_length=1, max_length=160, pattern=r"^\S(?:.*\S)?$")
+    sessionId: str = Field(min_length=1, max_length=160, pattern=r"^\S(?:.*\S)?$")
+    turnId: str = Field(min_length=1, max_length=160, pattern=r"^\S(?:.*\S)?$")
+    headId: str = Field(min_length=1, max_length=200, pattern=r"^\S(?:.*\S)?$")
+    ledgerSeq: int = Field(ge=1, le=2**53 - 1)
+
+
 class Message(BaseModel):
     model_config = ConfigDict(extra="forbid")
     message: str = Field(max_length=64000)
     requestId: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.:-]+$")
     attachmentIds: list[str] = Field(default_factory=list, max_length=8)
     references: list[dict] = Field(default_factory=list, max_length=8)
+    controlContinuation: ControlContinuation | None = None
 
     @model_validator(mode="after")
     def validate_content(self):
+        if "controlContinuation" in self.model_fields_set:
+            from .control_continuation import CONTROL_CONTINUATION_MESSAGE
+            if (self.controlContinuation is None or self.message != CONTROL_CONTINUATION_MESSAGE
+                    or self.attachmentIds or self.references):
+                raise ValueError("Invalid control continuation message")
         if not self.message.strip() and not self.attachmentIds:
             raise ValueError("Message or attachments required")
         if any(not isinstance(item, str) or not item or len(item) > 255
@@ -1719,6 +1734,9 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
     @app.post("/api/assistant/messages")
     def message(payload: Message):
         try:
+            if payload.controlContinuation is not None:
+                return native.submit(payload.message, payload.requestId,
+                                     control_continuation=payload.controlContinuation.model_dump())
             if payload.attachmentIds or payload.references:
                 return native.submit(payload.message, payload.requestId, payload.attachmentIds or None,
                                      payload.references or None)

@@ -44,14 +44,36 @@ async function render(active = true) {
   await act(async () => root.render(<QueryClientProvider client={client}><PersonalAssistantComputerPanel active={active} onCollapse={collapse} /></QueryClientProvider>));
   await settle();
 }
-async function renderConversation(onGranted = vi.fn(), authorizationRequestId?: string) {
-  await act(async () => root.render(<QueryClientProvider client={client}><PersonalAssistantComputerPanel active onCollapse={collapse} presentation="conversation" onGranted={onGranted} authorizationRequestId={authorizationRequestId} /></QueryClientProvider>));
+async function renderConversation(onGranted = vi.fn(), authorizationRequestId?: string, prepareContinuation?: Parameters<typeof PersonalAssistantComputerPanel>[0]["prepareContinuation"]) {
+  await act(async () => root.render(<QueryClientProvider client={client}><PersonalAssistantComputerPanel active onCollapse={collapse} presentation="conversation" onGranted={onGranted} authorizationRequestId={authorizationRequestId} prepareContinuation={prepareContinuation} /></QueryClientProvider>));
   await settle();
   return onGranted;
 }
 function button(label: string) { const found = [...container.querySelectorAll("button")].find(row => row.textContent === label || row.getAttribute("aria-label") === label); if (!found) throw new Error(`Missing button ${label}`); return found; }
 async function click(label: string) { await act(async () => button(label).click()); await settle(); }
 describe("single-window personal assistant controls", () => {
+  it("freezes the continuation before grant and calls it only after the exact window succeeds", async () => {
+    const finish = vi.fn(); const prepare = vi.fn(() => finish);
+    let resolve!: (state: ComputerState) => void;
+    vi.mocked(grantPersonalAssistantComputer).mockImplementation(() => new Promise(done => { resolve = done; }));
+    await renderConversation(vi.fn(), "request-original", prepare);
+    await act(async () => (container.querySelector('[aria-pressed="false"]') as HTMLButtonElement).click());
+    await act(async () => button("授权并继续当前任务").click());
+    expect(prepare).toHaveBeenCalledWith("grant"); expect(finish).not.toHaveBeenCalled();
+    expect(grantPersonalAssistantComputer).toHaveBeenCalledWith({ selectionId: target.selectionId, allowVision: true, authorizationRequestId: "request-original" });
+    vi.mocked(fetchPersonalAssistantComputer).mockResolvedValue(ready);
+    await act(async () => resolve(ready)); await settle();
+    expect(finish).toHaveBeenCalledOnce();
+  });
+  it("does not continue on rejected grants or passive authorized state", async () => {
+    const finish = vi.fn(); const prepare = vi.fn(() => finish);
+    vi.mocked(grantPersonalAssistantComputer).mockRejectedValue(new Error("expired request"));
+    await renderConversation(vi.fn(), "request-original", prepare);
+    await act(async () => (container.querySelector('[aria-pressed="false"]') as HTMLButtonElement).click());
+    await click("授权并继续当前任务");
+    await act(async () => client.setQueryData(queryKeys.personalAssistantComputer(), ready));
+    expect(prepare).toHaveBeenCalledOnce(); expect(finish).not.toHaveBeenCalled();
+  });
   it("requires an explicit window and grants once from the conversation card", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     const onGranted = await renderConversation();

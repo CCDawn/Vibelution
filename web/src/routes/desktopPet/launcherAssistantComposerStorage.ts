@@ -1,6 +1,7 @@
 import type { ComposerImageAttachment } from "../chat/chatComposerSubmitModel";
 import type { SessionPendingQuestion, SessionReferenceAttachment } from "../../api/types";
 import type { SessionContinuationExpectation } from "../../api/chat";
+import { LAUNCHER_ASSISTANT_CONTROL_CONTINUATION_MESSAGE, validLauncherAssistantControlContinuation } from "../../api/launcherAssistant";
 import type { LauncherAssistantQuestionDraft, LauncherAssistantQueuedAcceptance, LauncherAssistantSubmission } from "./launcherAssistantModel";
 
 /** Recoverable attachment metadata only: id plus the uploaded backend artifact.
@@ -57,7 +58,7 @@ const SNAPSHOT_FIELDS = ["draft", "outstanding", "acceptedTurnId", "queuedAccept
 // (same VERSION) still load; new writes always include the field.
 // `questionDraft` is also optional in VERSION 1; null explicitly clears it.
 const SNAPSHOT_ALLOWED = [...SNAPSHOT_FIELDS, "attachments", "questionDraft", "references", "continuation"];
-const SUBMISSION_FIELDS = ["message", "requestId", "draftSnapshot", "attachmentIds", "attachmentSnapshotIds", "preserveDraft", "answerQuestion", "references"];
+const SUBMISSION_FIELDS = ["message", "requestId", "draftSnapshot", "attachmentIds", "attachmentSnapshotIds", "preserveDraft", "answerQuestion", "references", "controlContinuation"];
 const ATTACHMENT_FIELDS = ["id", "artifactId", "filename", "contentType", "sizeBytes", "kind"];
 const QUESTION_FIELDS = ["id", "questionText", "askedAt", "turnId"];
 const MAX_FILENAME_CHARS = 255;
@@ -145,6 +146,9 @@ function submission(value: unknown): LauncherAssistantSubmission | null {
     || (!value.message.trim() && !(value.attachmentIds as string[] | undefined)?.length && !savedReferences?.length)) return null;
   const answerQuestion = value.answerQuestion === undefined ? null : pendingQuestion(value.answerQuestion);
   if (value.answerQuestion !== undefined && (!answerQuestion || value.preserveDraft !== true)) return null;
+  if (value.controlContinuation !== undefined && (!validLauncherAssistantControlContinuation(value.controlContinuation)
+    || value.message !== LAUNCHER_ASSISTANT_CONTROL_CONTINUATION_MESSAGE || value.preserveDraft !== true
+    || value.attachmentIds !== undefined || value.references !== undefined || value.answerQuestion !== undefined)) return null;
   return {
     message: value.message, requestId: value.requestId,
     ...(value.draftSnapshot !== undefined ? { draftSnapshot: value.draftSnapshot as string } : {}),
@@ -153,6 +157,7 @@ function submission(value: unknown): LauncherAssistantSubmission | null {
     ...(value.preserveDraft === true ? { preserveDraft: true } : {}),
     ...(answerQuestion ? { answerQuestion } : {}),
     ...(savedReferences ? { references: savedReferences } : {}),
+    ...(validLauncherAssistantControlContinuation(value.controlContinuation) ? { controlContinuation: { ...value.controlContinuation } } : {}),
   };
 }
 
