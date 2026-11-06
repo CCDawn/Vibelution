@@ -353,11 +353,13 @@ describe("ConversationView follow-up queue actions", () => {
     container = null;
   });
 
-  function renderBusyComposer(options: {
+  async function renderBusyComposer(options: {
     composerValue: string;
     followupQueue?: ComposerQueueItem[];
     onSubmit: () => void;
   }) {
+    if (root) await act(async () => root?.unmount());
+    container?.remove();
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: Infinity } },
     });
@@ -403,7 +405,7 @@ describe("ConversationView follow-up queue actions", () => {
     });
   }
 
-  it("submits queue and immediate-steer from the running composer", async () => {
+  it("queues a draft and preserves empty Enter steering while the primary control stops", async () => {
     const onSubmit = vi.fn();
     await renderBusyComposer({
       composerValue: "先不要改测试",
@@ -421,8 +423,11 @@ describe("ConversationView follow-up queue actions", () => {
       onSubmit,
     });
     expect(container?.textContent).toContain("排队中 · 1 条");
+    expect(container?.querySelector('[data-composer-action="stop"]')).toBeTruthy();
     await act(async () => {
-      container?.querySelector<HTMLButtonElement>('button[aria-label="立刻引导"]')?.click();
+      container?.querySelector("textarea")?.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "Enter", bubbles: true, cancelable: true,
+      }));
     });
     expect(onSubmit).toHaveBeenCalledTimes(1);
   });
