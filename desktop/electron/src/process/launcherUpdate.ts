@@ -4,6 +4,9 @@ import { ACTIVE_WORK_BLOCK_MESSAGE_RESTART } from "./activeWorkGuard.js";
 import type { DesktopShellStatus } from "./desktopShellFreshness.js";
 import { parseLauncherBuild, type LauncherBuild } from "./launcherBuildIdentity.js";
 
+export type LauncherUpdatePhase = "checking" | "preparing" | "saving" | "replacing";
+export type LauncherUpdateProgress = { phase: LauncherUpdatePhase; startedAt: number };
+
 /** A version read is not permission to stop a workspace. Recheck after preparation. */
 export async function executeLauncherUpdate(input: {
   /** Explicit operator refresh saves active tasks through stopWorkspaces. */
@@ -14,7 +17,11 @@ export async function executeLauncherUpdate(input: {
   scheduleReplacement: () => Promise<void>;
   /** Hold native assistant admission from the final idle proof through exit. */
   acquireShutdownGuard?: () => Promise<{ release(): Promise<void>; commit?(): void }>;
+  onPhase?: (phase: LauncherUpdatePhase) => void;
 }): Promise<OrchestratedLifecycleResult> {
+  const phase = (value: LauncherUpdatePhase) => {
+    try { input.onPhase?.(value); } catch { /* Status observers cannot change update admission. */ }
+  };
   const check = async (): Promise<OrchestratedLifecycleResult | null> => {
     let status: ActiveWorkStatus;
     try {
@@ -40,16 +47,20 @@ export async function executeLauncherUpdate(input: {
       activeWorkRuns: status.items,
     };
   };
+  phase("checking");
   const before = await check();
   if (before) return before;
   // Build failures stay in the live window; no workspace has been stopped yet.
+  phase("preparing");
   await input.prepare();
   const after = await check();
   if (after) return after;
   const guard = await input.acquireShutdownGuard?.();
   try {
+    phase("saving");
     await input.stopWorkspaces();
     guard?.commit?.();
+    phase("replacing");
     await input.scheduleReplacement();
   } catch (error) {
     // Failed preparation/stops keep the same live assistant usable. An
@@ -82,6 +93,7 @@ export function projectLauncherUpdateFreshness(input: {
   activeWork: ActiveWorkStatus;
   updating: boolean;
   runningBuild?: LauncherBuild | null;
+  progress?: LauncherUpdateProgress | null;
 }): Record<string, unknown> {
   const raw = typeof input.raw === "object" && input.raw !== null ? input.raw as Record<string, unknown> : {};
   const shell = input.shell;
@@ -108,6 +120,8 @@ export function projectLauncherUpdateFreshness(input: {
     activeWorkState: input.activeWork.state,
     activeWorkCount: input.activeWork.count ?? input.activeWork.items?.length ?? 0,
     updateInProgress: input.updating,
+    updatePhase: input.updating ? input.progress?.phase : undefined,
+    updateStartedAt: input.updating ? input.progress?.startedAt : undefined,
     ...(input.packaged ? {
       runningShort: shell?.packagedSourceCommit?.slice(0, 12) || "",
       headShort: shell?.currentCommit?.slice(0, 12) || "",

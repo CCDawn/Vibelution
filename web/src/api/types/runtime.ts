@@ -1252,6 +1252,8 @@ export type LauncherFreshness = {
   activeWorkState?: "idle" | "active" | "unknown";
   activeWorkCount?: number;
   updateInProgress?: boolean;
+  updatePhase?: "checking" | "preparing" | "saving" | "replacing";
+  updateStartedAt?: number;
   refreshError?: string;
 };
 
