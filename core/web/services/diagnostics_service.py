@@ -89,6 +89,7 @@ def _build_session_helpers() -> list[dict[str, Any]]:
         status = "warning"
 
     latest_signal = _session_latest_signal(active, total=total, busy_count=len(busy), failed_count=len(failed))
+    failed_session_id = str(failed[0].get("id") or "").strip() if failed else ""
     return [
         {
             "id": "chat_sessions",
@@ -99,6 +100,7 @@ def _build_session_helpers() -> list[dict[str, Any]]:
             "sessionCount": total,
             "busyCount": len(busy),
             "failedCount": len(failed),
+            "failedSessionId": failed_session_id,
             "staleCount": len(stale),
             "activeSessionId": str(active.get("id") or "") if active else "",
             "activeTitle": str(active.get("title") or "") if active else "",
@@ -191,6 +193,9 @@ def _session_findings(helper: dict[str, Any]) -> list[dict[str, Any]]:
         _evidence("阶段", helper.get("currentPhase") or "未记录"),
     ]
     if failed_count > 0:
+        # 失败 finding 的入口必须指向失败会话本身，而不是当前活跃会话。
+        failed_session_id = str(helper.get("failedSessionId") or "")
+        failed_route = f"/chat?session={failed_session_id}" if failed_session_id else route
         return [
             _finding(
                 "session_failed",
@@ -199,9 +204,9 @@ def _session_findings(helper: dict[str, Any]) -> list[dict[str, Any]]:
                 helper_id=str(helper.get("id") or ""),
                 title="会话失败需要先看",
                 summary=f"{failed_count} 个会话处于失败状态，先从最近回答、工具调用和错误日志确认失败点。",
-                evidence=common_evidence,
+                evidence=[*common_evidence, _evidence("失败会话", failed_session_id or "未记录")],
                 recommended_action=str(helper.get("recommendedAction") or ""),
-                route=route,
+                route=failed_route,
                 protected=True,
             )
         ]

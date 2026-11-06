@@ -261,6 +261,23 @@ def test_kernel_task_list_returns_latest_tasks_first_after_limit(tmp_path, monke
     assert [task["taskId"] for task in tasks] == list(reversed(created_task_ids[-3:]))
 
 
+def test_kernel_task_and_event_detail_map_blank_and_unknown_ids_like_timeline(tmp_path, monkeypatch):
+    _isolate_kernel(tmp_path, monkeypatch)
+    client = _client()
+
+    blank_task = client.get("/api/kernel/tasks/%20")
+    blank_event = client.get("/api/kernel/events/%20")
+    assert blank_task.status_code == 422, blank_task.text
+    assert "id is required" in blank_task.json()["detail"]
+    assert blank_event.status_code == 422, blank_event.text
+    assert "id is required" in blank_event.json()["detail"]
+
+    unknown_task = client.get("/api/kernel/tasks/task-unknown")
+    unknown_event = client.get("/api/kernel/events/event-unknown")
+    assert unknown_task.status_code == 404, unknown_task.text
+    assert unknown_event.status_code == 404, unknown_event.text
+
+
 def test_kernel_event_rejects_missing_recipient_but_keeps_audit_event(tmp_path, monkeypatch):
     _isolate_kernel(tmp_path, monkeypatch)
     client = _client()

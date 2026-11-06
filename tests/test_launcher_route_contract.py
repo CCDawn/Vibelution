@@ -758,3 +758,30 @@ def test_launcher_lifecycle_json_routes_keep_unknown_fields(monkeypatch) -> None
     )
     assert scene.status_code == 202
     assert scene.json() == expected_scene
+
+
+def test_launcher_register_desktop_session_maps_closed_and_blank_id_like_mutations(monkeypatch):
+    from core.launcher.desktop_session_store import DesktopSessionClosed
+
+    def closed_session(*_args, **_kwargs):
+        raise DesktopSessionClosed("desktop-session-1", 7)
+
+    monkeypatch.setattr(launcher_routes.launcher_service, "register_desktop_session", closed_session)
+    closed = client.post(
+        "/api/launcher/desktop-sessions",
+        json={"desktopSessionId": "desktop-session-1", "provider": "electron"},
+    )
+    assert closed.status_code == 409, closed.text
+    assert closed.json()["detail"]["code"] == "desktop_session_closed"
+
+    monkeypatch.setattr(
+        launcher_routes.launcher_service,
+        "register_desktop_session",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("desktopSessionId is required")),
+    )
+    blank = client.post(
+        "/api/launcher/desktop-sessions",
+        json={"desktopSessionId": "", "provider": "electron"},
+    )
+    assert blank.status_code == 400, blank.text
+    assert blank.json()["detail"]["code"] == "invalid_desktop_session_mutation"
