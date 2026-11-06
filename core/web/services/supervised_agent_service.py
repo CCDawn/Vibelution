@@ -838,11 +838,14 @@ def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any] |
         )
         return None, False
     if not existing:
+        # Background role seeding must never steal the server-side active
+        # session pointer (same seam as self-evolution role seeding).
         session_detail = session_service.create_chat_session(
             title=role.label,
             llm_bindings=seed_llm_bindings,
             created_by="supervised_evolution",
             conversation_index_kind=agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN,
+            activate=False,
         )
         agent_id = str(session_detail.get("agentId") or "").strip()
         existing = agent_directory_service.get_agent(agent_id) if agent_id else None
