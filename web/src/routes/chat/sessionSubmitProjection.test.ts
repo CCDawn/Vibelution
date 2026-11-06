@@ -34,6 +34,10 @@ describe("shared native conversation submit projection", () => {
     const observed = mergeSessionSubmitDetail(waiting, { ...detail(), queuedTurns: [nativeRow] });
     expect(isLocalQueuedSubmit(observed.queuedTurns![0])).toBe(false);
     expect(mergeSessionSubmitDetail(observed, detail()).queuedTurns).toEqual([]);
+    const partialStop = mergeSessionSubmitDetail(waiting, { id: "s", currentPhase: "stopping", stopRequested: true } as SessionDetail);
+    expect(partialStop.messages).toEqual([]);
+    expect(partialStop.queuedTurns).toHaveLength(1);
+    expect(partialStop.stopRequested).toBe(true);
     expect(acceptSessionSubmit({ id: "s", queuedTurns: [] } as unknown as SessionDetail, input, receipt)?.queuedTurns).toHaveLength(1);
   });
 

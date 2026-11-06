@@ -53,7 +53,7 @@ export function mergeSessionSubmitDetail(previous: SessionDetail | undefined, ne
   for (const row of previous.queuedTurns ?? []) {
     if (!isLocalQueuedSubmit(row) || !row.clientSubmissionId) continue;
     const requestId = row.clientSubmissionId;
-    const admitted = next.messages.some(message => message.role === "user" && message.metadata?.optimisticUserMessage !== true
+    const admitted = (Array.isArray(next.messages) ? next.messages : []).some(message => message.role === "user" && message.metadata?.optimisticUserMessage !== true
       && message.metadata?.clientSubmissionId === requestId) || next.activeTask?.metadata?.clientSubmissionId === requestId;
     if (admitted || merged.queuedTurns?.some(candidate => candidate.id === row.id || candidate.clientSubmissionId === requestId)) continue;
     merged = { ...merged, queuedTurns: [...(merged.queuedTurns ?? []), row] };
