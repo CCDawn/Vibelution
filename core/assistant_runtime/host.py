@@ -654,8 +654,11 @@ class NativeFacade:
         )
         return resolve_tool_approval_request(self.assistant["directSessionId"], request_id, decision=decision)
 
-    def submit(self, message, request_id, attachment_ids=None, references=None):
+    def submit(self, message, request_id, attachment_ids=None, references=None, *, control_continuation=None):
         from . import native
+        if control_continuation is not None:
+            return native.submit(message, request_id, attachment_ids, references,
+                                 control_continuation=control_continuation)
         return native.submit(message, request_id, attachment_ids, references)
 
     def upload_attachment(self, payload, filename, content_type):

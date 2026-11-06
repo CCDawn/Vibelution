@@ -48,6 +48,32 @@ def send(context, request_id="control-1", **changes):
     return native.submit(MESSAGE, request_id, control_continuation={**expected, **changes})
 
 
+def test_real_http_facade_reaches_native_admission_and_replays_one_turn(control_session, tmp_path):
+    """Exercise the actual production adapter, not an accepting fake submit."""
+    from fastapi.testclient import TestClient
+
+    from core.assistant_runtime.host import NativeFacade, create_app
+    from core.chat.conversation_ledger import load_conversation_events
+
+    _, _, sid, expected, scheduled, _ = control_session
+    # The fixture already seeds the real native owner. Do not start its
+    # unrelated reminder/lifecycle services against a synthetic profile.
+    client = TestClient(create_app(native=NativeFacade(tmp_path), token="control-facade-test"),
+                        base_url="http://127.0.0.1", headers={"Authorization": "Bearer control-facade-test"})
+    body = {"message": MESSAGE, "requestId": "http-control-original", "controlContinuation": expected}
+    try:
+        first = client.post("/api/assistant/messages", json=body)
+        assert first.status_code == 200 and first.json()["accepted"] is True
+        replay = client.post("/api/assistant/messages", json=body)
+        assert replay.status_code == 200 and replay.json()["turnId"] == first.json()["turnId"]
+    finally:
+        client.close()
+    users = [event for event in load_conversation_events(tmp_path, sid)
+             if event.event_type == "user_message" and event.correlation_id == body["requestId"]]
+    assert len(users) == len(scheduled) == 1
+    assert users[0].payload["metadata"]["assistantControlContinuation"] == expected
+
+
 def test_acceptance_replay_uses_exact_native_receipt_after_its_own_head_advance(control_session, tmp_path):
     from core.chat.conversation_ledger import load_conversation_events
 
