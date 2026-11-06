@@ -99,6 +99,131 @@ def _seed_legacy_session(project_root: Path) -> Path:
     return journal_path
 
 
+def _write_agents_registry_with_direct_claimant(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 7,
+                "agents": [
+                    {
+                        "agentId": "agent-alpha",
+                        "displayName": "Alpha",
+                        "kind": "persistent",
+                        "primaryMode": "chat",
+                        "conversationIndexKind": "personal_agent",
+                        "directSessionId": "session-live",
+                        "metadata": {
+                            "conversationIndexKind": "personal_agent",
+                            "directSessionVisibility": "active_session",
+                        },
+                        "llmBindings": {"dialogue": {"modelId": "gpt-5.6-luna"}},
+                        "promptTemplateId": "chat",
+                        "toolPolicyId": "tool-default",
+                        "toolPolicy": {"policyId": "tool-default"},
+                        "memoryPolicyId": "memory-default",
+                        "memoryPolicy": {"policyId": "memory-default"},
+                        "permissionPreset": "request_approval",
+                        "status": "active",
+                    }
+                ],
+                "toolPolicies": {"tool-default": {"policyId": "tool-default"}},
+                "memoryPolicies": {"memory-default": {"policyId": "memory-default"}},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_list_and_detail_agree_on_agent_ownership_for_the_same_session(
+    isolated_directory_runtime: Path,
+):
+    """The finance open gate reads the detail owner; the list reads the row.
+
+    A masterless chat state must resolve to the same live owner on both
+    surfaces — the detail projection recovers/rebinds onto the stored row's
+    live Agent, and the list projection reports that same owner — so a row the
+    list offers is never rejected by the detail ownership check.
+    """
+    project_root = isolated_directory_runtime
+    _write_agents_registry_with_direct_claimant(agent_directory_service.registry_path())
+    directory_runtime.initialize_session_directory_runtime(project_root=project_root)
+    save_chat_state(
+        project_root,
+        {
+            "version": 1,
+            "active_conversation_id": "session-live",
+            "conversations": [
+                {
+                    "conversation_id": "session-live",
+                    "title": "主题智能选股",
+                    "last_turn_status": "ready",
+                    "updated_at": "2026-10-19T07:26:37",
+                }
+            ],
+            "updated_at": "2026-10-19T07:26:37",
+        },
+    )
+    directory_bridge.sync_conversation_record(
+        {
+            "conversation_id": "session-live",
+            "title": "主题智能选股",
+            "agent_id": "agent-alpha",
+            "status": "ready",
+        },
+        wait=True,
+    )
+
+    detail = session_service.get_session_detail(
+        "session-live", transcript_scope="none", include_secondary=False,
+    )
+    summaries = session_service.query_sessions(agent_id="agent-alpha", limit=20)["items"]
+    summary = next(row for row in summaries if row["id"] == "session-live")
+
+    assert detail["agentId"] == "agent-alpha"
+    assert summary["agentId"] == "agent-alpha"
+    assert detail["agentId"] == summary["agentId"]
+    persisted = load_chat_state(project_root)
+    conversation = next(
+        item for item in persisted.get("conversations") or []
+        if str(item.get("conversation_id") or "") == "session-live"
+    )
+    assert conversation.get("agent_id") == "agent-alpha"
+
+
+def test_list_reprojects_dead_owner_rows_onto_the_live_direct_session_claimant(
+    isolated_directory_runtime: Path,
+):
+    """A row whose stored Agent no longer resolves follows its live claimant.
+
+    The directory store forbids live-row re-ownership, so the reconciliation
+    happens at read time: the same recovery primitive the detail projection
+    uses rebinds the projected summary to the live direct-session claimant,
+    and the summary no longer advertises a dead owner.
+    """
+    project_root = isolated_directory_runtime
+    _write_agents_registry_with_direct_claimant(agent_directory_service.registry_path())
+    directory_runtime.initialize_session_directory_runtime(project_root=project_root)
+    directory_bridge.sync_conversation_record(
+        {
+            "conversation_id": "session-live",
+            "title": "主题智能选股",
+            "agent_id": "agent-gone",
+            "status": "ready",
+        },
+        wait=True,
+    )
+
+    summaries = session_service.query_sessions(limit=50)["items"]
+    summary = next(row for row in summaries if row["id"] == "session-live")
+
+    assert summary["agentId"] == "agent-alpha"
+    assert summary["agentMissing"] is False
+    assert summary["agentStatusCode"] == ""
+    assert summary["agentDisplayName"] == "Alpha"
+
+
 def test_directory_runtime_migrates_legacy_sessions_without_importing_journals(
     isolated_directory_runtime: Path,
 ):

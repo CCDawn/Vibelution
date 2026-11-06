@@ -22,7 +22,7 @@ const researchDepthLabels: Record<ResearchDepth, { zh: string; en: string }> = {
   exhaustive: { zh: "全面", en: "Comprehensive" },
 };
 
-export function FinanceResearchReport({ report: projectedReport, assistantAgentId, sessionId, zh, onCitation, onResearch, onSupplementEvidence, busy = false, summaryOnly = false }: { report: StockResearchReport | null; assistantAgentId: string; sessionId: string; zh: boolean; onCitation: (citation: ReportCitation) => void; onResearch: () => void; onSupplementEvidence?: () => void; busy?: boolean; summaryOnly?: boolean }) {
+export function FinanceResearchReport({ report: projectedReport, assistantAgentId, sessionId, zh, onCitation, onResearch, onSupplementEvidence, busy = false, summaryOnly = false, topic = false }: { report: StockResearchReport | null; assistantAgentId: string; sessionId: string; zh: boolean; onCitation: (citation: ReportCitation) => void; onResearch: () => void; onSupplementEvidence?: () => void; busy?: boolean; summaryOnly?: boolean; topic?: boolean }) {
   const [tab, setTab] = useState("all");
   const turnId = projectedReport?.turnId ?? "";
   const verified = useGroundedFinancialReport({ assistantAgentId, sessionId, turnId });
@@ -30,7 +30,7 @@ export function FinanceResearchReport({ report: projectedReport, assistantAgentI
   useEffect(() => setTab("all"), [reportKey]);
   const report = useMemo(() => projectedReport && verified.text
     ? stockResearchReportFromText(projectedReport, verified.text) : null, [projectedReport, verified.text]);
-  if (!projectedReport) return <VStateSurface density="compact" tone={busy ? "loading" : "empty"} busy={busy} title={busy ? (zh ? "研究进行中" : "Research running") : (zh ? "这只股票还没有研究报告" : "No report for this stock")} actions={!busy ? <VButton variant="secondary" onPress={onResearch}>{zh ? "发起研究" : "Start research"}</VButton> : undefined}>{busy ? (zh ? "研究过程见右侧，完成后显示报告。" : "Follow progress on the right. The report appears after completion.") : undefined}</VStateSurface>;
+  if (!projectedReport) return <VStateSurface density="compact" tone={busy ? "loading" : "empty"} busy={busy} title={busy ? (zh ? "研究进行中" : "Research running") : topic ? (zh ? "本主题尚无报告" : "No report for this topic yet") : (zh ? "这只股票还没有研究报告" : "No report for this stock")} actions={!busy ? <VButton variant="secondary" onPress={onResearch}>{zh ? (topic ? "发起新主题" : "发起研究") : (topic ? "Start a new topic" : "Start research")}</VButton> : undefined}>{busy ? (zh ? "研究过程见右侧，完成后显示报告。" : "Follow progress on the right. The report appears after completion.") : undefined}</VStateSurface>;
   if (!report) return <FinanceReportReadState read={verified} zh={zh} onResumeResearch={onSupplementEvidence} />;
   const selected = report.sections.find((section) => section.id === tab);
   const parameters = report.researchParameters;

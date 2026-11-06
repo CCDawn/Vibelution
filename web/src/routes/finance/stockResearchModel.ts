@@ -118,7 +118,7 @@ export function stockFromResearchRequest(text: string): StockIdentity | null {
   return stockIdentityFromUnknown({ symbol, ticker, name, market });
 }
 
-type ResearchSubject = { kind: "stock"; stock: StockIdentity } | { kind: "topic" };
+export type ResearchSubject = { kind: "stock"; stock: StockIdentity } | { kind: "topic" };
 function researchRequestFromText(text: string): ResearchSubject | { kind: "rewrite" } | null {
   // A topic or screening task may mention tickers without becoming single-stock
   // research. Inspect its native header before looking for any stock identity.
@@ -140,6 +140,14 @@ export function latestResearchSubject(messages: readonly ConversationMessage[]):
     if (request && request.kind !== "rewrite") return request;
   }
   return null;
+}
+
+/** The persisted request decides the research face. Auto-generated session
+ * titles drift away from the historical "主题 ·" prefix, so that prefix is
+ * only a compatibility fallback for sessions without a parseable subject. */
+export function researchKindFromSession(subject: ResearchSubject | null, title: string | null | undefined): "stock" | "topic" {
+  if (subject) return subject.kind;
+  return title?.startsWith("主题 ·") ? "topic" : "stock";
 }
 
 function stockResearchParametersFromRequest(request: string): StockResearchParameters | undefined {
