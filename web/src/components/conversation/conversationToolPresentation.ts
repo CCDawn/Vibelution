@@ -4,7 +4,7 @@ import {
   type ConversationPatchRowSummary,
 } from "./conversationPatchModel";
 import { stripAnsiArtifacts } from "./conversationAnsiSanitize";
-import { assistantActionLabelForTool } from "./assistantActionLabels";
+import { assistantActionKindForTool, assistantActionLabelForTool } from "./assistantActionLabels";
 
 export type ConversationToolPresentationLanguage = "zh" | "en";
 
@@ -743,10 +743,11 @@ function compactArgumentSubject(value: string) {
  *
  * Result-derived summaries only exist once a tool finishes, so while it runs the
  * arguments are the only source for the target — a bare action label ("读取文件")
- * does not tell the reader which file. Paths win over queries because they are
- * the more specific answer, and a path is shown as a basename to stay scannable.
+ * does not tell the reader which file. Search terms identify a search more
+ * clearly than its scope (often just "."); other tools prefer the path basename.
  */
 export function subjectFromToolArguments(options: {
+  toolName?: string;
   toolArguments?: Record<string, unknown> | null;
   language: ConversationToolPresentationLanguage;
 }): string {
@@ -767,11 +768,16 @@ export function subjectFromToolArguments(options: {
 
   const path = pick(TOOL_ARGUMENT_PATH_KEYS)
     || (target ? firstScalar(target, ["filePath", "file_path", "path"]) : "");
+  const query = pick(TOOL_ARGUMENT_QUERY_KEYS)
+    || (target ? firstScalar(target, ["symbol", "name"]) : "");
+  const toolTokens = String(options.toolName || "").toLowerCase().split("_");
+  if (query && (assistantActionKindForTool(options.toolName || "", args) === "search"
+    || toolTokens.some((token) => ["search", "grep", "query"].includes(token)))) {
+    return compactArgumentSubject(query);
+  }
   if (path) {
     return compactArgumentSubject(basenamePath(path));
   }
-  const query = pick(TOOL_ARGUMENT_QUERY_KEYS)
-    || (target ? firstScalar(target, ["symbol", "name"]) : "");
   if (query) {
     return compactArgumentSubject(query);
   }
@@ -900,6 +906,7 @@ function buildToolActivityPillsForStatus(options: {
     // Nothing to summarize from a result yet (a running tool has none), so fall
     // back to the arguments: "读取文件" alone does not name the file.
     subject = subjectFromToolArguments({
+      toolName,
       toolArguments: options.toolArguments,
       language,
     });

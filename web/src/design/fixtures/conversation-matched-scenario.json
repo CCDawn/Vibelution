@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "matched-tool-hierarchy-20261106",
+  "title": "同场景原生部件回放",
+  "turnId": "matched-turn-1",
+  "startedAt": "2026-11-06T04:00:00.000Z",
+  "userText": "请只读检查 alpha.ts 和 beta.ts 中 paintState 的相关实现，并运行只读命令验证。",
+  "reasoningText": "我先读取两个文件并搜索 paintState，再运行只读命令核对结果。",
+  "progressText": "已读取 alpha.ts，正在检查 beta.ts 和 paintState 的引用。",
+  "executionText": "文件与搜索检查完成，正在运行只读验证命令。",
+  "finalText": "检查完成：alpha.ts 与 beta.ts 均已读取，已核对 paintState 的引用；只读验证输出 visual check，未修改任何文件。",
+  "failedText": "只读验证命令执行失败；文件与搜索检查已完成，未修改任何文件。",
+  "stoppedText": "已停止本次检查；已完成的读取和搜索结果保留，未修改任何文件。",
+  "tools": [
+    { "toolCallId": "matched-read-alpha", "kind": "read", "name": "Read", "title": "alpha.ts", "input": { "file_path": "alpha.ts" }, "output": "export const paintState = { phase: 'idle' };", "startedAtMs": 2000, "completedAtMs": 5000 },
+    { "toolCallId": "matched-read-beta", "kind": "read", "name": "Read", "title": "beta.ts", "input": { "file_path": "beta.ts" }, "output": "import { paintState } from './alpha';\nexport const currentPhase = () => paintState.phase;", "startedAtMs": 2000, "completedAtMs": 8000 },
+    { "toolCallId": "matched-search", "kind": "search", "name": "Grep", "title": "paintState", "input": { "pattern": "paintState", "path": "." }, "output": "alpha.ts:1:export const paintState = { phase: 'idle' };\nbeta.ts:1:import { paintState } from './alpha';\nbeta.ts:2:export const currentPhase = () => paintState.phase;", "startedAtMs": 2000, "completedAtMs": 8000 },
+    { "toolCallId": "matched-command", "kind": "execute", "name": "Bash", "title": "python -c \"print('visual check')\"", "input": { "command": "python -c \"print('visual check')\"" }, "output": "visual check", "startedAtMs": 8000, "completedAtMs": 12000 }
+  ],
+  "stages": [
+    { "id": "thinking", "reasoningStreaming": true, "reasoningDurationMs": 0, "label": "思考中", "elapsedMs": 0, "isStreaming": true, "workStatus": "running", "messageField": "reasoningText", "toolStates": {} },
+    { "id": "tools-running", "reasoningStreaming": false, "reasoningDurationMs": 2000, "label": "工具运行中", "elapsedMs": 2000, "isStreaming": true, "workStatus": "running", "messageField": "reasoningText", "toolStates": { "matched-read-alpha": "running", "matched-read-beta": "running", "matched-search": "running" } },
+    { "id": "run-mixed", "reasoningStreaming": false, "reasoningDurationMs": 2000, "label": "部分完成", "elapsedMs": 5000, "isStreaming": true, "workStatus": "running", "messageField": "progressText", "toolStates": { "matched-read-alpha": "completed", "matched-read-beta": "running", "matched-search": "running" } },
+    { "id": "execute-running", "reasoningStreaming": false, "reasoningDurationMs": 2000, "label": "命令运行中", "elapsedMs": 8000, "isStreaming": true, "workStatus": "running", "messageField": "executionText", "toolStates": { "matched-read-alpha": "completed", "matched-read-beta": "completed", "matched-search": "completed", "matched-command": "running" } },
+    { "id": "completed", "reasoningStreaming": false, "reasoningDurationMs": 2000, "label": "已完成", "elapsedMs": 12000, "isStreaming": false, "workStatus": "completed", "messageField": "finalText", "toolStates": { "matched-read-alpha": "completed", "matched-read-beta": "completed", "matched-search": "completed", "matched-command": "completed" } },
+    { "id": "failed", "reasoningStreaming": false, "reasoningDurationMs": 2000, "label": "失败", "elapsedMs": 12000, "isStreaming": false, "workStatus": "failed", "messageField": "failedText", "toolStates": { "matched-read-alpha": "completed", "matched-read-beta": "completed", "matched-search": "completed", "matched-command": "failed" } },
+    { "id": "stopped", "reasoningStreaming": false, "reasoningDurationMs": 2000, "label": "已停止", "elapsedMs": 12000, "isStreaming": false, "workStatus": "stopped", "messageField": "stoppedText", "toolStates": { "matched-read-alpha": "completed", "matched-read-beta": "completed", "matched-search": "completed", "matched-command": "stopped" } }
+  ],
+  "autoSequence": [
+    { "atMs": 0, "stageId": "thinking" },
+    { "atMs": 2000, "stageId": "tools-running" },
+    { "atMs": 5000, "stageId": "run-mixed" },
+    { "atMs": 8000, "stageId": "execute-running" },
+    { "atMs": 12000, "stageId": "completed" }
+  ]
+}

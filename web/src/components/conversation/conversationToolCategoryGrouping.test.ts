@@ -4,6 +4,7 @@ import type { CodexTranscriptCell } from "./codexTranscriptCells";
 import {
   buildConversationToolCategoryGroups,
   conversationToolPersistKey,
+  conversationToolCategoryGroupCountLabel,
   type ConversationToolCategorizedItem,
 } from "./conversationToolCategoryGrouping";
 import {
@@ -47,12 +48,33 @@ function groupIds(items: readonly ConversationToolCategorizedItem[]) {
 }
 
 describe("buildConversationToolCategoryGroups", () => {
+  it("summarizes reads and searches as call counts, including failed calls without inventing unique files", () => {
+    const group = buildConversationToolCategoryGroups(buildConversationToolActivityPresentation([
+      toolCell("read-a", "read_file_tool"), toolCell("read-b", "read_file_tool"),
+      toolCell("search", "grep_search_tool", { status: "failed", tone: "error" }),
+    ], "zh"), "zh")[0];
+    if (group.kind !== "categoryGroup") throw new Error("Expected explore group");
+    expect(conversationToolCategoryGroupCountLabel(group, "zh")).toBe("2 次读取 · 1 次搜索");
+    expect(conversationToolCategoryGroupCountLabel(group, "en")).toBe("2 reads · 1 search");
+    expect(group.attentionCount).toBe(1);
+  });
+
   it("keeps a lone category item on its plain row (first item renders as-is)", () => {
     const items = buildConversationToolActivityPresentation(
       [toolCell("read-1", "read_file_tool")],
       "zh",
     );
     expect(buildConversationToolCategoryGroups(items, "zh")).toEqual(items);
+  });
+
+  it("does not report Glob or context browsing as file reads", () => {
+    const group = buildConversationToolCategoryGroups(buildConversationToolActivityPresentation([
+      toolCell("glob", "glob_tool"), toolCell("context", "source_collection_context_tool"),
+      toolCell("search", "grep_search_tool"),
+    ], "zh"), "zh")[0];
+    if (group.kind !== "categoryGroup") throw new Error("Expected explore group");
+    expect(conversationToolCategoryGroupCountLabel(group, "zh")).toBe("2 次文件浏览 · 1 次搜索");
+    expect(conversationToolCategoryGroupCountLabel(group, "zh")).not.toContain("次读取");
   });
 
   it("keeps a single same-name batch un-wrapped (name-level run stays intact)", () => {

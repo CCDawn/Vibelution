@@ -25,6 +25,7 @@ import {
 import {
   buildConversationToolCategoryGroups,
   conversationToolPersistKey,
+  conversationToolCategoryGroupCountLabel,
   type ConversationToolCategoryGroupItem,
   type ConversationToolCategorizedItem,
 } from "./conversationToolCategoryGrouping";
@@ -659,7 +660,8 @@ function checklistModelForBatch(
 
 /**
  * ZCode-aligned parent group for a run of same-category tools (Explore /
- * Execute / …). The row shows the category word + call count and aggregates the
+ * Execute / …). The row shows the current action/target while running and
+ * semantic call counts after settling, and aggregates the
  * child states with B2 semantics: any running child keeps the category word
  * shimmering; failures surface as a dashed attention word whose hover tooltip
  * carries the first failed child's error summary. The expand choice persists
@@ -684,7 +686,27 @@ function ToolActivityCategoryGroup({
     forceOpen: turnFailed,
   });
   const Icon = CATEGORY_GROUP_ICONS[item.category];
-  const countLabel = language === "zh" ? `${item.count} 次` : `${item.count} calls`;
+  const countLabel = conversationToolCategoryGroupCountLabel(item, language);
+  const activeCells = item.items.flatMap((child) => child.kind === "batch" ? [...child.cells] : [child.cell])
+    .filter((cell) => cell.status === "running" || cell.status === "pending");
+  const runningCells = activeCells.filter((cell) => cell.status === "running");
+  const pendingCount = activeCells.length - runningCells.length;
+  const activeCell = runningCells.at(-1) ?? activeCells.at(-1);
+  const activePills = activeCell ? buildToolActivityPills(activeCell, language) : null;
+  const activeLabel = activePills && activeCell
+    ? [language === "zh"
+      ? `${activeCell.status === "pending" ? "等待" : "正在"}${activePills.actionLabel}`
+      : `${activeCell.status === "pending" ? "Waiting for" : "Running"} ${activePills.actionLabel}`,
+      activePills.subject,
+    ].filter(Boolean).join(" · ")
+    : "";
+  const activeCountLabel = activeCells.length > 1
+    ? (pendingCount
+      ? [runningCells.length ? (language === "zh" ? `${runningCells.length} 项进行中` : `${runningCells.length} running`) : "",
+        language === "zh" ? `${pendingCount} 项等待` : `${pendingCount} pending`].filter(Boolean).join(" · ")
+      : language === "zh" ? `共 ${activeCells.length} 项进行中` : `${activeCells.length} active`)
+    : "";
+  const groupSummary = activeLabel || countLabel;
   const statusKind = item.failedCount > 0 ? "failed" : "attention";
   const attentionLabel = item.attentionCount > 0
     ? (language === "zh"
@@ -697,8 +719,8 @@ function ToolActivityCategoryGroup({
     ? toolFailureDetailText(item.firstAttentionCell)
     : "";
   const label = language === "zh"
-    ? `展开或收起${item.title}工具组：${item.title}，${countLabel}`
-    : `Expand or collapse ${item.title} tool group: ${item.title}, ${countLabel}`;
+    ? `展开或收起${item.title}工具组：${item.title}，${countLabel}${activeLabel ? `，${activeLabel}` : ""}`
+    : `Expand or collapse ${item.title} tool group: ${item.title}, ${countLabel}${activeLabel ? `, ${activeLabel}` : ""}`;
   // SSR keeps the children mounted; on the client the persisted open flag gates
   // them (same delayed-unmount semantics as tool rows).
   const renderChildren = shouldRenderBody || typeof window === "undefined";
@@ -766,7 +788,8 @@ function ToolActivityCategoryGroup({
               </span>
             )
           ) : null}
-          <span className={styles.batchCount}>· {countLabel}</span>
+          <span className={styles.categoryGroupMeta} title={groupSummary} data-codex-tool-category-summary="true">· {groupSummary}</span>
+          {activeCountLabel ? <span className={styles.batchCount}>{activeCountLabel}</span> : null}
         </span>
       </summary>
       {renderChildren ? (
