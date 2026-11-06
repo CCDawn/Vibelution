@@ -159,62 +159,74 @@ def ensure_global_config_initialized(
     target.parent.mkdir(parents=True, exist_ok=True)
     backup_dir.mkdir(parents=True, exist_ok=True)
 
-    starter_text = _get_config_starter_text()
-    example_text = _get_example_config_starter_text()
-    created_config = _write_if_missing(
-        target,
-        fallback_text=starter_text,
-        source_type="external_starter",
-    )
-    upgraded_config = {"created": False, "sourceType": "existing", "sourcePath": str(target)}
-    if not created_config.get("created"):
-        upgraded_config = _maybe_upgrade_thin_local_starter(
-            target,
-            backup_dir=backup_dir,
-            starter_text=starter_text,
-        )
-    created_example = _write_if_missing(
-        example_target,
-        fallback_text=example_text,
-        source_type="external_example_starter",
-    )
-    meta_path = target.with_name(CONFIG_META_FILENAME)
-    existing_meta = _read_existing_meta(meta_path)
-    config_created_now = bool(created_config.get("created"))
-    config_upgraded_now = bool(upgraded_config.get("created"))
-    example_created_now = bool(created_example.get("created"))
-    if config_created_now:
-        config_source = str(created_config.get("sourceType") or "external_starter")
-    elif config_upgraded_now:
-        config_source = str(upgraded_config.get("sourceType") or "external_starter_upgrade")
-    else:
-        config_source = str(existing_meta.get("configSource") or "existing")
-    if target.exists():
-        from config.llm_schema_upgrader import upgrade_persisted_llm_schema_if_needed
+    # Everything below checks a target file and then writes it (starter,
+    # example, thin-starter upgrade, meta). Without the shared config edit
+    # lock those check-then-write windows were TOCTOU: two booting processes
+    # could both pass the exists check and the loser would clobber the
+    # winner's just-created or operator-customized config. Hold the same
+    # config-edit.lock every config.toml writer uses so the exists checks
+    # become in-lock rechecks; nested _config_edit_lock calls (the schema
+    # upgrader re-enters) are same-thread reentrant. Lazy import: public_config
+    # imports this module at load time.
+    from config.public_config import _config_edit_lock
 
-        upgrade_persisted_llm_schema_if_needed(target)
-    meta = {
-        "schemaVersion": CONFIG_META_SCHEMA_VERSION,
-        "configHome": str(target.parent),
-        "configPath": str(target),
-        "exampleConfigPath": str(example_target),
-        "backupDir": str(backup_dir),
-        "lockPath": str(lock_path),
-        "configPathEnv": str(os.environ.get(CONFIG_PATH_ENV) or ""),
-        "configHomeEnv": str(os.environ.get(CONFIG_HOME_ENV) or ""),
-        "createdAt": str(existing_meta.get("createdAt") or _now_iso()),
-        "createdConfig": bool(existing_meta.get("createdConfig")) or config_created_now,
-        "createdExampleConfig": bool(existing_meta.get("createdExampleConfig")) or example_created_now,
-        "upgradedThinStarter": bool(existing_meta.get("upgradedThinStarter")) or config_upgraded_now,
-        "configSource": config_source,
-        "exampleConfigSource": (
-            str(created_example.get("sourceType") or "existing")
-            if example_created_now
-            else str(existing_meta.get("exampleConfigSource") or "existing")
-        ),
-    }
-    if _should_write_meta(meta_path, existing_meta, meta):
-        meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    with _config_edit_lock(target):
+        starter_text = _get_config_starter_text()
+        example_text = _get_example_config_starter_text()
+        created_config = _write_if_missing(
+            target,
+            fallback_text=starter_text,
+            source_type="external_starter",
+        )
+        upgraded_config = {"created": False, "sourceType": "existing", "sourcePath": str(target)}
+        if not created_config.get("created"):
+            upgraded_config = _maybe_upgrade_thin_local_starter(
+                target,
+                backup_dir=backup_dir,
+                starter_text=starter_text,
+            )
+        created_example = _write_if_missing(
+            example_target,
+            fallback_text=example_text,
+            source_type="external_example_starter",
+        )
+        meta_path = target.with_name(CONFIG_META_FILENAME)
+        existing_meta = _read_existing_meta(meta_path)
+        config_created_now = bool(created_config.get("created"))
+        config_upgraded_now = bool(upgraded_config.get("created"))
+        example_created_now = bool(created_example.get("created"))
+        if config_created_now:
+            config_source = str(created_config.get("sourceType") or "external_starter")
+        elif config_upgraded_now:
+            config_source = str(upgraded_config.get("sourceType") or "external_starter_upgrade")
+        else:
+            config_source = str(existing_meta.get("configSource") or "existing")
+        if target.exists():
+            from config.llm_schema_upgrader import upgrade_persisted_llm_schema_if_needed
+
+            upgrade_persisted_llm_schema_if_needed(target)
+        meta = {
+            "schemaVersion": CONFIG_META_SCHEMA_VERSION,
+            "configHome": str(target.parent),
+            "configPath": str(target),
+            "exampleConfigPath": str(example_target),
+            "backupDir": str(backup_dir),
+            "lockPath": str(lock_path),
+            "configPathEnv": str(os.environ.get(CONFIG_PATH_ENV) or ""),
+            "configHomeEnv": str(os.environ.get(CONFIG_HOME_ENV) or ""),
+            "createdAt": str(existing_meta.get("createdAt") or _now_iso()),
+            "createdConfig": bool(existing_meta.get("createdConfig")) or config_created_now,
+            "createdExampleConfig": bool(existing_meta.get("createdExampleConfig")) or example_created_now,
+            "upgradedThinStarter": bool(existing_meta.get("upgradedThinStarter")) or config_upgraded_now,
+            "configSource": config_source,
+            "exampleConfigSource": (
+                str(created_example.get("sourceType") or "existing")
+                if example_created_now
+                else str(existing_meta.get("exampleConfigSource") or "existing")
+            ),
+        }
+        if _should_write_meta(meta_path, existing_meta, meta):
+            meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return meta
 
 
