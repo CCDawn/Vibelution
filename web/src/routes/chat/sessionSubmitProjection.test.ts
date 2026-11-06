@@ -30,6 +30,15 @@ describe("shared native conversation submit projection", () => {
     expect(acceptSessionSubmit({ id: "s", queuedTurns: [] } as unknown as SessionDetail, input, receipt)?.queuedTurns).toHaveLength(1);
   });
 
+  it.each([true, false])("does not resurrect an echo settled without request metadata, turn binding=%s", turnBinding => {
+    const pending = acceptSessionSubmit(beginSessionSubmit(detail(), input), input, { turnId: "turn-1" })!;
+    const native = { ...detail(), messages: [{ id: "native", role: "user", content: "hello", timestamp: input.createdAt,
+      metadata: turnBinding ? { turnId: "turn-1" } : {} }] } as SessionDetail;
+    const merged = mergeSessionSubmitDetail(pending, native);
+    expect(merged.messages.map(row => row.id)).toEqual(["native"]);
+    expect(mergeSessionSubmitDetail(merged, native).messages.map(row => row.id)).toEqual(["native"]);
+  });
+
   it("removes only its own optimistic paint even under window-union structural sharing", () => {
     const client = new QueryClient();
     const key = ["launcher-assistant", "detail", "s"];

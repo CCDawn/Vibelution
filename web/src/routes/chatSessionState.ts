@@ -169,7 +169,7 @@ function settlesOptimisticByContent(
   return Math.abs(committedAt - optimisticAt) <= OPTIMISTIC_SETTLE_TIME_WINDOW_MS;
 }
 
-function removeSettledOptimisticUserMessages(messages: ConversationMessage[]): ConversationMessage[] {
+export function removeSettledOptimisticUserMessages(messages: ConversationMessage[]): ConversationMessage[] {
   const optimisticMessages = messages.filter(isOptimisticUserMessage);
   if (optimisticMessages.length === 0) {
     return messages;

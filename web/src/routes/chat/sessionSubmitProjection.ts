@@ -2,7 +2,7 @@ import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import type { SessionDetail, SessionReferenceAttachment } from "../../api/types";
 import {
   appendOptimisticUserMessage, markOptimisticUserMessageAccepted, markSessionDetailRunning,
-  mergeSessionDetailMessageWindow, removeOptimisticUserMessage, type OptimisticUserMessageInput,
+  mergeSessionDetailMessageWindow, removeOptimisticUserMessage, removeSettledOptimisticUserMessages, type OptimisticUserMessageInput,
 } from "../chatSessionState";
 import { sessionReferenceId } from "./chatComposerSubmitModel";
 
@@ -41,7 +41,8 @@ export function mergeSessionSubmitDetail(previous: SessionDetail | undefined, ne
     const turnId = String(message.metadata.turnId || "");
     if (turnId) merged = markOptimisticUserMessageAccepted(merged, input, turnId)!;
   }
-  return merged;
+  const messages = removeSettledOptimisticUserMessages(merged.messages);
+  return messages === merged.messages ? merged : { ...merged, messages };
 }
 
 /** Deliberate removals bypass the window UNION structuralSharing policy. */
