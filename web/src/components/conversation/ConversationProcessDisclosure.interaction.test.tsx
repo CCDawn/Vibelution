@@ -7,27 +7,33 @@ import type { CodexTranscriptCell } from "./codexTranscriptCells";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-it("collapses settled work, reopens it on demand and keeps thought expansion independent", async () => {
+it("collapses settled work without a second thought switch and preserves child choices", async () => {
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
   const cells: CodexTranscriptCell[] = [{ id: "thought", kind: "reasoning_summary", messageId: "m1", status: "completed", tone: "neutral", text: "思考摘要" }];
+  function NativeUnit() {
+    const [open, setOpen] = React.useState(false);
+    return <><button data-unit-toggle aria-expanded={open} onClick={() => setOpen(!open)}>思考</button>
+      <span data-thought-body hidden={!open}>思考摘要</span></>;
+  }
   const render = (streaming: boolean) => root.render(
     <ConversationProcessDisclosure cells={cells} language="zh" presentation="flow" turnStreaming={streaming}>
-      {(thoughts) => <><button data-tool-action>读取配置</button><span data-thought-body hidden={!thoughts}>思考摘要</span></>}
+      <><button data-tool-action>读取配置</button><NativeUnit /></>
     </ConversationProcessDisclosure>,
   );
   const workToggle = () => host.querySelector<HTMLButtonElement>("[data-codex-process-work-toggle]")!;
-  const thoughtToggle = () => host.querySelector<HTMLButtonElement>("[data-codex-process-thought-toggle]")!;
+  const thoughtToggle = () => host.querySelector<HTMLButtonElement>("[data-unit-toggle]")!;
   try {
     await act(async () => render(true));
     expect(workToggle().getAttribute("aria-expanded")).toBe("true");
+    expect(host.querySelector("[data-codex-process-thought-toggle]")).toBeNull();
     await act(async () => { thoughtToggle().click(); await new Promise((resolve) => setTimeout(resolve, 35)); });
     expect(host.querySelector<HTMLElement>("[data-thought-body]")!.hidden).toBe(false);
     thoughtToggle().focus();
     await act(async () => render(false));
     expect(workToggle().getAttribute("aria-expanded")).toBe("false");
-    expect(host.querySelector<HTMLElement>("[data-thought-body]")!.hidden).toBe(true);
+    expect(host.querySelector("[data-thought-body]")!.closest("[hidden][inert]")).not.toBeNull();
     expect(document.activeElement).toBe(workToggle());
     expect(host.querySelector("[data-tool-action]")?.closest("[hidden][inert]")).not.toBeNull();
     await act(async () => workToggle().click());
@@ -37,6 +43,33 @@ it("collapses settled work, reopens it on demand and keeps thought expansion ind
     await act(async () => workToggle().click());
     await act(async () => render(true));
     expect(workToggle().getAttribute("aria-expanded")).toBe("false");
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+  }
+});
+
+it("restores focus to the matching guidance segment when a live flow becomes collapsed history", async () => {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const render = (streaming: boolean) => root.render(<>
+    <ConversationProcessDisclosure cells={[]} language="zh" presentation="flow" focusScope="s:turn:t:process">
+      <button>Earlier segment</button>
+    </ConversationProcessDisclosure>
+    <ConversationProcessDisclosure key={streaming ? "live" : "history"} cells={[]} language="zh"
+      presentation="flow" focusScope="s:turn:t:guide:g1:process" turnStreaming={streaming}>
+      <button data-current-segment>Current segment</button>
+    </ConversationProcessDisclosure>
+  </>);
+  try {
+    await act(async () => render(true));
+    host.querySelector<HTMLButtonElement>("[data-current-segment]")!.focus();
+    await act(async () => render(false));
+    const triggers = [...host.querySelectorAll<HTMLButtonElement>("[data-codex-process-work-toggle]")];
+    expect(triggers).toHaveLength(2);
+    expect(document.activeElement).toBe(triggers[1]);
+    expect(document.activeElement).not.toBe(triggers[0]);
   } finally {
     await act(async () => root.unmount());
     host.remove();

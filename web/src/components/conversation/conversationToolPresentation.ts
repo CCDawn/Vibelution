@@ -755,23 +755,21 @@ export function subjectFromToolArguments(options: {
   if (!args) {
     return "";
   }
+  const actionKind = assistantActionKindForTool(options.toolName || "", args);
+  // PA actions wrap canonical arguments once in parameters. Only the curated
+  // tool/action pair may open that envelope; never traverse arbitrary objects.
+  const parameters = actionKind ? objectRecord(args.parameters) : null;
   const target = objectRecord(args.target);
-  const pick = (keys: string[]) => {
-    for (const key of keys) {
-      const value = firstScalar(args, [key]);
-      if (value) {
-        return value;
-      }
-    }
-    return "";
-  };
+  const parameterTarget = objectRecord(parameters?.target);
+  const pick = (keys: string[], targetKeys?: string[]) => firstScalar(args, keys)
+    || (target && targetKeys ? firstScalar(target, targetKeys) : "")
+    || (parameters ? firstScalar(parameters, keys) : "")
+    || (parameterTarget && targetKeys ? firstScalar(parameterTarget, targetKeys) : "");
 
-  const path = pick(TOOL_ARGUMENT_PATH_KEYS)
-    || (target ? firstScalar(target, ["filePath", "file_path", "path"]) : "");
-  const query = pick(TOOL_ARGUMENT_QUERY_KEYS)
-    || (target ? firstScalar(target, ["symbol", "name"]) : "");
+  const path = pick(TOOL_ARGUMENT_PATH_KEYS, ["filePath", "file_path", "path"]);
+  const query = pick(TOOL_ARGUMENT_QUERY_KEYS, ["symbol", "name"]);
   const toolTokens = String(options.toolName || "").toLowerCase().split("_");
-  if (query && (assistantActionKindForTool(options.toolName || "", args) === "search"
+  if (query && (actionKind === "search"
     || toolTokens.some((token) => ["search", "grep", "query"].includes(token)))) {
     return compactArgumentSubject(query);
   }
@@ -787,8 +785,7 @@ export function subjectFromToolArguments(options: {
   }
   const entities: string[] = [];
   for (const entity of TOOL_ARGUMENT_ENTITY_SUBJECTS) {
-    const value = firstScalar(args, [...entity.keys])
-      || (target ? firstScalar(target, [...entity.keys]) : "");
+    const value = pick([...entity.keys], [...entity.keys]);
     if (value) {
       entities.push(`${entity[options.language]} ${value}`);
     }
@@ -884,7 +881,12 @@ function buildToolActivityPillsForStatus(options: {
   const timedOut = Boolean(options.timedOut)
     || payloadTimedOut
     || /超时|timed?\s*out/i.test(`${options.toolSummary || ""} ${options.cellSummary || ""}`);
-  let subject = extractToolSubject({
+  const argumentSubject = subjectFromToolArguments({ toolName, toolArguments: options.toolArguments, language });
+  const actionKind = assistantActionKindForTool(toolName, options.toolArguments);
+  const nameTokens = toolName.split("_");
+  const hasCanonicalTarget = toolName === "read_file_tool" || actionKind === "source" || actionKind === "search"
+    || nameTokens.includes("search") || nameTokens.includes("grep");
+  let subject = hasCanonicalTarget && argumentSubject ? argumentSubject : extractToolSubject({
     toolName,
     toolSummary: options.toolSummary,
     cellSummary: options.cellSummary,
@@ -905,11 +907,7 @@ function buildToolActivityPillsForStatus(options: {
   if (!subject) {
     // Nothing to summarize from a result yet (a running tool has none), so fall
     // back to the arguments: "读取文件" alone does not name the file.
-    subject = subjectFromToolArguments({
-      toolName,
-      toolArguments: options.toolArguments,
-      language,
-    });
+    subject = argumentSubject;
   }
   const durationLabel = String(options.durationLabel || "").trim();
 

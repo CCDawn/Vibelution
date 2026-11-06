@@ -52,6 +52,15 @@ function summaryContaining(html: string, marker: string) {
 }
 
 describe("ConversationToolActivity", () => {
+  it("renders repeated calls directly within a category instead of a third disclosure level", () => {
+    const html = renderToStaticMarkup(<ConversationToolActivity activity={createCodexTranscriptToolActivity([
+      namedToolCell("nested-read-a", "read_file_tool"), namedToolCell("nested-read-b", "read_file_tool"),
+      namedToolCell("nested-search", "grep_search_tool"),
+    ])} language="zh" renderToolDetails={() => null} />);
+    expect(html).toContain('data-codex-tool-activity-category-group="true"');
+    expect(html).not.toContain('data-codex-tool-activity-batch="true"');
+    expect(html.match(/data-codex-tool-activity-item="true"/g)).toHaveLength(3);
+  });
   it("names the active target in a collapsed group instead of only its total count", () => {
     const read = namedToolCell("active-read", "read_file_tool");
     const search = namedToolCell("active-search", "grep_search_tool");
@@ -721,7 +730,7 @@ describe("ConversationToolActivity", () => {
     expect(styles.categoryGroupSummary).toContain("list-none");
     expect(styles.categoryGroupSummary).toContain("[&::marker]:content-none");
     expect(styles.categoryGroupSummary).toContain("items-center");
-    expect(styles.categoryGroupDetailsInner).toContain("pl-1");
+    expect(styles.categoryGroupDetailsInner).toContain("pl-6");
     expect(styles.categoryGroupDetails).not.toContain("border-l");
     expect(styles.agentNameChip).not.toContain("rounded-full");
     expect(activityCss).toContain(".vui-components-conversation-tool-activity.categoryGroup:not([open])");

@@ -50,7 +50,7 @@ function retryCell(status: CodexTranscriptCell["status"] = "running"): CodexTran
 }
 
 describe("ConversationProcessDisclosure", () => {
-  it("collapses completed work independently of the thought choice", () => {
+  it("collapses completed work through one summary after the native flow, without a global thought switch", () => {
     const cells = [
       processCell("completed"),
       { ...processCell("completed"), id: "second-tool" },
@@ -64,14 +64,17 @@ describe("ConversationProcessDisclosure", () => {
     expect(html).toContain('data-codex-process-presentation="flow"');
     expect(html).toContain("完整进展正文");
     expect(html).toContain("工具记录");
-    expect(html).toMatch(/data-codex-process-thought-toggle="true" hidden=""/);
+    expect(html).not.toContain('data-codex-process-thought-toggle');
+    expect(html).not.toContain("显示思考");
     expect(html).toContain('aria-expanded="false"');
     expect(html).not.toContain("思考摘要");
     expect(html).not.toContain("<details");
     expect(html).toContain('data-codex-process-work-expanded="false"');
     expect(html).toContain('hidden="" inert="" aria-hidden="true"');
     expect(html).not.toContain("3 步");
-    expect(html.indexOf("已工作")).toBeLessThan(html.indexOf("工具记录"));
+    expect(html.indexOf("工具记录")).toBeLessThan(html.indexOf("已工作"));
+    expect(styles.flowWorkToggle).toContain("!p-0");
+    expect(styles.flowStatusRow).not.toContain("border-b");
   });
 
   it("keeps failed flow evidence visible without adding an empty thought toggle", () => {

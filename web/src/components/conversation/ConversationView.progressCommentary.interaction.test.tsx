@@ -49,7 +49,7 @@ function mixedMessage(status: "running" | "completed" | "failed", revision = 0):
     ...message,
     status: status === "failed" ? "completed" : status,
     turnItems: [
-      { ...base, id: `thought:${revision}`, itemId: "thought", sequence: 1, type: "reasoning", status: status === "running" ? "running" : "completed", terminal: status !== "running", text: `思考摘要第 ${revision} 版。` },
+      { ...base, id: `thought:${revision}`, itemId: "thought", sequence: 1, type: "reasoning", status: "completed", terminal: true, text: "已完成的前一段思考。" },
       { ...message.turnItems![0], sequence: 2 },
       {
         ...base, id: `tool:${revision}`, itemId: "tool", sequence: 3, type: "tool_call",
@@ -60,6 +60,7 @@ function mixedMessage(status: "running" | "completed" | "failed", revision = 0):
           : "HTTP 200 https://example.org/config.toml",
       },
       { ...message.turnItems![0], id: `second-progress:${revision}`, itemId: "second-progress", sequence: 4, text: "继续核对测试结果。" },
+      { ...base, id: `current-thought:${revision}`, itemId: "current-thought", sequence: 5, type: "reasoning", status: status === "running" ? "running" : "completed", terminal: status !== "running", text: `思考摘要第 ${revision} 版。` },
     ],
   } as ConversationMessage;
 }
@@ -175,12 +176,22 @@ describe("ConversationView visible progress flow", () => {
     expect(container?.querySelector('[data-codex-process-state="completed"]')).not.toBeNull();
   });
 
-  it("reveals thoughts with one toggle, remembers the choice across updates and settlement, and keeps tools expandable", async () => {
+  it("keeps native thought order and an explicit open choice across updates, settlement, and remount", async () => {
     await mount([mixedMessage("running")]);
     const flow = () => container!.querySelector<HTMLElement>('[data-codex-process-presentation="flow"]')!;
-    const thoughtToggle = () => flow().querySelector<HTMLButtonElement>("[data-codex-process-thought-toggle]")!;
-    expect(flow().querySelector('[data-codex-transcript-cell-kind="reasoning_summary"]')?.closest("[hidden][inert]")).not.toBeNull();
+    const thought = () => flow().querySelector<HTMLElement>('[data-thought-section="reasoning:current-thought"]')!;
+    const thoughtToggle = () => thought().querySelector<HTMLButtonElement>("button")!;
+    const initialThought = thought();
+    expect(flow().querySelector("[data-codex-process-thought-toggle]")).toBeNull();
+    expect([...flow().querySelectorAll("button")].some(button => button.textContent === "显示思考" || button.textContent === "收起思考")).toBe(false);
+    expect(thought().getAttribute("data-conversation-part-key")).toBe("current-thought");
+    const earlierThought = flow().querySelector('[data-thought-section="reasoning:thought"]')!;
+    expect(earlierThought.querySelector("button")?.getAttribute("aria-expanded")).toBe("false");
+    expect(earlierThought.closest("[hidden], [inert], [aria-hidden=true]")).toBeNull();
+    expect(thought().closest("[hidden], [inert], [aria-hidden=true]")).toBeNull();
     expect(thoughtToggle().getAttribute("aria-expanded")).toBe("false");
+    expect(thought().querySelector('[data-thought-scroll-body="true"]')).toBeNull();
+    expect(thought().querySelector('[data-thought-streaming-summary="true"]')?.textContent).toBe("思考摘要第 0 版。");
     expect(progressSection().textContent).toBe(LONG_PROGRESS);
     const tool = flow().querySelector<HTMLDetailsElement>('details[data-codex-tool-activity-item="true"]');
     expect(tool).not.toBeNull();
@@ -189,21 +200,23 @@ describe("ConversationView visible progress flow", () => {
     expect(tool?.querySelector('[data-codex-tool-detail-body="true"]')).toBeNull();
     expect(Array.from(flow().querySelectorAll("[data-codex-transcript-cell-kind]"))
       .map((cell) => cell.getAttribute("data-codex-transcript-cell-kind")))
-      .toEqual(["assistant_markdown", "tool_call", "assistant_markdown", "reasoning_summary"]);
+      .toEqual(["reasoning_summary", "assistant_markdown", "tool_call", "assistant_markdown", "reasoning_summary"]);
+    expect(thought().compareDocumentPosition(flow().querySelector('[data-codex-process-work-status="true"]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await act(async () => tool?.querySelector("summary")?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
     expect(tool?.open).toBe(true);
     expect(tool?.querySelector('[data-codex-tool-detail-body="true"]')).not.toBeNull();
 
-    await act(async () => {
-      thoughtToggle().dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      await new Promise((resolve) => window.setTimeout(resolve, 35));
-    });
+    // Opening this native unit leaves the earlier thought's own choice untouched.
+    await act(async () => thoughtToggle().click());
     expect(thoughtToggle().getAttribute("aria-expanded")).toBe("true");
+    expect(earlierThought.querySelector("button")?.getAttribute("aria-expanded")).toBe("false");
     expect(flow().querySelector('[data-thought-scroll-body="true"]')?.textContent).toContain("思考摘要第 0 版。");
-    expect(flow().querySelector('[data-thought-section] button')).toBeNull();
+    expect(thought().querySelectorAll("button")).toHaveLength(1);
     expect(flow().querySelector('[data-thought-section]')?.closest("[hidden], [inert], [aria-hidden=true]")).toBeNull();
 
     await act(async () => updateMessages?.([mixedMessage("running", 1)]));
+    expect(thought()).toBe(initialThought);
+    expect(flow().querySelector('details[data-codex-tool-activity-item="true"]')).toBe(tool);
     expect(flow().querySelector('[data-thought-scroll-body="true"]')?.textContent).toContain("思考摘要第 1 版。");
     await act(async () => updateMessages?.([mixedMessage("completed", 2)]));
     expect(thoughtToggle().getAttribute("aria-expanded")).toBe("true");
@@ -217,9 +230,38 @@ describe("ConversationView visible progress flow", () => {
       thoughtToggle().dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     expect(flow().querySelector('[data-thought-scroll-body="true"]')).toBeNull();
-    expect(flow().querySelector('[data-thought-section]')?.closest("[hidden][inert]")).not.toBeNull();
+    expect(thoughtToggle().getAttribute("aria-expanded")).toBe("false");
+    expect(thought().closest("[hidden], [inert], [aria-hidden=true]")).toBeNull();
     expect(progressSection().textContent).toBe(LONG_PROGRESS);
     expect(flow().querySelector('[data-codex-tool-activity="items"]')).not.toBeNull();
+  });
+
+  it("preserves an explicit closed thought across live revisions, settlement, and row remount", async () => {
+    await mount([mixedMessage("running")]);
+    const thought = () => container!.querySelector<HTMLElement>('[data-thought-section="reasoning:current-thought"]')!;
+    const toggle = () => thought().querySelector<HTMLButtonElement>("button")!;
+    await act(async () => toggle().click());
+    expect(toggle().getAttribute("aria-expanded")).toBe("true");
+    await act(async () => toggle().click());
+    const expectClosed = () => {
+      expect(toggle().getAttribute("aria-expanded")).toBe("false");
+      expect(thought().querySelector('[data-thought-scroll-body="true"]')).toBeNull();
+      expect(thought().closest("[hidden], [inert], [aria-hidden=true]")).toBeNull();
+      expect(container?.querySelector("[data-codex-process-thought-toggle]")).toBeNull();
+      expect(progressSection().textContent).toBe(LONG_PROGRESS);
+    };
+    expectClosed();
+    await act(async () => updateMessages?.([mixedMessage("running", 1)]));
+    expectClosed();
+    expect(thought().querySelector('[data-thought-streaming-summary="true"]')?.textContent).toBe("思考摘要第 1 版。");
+    await act(async () => updateMessages?.([mixedMessage("completed", 2)]));
+    expectClosed();
+    expect(thought().querySelector('[data-thought-streaming-summary="true"]')).toBeNull();
+    await act(async () => updateMessages?.([]));
+    await act(async () => updateMessages?.([mixedMessage("completed", 2)]));
+    expectClosed();
+    await act(async () => toggle().click());
+    expect(thought().querySelector('[data-thought-scroll-body="true"]')?.textContent).toBe("思考摘要第 2 版。");
   });
 
   it("preserves commentary and failed tool evidence when the turn ends", async () => {
@@ -227,6 +269,7 @@ describe("ConversationView visible progress flow", () => {
     await act(async () => updateMessages?.([mixedMessage("failed", 1)]));
     const flow = container!.querySelector<HTMLElement>('[data-codex-process-presentation="flow"]')!;
     expect(flow.getAttribute("data-codex-process-state")).toBe("failed");
+    expect(flow.getAttribute("data-codex-process-work-expanded")).toBe("true");
     expect(flow.textContent).toContain(LONG_PROGRESS);
     expect(flow.textContent).toContain("继续核对测试结果。");
     expect(flow.querySelector('[data-codex-tool-status-kind="failed"]')).not.toBeNull();

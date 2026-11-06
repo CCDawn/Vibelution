@@ -480,9 +480,13 @@ backToBottomButton:
     "vui-components-conversationview codexTranscriptReasoningCell min-w-0 grid min-h-0 content-start gap-1 border-0 bg-transparent py-1 text-vui-sm leading-[var(--vui-line-readable)]",
   // Native thought header: icon + title only (no collapse chevron column).
   codexTranscriptReasoningHeader:
-    "vui-components-conversationview codexTranscriptReasoningHeader min-w-0 overflow-hidden !grid !h-auto !min-h-0 !w-full !max-w-full grid-cols-[20px_minmax(0,1fr)] !items-center !justify-start gap-x-2 gap-y-0 !border-0 !bg-transparent !bg-none !p-0 !text-left !shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none hover:!border-transparent hover:!bg-transparent hover:!bg-none hover:!shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+    "vui-components-conversationview codexTranscriptReasoningHeader min-w-0 overflow-hidden !grid !h-auto !min-h-0 !w-full !max-w-full grid-cols-[15px_minmax(0,1fr)] !items-center !justify-start gap-x-2 gap-y-0 !border-0 !bg-transparent !bg-none !p-0 !text-left !shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none hover:!border-transparent hover:!bg-transparent hover:!bg-none hover:!shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
   codexTranscriptReasoningHeaderBody:
     "vui-components-conversationview codexTranscriptReasoningHeaderBody min-w-0 overflow-hidden text-left",
+  codexTranscriptReasoningIcon:
+    "vui-components-conversationview codexTranscriptReasoningIcon grid size-[15px] shrink-0 place-items-center text-[var(--fg-tertiary)]",
+  codexTranscriptReasoningBody:
+    "vui-components-conversationview codexTranscriptReasoningBody pl-[23px]",
   codexTranscriptReasoningTitleRow:
     "vui-components-conversationview codexTranscriptReasoningTitleRow inline-flex min-w-0 max-w-full flex-nowrap items-center gap-x-2 overflow-hidden",
   // Thought title keeps a fixed label so the rolling summary owns the leftover

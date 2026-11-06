@@ -1,10 +1,11 @@
-import { ChevronRight } from "lucide-react";
+import { CheckCircle2, ChevronRight, CircleAlert, CircleDot } from "lucide-react";
 import React, {
   Children,
   type CSSProperties,
   type ReactNode,
   useId,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -34,7 +35,7 @@ type ConversationProcessDisclosureProps = {
   cells: readonly CodexTranscriptCell[];
   language: "zh" | "en";
   children: ReactNode | ((expanded: boolean) => ReactNode);
-  /** Flow has independent work-record and thought disclosure controls. */
+  /** Flow keeps native reasoning rows inside one work-record disclosure. */
   presentation?: "disclosure" | "flow";
   messageOrder?: ReadonlyMap<string, number>;
   onUserToggle?: ConversationProcessUserToggle;
@@ -44,6 +45,8 @@ type ConversationProcessDisclosureProps = {
   /** Work-record choice uses the same session-owned expansion store as thoughts. */
   workExpanded?: boolean;
   onWorkExpandedChange?: (expanded: boolean) => void;
+  /** Stable host/turn identity for focus recovery when the live tail becomes history. */
+  focusScope?: string;
   /**
    * True while the owning assistant turn is still streaming. Multi-step agents
    * often finish every current tool before the next model step; without this
@@ -278,6 +281,7 @@ export function ConversationProcessDisclosure({
   onExpandedChange,
   workExpanded: controlledWorkExpanded,
   onWorkExpandedChange,
+  focusScope,
   turnStreaming = false,
   turnStartedAt,
   activeStage,
@@ -314,6 +318,23 @@ export function ConversationProcessDisclosure({
   const contentId = useId();
   const contentRef = useRef<HTMLDivElement>(null);
   const summaryRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    if (presentation !== "flow" || !focusScope) return;
+    const record = workContentRef.current;
+    return () => {
+      const focused = document.activeElement;
+      if (!focused || !record?.contains(focused)) return;
+      // Live-tail → virtualized-history can replace the whole flow. Recover
+      // only a focus lost with that removed subtree, never external focus.
+      queueMicrotask(() => {
+        if (focused.isConnected || document.activeElement !== document.body) return;
+        const trigger = [...document.querySelectorAll<HTMLButtonElement>("button[data-codex-process-focus-scope]")]
+          .find((button) => button.dataset.codexProcessFocusScope === focusScope
+            && button.getAttribute("aria-expanded") === "false");
+        trigger?.focus({ preventScroll: true });
+      });
+    };
+  }, [focusScope, presentation]);
   useEffect(() => {
     // Chromium can blur a newly hidden control to body before this effect.
     // Retain the last focused record control, without stealing external focus.
@@ -338,19 +359,19 @@ export function ConversationProcessDisclosure({
   // stays visible; after settle, unmount when collapsed (Codex-style compact summary).
   const shouldRenderContent = mounted || turnStreaming || typeof window === "undefined";
   const content = typeof children === "function"
-    ? children(expanded && (presentation !== "flow" || workExpanded))
+    ? children(presentation === "flow" ? workExpanded : expanded)
     : children;
   const rows = shouldRenderContent ? Children.toArray(content) : [];
 
   if (presentation === "flow") {
-    const hasThoughts = cells.some((cell) => cell.kind === "reasoning_summary" && Boolean((cell.text || cell.summary || "").trim()));
+    const StatusIcon = running ? CircleDot : state === "failed" ? CircleAlert : CheckCircle2;
     return (
       <div
         className={styles.flow}
         data-codex-process-disclosure="true"
         data-codex-process-presentation="flow"
         data-codex-process-state={state}
-        data-codex-process-expanded={expanded ? "true" : "false"}
+        data-codex-process-expanded={workExpanded ? "true" : "false"}
         data-codex-process-work-expanded={workExpanded ? "true" : "false"}
         data-codex-process-turn-streaming={turnStreaming ? "true" : undefined}
         data-active-turn-stage={turnStreaming ? activeStage : undefined}
@@ -363,6 +384,11 @@ export function ConversationProcessDisclosure({
           }
         }}
       >
+        <div className={styles.flowWorkContent} ref={workContentRef} id={`${contentId}-work`} hidden={!workExpanded} inert={!workExpanded} aria-hidden={!workExpanded}>
+          <div ref={contentRef} id={contentId} className={styles.flowContent}>
+            {content}
+          </div>
+        </div>
         <div className={styles.flowStatusRow}>
           <VButton
             ref={workTriggerRef}
@@ -371,6 +397,7 @@ export function ConversationProcessDisclosure({
             contentLayout="plain"
             className={styles.flowWorkToggle}
             data-codex-process-work-toggle="true"
+            data-codex-process-focus-scope={focusScope}
             aria-controls={`${contentId}-work`}
             aria-expanded={workExpanded}
             aria-label={`${toggleLabel}：${label}`}
@@ -382,6 +409,7 @@ export function ConversationProcessDisclosure({
               if (settle) window.requestAnimationFrame(settle);
             }}
           >
+            <StatusIcon size={15} className={styles.flowStatusIcon} aria-hidden="true" />
             <span data-codex-process-work-status="true" role={running ? "status" : undefined}>{label}</span>
             <ChevronRight
               className={[styles.chevron, workExpanded ? styles.chevronExpanded : ""].filter(Boolean).join(" ")}
@@ -389,32 +417,6 @@ export function ConversationProcessDisclosure({
               aria-hidden="true"
             />
           </VButton>
-          {hasThoughts ? (
-            <VButton
-              ref={summaryRef as React.Ref<HTMLButtonElement>}
-              type="button"
-              variant="ghost"
-              contentLayout="plain"
-              className={styles.flowThoughtToggle}
-              data-codex-process-thought-toggle="true"
-              hidden={!workExpanded}
-              aria-controls={contentId}
-              aria-expanded={expanded}
-              onClick={handleSummaryClick}
-            >
-              {language === "zh" ? (expanded ? "收起思考" : "显示思考") : (expanded ? "Hide thoughts" : "Show thoughts")}
-              <ChevronRight
-                className={[styles.chevron, expanded ? styles.chevronExpanded : ""].filter(Boolean).join(" ")}
-                size={12}
-                aria-hidden="true"
-              />
-            </VButton>
-          ) : null}
-        </div>
-        <div className={styles.flowWorkContent} ref={workContentRef} id={`${contentId}-work`} hidden={!workExpanded} inert={!workExpanded} aria-hidden={!workExpanded}>
-          <div ref={contentRef} id={contentId} className={styles.flowContent}>
-            {content}
-          </div>
         </div>
       </div>
     );

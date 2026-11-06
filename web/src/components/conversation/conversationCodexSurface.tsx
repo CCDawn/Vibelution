@@ -404,14 +404,7 @@ export function createConversationCodexSurface({
       timelineCells: CodexTranscriptCell[],
       options?: { attachToolApproval?: boolean; reasoningPresentation?: "flow"; reasoningExpanded?: boolean },
     ) => {
-      const hideReasoning = options?.reasoningPresentation === "flow" && !options.reasoningExpanded;
-      const nodes = buildCodexTranscriptTimelineNodes(timelineCells, { hideReasoning });
-      // These stay direct, stable-keyed siblings when thoughts are revealed;
-      // moving an invisible row must not reset its first-live measurement.
-      if (hideReasoning) {
-        nodes.push(...timelineCells.filter((cell) => cell.kind === "reasoning_summary")
-          .map((cell) => ({ kind: "cell" as const, cell })));
-      }
+      const nodes = buildCodexTranscriptTimelineNodes(timelineCells);
       const canAttach = Boolean(options?.attachToolApproval && toolApproval && !toolApprovalConsumedRef.current);
       const toolActivities = nodes.filter((node) => node.kind === "tool_activity");
       const matchedActivityId = canAttach
@@ -441,9 +434,6 @@ export function createConversationCodexSurface({
               <div
                 key={`reasoning:${node.cell.sourceItemId || node.cell.id}`}
                 data-codex-flow-thought="true"
-                hidden={!options.reasoningExpanded}
-                inert={!options.reasoningExpanded}
-                aria-hidden={!options.reasoningExpanded}
               >
                 {renderCodexTranscriptCell(message, node.cell, options)}
               </div>
@@ -496,8 +486,7 @@ export function createConversationCodexSurface({
             language={lang === "en" ? "en" : "zh"}
             messageOrder={activeTimelineMessageOrder}
             onUserToggle={handleProcessDisclosureUserToggle}
-            expanded={getExpansionState(message.id, "process", false)}
-            onExpandedChange={(expanded) => setExpansionState(message.id, "process", expanded)}
+            focusScope={`${sessionId}:${rowIdentity.processKey}`}
             workExpanded={getExpansionState(message.id, "work", streaming || finalCells.length === 0
               || turnWorkForceExpand(message)
               || processCells.some(conversationToolActivityNeedsAttention))}
@@ -507,10 +496,10 @@ export function createConversationCodexSurface({
             activeStage={phase === "stopping" ? "stopping" : resolveActiveTurnProgressStage(message)}
             workSummary={transcriptWorkSummary}
           >
-            {(showThoughts) => renderTimelineNodes(
+            {renderTimelineNodes(
               processCells,
               // Approvals stay composer-adjacent only (toolApprovalFallback).
-              { attachToolApproval: false, reasoningPresentation: "flow", reasoningExpanded: showThoughts },
+              { attachToolApproval: false, reasoningPresentation: "flow" },
             )}
           </ConversationProcessDisclosure>
         ) : null}

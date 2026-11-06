@@ -59,7 +59,7 @@ const styles = {
     "batchDetails",
     "min-w-0",
   ),
-  batchDetailsInner: cx("batchDetailsInner", "grid min-w-0 gap-0 pl-1"),
+  batchDetailsInner: cx("batchDetailsInner", "grid min-w-0 gap-0 pl-6"),
   batchRow: cx("batchRow", "min-w-0"),
   // Category parent group (ZCode Explore/Execute-style stage container): same
   // quiet row chrome as batches; colors/state live in the shared tokens.
@@ -69,7 +69,7 @@ const styles = {
     "flex w-full max-w-full min-w-0 list-none cursor-pointer items-center gap-x-2 py-1 text-left [&::-webkit-details-marker]:hidden [&::marker]:hidden [&::marker]:content-none focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
   ),
   categoryGroupDetails: cx("categoryGroupDetails", "min-w-0"),
-  categoryGroupDetailsInner: cx("categoryGroupDetailsInner", "grid min-w-0 gap-0 pl-1"),
+  categoryGroupDetailsInner: cx("categoryGroupDetailsInner", "grid min-w-0 gap-0 pl-6"),
   categoryGroupRow: cx("categoryGroupRow", "min-w-0"),
   categoryGroupMeta: cx("categoryGroupMeta", "min-w-0 flex-1 truncate text-vui-xs font-normal text-[var(--fg-tertiary)]"),
   // Tool chrome stays quieter than narrative body (fg-primary).

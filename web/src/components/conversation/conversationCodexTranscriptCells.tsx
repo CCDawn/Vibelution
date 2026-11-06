@@ -46,7 +46,7 @@ export type CodexTranscriptCellRenderersDeps = {
 /**
  * Codex transcript cell presentation and the thought/progress lanes, bound to
  * the conversation's expansion store. Public narration stays in the flow;
- * reasoning can use the standalone disclosure or the flow's shared toggle.
+ * each reasoning unit owns its native disclosure in both hosts.
  */
 export function createCodexTranscriptCellRenderers({
   lang,
@@ -56,8 +56,8 @@ export function createCodexTranscriptCellRenderers({
   renderProgressText,
 }: CodexTranscriptCellRenderersDeps) {
   /**
-   * Collapsible thinking lane (ZCode reasoning parity): streaming and settled
-   * thoughts both stay collapsed until the user expands. The collapsed header
+   * Collapsible thinking lane (ZCode reasoning parity): the row stays visible
+   * with a compact summary until the user expands this unit. The collapsed header
    * keeps icon + status title plus a single-line horizontally rolling summary
    * of the latest thought sentence; the expanded body is height-capped and
    * bottom-following.
@@ -85,15 +85,9 @@ export function createCodexTranscriptCellRenderers({
       return null;
     }
     const isLive = input.status === "running" || input.status === "pending";
-    // ZCode parity: streaming and completed reasoning default collapsed, so a
-    // live stream no longer unfolds over the transcript. The user's explicit
-    // toggle (explicit expansion state) still wins over the default; the
-    // section id comes from `reasoningExpansionSectionId`, which prefers
-    // sourceItemId so stream updates that rewrite cell.id keep the choice.
+    // The shared session expansion store preserves explicit choices over lifecycle defaults.
     const defaultExpanded = false;
-    const expanded = input.presentation === "flow"
-      ? input.expanded ?? false
-      : getExpansionState(messageId, input.sectionId, defaultExpanded);
+    const expanded = getExpansionState(messageId, input.sectionId, defaultExpanded);
     const thoughtTitle = isLive
       ? (lang === "zh" ? "思考中" : "Thinking…")
       : (lang === "zh" ? "已思考" : "Thought");
@@ -117,19 +111,7 @@ export function createCodexTranscriptCellRenderers({
         role={isLive ? "status" : undefined}
         aria-live={isLive ? "polite" : undefined}
       >
-        {input.presentation === "flow" ? (
-          <div className={styles.codexTranscriptReasoningHeader}>
-            <span className={styles.codexTranscriptCellIcon} aria-hidden="true"><BrainCircuit size={14} /></span>
-            <span className={styles.codexTranscriptReasoningTitle}>{thoughtTitle}</span>
-            <ThoughtDurationLabel
-              live={isLive}
-              expanded={expanded}
-              settledDurationSeconds={input.settledDurationSeconds}
-              settledSecondsTemplate={t("thoughtDurationSettledSeconds")}
-              settledMomentsLabel={t("thoughtDurationSettledMoments")}
-            />
-          </div>
-        ) : <VButton
+        <VButton
           type="button"
           contentLayout="plain"
           className={styles.codexTranscriptReasoningHeader}
@@ -140,7 +122,7 @@ export function createCodexTranscriptCellRenderers({
             toggleSection(messageId, input.sectionId, defaultExpanded);
           }}
         >
-          <span className={styles.codexTranscriptCellIcon} aria-hidden="true">
+          <span className={styles.codexTranscriptReasoningIcon} aria-hidden="true">
             {isLive
               ? <LoaderCircle className={styles.statusSpinner} size={14} />
               : <BrainCircuit size={14} />}
@@ -155,11 +137,11 @@ export function createCodexTranscriptCellRenderers({
                 settledSecondsTemplate={t("thoughtDurationSettledSeconds")}
                 settledMomentsLabel={t("thoughtDurationSettledMoments")}
               />
-              {!expanded ? <ThoughtStreamingSummary text={fullText} /> : null}
+              {!expanded && isLive ? <ThoughtStreamingSummary text={fullText} /> : null}
             </span>
           </span>
-        </VButton>}
-        {expanded ? <ThoughtScrollBody text={fullText} streaming={isLive} /> : null}
+        </VButton>
+        {expanded ? <ThoughtScrollBody text={fullText} streaming={isLive} className={styles.codexTranscriptReasoningBody} /> : null}
       </section>
     );
   }

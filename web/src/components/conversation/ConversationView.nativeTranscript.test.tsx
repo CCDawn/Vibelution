@@ -63,17 +63,20 @@ function transcriptDom(html: string) {
   return parsedDocument.body;
 }
 
-function expectCollapsedThoughts(html: string, itemIds: string[]) {
+function expectNativeThoughts(html: string, itemIds: string[]) {
   const body = transcriptDom(html);
-  expect(body.querySelector('[data-codex-process-presentation="flow"]')?.getAttribute("data-codex-process-expanded")).toBe("false");
-  const toggle = [...body.querySelectorAll("button")].find(button => button.textContent === "显示思考");
-  expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+  expect(body.querySelector('[data-codex-process-thought-toggle]')).toBeNull();
+  expect([...body.querySelectorAll("button")].some(button => button.textContent === "显示思考" || button.textContent === "收起思考")).toBe(false);
   const thoughts = [...body.querySelectorAll("[data-thought-section]")];
-  expect(thoughts).toHaveLength(itemIds.length);
-  for (const itemId of itemIds) {
-    const thought = thoughts.find(section => section.getAttribute("data-conversation-part-key") === itemId);
-    expect(thought, `Thought unit remains mounted: ${itemId}`).toBeTruthy();
-    expect(thought?.closest('[hidden], [inert], [aria-hidden="true"]'), `Thought is hidden: ${itemId}`).toBeTruthy();
+  expect(thoughts.map(section => section.getAttribute("data-conversation-part-key"))).toEqual(itemIds);
+  for (const thought of thoughts) {
+    expect(thought.getAttribute("data-thought-expanded")).toBe("false");
+    expect(thought.querySelector("button")?.getAttribute("aria-expanded")).toBe("false");
+    expect(thought.querySelector('[data-thought-scroll-body="true"]')).toBeNull();
+    // Only the outer work record may hide the row; each native thought keeps its own header.
+    const wrapper = thought.closest('[data-codex-flow-thought="true"]')!;
+    expect(wrapper).toBeTruthy();
+    expect(wrapper.hasAttribute("hidden") || wrapper.hasAttribute("inert") || wrapper.getAttribute("aria-hidden") === "true").toBe(false);
   }
   return thoughts;
 }
@@ -409,12 +412,12 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain('data-codex-transcript-cell-kind="reasoning_summary"');
 
     const ordinary = renderConversation([first], "trace", false);
-    expectCollapsedThoughts(ordinary, ["companion-reason"]);
+    expectNativeThoughts(ordinary, ["companion-reason"]);
     expect(ordinary).toContain("先在心里过一遍。");
     expect(html).not.toContain("显示思考");
   });
 
-  it("keeps ordinary Agent thoughts available behind their toggle without companion typing UI", () => {
+  it("keeps live ordinary Agent thought headers and their summary visible without companion typing UI", () => {
     const html = renderConversation([
       {
         id: "assistant-agent-thinking",
@@ -438,7 +441,8 @@ describe("ConversationView native Codex transcript surface", () => {
       },
     ]);
 
-    expectCollapsedThoughts(html, ["agent-reasoning"]);
+    const thoughts = expectNativeThoughts(html, ["agent-reasoning"]);
+    expect(thoughts[0].querySelector('[data-thought-streaming-summary="true"]')?.textContent).toBe("普通 Agent 的原生思考轨迹仍然可见。");
     expect(html).not.toContain('data-companion-typing-status="true"');
     expect(html).not.toContain('data-companion-typing-rail="assistant"');
   });
@@ -554,13 +558,14 @@ describe("ConversationView native Codex transcript surface", () => {
       },
     ]);
 
-    const thoughts = expectCollapsedThoughts(html, ["thought-completed", "thought-running"]);
+    const thoughts = expectNativeThoughts(html, ["thought-completed", "thought-running"]);
     expect(thoughts).toHaveLength(2);
     expect(thoughts[0].getAttribute("data-codex-transcript-cell-status")).toBe("completed");
     expect(thoughts[0].textContent).toContain("已思考");
     expect(thoughts[0].textContent).not.toContain("思考中");
     expect(thoughts[1].getAttribute("data-codex-transcript-cell-status")).toBe("running");
     expect(thoughts[1].textContent).toContain("思考中");
+    expect(thoughts[1].querySelector('[data-thought-streaming-summary="true"]')?.textContent).toBe("当前仍在进行的思考。");
   });
 
   it("ends stale thinking and keeps accumulated progress out of the final response", () => {
@@ -580,7 +585,7 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html.match(/data-codex-progress-cell="true"/g)).toHaveLength(2);
     expect(html).not.toContain("思考中");
     expect(html).toContain("已思考");
-    expectCollapsedThoughts(html, ["thought"]);
+    expectNativeThoughts(html, ["thought"]);
     expect(html.indexOf(texts[0])).toBeLessThan(html.indexOf('data-conversation-part-key="tool"'));
     expect(html.indexOf('data-conversation-part-key="tool"')).toBeLessThan(html.indexOf(texts[1]));
   });
@@ -594,7 +599,7 @@ describe("ConversationView native Codex transcript surface", () => {
     );
   });
 
-  it("keeps commentary visible without a progress heading while thoughts start hidden", () => {
+  it("keeps commentary visible without a progress heading beside collapsed settled thoughts", () => {
     const html = renderConversation([
       {
         id: "assistant-commentary-reasoning-labels",
@@ -634,7 +639,7 @@ describe("ConversationView native Codex transcript surface", () => {
       },
     ]);
 
-    expectCollapsedThoughts(html, ["reasoning-label"]);
+    expectNativeThoughts(html, ["reasoning-label"]);
     const commentary = transcriptDom(html).querySelector('[data-codex-progress-cell="true"]')!;
     expect(commentary.textContent).toBe("这是对用户可见的进展说明。");
     expect(commentary.closest('[hidden], [inert], [aria-hidden="true"]')).toBeNull();
@@ -716,7 +721,7 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain("line-clamp-3");
     // The progress copy that repeats the final answer must paint once.
     expect(html.split(repeated).length - 1).toBe(1);
-    expectCollapsedThoughts(html, ["reasoning-lane"]);
+    expectNativeThoughts(html, ["reasoning-lane"]);
   });
 
   it("keeps short and long commentary fully visible without requiring a second toggle", () => {
@@ -1016,7 +1021,7 @@ describe("ConversationView native Codex transcript surface", () => {
       const html = renderConversation([mixedMessage(carrier)]);
       expect(html).toContain("压缩后的回答必须保留。");
       expect(html).toContain('data-conversation-part-key="mixed-tool"');
-      expect(html).toContain("file read");
+      expect(html).toContain("compression-regression.ts");
       expect(html.match(/data-conversation-compression-divider=/g)).toHaveLength(1);
       expect(html).toContain(`data-conversation-compression-divider="${outcome}"`);
       expect(html).not.toContain("checkpoint bookkeeping");
@@ -1043,7 +1048,7 @@ describe("ConversationView native Codex transcript surface", () => {
     });
   });
 
-  it("keeps reasoning units mounted but hidden until requested while streaming and after settle", () => {
+  it("keeps live and settled reasoning collapsed under one visible native header per unit", () => {
     const reasoning = (status: "running" | "completed"): ConversationMessage => ({
       id: `assistant-reasoning-${status}`,
       role: "assistant",
@@ -1066,15 +1071,16 @@ describe("ConversationView native Codex transcript surface", () => {
       }],
     });
 
-    // Collapsing hides thought content without discarding its live clock.
+    // Native rows stay present; only live collapsed rows carry a rolling summary.
     const live = renderConversation([reasoning("running")]);
-    expectCollapsedThoughts(live, ["reasoning-running"]);
+    const liveThoughts = expectNativeThoughts(live, ["reasoning-running"]);
     expect(live).toContain("工作中");
     expect(live.match(/data-codex-process-disclosure=/g)).toHaveLength(1);
-    expect(live).not.toContain('data-thought-streaming-summary="true"');
+    expect(liveThoughts[0].querySelector('[data-thought-streaming-summary="true"]')?.textContent)
+      .toBe("先确认这个函数的两条来源路径，再看函数体。");
 
     const settled = renderConversation([reasoning("completed")]);
-    const settledThoughts = expectCollapsedThoughts(settled, ["reasoning-completed"]);
+    const settledThoughts = expectNativeThoughts(settled, ["reasoning-completed"]);
     expect(settledThoughts[0].textContent).toContain("已思考");
     expect(settledThoughts[0].textContent).not.toContain("思考中");
     expect(settled).not.toContain('data-thought-streaming-summary="true"');

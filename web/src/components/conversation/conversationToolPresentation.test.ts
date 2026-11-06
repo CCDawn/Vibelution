@@ -420,6 +420,14 @@ describe("normalizeToolActivityStatus / extractToolDisplayCommand", () => {
 });
 
 describe("buildCodexToolActivityPills", () => {
+  it("keeps a completed read identifiable by file instead of replacing its target with source output", () => {
+    expect(buildCodexToolActivityPills({ toolName: "read_file_tool", status: "completed", language: "zh",
+      toolArguments: { path: "src/alpha.ts" }, resultPreview: "export const paintState = { phase: 'idle' };" }))
+      .toMatchObject({ subject: "alpha.ts", statusKind: "completed" });
+    expect(buildCodexToolActivityPills({ toolName: "personal_assistant_action_tool", status: "completed", language: "zh",
+      toolArguments: { action: "source_read", parameters: { path: "src/beta.ts" } }, resultPreview: "source text preview" }))
+      .toMatchObject({ subject: "beta.ts", statusKind: "completed" });
+  });
   it("names a running search by its term instead of its directory scope", () => {
     for (const toolName of ["grep_search_tool", "search_code_tool", "query_tool"]) {
       expect(buildCodexToolActivityPills({ toolName, status: "running", language: "zh",
@@ -433,6 +441,89 @@ describe("buildCodexToolActivityPills", () => {
         .toMatchObject({ actionLabel: "搜索源码", subject: "paintState" });
     }
   });
+
+  it.each(["personal_assistant_action_tool", "personal_assistant_manage_tool"])(
+    "names actual source action parameter envelopes for %s",
+    (toolName) => {
+      for (const path of [
+        "web/src/components/conversation/grouping.ts",
+        "web/src/components/conversation/conversationToolPresentation.ts",
+      ]) {
+        expect(buildCodexToolActivityPills({
+          toolName, status: "running", language: "zh",
+          toolArguments: {
+            action: "source_read",
+            parameters: { path, project_id: "project-a", line: 10, max_lines: 30 },
+          },
+        })).toMatchObject({ actionLabel: "读取源码", subject: path.split("/").at(-1) });
+      }
+      for (const search of [{ query: "paintState" }, { pattern: "paintState" }]) {
+        expect(buildCodexToolActivityPills({
+          toolName, status: "running", language: "zh",
+          toolArguments: { action: "source_search", path: ".", parameters: { ...search, path: "." } },
+        })).toMatchObject({ actionLabel: "搜索源码", subject: "paintState" });
+      }
+    },
+  );
+
+  it("preserves top-level subjects before matching assistant parameter fields", () => {
+    expect(subjectFromToolArguments({
+      toolName: "personal_assistant_action_tool", language: "zh",
+      toolArguments: { action: "source_read", path: "src/outer.ts", parameters: { path: "src/inner.ts" } },
+    })).toBe("outer.ts");
+    expect(subjectFromToolArguments({
+      toolName: "personal_assistant_action_tool", language: "zh",
+      toolArguments: { action: "source_read", target: { path: "src/outer-target.ts" }, parameters: { path: "src/inner.ts" } },
+    })).toBe("outer-target.ts");
+    expect(subjectFromToolArguments({
+      toolName: "personal_assistant_manage_tool", language: "zh",
+      toolArguments: { action: "source_search", query: "outerTerm", parameters: { query: "innerTerm", path: "." } },
+    })).toBe("outerTerm");
+    expect(subjectFromToolArguments({
+      toolName: "personal_assistant_manage_tool", language: "en",
+      toolArguments: { action: "session_get", session_id: "outer-session", parameters: { session_id: "inner-session", project_id: "project-a" } },
+    })).toBe("Session outer-session · Project project-a");
+  });
+
+  it("opens parameter envelopes only for recognized assistant tools and actions", () => {
+    for (const toolName of ["unknown_tool", "read_file_tool", undefined]) {
+      expect(subjectFromToolArguments({
+        toolName, language: "zh",
+        toolArguments: { action: "source_read", parameters: { path: "private.ts" } },
+      })).toBe("");
+    }
+    expect(subjectFromToolArguments({
+      toolName: "personal_assistant_action_tool", language: "zh",
+      toolArguments: { action: "future_unknown_action", parameters: { query: "private query", path: "private.ts" } },
+    })).toBe("");
+  });
+
+  it("keeps assistant envelope extraction shallow and limited to subject fields", () => {
+    const privateFields = {
+      prompt: "private complete prompt",
+      body: "private message body",
+      content: "private document content",
+      api_key: "private-api-key",
+      credential_token: "private-credential-token",
+      arbitrary: { path: "private-nested.ts" },
+      parameters: { path: "private-recursive.ts" },
+    };
+    expect(subjectFromToolArguments({
+      toolName: "personal_assistant_action_tool", language: "zh",
+      toolArguments: { action: "source_read", parameters: privateFields },
+    })).toBe("");
+    expect(subjectFromToolArguments({
+      toolName: "personal_assistant_manage_tool", language: "zh",
+      toolArguments: { action: "source_read", parameters: { ...privateFields, path: "src/public.ts" } },
+    })).toBe("public.ts");
+    for (const parameters of [[{ path: "private-array.ts" }], JSON.stringify({ path: "private-json.ts" })]) {
+      expect(subjectFromToolArguments({
+        toolName: "personal_assistant_action_tool", language: "zh",
+        toolArguments: { action: "source_read", parameters },
+      })).toBe("");
+    }
+  });
+
   it("names assistant entity targets without displaying prompts, bodies or credentials", () => {
     const toolArguments = {
       action: "session_update",

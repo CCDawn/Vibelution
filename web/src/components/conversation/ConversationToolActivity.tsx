@@ -687,8 +687,8 @@ function ToolActivityCategoryGroup({
   });
   const Icon = CATEGORY_GROUP_ICONS[item.category];
   const countLabel = conversationToolCategoryGroupCountLabel(item, language);
-  const activeCells = item.items.flatMap((child) => child.kind === "batch" ? [...child.cells] : [child.cell])
-    .filter((cell) => cell.status === "running" || cell.status === "pending");
+  const childCells = item.items.flatMap((child) => child.kind === "batch" ? [...child.cells] : [child.cell]);
+  const activeCells = childCells.filter((cell) => cell.status === "running" || cell.status === "pending");
   const runningCells = activeCells.filter((cell) => cell.status === "running");
   const pendingCount = activeCells.length - runningCells.length;
   const activeCell = runningCells.at(-1) ?? activeCells.at(-1);
@@ -795,16 +795,14 @@ function ToolActivityCategoryGroup({
       {renderChildren ? (
         <div className={styles.categoryGroupDetails}>
           <div className={styles.categoryGroupDetailsInner}>
-            {item.items.map((child, index) => (
+            {childCells.map((cell, index) => (
               <div
-                key={toolActivityRowKey(child)}
+                key={conversationToolPersistKey(cell)}
                 className={styles.categoryGroupRow}
-                style={staggeredRowStyle(index, item.items.length)}
+                style={staggeredRowStyle(index, childCells.length)}
               >
-                {toolActivityRowContent(child, language, renderToolDetails, toolDetailIsEmpty, {
-                  sessionId,
-                  turnFailed,
-                })}
+                <ToolActivityItem cell={cell} language={language} renderToolDetails={renderToolDetails}
+                  toolDetailIsEmpty={toolDetailIsEmpty} sessionId={sessionId} turnFailed={turnFailed} />
               </div>
             ))}
           </div>
