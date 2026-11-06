@@ -56,10 +56,14 @@ _CODEX_SANDBOX_MODES = {
     _WORKSPACE_WRITE_SANDBOX_MODE,
 }
 _WINDOWS_OFFLINE_SHELL_BLOCK_CODE = "SANDBOX_UNVERIFIED"
+# Public alias: tool layers (e.g. shell 失败冷却) need to recognize the
+# environment-level rejection without importing private names.
+SANDBOX_UNVERIFIED_BLOCK_CODE = _WINDOWS_OFFLINE_SHELL_BLOCK_CODE
 _WINDOWS_OFFLINE_SHELL_BLOCK_MESSAGE = (
     "Windows 原生 Codex 离线 shell 隔离未通过运行时验证；"
-    "为避免命令在可访问外网的错误边界中执行，已拒绝本次直接 shell 命令。"
-    "请改用受控工具，或由显式 danger_full_access 权限执行。"
+    "为避免命令在可访问外网的错误边界中执行，只有携带用户显式批准一次性执行凭据的命令才会放行。"
+    "本次调用没有有效凭据（审批即证据）：请在审批卡片显式批准该命令后重试，"
+    "或由显式 danger_full_access 权限执行。命令未执行。"
 )
 
 
@@ -96,6 +100,58 @@ def _windows_offline_shell_is_unverified(sandbox_mode: str) -> bool:
     arbitrary local shell while the native boundary is unverifiable.
     """
     return _host_platform() == "windows" and _sandbox_requires_codex(sandbox_mode)
+
+
+def windows_offline_shell_unverified() -> bool:
+    """Whether the live host+runtime shell boundary is an unverified Windows sandbox.
+
+    Shared with the approval service: silent auto-approval of sandbox-contained
+    tools is only valid where containment is actually proven.
+    """
+    return _windows_offline_shell_is_unverified(_current_agent_sandbox_mode())
+
+
+def is_sandbox_unverified_block(result_text: str) -> bool:
+    """True when a tool result is this module's sandbox-unverified rejection.
+
+    环境拒绝（无凭据）不是命令本身的失败：shell 失败冷却等机制应据此豁免，
+    避免模型因环境拦截被计入失败意图而劝退。
+    """
+    return SANDBOX_UNVERIFIED_BLOCK_CODE in str(result_text or "")
+
+
+def _approved_execution_evidence_allows(command_text: str) -> tuple[bool, str]:
+    """Validate (and consume) one-shot user-approval evidence for this command.
+
+    「审批即证据」：沙箱门只在 Windows 未验证场景生效。证据由审批服务在用户
+    显式批准时签发（服务端内存态，模型不可见、不可构造），绑定 session +
+    turn + 命令哈希且短 TTL。验证成功即消费（一次性）；查无证据、过期、
+    会话/回合不一致一律拒绝并维持 SANDBOX_UNVERIFIED。
+    """
+    try:
+        from core.web.services.agent_directory_service import current_agent_runtime
+
+        runtime = current_agent_runtime()
+    except Exception:
+        runtime = {}
+    session_id = str((runtime or {}).get("sessionId") or "").strip()
+    turn_id = str((runtime or {}).get("turnId") or (runtime or {}).get("runId") or "").strip()
+    if not session_id or not turn_id:
+        return False, "no_runtime_identity"
+    try:
+        from core.web.services.session.execution_evidence import (
+            command_execution_hash,
+            verify_and_consume_execution_evidence,
+        )
+
+        return verify_and_consume_execution_evidence(
+            session_id=session_id,
+            turn_id=turn_id,
+            command_hash=command_execution_hash(command_text),
+        )
+    except Exception:
+        # 证据探测失败绝不放行；维持 fail-closed。
+        return False, "evidence_probe_failed"
 
 
 def _log_outcome(
@@ -594,11 +650,17 @@ def start_codex_sandbox_terminal_session(
         _log_outcome(command_hash, "blocked", reason=route.reason or "shell_route")
         return _terminal_error_payload("SHELL_ROUTE_BLOCKED", str(route.error or "命令路由被拦截。"))
     if _windows_offline_shell_is_unverified(sandbox_mode):
-        _log_outcome(command_hash, "blocked", reason="windows_offline_shell_unverified")
-        return _terminal_error_payload(
-            _WINDOWS_OFFLINE_SHELL_BLOCK_CODE,
-            _WINDOWS_OFFLINE_SHELL_BLOCK_MESSAGE,
-        )
+        evidence_ok, evidence_reason = _approved_execution_evidence_allows(normalized_command)
+        if not evidence_ok:
+            _log_outcome(
+                command_hash,
+                "blocked",
+                reason=f"windows_offline_shell_unverified:{evidence_reason}",
+            )
+            return _terminal_error_payload(
+                _WINDOWS_OFFLINE_SHELL_BLOCK_CODE,
+                _WINDOWS_OFFLINE_SHELL_BLOCK_MESSAGE,
+            )
     executable = _resolve_codex_executable() if _sandbox_requires_codex(sandbox_mode) else ""
     if _sandbox_requires_codex(sandbox_mode) and not executable:
         _log_outcome(command_hash, "unavailable", reason="codex_executable_missing")
@@ -787,11 +849,17 @@ def execute_codex_sandbox_command(
         _log_outcome(command_hash, "blocked", reason=route.reason or "shell_route")
         return route.error
     if _windows_offline_shell_is_unverified(sandbox_mode):
-        _log_outcome(command_hash, "blocked", reason="windows_offline_shell_unverified")
-        return (
-            f"[安全拦截 | {_WINDOWS_OFFLINE_SHELL_BLOCK_CODE}] "
-            f"{_WINDOWS_OFFLINE_SHELL_BLOCK_MESSAGE}\n命令未执行，也未回退到非沙盒模式。"
-        )
+        evidence_ok, evidence_reason = _approved_execution_evidence_allows(normalized_command)
+        if not evidence_ok:
+            _log_outcome(
+                command_hash,
+                "blocked",
+                reason=f"windows_offline_shell_unverified:{evidence_reason}",
+            )
+            return (
+                f"[安全拦截 | {_WINDOWS_OFFLINE_SHELL_BLOCK_CODE}] "
+                f"{_WINDOWS_OFFLINE_SHELL_BLOCK_MESSAGE}\n也未回退到非沙盒模式。"
+            )
 
     executable = _resolve_codex_executable() if _sandbox_requires_codex(sandbox_mode) else ""
     if _sandbox_requires_codex(sandbox_mode) and not executable:

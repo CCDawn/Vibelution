@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from core.authorization import tool_authorization_service
+from core.infrastructure import codex_cli_sandbox
 from core.infrastructure.tool_executor import ToolExecutor
 from core.web.services import agent_directory_service
 from core.web.services.session import tool_approvals
@@ -244,6 +245,10 @@ def test_request_approval_policy_prompts_for_workspace_command(monkeypatch):
 
 def test_auto_review_runs_contained_workspace_command_without_prompt(monkeypatch):
     _runtime(monkeypatch, permission_preset="auto_review")
+    # 静默自动批的前提是工具确实被沙箱 contain：在非 Windows 宿主上该前提
+    # 成立，行为保持不变（Windows 未验证沙箱下改为 pending 审批，见
+    # test_approval_execution_evidence.py 的对应测试）。
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "linux")
     _install(("exec_command", "on_request", "execute"))
     calls = []
     executor = ToolExecutor()
