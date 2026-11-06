@@ -1213,3 +1213,18 @@ def test_readable_sources_distinguish_task_only_private_base_and_episodic_memory
 
     assert episodic_only["selectedCount"] == 1
     assert episodic_only["readableCount"] == 1
+
+
+def test_missing_agent_lookup_is_not_found_not_runtime_fault(tmp_path):
+    """A lookup miss for an unknown Agent raises AgentNotFoundError so routes
+    map it to 404, instead of AgentPerceptionRuntimeError surfacing as 500."""
+    from core.web.services.agent_directory_service import AgentNotFoundError
+
+    service = AgentPerceptionRuntime(
+        store=AgentPerceptionStore(path_resolver=lambda _agent: tmp_path / "missing.json"),
+        agent_loader=lambda _agent_id: None,
+    )
+    with pytest.raises(AgentNotFoundError):
+        service.recover_agent("agent-missing")
+    with pytest.raises(AgentNotFoundError):
+        service.run_agent("agent-missing")

@@ -62,6 +62,7 @@ from config.public_config import (
     CONFIG_PATH,
     SCHEMA_V2_LEGACY_MODEL_WRITE_ERROR,
     UNCONFIGURED_MODEL_REF,
+    _config_edit_lock,
     _delete_user_env_var,
     _set_user_env_var,
     add_llm_model,
@@ -4045,49 +4046,57 @@ def apply_config_workspace(
     draft_meta: dict | None = None,
     base_hash: str = "",
 ) -> dict[str, Any]:
-    old_public = load_public_config()
-    current_public = _with_config_workspace_defaults(old_public)
-    submitted = _prepare_submitted_public_config(public_config, old_public)
-    submitted_base = _normalize_apply_base_config(base_config, old_public)
-    lang = _resolve_workspace_language(submitted)
-    submitted_base = _resolve_apply_base_config(
-        base_hash=base_hash,
-        submitted_base=submitted_base,
-        old_public=old_public,
-        current_public=current_public,
-        lang=lang,
-    )
-    merged, changed_paths, _ = _merge_submitted_config_changes(
-        base_config=submitted_base,
-        submitted=submitted,
-        old_public=current_public,
-        lang=lang,
-    )
-    base_for_summary = submitted_base or current_public
-    removed_model_ids = _removed_model_ids_from_paths(changed_paths, base_for_summary, submitted)
-    for removed_model_id in removed_model_ids:
-        _assert_model_delete_workspace_references_allowed(merged, removed_model_id)
-    pinned_before = _pinned_provider_model_refs(merged)
-    merged = materialize_observed_binding_pins(merged)
-    observed_pins = sorted(_pinned_provider_model_refs(merged) - pinned_before)
-    validate_llm_public_config(merged)
-    _validate_git_commit_settings(merged)
-    optional_unconfigured_profile_ids = _optional_unconfigured_profile_ids(merged)
-    if optional_unconfigured_profile_ids:
-        _record_config_scene_event(
-            "validate",
-            "config.llm_profiles.optional_missing_allowed",
-            message="Optional LLM profiles are intentionally unconfigured.",
-            outcome="allowed",
-            fields={
-                "profileCount": len(optional_unconfigured_profile_ids),
-                "profileIds": optional_unconfigured_profile_ids,
-            },
-            lifecycle=True,
+    # Read baseline -> merge -> validate -> persist holds the shared config
+    # edit lock end to end (ISS-033): without it two concurrent applies read
+    # the same on-disk baseline and the last writer clobbered the other's
+    # changes. The inner save_public_config re-enters this same lock, and
+    # load_public_config's bootstrap re-enters it too; other threads/processes
+    # still serialize on the config-edit.lock sidecar and fail closed with a
+    # readable RuntimeError once the bounded wait is exhausted.
+    with _config_edit_lock(resolve_config_path()):
+        old_public = load_public_config()
+        current_public = _with_config_workspace_defaults(old_public)
+        submitted = _prepare_submitted_public_config(public_config, old_public)
+        submitted_base = _normalize_apply_base_config(base_config, old_public)
+        lang = _resolve_workspace_language(submitted)
+        submitted_base = _resolve_apply_base_config(
+            base_hash=base_hash,
+            submitted_base=submitted_base,
+            old_public=old_public,
+            current_public=current_public,
+            lang=lang,
         )
-    build_effective_config(merged)
-    _preserve_stored_ui_language_on_apply(merged, _stored_ui_language(old_public))
-    _save_public_config_and_invalidate(merged)
+        merged, changed_paths, _ = _merge_submitted_config_changes(
+            base_config=submitted_base,
+            submitted=submitted,
+            old_public=current_public,
+            lang=lang,
+        )
+        base_for_summary = submitted_base or current_public
+        removed_model_ids = _removed_model_ids_from_paths(changed_paths, base_for_summary, submitted)
+        for removed_model_id in removed_model_ids:
+            _assert_model_delete_workspace_references_allowed(merged, removed_model_id)
+        pinned_before = _pinned_provider_model_refs(merged)
+        merged = materialize_observed_binding_pins(merged)
+        observed_pins = sorted(_pinned_provider_model_refs(merged) - pinned_before)
+        validate_llm_public_config(merged)
+        _validate_git_commit_settings(merged)
+        optional_unconfigured_profile_ids = _optional_unconfigured_profile_ids(merged)
+        if optional_unconfigured_profile_ids:
+            _record_config_scene_event(
+                "validate",
+                "config.llm_profiles.optional_missing_allowed",
+                message="Optional LLM profiles are intentionally unconfigured.",
+                outcome="allowed",
+                fields={
+                    "profileCount": len(optional_unconfigured_profile_ids),
+                    "profileIds": optional_unconfigured_profile_ids,
+                },
+                lifecycle=True,
+            )
+        build_effective_config(merged)
+        _preserve_stored_ui_language_on_apply(merged, _stored_ui_language(old_public))
+        _save_public_config_and_invalidate(merged)
 
     normalized_meta = _normalize_draft_meta(draft_meta)
     cleared_envs = [str(env_name) for env_name in normalized_meta.get("pending_cleared_api_keys", [])]
