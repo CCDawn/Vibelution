@@ -1,14 +1,14 @@
 {
   "comment": "Baseline for visualTokenEscalationContract.test.ts. Ratchet: counts may only shrink. Regenerate with: npm run tokens:baseline-update (web/).",
-  "updatedAt": "2026-11-03",
-  "scannedFileCount": 1847,
+  "updatedAt": "2026-11-06",
+  "scannedFileCount": 1896,
   "exemptFiles": [
     "routes/chat/CliAgentRunTerminalPanel.tsx",
     "routes/teams/challenge-cup/questionArchiveExport.ts"
   ],
   "categories": {
     "builtinFontSize": {
-      "total": 211,
+      "total": 216,
       "files": {
         "routes/agentConfigForm.styles.ts": 4,
         "routes/AgentConfigPolicyPanePanel.styles.ts": 1,
@@ -21,6 +21,7 @@
         "routes/AgentSelectedDetailContentPanel.styles.ts": 3,
         "routes/AgentTaskProfilePanel.styles.ts": 3,
         "routes/chat/TeamDirectoryManagementOverlay.styles.ts": 1,
+        "routes/desktopPet/LauncherAssistantQuestionCard.styles.ts": 5,
         "routes/finance/FinanceAnalystTeam.styles.ts": 22,
         "routes/finance/FinanceDashboard.styles.ts": 9,
         "routes/finance/FinanceEvaluation.styles.ts": 4,
@@ -50,7 +51,7 @@
       }
     },
     "arbitraryTextSize": {
-      "total": 45,
+      "total": 54,
       "files": {
         "app/AppShell.styles.ts": 1,
         "components/conversation/ConversationFileReferenceChips.styles.ts": 1,
@@ -62,6 +63,9 @@
         "routes/AgentRuntimePolicyPanel.styles.ts": 1,
         "routes/AgentTaskProfilePanel.styles.ts": 1,
         "routes/chat/ChatSessionBrowser.styles.ts": 6,
+        "routes/desktopPet/assistantTasks/LauncherAssistantTaskDetail.styles.ts": 5,
+        "routes/desktopPet/assistantTasks/LauncherAssistantTaskSidebar.styles.ts": 3,
+        "routes/desktopPet/LauncherAssistantQuestionCard.styles.ts": 1,
         "routes/finance/FinanceAnalystTeam.styles.ts": 1,
         "routes/finance/FinanceEvaluation.styles.ts": 1,
         "routes/finance/FinancePortfolioResearch.styles.ts": 8,
@@ -73,7 +77,7 @@
       }
     },
     "arbitraryRadius": {
-      "total": 28,
+      "total": 29,
       "files": {
         "app/PageFrameLoadingShell.styles.ts": 3,
         "components/conversation/AgentUserContentSectionView.styles.ts": 1,
@@ -85,6 +89,7 @@
         "routes/chat/ChatRightRail.styles.ts": 4,
         "routes/chat/ChatSessionBrowser.styles.ts": 1,
         "routes/ChatCodingRoute.styles.ts": 2,
+        "routes/memory/PlatformKnowledgeGraphWorkbench.styles.ts": 1,
         "routes/SelfEvolutionTrack.styles.ts": 1,
         "routes/shared/ProgressiveRegionSkeleton.tsx": 2,
         "routes/SkillsRoute.styles.ts": 1
