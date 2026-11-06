@@ -19,6 +19,11 @@ export const PYTHON_JSON_BRIDGE_PROCESS_TREE_TIMEOUT_MS = 10_000;
  * reads use the existing bounded command budget, like state-refresh.
  */
 export function launcherApiBridgeTimeoutMs(path: string, method: string): number {
+  // Build metadata inspection includes the native package status read; the
+  // ordinary source-only freshness request keeps its cheap query budget.
+  if (method === "GET" && /^freshness\?shellKind=(?:packaged|unpackaged)$/.test(path)) {
+    return PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS;
+  }
   if (path === "maintenance/reset/apply") {
     return PYTHON_JSON_BRIDGE_MAINTENANCE_TIMEOUT_MS;
   }

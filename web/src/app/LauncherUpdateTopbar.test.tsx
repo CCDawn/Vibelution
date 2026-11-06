@@ -14,7 +14,10 @@ const api = vi.hoisted(() => ({ getLauncherFreshness: vi.fn(), restartLatestLaun
 vi.mock("../api/launcher", () => api);
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const available = { current: false, label: "stale", updateAvailable: true, activeWorkState: "idle", activeWorkCount: 0, runningShort: "aaaa", headShort: "bbbb" };
+const available = { current: false, label: "stale", updateAvailable: true, activeWorkState: "idle", activeWorkCount: 0,
+  runningShort: "misleading-commit", headShort: "misleading-commit", availableBuildState: "ready",
+  runningBuild: { kind: "unpackaged", id: "a".repeat(64), electronTree: "c".repeat(40) },
+  availableBuild: { kind: "unpackaged", id: "b".repeat(64), electronTree: "d".repeat(40) } };
 let root: Root;
 let host: HTMLDivElement;
 let client: QueryClient;
@@ -51,6 +54,25 @@ afterEach(async () => {
 });
 
 describe("shared Launcher update topbar", () => {
+  it("shows not-built honestly while keeping the existing prepare-and-restart action", async () => {
+    api.getLauncherFreshness.mockResolvedValue({ ...available, availableBuild: null, availableBuildState: "not_built" });
+    await mount();
+    expect(host.textContent).toContain("有更新，待构建");
+    expect(host.textContent).not.toContain("bbbbbbbbbbbb");
+    expect(host.textContent).not.toContain("misleading-commit");
+    expect(button("更新并重启")).toBeTruthy();
+    expect(api.restartLatestLauncher).not.toHaveBeenCalled();
+  });
+
+  it("does not relabel legacy commit fields as real builds", async () => {
+    api.getLauncherFreshness.mockResolvedValue({ current: false, updateAvailable: true, label: "old bridge",
+      runningShort: "fake-current", headShort: "fake-available" });
+    await mount();
+    expect(host.textContent).not.toContain("fake-current");
+    expect(host.textContent).not.toContain("fake-available");
+    expect(host.querySelectorAll("dd")[0]?.textContent).toBe("未知");
+  });
+
   it("rechecks a recently cached update when the Launcher opens", async () => {
     api.getLauncherFreshness.mockResolvedValue({ ...available, current: true, shellStale: false, updateAvailable: false });
     await mount(true);
@@ -73,7 +95,9 @@ describe("shared Launcher update topbar", () => {
     api.getLauncherFreshness.mockResolvedValue({ ...available, activeWorkState: "active", activeWorkCount: 2 });
     await mount();
     expect(host.textContent).toContain("发现更新");
-    expect(host.textContent).toContain("@aaaa");
+    expect(host.textContent).toContain("桌面构建 aaaaaaaaaaaa");
+    expect(host.textContent).toContain("桌面构建 bbbbbbbbbbbb");
+    expect(host.textContent).not.toContain("misleading-commit");
     expect(host.querySelector('[data-testid="launcher-topbar"]')).toBeNull();
     await click("更新并重启");
     expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);

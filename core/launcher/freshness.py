@@ -37,7 +37,7 @@ def reset_launcher_start_identity_for_tests() -> None:
     _started = None
 
 
-def get_launcher_freshness() -> dict[str, Any]:
+def get_launcher_freshness(*, shell_kind: str | None = None) -> dict[str, Any]:
     # One HEAD capture serves both sides. The start identity is cached from
     # the process's first read, so the shared capture only changes the very
     # first call — where the process start commit and HEAD are the same fact.
@@ -57,7 +57,7 @@ def get_launcher_freshness() -> dict[str, Any]:
         label = f"Launcher 落后本地 main · {running_short} → {head_short}"
     shell_stale, shell_reason = _unpackaged_shell_update()
     update_available = (current is False) or shell_stale
-    return {
+    payload = {
         "schemaVersion": 1,
         "current": current if known else None,
         "label": label,
@@ -72,6 +72,11 @@ def get_launcher_freshness() -> dict[str, Any]:
         "shellReason": shell_reason,
         "updateAvailable": update_available,
     }
+    if shell_kind in {"packaged", "unpackaged"}:
+        from core.launcher.build_identity import inspect_available_launcher_build
+
+        payload.update(inspect_available_launcher_build(PROJECT_ROOT, shell_kind=shell_kind))
+    return payload
 
 
 def _git_identity() -> dict[str, str]:

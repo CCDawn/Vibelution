@@ -1230,11 +1230,22 @@ export type LauncherControlResponse = RuntimeControlResponse & {
   code?: string;
 };
 
+export type LauncherBuild = {
+  kind: "packaged" | "unpackaged";
+  id: string;
+  electronTree: string;
+  sourceCommit?: string;
+  builtAt?: string;
+};
+
 export type LauncherFreshness = {
   current: boolean | null;
   label: string;
   runningShort?: string;
   headShort?: string;
+  runningBuild?: LauncherBuild | null;
+  availableBuild?: LauncherBuild | null;
+  availableBuildState?: "ready" | "not_built" | "unknown";
   shellStale?: boolean;
   shellReason?: string;
   updateAvailable?: boolean;
