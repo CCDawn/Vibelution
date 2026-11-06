@@ -518,10 +518,19 @@ def _should_skip_child(root_id: str, child: Path, root_path: Path) -> bool:
 def _assert_allowed_runtime_log_path(root_id: str, relative_path: str) -> None:
     if root_id != "runtime_logs":
         return
-    normalized = str(relative_path or "").strip().replace("\\", "/").lstrip("/")
-    while normalized.startswith("./"):
-        normalized = normalized[2:].lstrip("/")
-    if normalized == "runtime_scenes" or normalized.startswith("runtime_scenes/"):
+    # Decide on the resolved path so aliases cannot smuggle a protected group
+    # past the check: `..` segments, backslashes, case differences (on
+    # case-insensitive filesystems) and in-root symlinks all collapse here.
+    logs_root = _resolve_log_root(root_id)
+    candidate = (logs_root / str(relative_path or "")).resolve()
+    try:
+        first_segment = candidate.relative_to(logs_root).parts[0]
+    except (ValueError, IndexError):
+        # Resolves outside the runtime logs root (or is the root itself);
+        # _resolve_log_path enforces that containment.
+        return
+    group = first_segment.casefold()
+    if group == "runtime_scenes":
         raise ValueError("Runtime scene bundles must be managed from the runtime scenes surface")
-    if normalized == "conversations" or normalized.startswith("conversations/"):
+    if group == "conversations":
         raise ValueError("Conversation logs must be managed from the conversation logs surface")
