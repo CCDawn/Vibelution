@@ -1102,3 +1102,43 @@ def test_runtime_scene_events_never_include_prompt_approval_reason_or_arguments(
     assert "secret prompt body" not in serialized
     assert "approval arguments" not in serialized
     assert "private approval reason" not in serialized
+
+
+def test_recovery_lookup_reports_corrupted_store_as_degraded_not_absent(tmp_path):
+    runtime = FakeRuntime()
+    service = _service(tmp_path, runtime)
+    started = service.start_task(owner_id="durable-request-capability", adapter_connection_id="connection",
+        capabilities=set(), agent_id="coder", task="bounded task", permission_profile="read_only",
+        client_request_id="stable-request", title="", runtime_revision="rev-1")
+
+    # A genuinely absent request with a healthy store stays a plain not-found.
+    with pytest.raises(ExternalAgentAccessError) as clean_denial:
+        service.get_task_for_request(owner_id="durable-request-capability", client_request_id="unknown-request")
+    assert clean_denial.value.code == "TASK_NOT_FOUND"
+    assert "corrupted record" not in str(clean_denial.value)
+
+    # Corrupt projection files make the store hold unreadable records.
+    (service.store.tasks_dir / "eat-corrupted.json").write_bytes(b"\xff\xfe not utf-8 \xff")
+    (service.store.tasks_dir / "eat-alsobad.json").write_text("not json at all", encoding="utf-8")
+
+    # The healthy record still recovers by its original request id.
+    recovered = service.get_task_for_request(owner_id="durable-request-capability",
+        client_request_id="stable-request", include_private=True)
+    assert recovered["taskId"] == started["taskId"]
+
+    # With corrupt records present, the denial says degraded instead of a
+    # bare "not found", while keeping the code that consumers branch on.
+    with pytest.raises(ExternalAgentAccessError) as degraded_denial:
+        service.get_task_for_request(owner_id="durable-request-capability", client_request_id="unknown-request")
+    assert degraded_denial.value.code == "TASK_NOT_FOUND"
+    assert "corrupted record" in str(degraded_denial.value)
+
+    degraded_events = [
+        event for event in runtime.events
+        if event["args"] and event["args"][2] == "external_agent.task_recovery.degraded"
+    ]
+    assert len(degraded_events) == 1
+    fields = degraded_events[0]["kwargs"]["fields"]
+    assert fields["corruptedRecordCount"] == 2
+    assert fields["corruptedTaskIds"] == ["eat-alsobad", "eat-corrupted"]
+    assert degraded_events[0]["kwargs"]["outcome"] == "degraded"

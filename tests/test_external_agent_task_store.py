@@ -106,3 +106,31 @@ def test_task_store_rejects_stale_revision_and_keeps_terminal_state(tmp_path) ->
             expected_revision=running["revision"],
         )
     assert store.get_task(task["taskId"])["status"] == terminal["status"] == "succeeded"
+
+
+def test_corrupt_record_is_skipped_but_distinguishable_from_absent(tmp_path) -> None:
+    store = ExternalAgentTaskStore(tmp_path)
+    task, _ = store.create_task(
+        owner_id="host-a",
+        agent_id="coder",
+        task_digest="sha256:abc",
+        client_request_id="request-1",
+        request_digest="sha256:req",
+        permission_profile="read_only",
+        lease_seconds=30,
+        adapter_connection_id="connection-a",
+        runtime_revision="rev-1",
+    )
+    # A record file that exists but cannot be decoded must not poison the
+    # whole iteration, and it must stay reportable instead of silently
+    # looking like it never existed.
+    (store.tasks_dir / "eat-corrupted.json").write_bytes(b"\xff\xfe not utf-8 \xff")
+
+    replay = store.find_idempotent(owner_id="host-a", client_request_id="request-1")
+    assert replay is not None
+    assert replay["taskId"] == task["taskId"]
+
+    assert store.find_idempotent(owner_id="host-a", client_request_id="missing") is None
+    assert store.list_corrupted_task_ids() == ["eat-corrupted"]
+    assert store.list_nonterminal() != []
+    assert all(item["taskId"] != "eat-corrupted" for item in store.list_nonterminal())

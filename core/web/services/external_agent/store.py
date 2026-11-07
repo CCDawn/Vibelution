@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import threading
 import uuid
@@ -13,6 +14,9 @@ from pathlib import Path
 from typing import Any
 
 from core.external_agent.contracts import TASK_ACTIVE_STATUSES, TASK_TERMINAL_STATUSES
+
+
+logger = logging.getLogger(__name__)
 
 
 class ExternalAgentTaskStoreError(RuntimeError):
@@ -279,6 +283,30 @@ class ExternalAgentTaskStore:
         )
         return result
 
+    def list_corrupted_task_ids(self) -> list[str]:
+        """Return ids of on-disk task records that exist but cannot be read.
+
+        A corrupted projection file must stay distinguishable from a task
+        that was never persisted: recovery lookups skip corrupt records, so
+        callers need this signal to report degradation instead of silently
+        answering "not found" for a store that holds unreadable records.
+        """
+        with self._lock:
+            if not self.tasks_dir.is_dir():
+                return []
+            corrupted: list[str] = []
+            for path in sorted(self.tasks_dir.glob("eat-*.json")):
+                try:
+                    self._read_path(path)
+                except (
+                    OSError,
+                    ValueError,
+                    json.JSONDecodeError,
+                    ExternalAgentTaskStoreError,
+                ):
+                    corrupted.append(path.stem)
+            return corrupted
+
     @staticmethod
     def owner_matches(record: dict[str, Any], owner_id: str) -> bool:
         return str(record.get("ownerSubjectHash") or "") == _subject_hash(owner_id)
@@ -306,7 +334,12 @@ class ExternalAgentTaskStore:
                 ValueError,
                 json.JSONDecodeError,
                 ExternalAgentTaskStoreError,
-            ):
+            ) as exc:
+                logger.warning(
+                    "external_agent_task_store corrupt record skipped file=%s error=%s",
+                    path.name,
+                    type(exc).__name__,
+                )
                 continue
         return result
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import threading
 import weakref
@@ -31,6 +32,9 @@ from .store import (
     ExternalAgentTaskStore,
 )
 from vibelution_storage import resolve_project_runtime_home
+
+
+logger = logging.getLogger(__name__)
 
 
 class ExternalAgentTaskError(RuntimeError):
@@ -483,6 +487,31 @@ class ExternalAgentTaskService:
         with self._refresh_lock:
             record = self.store.find_idempotent(owner_id=owner_id, client_request_id=client_request_id)
             if record is None:
+                corrupted_ids = self.store.list_corrupted_task_ids()
+                if corrupted_ids:
+                    # A corrupted on-disk projection must stay distinguishable
+                    # from a request that was never persisted: this recovery
+                    # answer is degraded, not simply "absent". The denial code
+                    # stays TASK_NOT_FOUND because restart/cleanup consumers
+                    # branch on it exactly.
+                    logger.warning(
+                        "external_agent_task_recovery degraded corruptRecords=%d ids=%s",
+                        len(corrupted_ids),
+                        corrupted_ids[:8],
+                    )
+                    self._record_gateway_event(
+                        "external_agent.task_recovery.degraded",
+                        fields={
+                            "corruptedRecordCount": len(corrupted_ids),
+                            "corruptedTaskIds": corrupted_ids[:24],
+                        },
+                        outcome="degraded",
+                    )
+                    raise ExternalAgentAccessError(
+                        "external Agent task was not found; task store holds "
+                        f"{len(corrupted_ids)} corrupted record(s) and recovery is degraded",
+                        code="TASK_NOT_FOUND",
+                    )
                 raise ExternalAgentAccessError("external Agent task was not found", code="TASK_NOT_FOUND")
             record, approvals = self._refresh(record)
         return self._public_task(record, pending_approvals=approvals, include_private=include_private)
