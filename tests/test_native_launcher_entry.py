@@ -33,10 +33,10 @@ def test_code_only_integration_skips_native_install_before_resolving_project(tmp
     assert not absent_project.exists() and not output.exists()
 
 
-def test_native_launch_budget_covers_start_settlement_retry_and_spawn():
+def test_native_launch_budget_covers_exactly_once_ack_settlement_and_spawn():
     from scripts.vibelution_desktop_entry import (
         DEFAULT_START_LIFECYCLE_SETTLE_TIMEOUT_SECONDS,
-        LAUNCH_SETTLEMENT_RETRY_TIMEOUT_SECONDS,
+        MAIN_LINE_LAUNCH_ACK_TIMEOUT_SECONDS,
     )
 
     block = _source().split("private static void LaunchCurrentElectronMain", 1)[1].split(
@@ -45,9 +45,10 @@ def test_native_launch_budget_covers_start_settlement_retry_and_spawn():
     budget = re.search(r'int bridgeTimeoutMs = startup \? (\d+) : (\d+);', block)
     assert budget is not None
     outer_seconds = int(budget.group(1)) / 1000
-    assert outer_seconds >= (
-        DEFAULT_START_LIFECYCLE_SETTLE_TIMEOUT_SECONDS + LAUNCH_SETTLEMENT_RETRY_TIMEOUT_SECONDS + 60
-    )
+    # Acknowledgement shares the one request's settlement deadline; an unknown
+    # result never creates another request or a separate retry budget.
+    assert 0 < MAIN_LINE_LAUNCH_ACK_TIMEOUT_SECONDS <= DEFAULT_START_LIFECYCLE_SETTLE_TIMEOUT_SECONDS
+    assert outer_seconds >= DEFAULT_START_LIFECYCLE_SETTLE_TIMEOUT_SECONDS + 60
     assert int(budget.group(2)) == 240000
     for operation in ("start", "restart", "rebuild-and-start"):
         assert f'string.Equals(thenLifecycle, "{operation}", StringComparison.OrdinalIgnoreCase)' in block
