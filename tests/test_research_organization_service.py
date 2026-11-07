@@ -1255,3 +1255,106 @@ def test_archived_former_agent_stays_visible_but_cannot_receive_new_task(org_wor
     assert blocked["message"]["deliveries"][0]["allowed"] is False
     assert blocked["message"]["deliveries"][0]["reason"] == "target_agent_archived_or_missing"
     assert any(node["agentId"] == created_agent_id for node in blocked["organization"]["agents"])
+
+
+def test_organization_canvas_survives_mistyped_record_fields(org_workspace, monkeypatch):
+    """ISS-053: mistyped list fields in stored org records must degrade the
+    single field (and never turn the organization / flow-canvas reads into a
+    500); an unforeseen converter failure drops only that one record and
+    reports a structured audit event."""
+
+    org_events: list[dict] = []
+    monkeypatch.setattr(
+        research_organization_service,
+        "_record_org_event",
+        lambda event_code, *, outcome, fields, level="info": org_events.append(
+            {"eventCode": event_code, "outcome": outcome, "fields": fields, "level": level}
+        ),
+    )
+
+    # Hardening layer: known list-typed fields degrade to defaults.
+    policy = research_organization_service._normalize_communication_policy(
+        {"allowedMessageTypes": 42, "allowedIntents": {"nope": 1}}
+    )
+    assert policy["allowedMessageTypes"] == ["notice", "request", "report"]
+    assert policy["allowedIntents"] == []
+    canvas_node = research_organization_service._agent_node_to_canvas_api(
+        {"agentId": "agent-1", "status": "active", "toolPolicy": {"allowedTools": 42}}
+    )
+    assert canvas_node["allowedTools"] == []
+
+    # Isolation layer: one raising record is dropped with an audit event while
+    # the good record converts normally.
+    def _convert(item):
+        if item.get("corrupt"):
+            raise TypeError("'int' object is not iterable")
+        return item
+
+    converted = research_organization_service._convert_org_records(
+        [{"agentId": "agent-good"}, {"agentId": "agent-bad", "corrupt": True}],
+        _convert,
+        record_kind="agent",
+    )
+    assert [item["agentId"] for item in converted] == ["agent-good"]
+    assert len(org_events) == 1
+    assert org_events[0]["eventCode"] == "research.organization.corrupt_records_dropped"
+    assert org_events[0]["outcome"] == "degraded"
+    assert org_events[0]["fields"]["droppedCount"] == 1
+    assert org_events[0]["fields"]["dropped"][0]["recordId"] == "agent-bad"
+
+    # End to end: a stored graph with mistyped fields still renders a full
+    # canvas (same behavior as GET /api/research/organization and
+    # GET /api/research/flow-canvas behind it).
+    ceo_detail = session_service.create_chat_session(title="损坏字段 CEO")
+    advisor_detail = session_service.create_chat_session(title="损坏字段顾问")
+    ceo = agent_directory_service.update_agent_instance(
+        ceo_detail["agentId"],
+        primary_mode="research",
+        role_key="research_ceo",
+        metadata={"systemRole": "ceo", "researchOrgRole": "ceo", "protected": True},
+    )
+    advisor = agent_directory_service.update_agent_instance(
+        advisor_detail["agentId"],
+        primary_mode="research",
+        role_key="research_organization_advisor",
+        metadata={"systemRole": "organization_advisor", "researchOrgRole": "organization_advisor"},
+    )
+    org_workspace.write_research_organization(
+        {
+            "schemaVersion": 1,
+            "agents": [
+                {
+                    "nodeId": "ceo-node",
+                    "agentId": ceo["agentId"],
+                    "role": "ceo",
+                    "status": "active",
+                    "toolPolicy": {"allowedTools": 42},
+                },
+                {
+                    "nodeId": "advisor-node",
+                    "agentId": advisor["agentId"],
+                    "role": "organization_advisor",
+                    "status": "active",
+                },
+            ],
+            "edges": [
+                {
+                    "edgeId": "edge-ceo-advisor",
+                    "fromAgentId": ceo["agentId"],
+                    "toAgentId": advisor["agentId"],
+                    "status": "active",
+                    "communicationPolicy": {"allowedMessageTypes": 7},
+                }
+            ],
+        }
+    )
+
+    canvas = research_organization_service.get_research_organization_canvas_graph()
+
+    assert {node["agentId"] for node in canvas["agents"]} == {ceo["agentId"], advisor["agentId"]}
+    ceo_canvas = next(node for node in canvas["agents"] if node["agentId"] == ceo["agentId"])
+    assert ceo_canvas["allowedTools"] == []
+    edge = next(edge for edge in canvas["edges"] if edge["edgeId"] == "edge-ceo-advisor")
+    assert edge["communicationPolicy"]["allowedMessageTypes"] == ["notice", "request", "report"]
+    graph = research_organization_service.get_research_organization()
+    assert any(node["agentId"] == ceo["agentId"] for node in graph["agents"])

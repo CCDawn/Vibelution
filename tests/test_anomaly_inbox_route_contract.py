@@ -154,14 +154,50 @@ def test_anomaly_inbox_route_without_question_id_returns_empty_inbox(
         "project_hypothesis_first_state_v2",
         fail_project,
     )
+    # ISS-070: an empty questionId no longer skips team validation — the route
+    # still resolves the team (same semantics as the with-question path) while
+    # keeping the legal empty-inbox response.
+    checked_teams: list[str] = []
+
+    def fake_assert_team_exists(team_id: str) -> str:
+        checked_teams.append(team_id)
+        return team_id
+
+    monkeypatch.setattr(hf_routes, "assert_team_exists", fake_assert_team_exists)
     response = _client().get(_ROUTE)
     assert response.status_code == 200
+    assert checked_teams == [_TEAM]
     body = response.json()
     assert body["schemaVersion"] == 1
     assert body["questionId"] == ""
     assert body["inbox"]["schemaVersion"] == 1
     assert body["inbox"]["ruleId"] == "anomaly_inbox_rule.v1"
     assert body["inbox"]["items"] == []
+
+
+def test_anomaly_inbox_route_without_question_id_maps_unknown_team_to_404(
+    monkeypatch,
+) -> None:
+    """ISS-070: empty questionId must not bypass team existence validation."""
+
+    from core.web.services.team_service import TeamNotFoundError
+
+    def fail_project(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("state-v2 projection must not run without a question")
+
+    monkeypatch.setattr(
+        hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        fail_project,
+    )
+
+    def raise_unknown_team(team_id: str) -> str:
+        raise TeamNotFoundError("Team not found.")
+
+    monkeypatch.setattr(hf_routes, "assert_team_exists", raise_unknown_team)
+    response = _client().get(_ROUTE)
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Team not found."
 
 
 def test_anomaly_inbox_route_end_to_end_projection_from_problems(

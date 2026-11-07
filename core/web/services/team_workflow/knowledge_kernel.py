@@ -3668,15 +3668,31 @@ def _load_transfer_records(team_id: str) -> list[dict[str, Any]]:
     if not path.exists():
         return []
     records: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    skipped_reasons: list[str] = []
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         if not line.strip():
             continue
         try:
             payload = json.loads(line)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
+            # ISS-064: fail-soft skip stays, but the dropped handoff record
+            # must be observable — report line number and parse reason.
+            skipped_reasons.append(f"line {line_number}: {exc.msg}")
             continue
         if isinstance(payload, dict):
             records.append(payload)
+    if skipped_reasons:
+        s._record_workflow_event(
+            "workflow.transfer_records_corrupt_lines_skipped",
+            team_id,
+            fields={
+                "transferRecordsPath": s._relative_path(path),
+                "skippedLineCount": len(skipped_reasons),
+                "skippedReasons": skipped_reasons[:8],
+            },
+            outcome="degraded",
+            level="warning",
+        )
     return records
 
 

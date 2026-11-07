@@ -32,6 +32,40 @@ def _counter(value: object) -> int:
     return int(value) if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
 
 
+def _invalid_counter_keys(value: Any) -> list[str]:
+    """Counter keys present with a non-integer value that `_counter` zeroed."""
+
+    raw = value if isinstance(value, dict) else {}
+    return [
+        key
+        for key in _BUDGET_COUNTER_KEYS
+        if raw.get(key) is not None
+        and (isinstance(raw.get(key), bool) or not isinstance(raw.get(key), int))
+    ]
+
+
+def _record_usage_counters_degraded(receipt_id: str, dropped_keys: list[str]) -> None:
+    """ISS-066: settled usage counters with wrong-typed values are zeroed in
+    the budget summary; keep fail-soft totals but make the drop observable
+    through the existing runtime-scene channel."""
+
+    from core.web.services.runtime_scene_service import (
+        record_runtime_scene_event_quietly,
+    )
+
+    record_runtime_scene_event_quietly(
+        "team_workflow_orchestration",
+        "research_runtime_projection",
+        "budget_usage_counters_invalid",
+        level="warning",
+        outcome="degraded",
+        fields={
+            "receiptId": receipt_id,
+            "droppedKeys": dropped_keys[:12],
+        },
+    )
+
+
 def _normalized_budget_counters(value: Any, *, requested: bool = False) -> dict[str, int]:
     raw = dict(value) if isinstance(value, dict) else {}
     tokens = raw.get("tokens")
@@ -72,6 +106,11 @@ def _budget_records(snapshot: ResearchWorkflowSnapshot) -> tuple[list[dict[str, 
         actual_counters = _normalized_budget_counters(actual)
         stage_id = str(ref.stage_id or "")
         status = str(ref.status or "")
+        invalid_actual_keys = _invalid_counter_keys(actual)
+        if invalid_actual_keys and status in _TERMINAL_CONSUMED_STATUSES:
+            _record_usage_counters_degraded(
+                str(ref.reservation_id or ref.receipt_id or ""), invalid_actual_keys
+            )
         reservation = {
             "reservationId": str(ref.reservation_id or ""),
             "receiptId": str(ref.receipt_id or ""),
