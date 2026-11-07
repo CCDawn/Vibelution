@@ -56,6 +56,7 @@ from core.runtime_manager.work_run_leases import (
     WorkRunLeaseRequest,
     check_lease_conflicts,
 )
+from core.runtime_manager.work_run_store import work_run_snapshot_shape_error
 
 from .i18n import get_web_language, text_for
 from . import agent_directory_service, agent_mode_binding_service, session_service
@@ -265,6 +266,14 @@ class SelfEvolutionRunValidationError(ValueError):
 
 class SelfEvolutionRunNotFoundError(LookupError):
     """Raised when a requested self-evolution run cannot be found."""
+
+
+class SelfEvolutionRunCorruptError(SelfEvolutionRunNotFoundError):
+    """Raised when a requested run record exists but is unreadable/corrupt.
+
+    Subclasses NotFoundError so existing 404 mappings keep working, while the
+    corrupt wording lets readers tell a damaged record from a missing one.
+    """
 
 
 def _lifecycle_string(value: Any) -> str:
@@ -2516,7 +2525,22 @@ def get_self_observation_run_snapshot(run_id: str) -> dict[str, Any] | None:
     normalized = str(run_id or "").strip()
     with _OBSERVATION_RUN_STATE_LOCK:
         snapshot = _OBSERVATION_RUNS.get(normalized)
-        return dict(snapshot) if snapshot else None
+        if snapshot is None:
+            return None
+    shape_error = work_run_snapshot_shape_error(snapshot)
+    if shape_error:
+        # Detail and event-stream readers share this getter, so a damaged
+        # record surfaces as the same explicit corrupt error on both sides
+        # instead of crashing one and silently serving the other.
+        _debug_logger.warning(
+            f"Self observation run record is corrupt: {shape_error}",
+            tag="SELF_EVOLUTION",
+        )
+        raise SelfEvolutionRunCorruptError(
+            f"Self observation run record is corrupt: {shape_error}"
+        )
+    with _OBSERVATION_RUN_STATE_LOCK:
+        return dict(snapshot)
 
 
 def force_cancel_active_self_observation_runs_for_shutdown(reason: str = "") -> list[dict[str, Any]]:
@@ -2622,17 +2646,26 @@ def _set_self_observation_terminal_state(
 
 
 def _self_observation_operator_terminated(run_id: str) -> bool:
-    snapshot = get_self_observation_run_snapshot(run_id)
+    try:
+        snapshot = get_self_observation_run_snapshot(run_id)
+    except SelfEvolutionRunCorruptError:
+        return False
     return _self_observation_has_operator_terminal_state(snapshot)
 
 
 def _self_observation_run_terminal(run_id: str) -> bool:
-    snapshot = get_self_observation_run_snapshot(run_id)
+    try:
+        snapshot = get_self_observation_run_snapshot(run_id)
+    except SelfEvolutionRunCorruptError:
+        return False
     return _self_observation_has_terminal_state(snapshot)
 
 
 def _expire_self_observation_run_deadline(run_id: str) -> None:
-    snapshot = get_self_observation_run_snapshot(run_id)
+    try:
+        snapshot = get_self_observation_run_snapshot(run_id)
+    except SelfEvolutionRunCorruptError:
+        return
     if not isinstance(snapshot, dict):
         return
     if str(snapshot.get("status") or "").strip().lower() not in {"queued", "running"}:
@@ -3434,7 +3467,10 @@ def start_self_observation_run(payload: dict[str, Any]) -> dict[str, Any]:
             "deadlineMonotonic": deadline_monotonic,
         },
     )
-    return get_self_observation_run_snapshot(run_id) or snapshot
+    try:
+        return get_self_observation_run_snapshot(run_id) or snapshot
+    except SelfEvolutionRunCorruptError:
+        return snapshot
 
 
 def execute_self_observation_action(run_id: str, action: str) -> dict[str, Any]:
@@ -3501,7 +3537,12 @@ def stream_self_observation_run_events(run_id: str, initial_snapshot: dict[str, 
     if initial_snapshot:
         yield _encode_sse_event("self_observation_run", initial_snapshot)
     while normalized_run_id:
-        snapshot = get_self_observation_run_snapshot(normalized_run_id)
+        try:
+            snapshot = get_self_observation_run_snapshot(normalized_run_id)
+        except SelfEvolutionRunCorruptError:
+            # Mid-stream corruption ends the stream instead of emitting a
+            # payload the detail endpoint would refuse.
+            return
         if snapshot is None:
             return
         if not initial_snapshot:

@@ -1,3 +1,4 @@
+import json
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import threading
@@ -443,3 +444,34 @@ def test_cross_process_admission_allows_only_one_campaign(tmp_path):
             if process.poll() is None:
                 process.terminate()
                 process.wait(timeout=10)
+
+
+def _corrupt_snapshot_status(store, campaign_id):
+    snapshot_path = store.runs_dir(RUN_KIND) / f"{campaign_id}.json"
+    payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    payload["status"] = 12345
+    snapshot_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
+def test_corrupt_detail_record_is_reported_as_corrupt(env):
+    """ISS-072：详情目标记录存在但字段类型损坏时，必须以「记录损坏」404 语义失败，
+    与「不存在」可区分，而不是把坏记录交给响应校验（500）。"""
+    actor, child, store, _, _ = env
+    queued = actor.queue(request())
+    _corrupt_snapshot_status(store, queued["runId"])
+
+    with pytest.raises(CampaignValidationError) as excinfo:
+        actor.get(queued["runId"])
+
+    assert "corrupt" in str(excinfo.value)
+
+
+def test_corrupt_active_record_is_skipped_as_none(env):
+    """ISS-072：活动项读取遇到损坏记录必须跳过（返回 None），不得 500。"""
+    actor, child, store, _, _ = env
+    queued = actor.queue(request())
+    _corrupt_snapshot_status(store, queued["runId"])
+
+    assert actor.active() is None
+    with pytest.raises(CampaignValidationError):
+        actor.get(queued["runId"])

@@ -88,3 +88,27 @@ def test_campaign_conflict_maps_to_409_and_reads_return_typed_envelopes(env):
     assert client.post("/api/evolution/self/campaigns", json=_body()).status_code == 409
     assert client.get("/api/evolution/self/campaigns/active").json() is None
     assert client.get("/api/evolution/self/campaigns/campaign-1").json()["status"] == "completed"
+
+
+def test_campaign_reads_fail_soft_on_corrupt_records(env, monkeypatch):
+    """ISS-072：活动项遇损坏记录 200 None；详情遇损坏记录 404 且措辞可辨「损坏」。"""
+    from core.web.services.self_evolution_campaign_service import CampaignValidationError
+
+    client, _, owner = env
+
+    def corrupt_active():
+        raise CampaignValidationError("Campaign snapshot record is corrupt: snapshot status is not a string")
+
+    def corrupt_get(campaign_id):
+        raise CampaignValidationError("Campaign snapshot record is corrupt: snapshot status is not a string")
+
+    owner.active_campaign = corrupt_active
+    owner.get_campaign = corrupt_get
+
+    active = client.get("/api/evolution/self/campaigns/active")
+    assert active.status_code == 200
+    assert active.json() is None
+
+    detail = client.get("/api/evolution/self/campaigns/campaign-1")
+    assert detail.status_code == 404
+    assert "corrupt" in detail.json()["detail"]

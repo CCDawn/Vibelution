@@ -242,6 +242,27 @@ def snapshot_run_id(payload: dict[str, Any]) -> str:
     ).strip()
 
 
+def work_run_snapshot_shape_error(payload: Any) -> str:
+    """Return why a snapshot cannot be served as a run record, or "" when readable.
+
+    The JSON store already quarantines undecodable files, so the remaining
+    damage class is a parsed object whose wire fields carry wrong types (for
+    example a non-string ``runId``/``status``).  Run detail and list readers
+    use this single predicate so a corrupt record can be isolated with one
+    shared definition instead of one per surface.
+    """
+
+    if not isinstance(payload, dict):
+        return "snapshot is not an object"
+    run_id = payload.get("runId")
+    if not isinstance(run_id, str) or not run_id.strip():
+        return "snapshot runId is missing or not a non-empty string"
+    status = payload.get("status")
+    if status is not None and not isinstance(status, str):
+        return "snapshot status is not a string"
+    return ""
+
+
 def snapshot_is_stale(payload: dict[str, Any]) -> bool:
     updated = _parse_datetime(str(payload.get("updatedAt") or payload.get("startedAt") or ""))
     if updated is None:

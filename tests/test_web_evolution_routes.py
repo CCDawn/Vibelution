@@ -2144,6 +2144,59 @@ def test_self_observation_action_route_returns_409_for_non_active_run(monkeypatc
     assert "not active" in second.json()["detail"]
 
 
+def test_self_observation_corrupt_record_maps_identically_on_detail_and_events(monkeypatch):
+    """ISS-073：详情与事件流对损坏记录必须语义一致——同一显式 404「记录损坏」，
+    不允许一侧 500 而另一侧照常出流。"""
+    corrupt = {
+        "runId": "self-observe-corrupt",
+        "runKind": "self_observation_run",
+        "status": 12345,
+    }
+    with self_evolution_control_service._OBSERVATION_RUN_STATE_LOCK:
+        self_evolution_control_service._OBSERVATION_RUNS["self-observe-corrupt"] = corrupt
+    try:
+        detail = client.get("/api/evolution/self/observation-runs/self-observe-corrupt")
+        events = client.get("/api/evolution/self/observation-runs/self-observe-corrupt/events")
+    finally:
+        with self_evolution_control_service._OBSERVATION_RUN_STATE_LOCK:
+            self_evolution_control_service._OBSERVATION_RUNS.pop("self-observe-corrupt", None)
+
+    assert detail.status_code == 404
+    assert "corrupt" in detail.json()["detail"]
+    assert events.status_code == 404
+    assert events.json()["detail"] == detail.json()["detail"]
+
+
+def test_self_observation_unknown_record_stays_not_found_on_both_sides():
+    detail = client.get("/api/evolution/self/observation-runs/self-observe-missing")
+    events = client.get("/api/evolution/self/observation-runs/self-observe-missing/events")
+
+    assert detail.status_code == 404
+    assert "not found" in detail.json()["detail"]
+    assert events.status_code == 404
+    assert "not found" in events.json()["detail"]
+    assert "corrupt" not in detail.json()["detail"]
+
+
+def test_autonomous_run_route_maps_corrupt_record_to_404_not_500(monkeypatch):
+    """ISS-071：损坏的自主运行详情记录必须 404 且可辨认「记录损坏」。"""
+    from core.web.services.self_evolution_autonomous_loop_service import (
+        AutonomousLoopValidationError,
+    )
+
+    def corrupt(run_id: str):
+        raise AutonomousLoopValidationError(
+            "Self-evolution autonomous loop record is corrupt: snapshot status is not a string"
+        )
+
+    monkeypatch.setattr(evolution_routes, "get_autonomous_self_evolution_run", corrupt, raising=False)
+
+    response = client.get("/api/evolution/self/autonomous-runs/self-loop-corrupt")
+
+    assert response.status_code == 404
+    assert "corrupt" in response.json()["detail"]
+
+
 def test_autonomous_self_evolution_routes_expose_start_and_read_models(monkeypatch):
     queued = {
         "runId": "self-loop-web",
@@ -2530,6 +2583,51 @@ def test_supervised_run_command_status_rejects_invalid_command_id(tmp_path, monk
     response = client.get("/api/evolution/runs/commands/cmd.bad")
 
     assert response.status_code == 422
+
+def test_supervised_run_command_status_distinguishes_corrupt_receipt_from_pending(tmp_path, monkeypatch):
+    """ISS-074：损坏回执（文件损坏或 completed 无布尔 ok）必须显式 corrupted，
+    与未完成回执的 pending 可区分。"""
+
+    def _status_for(payload_path, name):
+        monkeypatch.setattr(supervised_control_service, "RESULTS_DIR", payload_path)
+        return client.get(f"/api/evolution/runs/commands/{name}").json()
+
+    missing = _status_for(tmp_path / "no-results", "cmd-missing")
+    assert missing["status"] == "pending"
+    assert missing["errorType"] == ""
+
+    corrupt_file_dir = tmp_path / "corrupt-file"
+    corrupt_file_dir.mkdir(parents=True)
+    (corrupt_file_dir / "cmd-corrupt-file.json").write_text("{not-json", encoding="utf-8")
+    corrupt_file = _status_for(corrupt_file_dir, "cmd-corrupt-file")
+    assert corrupt_file["status"] == "corrupted"
+    assert corrupt_file["errorType"] == "CommandResultCorrupt"
+    assert "unreadable" in corrupt_file["message"]
+
+    corrupt_fields_dir = tmp_path / "corrupt-fields"
+    corrupt_fields_dir.mkdir(parents=True)
+    (corrupt_fields_dir / "cmd-corrupt-fields.json").write_text(
+        json.dumps({"commandId": "cmd-corrupt-fields", "accepted": True,
+                    "completed": True, "ok": "yes"}),
+        encoding="utf-8",
+    )
+    corrupt_fields = _status_for(corrupt_fields_dir, "cmd-corrupt-fields")
+    assert corrupt_fields["status"] == "corrupted"
+    assert corrupt_fields["errorType"] == "CommandResultCorrupt"
+
+    incomplete_dir = tmp_path / "incomplete"
+    incomplete_dir.mkdir(parents=True)
+    (incomplete_dir / "cmd-incomplete.json").write_text(
+        json.dumps({"commandId": "cmd-incomplete", "accepted": True,
+                    "completed": False, "ok": None}),
+        encoding="utf-8",
+    )
+    incomplete = _status_for(incomplete_dir, "cmd-incomplete")
+    assert incomplete["status"] == "pending"
+    assert incomplete["errorType"] == ""
+
+    assert missing["status"] != corrupt_file["status"]
+    assert incomplete["status"] != corrupt_fields["status"]
 
 def test_start_supervised_run_from_bundle_uses_launchable_file_stem(tmp_path, monkeypatch):
     _use_test_supervised_workspace(tmp_path, monkeypatch)
