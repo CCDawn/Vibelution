@@ -2166,19 +2166,14 @@ function Test-ProcessAlive {
     return $null -ne (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)
 }
 
-function Resolve-PackagedElectronDesktopEntryPath {
-    if (-not (Test-Path -LiteralPath $desktopEntryCatalogScriptPath)) {
-        throw "Desktop entry catalog is missing: $desktopEntryCatalogScriptPath"
-    }
+function Resolve-ManagedDesktopPublicEntryPath {
+    param([Parameter(Mandatory = $true)][object]$Catalog)
 
-    . $desktopEntryCatalogScriptPath
-    $catalog = Assert-DesktopEntryCatalog -ProjectDir $projectDir
-    $entryPath = Resolve-DesktopPublicEntryPath -Catalog $catalog -ProjectDir $projectDir
-    if (-not (Test-Path -LiteralPath $entryPath)) {
-        throw "Packaged Electron desktop entry is missing: $entryPath. Run scripts\build_desktop_package.ps1 before repairing the shortcut."
+    $entryPath = Resolve-DesktopPublicEntryPath -Catalog $Catalog
+    if (-not (Test-Path -LiteralPath $entryPath -PathType Leaf)) {
+        throw "Managed native Launcher entry is missing: $entryPath. Run scripts\install_windows.ps1 before repairing the shortcut."
     }
-
-    return (Resolve-Path -LiteralPath $entryPath).Path
+    return $entryPath
 }
 
 function Get-NativeLauncherEntryExePath {
@@ -2236,73 +2231,15 @@ function Ensure-NativeLauncherEntryExecutable {
     }
 }
 
-function Set-LauncherShellShortcut {
-    param(
-        [Parameter(Mandatory = $true)]
-        [object]$Shell,
-        [Parameter(Mandatory = $true)]
-        [string]$ShortcutPath,
-        [Parameter(Mandatory = $true)]
-        [string]$TargetPath,
-        [Parameter(Mandatory = $true)]
-        [string]$Arguments,
-        [Parameter(Mandatory = $true)]
-        [string]$IconPath
-    )
-
-    $shortcut = $Shell.CreateShortcut($ShortcutPath)
-    $shortcut.TargetPath = $TargetPath
-    $shortcut.Arguments = $Arguments
-    $shortcut.WorkingDirectory = $projectDir
-    $shortcut.IconLocation = ('{0},0' -f $IconPath)
-    $shortcut.Description = "Vibelution Launcher"
-    $shortcut.WindowStyle = 7
-    $shortcut.Save()
-}
-
 function Repair-LauncherShortcut {
     . $desktopEntryCatalogScriptPath
-    $startMenuRoot = [Environment]::GetFolderPath("StartMenu")
-    if (-not $startMenuRoot -and $env:APPDATA) {
-        $startMenuRoot = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu"
-    }
-    if (-not $startMenuRoot) {
-        throw "Windows Start Menu path could not be resolved."
-    }
+    $catalog = Assert-DesktopEntryCatalog -ProjectDir $projectDir
+    $shortcutTargetPath = Resolve-ManagedDesktopPublicEntryPath -Catalog $catalog
+    $shortcutArguments = Resolve-DesktopPublicEntryArguments -Catalog $catalog
+    $iconPath = $shortcutTargetPath
 
-    $programsDir = Join-Path $startMenuRoot "Programs"
-    if (-not (Test-Path -LiteralPath $programsDir)) {
-        New-Item -ItemType Directory -Path $programsDir -Force | Out-Null
-    }
-
-    $iconPath = $launcherIconPath
-    if (-not (Test-Path -LiteralPath $iconPath)) {
-        $iconPath = Join-Path $projectDir "web\public\favicon.ico"
-    }
-    if (-not (Test-Path -LiteralPath $iconPath)) {
-        throw "Vibelution icon file is missing: $launcherIconPath"
-    }
-
-    $shortcutMode = "electron_package"
-    try {
-        $shortcutTargetPath = Resolve-PackagedElectronDesktopEntryPath
-        # Ordinary shortcuts start the resident desktop pet. Opening the full
-        # Launcher remains an explicit click or focus deep-link action.
-        $shortcutArguments = ('--workspace "{0}"' -f $projectDir)
-    } catch {
-        $wrapperScript = Join-Path $projectDir "scripts\launch_vibelution_shortcut.ps1"
-        if (-not (Test-Path -LiteralPath $wrapperScript)) {
-            throw
-        }
-        $shortcutTargetPath = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
-        $shortcutArguments = ('-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -ProjectDir "{1}"' -f $wrapperScript, $projectDir)
-        $shortcutMode = "native_shortcut_bootstrap"
-    }
-
-    $shortcutPath = Join-Path $programsDir $launcherShortcutName
     $shell = New-Object -ComObject WScript.Shell
-    Set-LauncherShellShortcut -Shell $shell -ShortcutPath $shortcutPath -TargetPath $shortcutTargetPath -Arguments $shortcutArguments -IconPath $iconPath
-
+    $shortcutPath = Set-VibelutionStartMenuLauncherShortcut -Shell $shell -TargetPath $shortcutTargetPath -Arguments $shortcutArguments -IconPath $iconPath
     $desktopShortcutPath = Set-VibelutionDesktopLauncherShortcut -Shell $shell -ProjectDir $projectDir -TargetPath $shortcutTargetPath -Arguments $shortcutArguments -IconPath $iconPath
 
     Write-LauncherControlLog `
@@ -2312,7 +2249,7 @@ function Repair-LauncherShortcut {
             shortcut_path = $shortcutPath
             desktop_shortcut_path = $desktopShortcutPath
             target_path = $shortcutTargetPath
-            shortcut_mode = $shortcutMode
+            shortcut_mode = "managed_assistant"
             desktop_entry = $shortcutTargetPath
             icon_path = $iconPath
         }

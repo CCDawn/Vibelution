@@ -8,6 +8,7 @@ import subprocess
 import pytest
 
 from tests.test_managed_desktop_package import package as managed_source_package, package_fixture
+from tests.test_launcher_shortcut_resident import shortcut_harness, shortcut_project
 
 ROOT = Path(__file__).resolve().parents[1]
 ENTRY = ROOT / "scripts/windows_launcher_entry/VibelutionLauncher.cs"
@@ -280,44 +281,25 @@ def test_native_managed_admission_fails_closed(managed_native_harness, tmp_path,
 
 
 @pytest.mark.parametrize("changed_input", ["assistant", "build", "icon"])
-def test_shortcut_cache_key_hashes_every_native_build_input(tmp_path, changed_input):
+def test_shortcut_keeps_the_installed_entry_when_native_build_inputs_change(shortcut_harness, shortcut_project, changed_input):
     if os.name != "nt":
-        pytest.skip("Windows PowerShell cache function")
-    source = (ROOT / "scripts/launch_vibelution_shortcut.ps1").read_text(encoding="utf-8")
-    function = source.split("function Get-NativeEntryCacheKey {", 1)[1].split("$localAppData =", 1)[0]
-    paths = {name: tmp_path / f"{name}.input" for name in ("source", "assistant", "build", "icon")}
-    for name, path in paths.items():
-        path.write_text(f"original {name}", encoding="utf-8")
-    source_bytes = paths["source"].read_bytes()
-    call = "Get-NativeEntryCacheKey " + " ".join(
-        f"-{parameter} '{str(paths[name]).replace(chr(39), chr(39) * 2)}'"
-        for parameter, name in (("SourcePath", "source"), ("AssistantSourcePath", "assistant"),
-                                ("BuildScriptPath", "build"), ("IconPath", "icon"))
-    )
-    script = tmp_path / "cache-only.ps1"
-    script.write_text('Set-StrictMode -Version Latest\n$ErrorActionPreference = "Stop"\n'
-                      + "function Get-NativeEntryCacheKey {" + function + "\n" + call, encoding="utf-8")
-    private = tmp_path / "private"
-    private.mkdir()
-    env = {k: v for k, v in os.environ.items() if not k.upper().startswith("VIBELUTION_")}
-    env.update(USERPROFILE=str(private), HOME=str(private), LOCALAPPDATA=str(private))
-    powershell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
-    env["PSModulePath"] = str(powershell.parent / "Modules")
-
-    def key():
-        result = subprocess.run([str(powershell), "-NoLogo", "-NoProfile", "-NonInteractive",
-                                 "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", str(script)],
-                                capture_output=True, text=True, timeout=15, env=env,
-                                creationflags=subprocess.CREATE_NO_WINDOW)
-        assert result.returncode == 0, result.stdout + result.stderr
-        return result.stdout.strip()
-
-    before = key()
-    paths[changed_input].write_text(f"changed {changed_input}", encoding="utf-8")
-    after = key()
-    assert before != after, f"{changed_input} must invalidate the native entry cache"
-    combined = "|".join(hashlib.sha256(paths[name].read_bytes()).hexdigest().upper()
-                        for name in ("source", "assistant", "build", "icon"))
-    assert after == hashlib.sha256(combined.encode("utf-8")).hexdigest()[:16]
-    assert key() == after
-    assert paths["source"].read_bytes() == source_bytes
+        pytest.skip("Windows PowerShell managed entry")
+    paths = {
+        "assistant": "scripts/windows_launcher_entry/ManagedDesktopAssistant.cs",
+        "build": "scripts/windows_launcher_entry/build_vibelution_launcher_entry.ps1",
+        "icon": "assets/icons/vibelution.ico",
+    }
+    path = shortcut_project / paths[changed_input]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"original {changed_input}", encoding="utf-8")
+    before = shortcut_harness("wrapper", "installed")
+    path.write_text(f"changed {changed_input}", encoding="utf-8")
+    after = shortcut_harness("wrapper", "installed")
+    assert before["message"] == after["message"] == ""
+    assert before["calls"] == after["calls"]
+    assert before["launches"] == after["launches"] == [{
+        "target": after["expected"], "arguments": ["--assistant"],
+        "workingDirectory": after["workingDirectory"], "windowStyle": "Hidden",
+    }]
+    assert path.read_text(encoding="utf-8") == f"changed {changed_input}"
+    assert not list(shortcut_project.rglob("*.exe"))

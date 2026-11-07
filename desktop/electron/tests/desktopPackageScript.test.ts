@@ -353,7 +353,8 @@ describe("desktop package script", () => {
     expect(script).toContain("function Invoke-CheckedNative");
     expect(script).toContain("$entryCatalogScript = Join-Path $projectDir \"scripts/desktop_entry_catalog.ps1\"");
     expect(script).toContain(". $entryCatalogScript");
-    expect(script).toContain("$desktopExe = Resolve-DesktopPublicEntryPath");
+    expect(script).toContain("$desktopExe = Resolve-DesktopPackageEntryPath");
+    expect(script).not.toContain("Resolve-DesktopPublicEntryPath");
     expect(script).toContain("Assert-DesktopEntryCatalog");
     expect(script).toContain("function Assert-NoDesktopPackageProcesses");
     expect(script).toContain("function Wait-ForNoNewDesktopPackageProcesses");
@@ -419,7 +420,8 @@ describe("desktop package script", () => {
     expect(script).toContain("function Invoke-CheckedNative");
     expect(script).toContain("$entryCatalogScript = Join-Path $projectDir \"scripts/desktop_entry_catalog.ps1\"");
     expect(script).toContain(". $entryCatalogScript");
-    expect(script).toContain("$desktopExe = Resolve-DesktopPublicEntryPath");
+    expect(script).toContain("$desktopExe = Resolve-DesktopPackageEntryPath");
+    expect(script).not.toContain("Resolve-DesktopPublicEntryPath");
     expect(script).toContain("Assert-DesktopEntryCatalog");
     expect(script).toContain("function Get-AllVibelutionDesktopProcesses");
     expect(script).toContain("function Get-DesktopPackageProcesses");
@@ -450,6 +452,8 @@ describe("desktop package script", () => {
   it("provides a native Workbench-close canary that drives the packaged Electron close event", () => {
     const script = readFileSync(workbenchCloseCanaryScriptPath, "utf8");
 
+    expect(script).toContain("$desktopExe = Resolve-DesktopPackageEntryPath");
+    expect(script).not.toContain("Resolve-DesktopPublicEntryPath");
     expect(script).toContain("$packageVerifier = Join-Path $projectDir \"scripts/verify_desktop_package.ps1\"");
     expect(script).toContain("$canarySummaryPath = Join-Path $projectDir \".runtime/launcher/electron-workbench-close-canary-summary.json\"");
     expect(script).toContain("--workbench-close-canary");

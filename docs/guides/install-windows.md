@@ -2,7 +2,7 @@
 
 其他平台：[macOS](install-macos.md) · [Linux](install-linux.md)
 
-目标：用尽量少的步骤在本机打开 Vibelution 工作台。
+目标：用尽量少的步骤在本机打开 Vibelution 个人助理和工作台。
 
 ## 你需要什么
 
@@ -59,18 +59,27 @@ powershell -ExecutionPolicy Bypass -File scripts/install_windows.ps1 -SkipFronte
 3. 准备 `desktop/electron` 构建依赖（`npm ci`；缺 electron 二进制时自动补装）
 4. 在 `web/` 执行 `npm install`（若缺 `node_modules`）
 5. 构建 `web/dist`（若需要）
-6. 同步桌面/开始菜单用的 **Vibelution Launcher** 入口（若本机工具链可用）
+6. 同步并校验必需的原生 **Vibelution Launcher** 入口；失败时停止安装
 7. 构建并发布 managed 桌面包（用 node-gyp 现场编译原生模块，这一步需要 VS C++ 工具链）
-8. 打印配置路径与启动方式
+8. 将桌面和开始菜单快捷方式统一指向系统 LocalApplicationData 下的 `Vibelution\Launcher\VibelutionLauncher.exe`，参数固定为 `--assistant`
+9. 打印配置路径与启动方式
 
 ## 启动
 
-**推荐**：双击桌面上的 **Vibelution Launcher**（或开始菜单同名项）。
+**推荐**：双击桌面上的 **Vibelution Launcher**（或开始菜单中的 **Vibelution**）打开个人助理。
+快捷方式使用托管桌面包，目标、工作目录和图标均不依赖源码 checkout 的位置，也不引用 `dist/desktop/win-unpacked`。
 
 或：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/vibelution_launcher.ps1 -Action start
+$launcher = Join-Path ([Environment]::GetFolderPath("LocalApplicationData")) "Vibelution\Launcher\VibelutionLauncher.exe"
+& $launcher --assistant
+```
+
+开发时启动当前项目工作台，仍使用项目生命周期入口：
+
+```powershell
+& $launcher --project (Get-Location).Path start
 ```
 
 控制面为 **Electron Launcher 控制窗口**（IPC，非浏览器 URL）；Python `:8765` 控制面已退役（[ADR 0009](../adr/0009-launcher-control-plane-lives-in-electron-main.md)）。
@@ -94,6 +103,7 @@ powershell -ExecutionPolicy Bypass -File scripts/vibelution_launcher.ps1 -Action
 | 脚本报缺 VS C++ 工具链 | 按上方 winget 命令安装 VS 2022 生成工具（C++ 工作负载），**新开终端**后重跑 `install_windows.ps1` |
 | electron 二进制缺失（`node_modules\electron\dist\electron.exe` 不存在） | 安装脚本会自动执行 `node node_modules\electron\install.js` 补装；下载不通时设置 `ELECTRON_MIRROR`（如 `https://npmmirror.com/mirrors/electron/`）后重跑 |
 | Launcher 起不来 | `python scripts/migrate_project_storage.py inventory` 输出的 `activePaths.runtime/launcher/` |
+| 快捷方式修复报托管原生入口缺失 | 重跑 `install_windows.ps1` 完成原生入口同步和托管包发布；修复失败时不会改写成 PowerShell 或旧 `dist` 快捷方式 |
 | 工作台打不开 / 重建失败 | inventory 输出的 `activePaths.logs/runtime_scenes/` 最新目录；确认 git 在 **main**（开发机） |
 | 黑窗闪烁 | 应使用官方 Launcher / pythonw 路径，勿手搓 `python.exe` 常驻服务 |
 

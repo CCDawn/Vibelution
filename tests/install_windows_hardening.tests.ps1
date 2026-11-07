@@ -320,6 +320,12 @@ $publishedIndex = $source.IndexOf('-Label "Build and publish managed desktop pac
 $shortcutIndex = $source.IndexOf('$null = Set-VibelutionDesktopLauncherShortcut')
 Assert-True -Name "shortcut owner stays after managed publication" -Condition (
     $publishedIndex -ge 0 -and $shortcutIndex -gt $publishedIndex -and (-not $source.Contains("CreateShortcut")))
+Assert-True -Name "desktop and Start Menu use the canonical managed assistant" -Condition (
+    $source.Contains('Set-VibelutionStartMenuLauncherShortcut') -and
+    $source.Contains('$desktopEntry = Resolve-DesktopPublicEntryPath -Catalog $catalog') -and
+    $source.Contains('$desktopArguments = Resolve-DesktopPublicEntryArguments -Catalog $catalog') -and
+    $source.Contains('-TargetPath $desktopEntry -Arguments $desktopArguments -IconPath $desktopEntry') -and
+    (-not $source.Contains('--workspace')))
 
 Write-Host ""
 Write-Host "Passed: $script:Passed  Failed: $script:Failed"

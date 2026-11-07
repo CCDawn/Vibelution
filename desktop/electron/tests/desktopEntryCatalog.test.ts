@@ -7,10 +7,13 @@ type DesktopEntryCatalog = {
   publicProductEntries: Array<{
     id: string;
     label: string;
+    pathBase: string;
     path: string;
+    arguments: string[];
     target: string;
     windowProvider: string;
     shortcutAllowed: boolean;
+    publicProductEntry: boolean;
   }>;
   operatorEntries: Array<{
     id: string;
@@ -40,7 +43,7 @@ function readCatalog(): DesktopEntryCatalog {
 }
 
 describe("desktop entry catalog", () => {
-  it("declares Vibelution.exe as the only public product entry", () => {
+  it("declares the managed native assistant as the only public product entry", () => {
     const catalog = readCatalog();
 
     expect(catalog.schemaVersion).toBe(1);
@@ -48,10 +51,13 @@ describe("desktop entry catalog", () => {
     expect(catalog.publicProductEntries[0]).toMatchObject({
       id: "vibelution-desktop-package",
       label: "Vibelution",
-      path: "dist/desktop/win-unpacked/Vibelution.exe",
+      pathBase: "localAppData",
+      path: "Vibelution/Launcher/VibelutionLauncher.exe",
+      arguments: ["--assistant"],
       target: "launcher",
       windowProvider: "electron",
-      shortcutAllowed: true
+      shortcutAllowed: true,
+      publicProductEntry: true
     });
   });
 
@@ -60,6 +66,13 @@ describe("desktop entry catalog", () => {
 
     expect(catalog.operatorEntries).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({
+          id: "desktop-package-artifact",
+          pathBase: "project",
+          path: "dist/desktop/win-unpacked/Vibelution.exe",
+          shortcutAllowed: false,
+          publicProductEntry: false
+        }),
         expect.objectContaining({ path: "scripts/vibelution_launcher.ps1", publicProductEntry: false }),
         expect.objectContaining({ path: "scripts/vibelution_launcher.py", publicProductEntry: false })
       ])
@@ -89,6 +102,9 @@ describe("desktop entry catalog", () => {
     expect(script).toContain("function Read-DesktopEntryCatalog");
     expect(script).toContain("function Assert-DesktopEntryCatalog");
     expect(script).toContain("function Resolve-DesktopPublicEntryPath");
+    expect(script).toContain('GetFolderPath("LocalApplicationData")');
+    expect(script).toContain("function Resolve-DesktopPublicEntryArguments");
+    expect(script).toContain("function Resolve-DesktopPackageEntryPath");
     expect(script).toContain("desktop-entry-catalog.json");
   });
 });

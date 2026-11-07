@@ -106,21 +106,30 @@ def test_native_launcher_secondary_shortcut_launch_shows_assistant_without_workb
     assert "parsed.FromShortcut" in source
 
 
-def test_launch_vibelution_shortcut_script_builds_content_addressed_entry():
+def test_launch_vibelution_shortcut_script_uses_the_canonical_managed_entry():
     source = (PROJECT_ROOT / "scripts" / "launch_vibelution_shortcut.ps1").read_text(encoding="utf-8")
 
-    assert "entry-cache" in source
-    assert "--from-shortcut" in source
-    assert "build_vibelution_launcher_entry.ps1" in source
+    assert "entry-cache" not in source
+    assert "--from-shortcut" not in source
+    assert "build_vibelution_launcher_entry.ps1" not in source
+    assert "Resolve-DesktopPublicEntryPath -Catalog $catalog" in source
+    assert "Resolve-DesktopPublicEntryArguments -Catalog $catalog" in source
+    assert "Managed native Launcher entry is missing:" in source
+    assert "install_windows.ps1" in source
     assert "Start-Process" in source
     assert "WindowStyle Hidden" in source
     helper = (PROJECT_ROOT / "scripts" / "desktop_entry_catalog.ps1").read_text(encoding="utf-8")
     assert "Vibelution Launcher.lnk" in helper
     assert "Set-VibelutionDesktopLauncherShortcut" in source
+    assert "Set-VibelutionStartMenuLauncherShortcut" in source
     assert "CreateShortcut" not in source
     assert "WScript.Shell" in source
     assert "WindowStyle = 7" in helper
-    assert "Repair-DesktopLauncherShortcut" in source
+    assert "-WorkingDirectory (Split-Path -Parent $entryExe)" in source
+    assert "-IconPath $entryExe" in source
+    assert "powershell.exe" not in source
+    assert "--project" not in source
+    assert "--action" not in source
 
 
 def test_native_launcher_last_resort_tray_defers_lifecycle_to_electron():

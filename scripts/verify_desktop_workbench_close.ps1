@@ -13,7 +13,7 @@ $entryCatalogScript = Join-Path $projectDir "scripts/desktop_entry_catalog.ps1"
 . $entryCatalogScript
 $entryCatalog = Assert-DesktopEntryCatalog -ProjectDir $projectDir
 $packageVerifier = Join-Path $projectDir "scripts/verify_desktop_package.ps1"
-$desktopExe = Resolve-DesktopPublicEntryPath -Catalog $entryCatalog -ProjectDir $projectDir
+$desktopExe = Resolve-DesktopPackageEntryPath -Catalog $entryCatalog -ProjectDir $projectDir
 $canaryUserDataRoot = Join-Path $projectDir ".runtime/electron-workbench-close-canary-user-data"
 $canarySummaryPath = Join-Path $projectDir ".runtime/launcher/electron-workbench-close-canary-summary.json"
 $workbenchWindowTitle = "Vibelution Workbench"
