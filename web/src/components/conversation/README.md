@@ -9,8 +9,10 @@ window, and turn composition. Stick-bottom scroll lives in
 `useConversationTimelineFollow.ts`. Process/response expansion state, the
 segment parse cache, and prewarm live in `useConversationProcessExpansion.ts`.
 The turn-navigator directory and live current-turn index live in
-`useConversationTurnNav.ts`. Pure presentation, timeline projection, and tool
-rendering should live outside the shell.
+`useConversationTurnNav.ts`. Image preview open/close state lives in
+`useConversationImagePreview.ts`; the lazy dialog mount stays a shell gate.
+Pure presentation, timeline projection, and tool rendering should live outside
+the shell.
 
 ## 30-second routing (Agent reading map)
 
@@ -40,7 +42,7 @@ rendering should live outside the shell.
 | Progress/commentary narration lane | `codexTranscriptCells.ts` (lane dedupe/rules), `ConversationView.tsx` (`renderCodexProgressCell`) |
 | Mental-state rows | `conversationMentalState.ts` |
 | Composer shortcuts / slash commands | `composerShortcuts.ts`, `conversationSlashCommandSuggestions.ts` |
-| Image artifacts / preview dialog | `ConversationImageArtifactView.tsx`, `ConversationImagePreviewDialog.tsx` |
+| Image artifacts / preview dialog | `ConversationImageArtifactView.tsx`, `ConversationImagePreviewDialog.tsx`; open/close state in `useConversationImagePreview.ts` (lazy mount stays in `ConversationView.tsx`) |
 | Turn file deliveries / recorded patches | `ConversationFileDeliveries.tsx`, `conversationFileDeliveryModel.ts`; successful native tool calls only, no session-level changed-file attribution. Content is a turn snapshot, patches are ordered operations rather than a net filesystem diff. HTML uses the shared static sandbox preview. |
 | Turn navigator rail | `ConversationTurnNavigator.tsx`, `useConversationTurnNav.ts`, `conversationTurnNavigation.ts` |
 | Turn avatar / header compaction | `conversationTurnAvatar.ts`, `ConversationTurnAvatarContent.tsx` |
@@ -67,6 +69,7 @@ Approximate ownership inside the shell. Line ranges drift; use the map by
 | Response streaming render | streaming segments / markdown | streaming + markdown modules |
 | Tool activity strip | tool lifecycle UI | `ConversationToolActivity.tsx` |
 | Composer | draft, attachments, slash, submit keys | composer pure modules + Chat route hooks |
+| Image preview open/close | preview request, Escape dismiss | `useConversationImagePreview.ts` |
 | Image preview mount | conditional React.lazy dialog | keep shell gate |
 | Text-selection quote | quote / copy / reference / side-chat menu | `useConversationSelectionQuote.tsx` |
 | Branch fork dialog | target message, scope, pending, open/close/submit | `useConversationForkSession.ts`; `ConversationForkSessionDialog` JSX stays in the shell |
@@ -82,6 +85,7 @@ Approximate ownership inside the shell. Line ranges drift; use the map by
 | Prefetch without mount | `prefetchConversationView.ts` | mounting ConversationView early |
 | Timeline text-selection quote | `useConversationSelectionQuote.tsx` | stick-bottom / history-load scroll |
 | Branch fork dialog state | `useConversationForkSession.ts` | route API call, or moving `ConversationForkSessionDialog` out of the shell |
+| Image preview open/close state | `useConversationImagePreview.ts` | inlining preview state back into the shell, or moving the dialog mount out of the shell |
 | Process / response expansion state | `useConversationProcessExpansion.ts` | inlining section defaults back into the shell |
 | Turn navigator directory | `useConversationTurnNav.ts` | inlining preview maps back into the shell |
 
