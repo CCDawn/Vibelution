@@ -1058,6 +1058,47 @@ def test_ledger_merged_wake_digs_all_receipts_in_one_turn(monkeypatch, personal_
     assert patrol.patrol_once(now=NOW + 60.0)["wake"] is None
 
 
+
+def test_merged_wake_message_keeps_full_receipt_bodies():
+    """多条回执合并时保留每条完整正文，不再退化成 200 字摘要。"""
+
+    carrier = _receipt_row("r-3")
+    first = _receipt_row("r-1")
+    second = _receipt_row("r-2")
+    first_body = "第一条完整结论：" + ("证据A" * 150)
+    second_body = "第二条完整结论：" + ("证据B" * 150)
+    first["content"] = first_body
+    second["content"] = second_body
+
+    message, consumed = patrol._merged_wake_message(
+        carrier, [first, second, carrier], "agent-pa"
+    )
+
+    assert first_body in message["content"]
+    assert second_body in message["content"]
+    # 摘要不再顶替正文。
+    assert "已完成调研" not in message["content"]
+    assert consumed == ["r-3", "r-1", "r-2"]
+
+
+def test_merged_wake_leaves_clipped_receipt_unconsumed(monkeypatch, personal_env):
+    """正文被截断的回执不消费：收件箱原文仍可读，prompt 里标了截断。"""
+
+    _seed_ledger_agents(personal_env)
+    _seed_dispatch_and_receipts(personal_env, ["r-1", "r-2"])
+    harness = _LedgerHarness(monkeypatch)
+    monkeypatch.setattr(patrol, "WAKE_RECEIPT_BODY_LIMIT", 4)
+
+    result = patrol.patrol_once(now=NOW)
+
+    assert result["wake"]["attempted"] is True
+    message = harness.wake_calls[0]["message"]
+    assert "正文已截断" in message["content"]
+    # 截断的回执留在收件箱：未消费，正文不会凭空消失。
+    assert result["wake"]["consumedReceiptIds"] == []
+    # digested 仍然全批落账：截断不是重试理由。
+    assert sorted(result["wake"]["digestedReceiptIds"]) == ["r-1", "r-2"]
+
 def test_ledger_wakes_receipt_outside_legacy_window(monkeypatch, personal_env):
     """出窗回执照样可见照样唤醒（批三核心目标）：计数窗口现算已死。"""
 

@@ -132,6 +132,10 @@ _TITLE_LIMIT = 80
 _BODY_LIMIT = 160
 _ID_SEGMENT_LIMIT = 64
 _SUMMARY_LIMIT = 200
+# 回执正文并入唤醒 prompt 的边界：单条与整批都设上限。超限只带截断标记，
+# 该回执保持未消费，正文仍留在 PA 收件箱可读，不会在会话里凭空消失。
+WAKE_RECEIPT_BODY_LIMIT = 4000
+WAKE_RECEIPT_BATCH_LIMIT = 32000
 
 
 def _clip(value: Any, *, limit: int = _TITLE_LIMIT) -> str:
@@ -580,24 +584,65 @@ def _merged_wake_message(
     carrier: dict[str, Any],
     receipts: list[dict[str, Any]],
     pa_agent_id: str,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], list[str]]:
     """One turn digests every wake-eligible receipt, not one per turn.
 
     The carrier (newest receipt) keeps its identity — ``wake_agent_for_inbox_message``
-    consumes exactly it — while every other receipt is appended to the prompt
-    content so the single PA turn sees the whole batch.
+    consumes exactly it — while every other receipt joins the prompt with its
+    full body instead of the 200-char summary. Bodies stay bounded per receipt
+    and per batch; a receipt that had to be clipped is *not* consumed, so its
+    body stays readable in the PA inbox instead of vanishing from the transcript.
+
+    Returns ``(message, consumed_ids)`` — ids whose full body reached the prompt.
     """
 
     message = dict(carrier)
     message.setdefault("targetAgentId", pa_agent_id)
     message.setdefault("targetSessionId", "")
+    carrier_id = _text(carrier, "messageId")
     others = [
         row
         for row in receipts
-        if _text(row, "messageId") != _text(carrier, "messageId")
+        if _text(row, "messageId") != carrier_id
     ]
+    consumed_ids = [carrier_id] if carrier_id else []
     if not others:
-        return message
+        return message, consumed_ids
+    lines = [
+        f"[合并消化] 本轮唤醒一并处理 {len(receipts)} 条未消化回执（全部随本轮标记为已消化）：",
+    ]
+    remaining = WAKE_RECEIPT_BATCH_LIMIT
+    for index, row in enumerate([carrier, *others], start=1):
+        message_id = _text(row, "messageId")
+        source = _text(row, "sourceAgentName") or _text(row, "sourceAgentId") or "外部来源"
+        body = _text(row, "content") or _text(row, "summary")
+        if index == 1:
+            # carrier 正文原样落地，不参与批量预算。
+            lines.append(
+                f"{index}. {message_id}（{source}，{_text(row, 'createdAt')}）：{body}"
+            )
+            continue
+        complete = True
+        if len(body) > WAKE_RECEIPT_BODY_LIMIT:
+            body = body[:WAKE_RECEIPT_BODY_LIMIT]
+            complete = False
+        if len(body) > remaining:
+            body = body[: max(0, remaining)]
+            complete = False
+        remaining = max(0, remaining - len(body))
+        marker = "（正文已截断，完整原文仍在助理收件箱，未随本轮消费）" if not complete else ""
+        lines.append(
+            f"{index}. {message_id}（{source}，{_text(row, 'createdAt')}）：{body}{marker}"
+        )
+        if complete and message_id:
+            consumed_ids.append(message_id)
+    lines.append("请逐条核对以上回执并纳入处理；本轮已标记消化，无需再等下一次提醒。")
+    content = _text(message, "content") or _text(message, "summary")
+    message["content"] = "\n".join([content, *lines]) if content else "\n".join(lines)
+    message["summary"] = _clip(
+        f"合并 {len(receipts)} 条回执：{_text(message, 'summary')}", limit=_SUMMARY_LIMIT
+    )
+    return message, consumed_ids
     lines = [
         f"[合并消化] 本轮唤醒一并处理 {len(receipts)} 条未消化回执（全部随本轮标记为已消化）：",
     ]
@@ -692,7 +737,8 @@ def _attempt_merged_wake(
 
     ``reserved`` is committed before any submission; ``accepted`` (turn
     started — the whole batch is digest-marked in one transaction and the
-    non-carrier receipts are consumed) and ``unknown`` (outcome unprovable —
+    receipts whose full body reached the prompt are consumed) and ``unknown``
+    (outcome unprovable —
     never retried) consume quota; ``cancelled_pre_admission`` (skipped —
     provably no turn) is retryable and consumes nothing. Exceptions that
     provably never reached the submission call (directory read, prompt
@@ -711,7 +757,9 @@ def _attempt_merged_wake(
     receipt_ids = [_text(row, "messageId") for row in wake_eligible if _text(row, "messageId")]
     attempt_id = _ledger_reserve_wake(receipt_ids, now=now) if ledger_ready else None
     if attempt_id:
-        wake_message = _merged_wake_message(carrier, wake_eligible, pa_agent_id)
+        wake_message, complete_ids = _merged_wake_message(
+            carrier, wake_eligible, pa_agent_id
+        )
     else:
         if ledger_ready:
             logger.warning(
@@ -720,6 +768,8 @@ def _attempt_merged_wake(
         wake_message = dict(carrier)
         wake_message.setdefault("targetAgentId", pa_agent_id)
         wake_message.setdefault("targetSessionId", "")
+        # 未走台账合并时只有 carrier 正文进入 prompt。
+        complete_ids = [carrier_id] if carrier_id else []
 
     delivery: dict[str, Any]
     digested_ids: list[str] = []
@@ -768,7 +818,7 @@ def _attempt_merged_wake(
                 )
                 consumed_ids = _consume_pa_inbox_messages(
                     pa_agent_id,
-                    [mid for mid in receipt_ids if mid != carrier_id],
+                    [mid for mid in complete_ids if mid != carrier_id],
                     session_id=_text(delivery, "targetSessionId"),
                     turn_id=_text(delivery, "turnId"),
                 )
@@ -1335,6 +1385,8 @@ __all__ = [
     "PATROL_INTERVAL_SECONDS",
     "PATROL_SOURCE",
     "WAKE_COOLDOWN_SECONDS",
+    "WAKE_RECEIPT_BATCH_LIMIT",
+    "WAKE_RECEIPT_BODY_LIMIT",
     "collect_assistant_digest_attention",
     "find_undigested_receipts",
     "is_pa_patrol_enabled",
