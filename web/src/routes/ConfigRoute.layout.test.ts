@@ -197,7 +197,7 @@ describe("ConfigRoute layout contract", () => {
     expect(quickSetupStylesSource).not.toContain("min-h-[28rem]");
     expect(quickSetupStylesSource).not.toContain("minmax(22rem,0.9fr)_minmax(28rem,1.1fr)");
     expect(routeSource).toContain('workspace.schemaVersion === 2 && isSectionVisible("models")');
-    expect(routeSourceRaw).toContain("compactHome");
+    expect(routeSourceRaw).toContain("modelEditorDrafts={modelEditorDrafts}");
     expect(routeSource).toContain('isSectionVisible("models")');
   });
 
@@ -453,7 +453,7 @@ describe("ConfigRoute layout contract", () => {
   });
 
   it("keeps existing Provider management in a bounded desktop list-detail grid", () => {
-    expect(providerPanelSource).toContain("defaultWidth: 224");
+    expect(providerPanelSource).toContain("WORKBENCH_LAYOUT_IDS.configModelAssets");
     expect(providerPanelStyles.registryWorkspace).not.toContain("max-[960px]");
     expect(providerPanelStyles.providerList).toContain("min-h-0");
     expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
@@ -507,7 +507,7 @@ describe("ConfigRoute layout contract", () => {
     expect(styles.content).toContain("h-full");
     expect(styles.pageViewport).toContain("overflow-y-auto");
     expect(styles.pageViewport).toContain("content-start");
-    expect(styles.providerModelsLayout).not.toContain("h-full");
+    expect(styles.providerModelsLayout).toContain("h-full");
     expect(styles.notice).toContain("relative");
     expect(styles.notice).toContain("z-10");
     expect(styles.notice).toContain("shrink-0");
@@ -643,7 +643,7 @@ describe("ConfigRoute layout contract", () => {
   it("converges the provider registry into a compact VUI workbench contract", () => {
     expect(providerPanelStylesSource).not.toMatch(/\bsurface-card\b(?!\))/);
     expect(providerPanelStyles.sectionSurface).toContain("!rounded-none");
-    expect(providerPanelSource).toContain("defaultWidth: 224");
+    expect(providerPanelSource).toContain("WORKBENCH_LAYOUT_IDS.configModelAssets");
     expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
     expect(providerPanelStyles.tableScroll).toContain("min-h-0");
     expect(providerPanelStyles.providerButton).toContain("!min-h-9");

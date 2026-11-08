@@ -146,172 +146,234 @@ async function renderModelDetails(models: ConfigCatalogModel[], options: {liveRe
   return container.querySelector<HTMLElement>('[data-vui-region="config-models-detail"]')!.outerHTML;
 }
 
-describe("compact model services home", () => {
+function buttonByText(container: ParentNode, text: string): HTMLButtonElement {
+  const button = [...container.querySelectorAll<HTMLButtonElement>("button")]
+    .find((item) => item.textContent?.trim() === text);
+  if (!button) throw new Error(`Missing button: ${text}`);
+  return button;
+}
+
+async function changeInput(input: HTMLInputElement, value: string) {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+async function activateTab(container: HTMLElement, label: string) {
+  const tab = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
+    .find((item) => item.textContent === label);
+  if (!tab) throw new Error(`Missing tab: ${label}`);
+  await act(async () => tab.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+}
+
+function providerButton(container: HTMLElement, id: string) {
+  const button = [...container.querySelectorAll<HTMLButtonElement>('[data-provider-enabled] button[aria-pressed]')]
+    .find((item) => item.title.split("\n").at(-1) === id);
+  if (!button) throw new Error(`Missing provider: ${id}`);
+  return button;
+}
+
+async function mountWorkspace(initialProps: ConfigProviderRegistryPanelProps) {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  mountedRoots.push(root);
+  function Harness({ currentProps }: { currentProps: ConfigProviderRegistryPanelProps }) {
+    const [selected, setSelected] = React.useState(initialProps.selectedProviderId);
+    const [tab, setTab] = React.useState(initialProps.selectedTab);
+    const [drafts, setDrafts] = React.useState(initialProps.modelEditorDrafts ?? {});
+    return <ConfigProviderRegistryPanel {...currentProps} selectedProviderId={selected} selectedTab={tab}
+      modelEditorDrafts={currentProps.onModelEditorDraftChange ? drafts : currentProps.modelEditorDrafts}
+      onModelEditorDraftChange={currentProps.onModelEditorDraftChange ? (modelRef, edits) => {
+        currentProps.onModelEditorDraftChange?.(modelRef, edits);
+        setDrafts((current) => ({ ...current, [modelRef]: edits }));
+      } : undefined}
+      onSelectProvider={(providerId) => { currentProps.onSelectProvider(providerId); setSelected(providerId); }}
+      onSelectTab={(value) => { currentProps.onSelectTab(value); setTab(value); }} />;
+  }
+  async function rerender(props: ConfigProviderRegistryPanelProps) {
+    await act(async () => root.render(<Harness currentProps={props} />));
+  }
+  await rerender(initialProps);
+  return { container, rerender };
+}
+
+describe("direct model services workspace", () => {
   async function mount(props: ConfigProviderRegistryPanelProps) {
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    mountedRoots.push(root);
-    function Harness() {
-      const [selected, setSelected] = React.useState(props.selectedProviderId);
-      return <ConfigProviderRegistryPanel {...props} compactHome selectedProviderId={selected}
-        onSelectProvider={(providerId) => { props.onSelectProvider(providerId); setSelected(providerId); }} />;
-    }
-    await act(async () => root.render(<Harness />));
-    return container;
+    return (await mountWorkspace(props)).container;
   }
 
-  async function mountWithRerender(initialProps: ConfigProviderRegistryPanelProps) {
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    mountedRoots.push(root);
-    function Harness({ currentProps }: { currentProps: ConfigProviderRegistryPanelProps }) {
-      const [selected, setSelected] = React.useState(initialProps.selectedProviderId);
-      return <ConfigProviderRegistryPanel {...currentProps} compactHome selectedProviderId={selected}
-        onSelectProvider={(providerId) => { currentProps.onSelectProvider(providerId); setSelected(providerId); }} />;
-    }
-    await act(async () => root.render(<Harness currentProps={initialProps} />));
-    return {
-      container,
-      rerender: async (nextProps: ConfigProviderRegistryPanelProps) => {
-        await act(async () => root.render(<Harness currentProps={nextProps} />));
-      },
-    };
-  }
-
-  it("shows flat service rows with real status and keeps the full workspace closed", () => {
-    const markup = renderToStaticMarkup(<ConfigProviderRegistryPanel {...panelProps([model("pinned", "pinned")], {
-      compactHome: true, hasPendingApply: true,
+  it("opens the service and model list directly with nearby real feedback", async () => {
+    const onSelectProvider = vi.fn();
+    const container = await mount(panelProps([model("pinned", "pinned")], {
+      onSelectProvider,
       actionFeedback: { kind: "model", providerId: "relay_a", phase: "error", message: "真实调用失败" },
-    })} />);
-    expect(markup).toContain('data-vui-region="config-model-services-home"');
-    expect(markup).toContain("Relay A");
-    expect(markup).toContain("https://relay.example/v1");
-    expect(markup).toContain("已添加 1 个模型");
-    expect(markup).toContain("目录已更新");
-    expect(markup).toContain("真实调用失败");
-    expect(markup).toContain('role="alert"');
-    expect(markup).not.toContain('data-vui-region="config-provider-connection"');
-    expect(markup).not.toContain('data-save-prompt="pending"');
-    expect(markup).not.toContain('data-provider-action="add-provider"');
-    expect(panelSourceRaw).not.toContain("collapse: {");
-    expect(panelSourceRaw).toContain("layoutId: WORKBENCH_LAYOUT_IDS.configModelAssets");
+    }));
+    expect(container.querySelector('[data-vui="split-sidebar"]')).not.toBeNull();
+    expect(container.querySelector('[data-vui-region="config-models-main"]')?.textContent).toContain("Relay A");
+    expect(container.querySelector('[data-model-row="relay_a/pinned"]')).not.toBeNull();
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("真实调用失败");
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(onSelectProvider).not.toHaveBeenCalled();
   });
 
-  it("shows enabled services with connection errors and omits disabled services from the home", async () => {
+  it("keeps enabled failures visible and expands disabled services without changing selection", async () => {
+    const onSelectProvider = vi.fn();
     const enabledError = { ...provider([]), providerId: "relay_broken", label: "Broken Relay", status: "auth_failed" };
     const disabled = { ...provider([]), providerId: "relay_off", label: "Off Relay", enabled: false };
-    const container = await mount(panelProps([], { rows: [disabled, enabledError] }));
-
-    expect(container.querySelector('[data-provider-home-row="relay_broken"] [data-provider-status="auth_failed"]')).not.toBeNull();
-    expect(container.querySelector('[data-provider-home-row="relay_off"]')).toBeNull();
-    expect(container.querySelector('[data-provider-home-action="manage-disabled"]')?.textContent).toContain("(1)");
+    const container = await mount(panelProps([], { rows: [disabled, enabledError], selectedProviderId: "relay_broken", onSelectProvider }));
+    expect(container.querySelector('[data-provider-status="auth_failed"] [data-provider-dot="warn"]')).not.toBeNull();
+    expect(container.querySelector('[data-provider-enabled="false"]')).toBeNull();
+    const expand = buttonByText(container, "未启用的服务 (1)");
+    expect(expand.getAttribute("aria-pressed")).toBe("false");
+    await act(async () => expand.click());
+    expect(providerButton(container, "relay_off")).toBeDefined();
+    expect(providerButton(container, "relay_broken").getAttribute("aria-pressed")).toBe("true");
+    expect(onSelectProvider).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 
-  it("opens the existing workspace with only disabled services in its sidebar", async () => {
+  it("waits for saved enabled props and retains the selected service when it is restored", async () => {
     const onSelectProvider = vi.fn();
-    const enabled = { ...provider([]), providerId: "relay_on", label: "Online Relay" };
-    const disabledA = { ...provider([]), providerId: "relay_off_a", label: "Off Relay A", enabled: false };
-    const disabledB = { ...provider([]), providerId: "relay_off_b", label: "Off Relay B", enabled: false };
-    const container = await mount(panelProps([], { rows: [enabled, disabledA, disabledB], onSelectProvider }));
-
-    await act(async () => container.querySelector<HTMLButtonElement>('[data-provider-home-action="manage-disabled"]')!.click());
-    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]')!;
-
-    expect(onSelectProvider).toHaveBeenCalledWith("relay_off_a");
-    expect(dialog.textContent).toContain("管理模型服务");
-    expect(dialog.querySelectorAll('[data-provider-enabled="false"]')).toHaveLength(2);
-    expect(dialog.querySelector('[data-provider-enabled="true"]')).toBeNull();
-    expect(dialog.querySelector('[data-vui-region="config-models-main"]')?.textContent).toContain("Off Relay A");
-  });
-
-  it("reflects restored rows only after props update and selects the next disabled service", async () => {
-    const onSelectProvider = vi.fn();
+    const onToggleEnabled = vi.fn();
     const active = { ...provider([]), providerId: "relay_on", label: "Online Relay" };
     const restored = { ...provider([]), providerId: "relay_off_a", label: "Off Relay A", enabled: false };
     const remaining = { ...provider([]), providerId: "relay_off_b", label: "Off Relay B", enabled: false };
-    const initialProps = panelProps([], { rows: [active, restored, remaining], onSelectProvider });
-    const { container, rerender } = await mountWithRerender(initialProps);
-
-    await act(async () => container.querySelector<HTMLButtonElement>('[data-provider-home-action="manage-disabled"]')!.click());
-    await rerender(panelProps([], {
-      rows: [active, { ...restored, enabled: true }, remaining],
-      onSelectProvider,
-    }));
-
-    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]')!;
-    expect(container.querySelector('[data-provider-home-row="relay_off_a"]')).not.toBeNull();
-    expect(container.querySelector('[data-provider-home-action="manage-disabled"]')?.textContent).toContain("(1)");
-    expect(dialog.querySelector('[data-provider-enabled="true"]')).toBeNull();
-    expect(dialog.querySelector('[data-provider-enabled="false"]')?.getAttribute("data-provider-enabled")).toBe("false");
-    expect(dialog.querySelector('[data-vui-region="config-models-main"]')?.textContent).toContain("Off Relay B");
-    expect(onSelectProvider).toHaveBeenLastCalledWith("relay_off_b");
+    const props = panelProps([], { rows: [active, restored, remaining], selectedProviderId: "relay_on", onSelectProvider, onToggleEnabled });
+    const { container, rerender } = await mountWorkspace(props);
+    await act(async () => buttonByText(container, "未启用的服务 (2)").click());
+    await act(async () => providerButton(container, "relay_off_a").click());
+    const selectedRow = providerButton(container, "relay_off_a").closest('[data-provider-enabled]')!;
+    const toggle = selectedRow.querySelector<HTMLInputElement>('[role="switch"]')!;
+    await act(async () => toggle.click());
+    expect(onToggleEnabled).toHaveBeenCalledExactlyOnceWith("relay_off_a", true);
+    expect(toggle.checked).toBe(false);
+    await rerender({ ...props, rows: [active, { ...restored, enabled: true }, remaining] });
+    expect(providerButton(container, "relay_off_a").getAttribute("aria-pressed")).toBe("true");
+    expect(providerButton(container, "relay_off_a").closest('[data-provider-enabled]')?.getAttribute("data-provider-enabled")).toBe("true");
+    expect(buttonByText(container, "未启用的服务 (1)")).toBeDefined();
+    expect(onSelectProvider).toHaveBeenCalledExactlyOnceWith("relay_off_a");
   });
 
-  it("keeps an all-disabled home recoverable and offers an empty state after all services are restored", async () => {
+  it("allows an all-disabled catalog to be recovered through the same workspace", async () => {
     const disabledA = { ...provider([]), providerId: "relay_off_a", label: "Off Relay A", enabled: false };
     const disabledB = { ...provider([]), providerId: "relay_off_b", label: "Off Relay B", enabled: false };
-    const initialProps = panelProps([], { rows: [disabledA, disabledB] });
-    const { container, rerender } = await mountWithRerender(initialProps);
-
-    expect(container.querySelectorAll('[data-provider-home-row]')).toHaveLength(0);
-    expect(container.textContent).toContain(CONFIG_COPY.zh.homeNoEnabledServicesTitle);
-    expect(container.querySelector('[data-provider-home-action="manage-disabled"]')?.textContent).toContain("(2)");
-
-    await act(async () => container.querySelector<HTMLButtonElement>('[data-provider-home-action="manage-disabled"]')!.click());
-    await rerender(panelProps([], { rows: [{ ...disabledA, enabled: true }, { ...disabledB, enabled: true }] }));
-
-    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]')!;
-    expect(container.querySelectorAll('[data-provider-home-row]')).toHaveLength(2);
-    expect(container.querySelector('[data-provider-home-action="manage-disabled"]')).toBeNull();
-    expect(dialog.textContent).toContain(CONFIG_COPY.zh.homeNoDisabledServicesTitle);
-    expect(dialog.textContent).toContain(CONFIG_COPY.zh.homeNoDisabledServicesBody);
-
-    await act(async () => dialog.querySelector<HTMLButtonElement>('[data-provider-action="manage-all-providers"]')!.click());
-    expect(dialog.querySelectorAll('[data-provider-enabled="true"]')).toHaveLength(2);
+    const props = panelProps([], { rows: [disabledA, disabledB], selectedProviderId: "relay_off_a" });
+    const { container, rerender } = await mountWorkspace(props);
+    expect(container.querySelectorAll('[data-provider-enabled]')).toHaveLength(0);
+    await act(async () => buttonByText(container, "未启用的服务 (2)").click());
+    expect(container.querySelectorAll('[data-provider-enabled="false"]')).toHaveLength(2);
+    await rerender({ ...props, rows: [{ ...disabledA, enabled: true }, { ...disabledB, enabled: true }] });
+    expect(container.querySelectorAll('[data-provider-enabled="true"]')).toHaveLength(2);
+    expect(container.textContent).not.toContain("未启用的服务 (");
+    expect(providerButton(container, "relay_off_a").getAttribute("aria-pressed")).toBe("true");
   });
 
-  it("tests an enabled pinned model belonging to the clicked service", async () => {
+  it("keeps the current model and its text draft while provider search hides its row", async () => {
+    const onSelectProvider = vi.fn();
+    const onUpdateModel = vi.fn();
+    const current = { ...model("luna", "pinned", "Luna"), draftEntry: { label: "Luna", upstream_id: "luna-upstream" } };
+    const other = { ...provider([]), providerId: "relay_b", label: "Relay B" };
+    const onModelEditorDraftChange = vi.fn();
+    const container = await mount(panelProps([current], { rows: [provider([current]), other], onSelectProvider, onUpdateModel, onModelEditorDraftChange }));
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-model-row="relay_a/luna"] button')!.click());
+    const input = container.querySelector<HTMLInputElement>('[data-model-edit-field="label"] input')!;
+    await changeInput(input, "Unsaved Luna");
+    const search = container.querySelector<HTMLInputElement>('input[aria-label="搜索厂商或模型"]')!;
+    await changeInput(search, "Relay B");
+    expect(container.querySelectorAll('[data-provider-enabled]')).toHaveLength(1);
+    expect(providerButton(container, "relay_b")).toBeDefined();
+    expect(container.querySelector('[data-model-detail="relay_a/luna"]')).not.toBeNull();
+    expect(input.value).toBe("Unsaved Luna");
+    expect(onSelectProvider).not.toHaveBeenCalled();
+    expect(onUpdateModel).not.toHaveBeenCalled();
+    expect(onModelEditorDraftChange).toHaveBeenCalledWith("relay_a/luna", { label: "Unsaved Luna" });
+    expect(container.querySelector('[data-model-action="save-edit"]')).toBeNull();
+    await changeInput(search, "");
+    expect(providerButton(container, "relay_a").getAttribute("aria-pressed")).toBe("true");
+    expect(input.value).toBe("Unsaved Luna");
+  });
+
+  it("retains controlled drafts by full model ref when switching same-name models across providers", async () => {
+    const onUpdateModel = vi.fn();
+    const onModelEditorDraftChange = vi.fn();
+    const first = model("shared", "pinned", "Same model");
+    const second = { ...first, modelRef: "relay_b/shared" };
+    const rows = [provider([first]), { ...provider([second]), providerId: "relay_b", label: "Relay B" }];
+    const container = await mount(panelProps([], { rows, onUpdateModel, onModelEditorDraftChange }));
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-model-row="relay_a/shared"] button')!.click());
+    await changeInput(container.querySelector<HTMLInputElement>('[data-model-edit-field="context_window"] input')!, "unfinished");
+    await act(async () => providerButton(container, "relay_b").click());
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-model-row="relay_b/shared"] button')!.click());
+    const secondContext = container.querySelector<HTMLInputElement>('[data-model-edit-field="context_window"] input')!;
+    expect(secondContext.value).not.toBe("unfinished");
+    await changeInput(container.querySelector<HTMLInputElement>('[data-model-edit-field="label"] input')!, "Second draft");
+    await act(async () => providerButton(container, "relay_a").click());
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-model-row="relay_a/shared"] button')!.click());
+    const firstContext = container.querySelector<HTMLInputElement>('[data-model-edit-field="context_window"] input')!;
+    expect(firstContext.value).toBe("unfinished");
+    expect(firstContext.getAttribute("aria-invalid")).toBe("true");
+    expect(container.querySelector<HTMLInputElement>('[data-model-edit-field="label"] input')!.value).toBe("Same model");
+    expect(onModelEditorDraftChange).toHaveBeenCalledWith("relay_a/shared", { context_window: "unfinished" });
+    expect(onModelEditorDraftChange).toHaveBeenCalledWith("relay_b/shared", { label: "Second draft" });
+    expect(onUpdateModel).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-model-action="save-edit"]')).toBeNull();
+  });
+
+  it("returns from a model to its list and restores that entity's draft when reopened", async () => {
+    const onUpdateModel = vi.fn();
+    const container = await mount(panelProps([model("first", "pinned"), model("second", "pinned")], { onUpdateModel }));
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-model-row="relay_a/first"] button')!.click());
+    const input = container.querySelector<HTMLInputElement>('[data-model-edit-field="label"] input')!;
+    await changeInput(input, "First draft");
+    await act(async () => buttonByText(container, "返回模型列表").click());
+    expect(container.querySelector<HTMLElement>('[data-vui-region="config-models-detail"]')!.hidden).toBe(true);
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-model-row="relay_a/second"] button')!.click());
+    expect(container.querySelector<HTMLInputElement>('[data-model-edit-field="label"] input')!.value).toBe("second");
+    await act(async () => buttonByText(container, "返回模型列表").click());
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-model-row="relay_a/first"] button')!.click());
+    expect(container.querySelector<HTMLInputElement>('[data-model-edit-field="label"] input')!.value).toBe("First draft");
+  });
+
+  it("tests the exact selected model ref and keeps other providers out of the call", async () => {
     const onTestModel = vi.fn();
+    const onProbeImageInput = vi.fn();
     const onDiscover = vi.fn();
-    const rows = [
-      provider([model("first", "pinned")]),
-      { ...provider([
-        { ...model("disabled-entry", "pinned"), modelRef: "relay_b/disabled-entry", draftEntry: { enabled: false } },
-        model("foreign", "pinned"),
-        { ...model("discovered", "observed"), modelRef: "relay_b/discovered" },
-        { ...model("actual", "pinned"), modelRef: "relay_b/actual" },
-      ]), providerId: "relay_b", label: "Relay B" },
-    ];
-    const container = await mount(panelProps([], { rows, onTestModel, onDiscover }));
-    const button = container.querySelector<HTMLButtonElement>('[data-provider-home-row="relay_b"] [data-provider-home-action="test"]')!;
-    await act(async () => button.click());
+    const rows = [provider([model("first", "pinned")]), {
+      ...provider([{ ...model("actual", "pinned"), modelRef: "relay_b/actual" }]), providerId: "relay_b", label: "Relay B",
+    }];
+    const container = await mount(panelProps([], { rows, onTestModel, onProbeImageInput, onDiscover }));
+    await act(async () => providerButton(container, "relay_b").click());
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-model-row="relay_b/actual"] button')!.click());
+    await act(async () => buttonByText(container, CONFIG_COPY.zh.testCall).click());
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-model-capability-action="image_input"]')!.click());
     expect(onTestModel).toHaveBeenCalledExactlyOnceWith("relay_b/actual");
+    expect(onProbeImageInput).toHaveBeenCalledExactlyOnceWith("relay_b/actual");
     expect(onDiscover).not.toHaveBeenCalled();
   });
 
-  it("fetches models instead of calling a discovered or missing model", async () => {
+  it("fetches the selected service catalog from connection settings without testing an unavailable model", async () => {
     const onDiscover = vi.fn();
     const onTestModel = vi.fn();
     const container = await mount(panelProps([model("seen", "observed"), model("missing", "missing_remote")], { onDiscover, onTestModel }));
-    const button = container.querySelector<HTMLButtonElement>('[data-provider-home-action="discover"]')!;
-    expect(button.textContent).toBe("获取模型");
-    await act(async () => button.click());
+    await activateTab(container, "连接设置");
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-provider-action="detect"]')!.click());
     expect(onDiscover).toHaveBeenCalledExactlyOnceWith("relay_a");
     expect(onTestModel).not.toHaveBeenCalled();
   });
 
-  it("keeps busy feedback visible and disables the matching action", async () => {
+  it("keeps busy model feedback visible and prevents duplicate calls", async () => {
     const onTestModel = vi.fn();
     const container = await mount(panelProps([model("pinned", "pinned")], {
       onTestModel,
       actionFeedback: { kind: "model", providerId: "relay_a", phase: "busy", message: "正在真实调用模型" },
     }));
-    expect(container.querySelector('[role="status"]')?.textContent).toBe("正在真实调用模型");
-    const button = container.querySelector<HTMLButtonElement>('[data-provider-home-action="test"]')!;
-    expect(button.disabled).toBe(true);
-    await act(async () => button.click());
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-model-row="relay_a/pinned"] button')!.click());
+    expect(container.querySelector('[role="status"]')?.textContent).toContain("正在真实调用模型");
+    const test = buttonByText(container, CONFIG_COPY.zh.testCall);
+    expect(test.disabled).toBe(true);
+    await act(async () => test.click());
     expect(onTestModel).not.toHaveBeenCalled();
   });
 
@@ -338,17 +400,17 @@ describe("compact model services home", () => {
       actionFeedback: { kind: "model", providerId: "relay_a", phase: "error", message: "模型调用失败" },
       onToggleEnabled: vi.fn(),
     });
-    const compactMarkup = renderToStaticMarkup(<ConfigProviderRegistryPanel {...props} compactHome />);
+    const compactMarkup = renderToStaticMarkup(<ConfigProviderRegistryPanel {...props} />);
     const workspaceMarkup = renderToStaticMarkup(<ConfigProviderRegistryPanel {...props} />);
     const busyMarkup = renderToStaticMarkup(<ConfigProviderRegistryPanel {...panelProps([], {
       actionFeedback: { kind: "enabled", providerId: "relay_a", phase: "busy", message: "正在保存" },
       onToggleEnabled: vi.fn(),
-    })} compactHome />);
+    })} />);
     const missingRowMarkup = renderToStaticMarkup(<ConfigProviderRegistryPanel {...panelProps([], {
       rows: [],
       actionFeedback: { kind: "enabled", providerId: "missing-provider", phase: "error", message: "保存失败" },
       onToggleEnabled: vi.fn(),
-    })} compactHome />);
+    })} />);
 
     expect(compactMarkup).not.toContain('data-provider-retry-action="enabled"');
     expect(workspaceMarkup).not.toContain('data-provider-retry-action="enabled"');
@@ -398,33 +460,26 @@ describe("compact model services home", () => {
     expect(onToggleEnabled).not.toHaveBeenCalled();
   });
 
-  it("opens the existing connection, key and model controls from Manage", async () => {
-    const onSelectProvider = vi.fn();
+  it("reaches connection, credentials and advanced diagnostics through the selected service tabs", async () => {
     const onEditRoute = vi.fn();
     const onEditCredential = vi.fn();
-    const container = await mount(panelProps([model("pinned", "pinned")], {
-      onSelectProvider, onEditRoute, onEditCredential,
-      rows: [provider([model("pinned", "pinned")]), {
-        ...provider([{ ...model("second", "pinned"), modelRef: "relay_b/second" }]), providerId: "relay_b", label: "Relay B",
-      }],
-    }));
-    await act(async () => container.querySelector<HTMLButtonElement>('[data-provider-home-row="relay_b"] [data-provider-home-action="manage"]')!.click());
-    expect(onSelectProvider).toHaveBeenCalledWith("relay_b");
-    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]')!;
-    expect(dialog.textContent).toContain("管理模型服务");
-    expect(dialog.querySelector('[data-vui-region="config-models-main"]')?.textContent).toContain("Relay B");
-    expect(dialog.querySelector('[data-vui-region="config-provider-connection"]')).not.toBeNull();
-    expect(dialog.querySelector('[data-provider-tab="models"]')).not.toBeNull();
-    expect(document.querySelectorAll('#config-models')).toHaveLength(1);
-    await act(async () => dialog.querySelector<HTMLButtonElement>('[data-provider-action="route"]')!.click());
-    expect(onEditRoute).toHaveBeenCalledWith("relay_b");
-    const keyButton = Array.from(dialog.querySelectorAll('button')).find((button) => button.textContent?.includes("更新 API Key"))!;
-    await act(async () => keyButton.click());
-    expect(onEditCredential).toHaveBeenCalledWith("relay_b");
-    await act(async () => dialog.querySelector<HTMLButtonElement>('[data-provider-action="edit-asset"]')!.click());
+    const onSaveContextWindow = vi.fn();
+    const container = await mount(panelProps([model("pinned", "pinned")], { onEditRoute, onEditCredential, onSaveContextWindow }));
+    const connection = container.querySelector<HTMLElement>('[data-vui-region="config-provider-connection"]')!;
+    expect(connection.hidden).toBe(true);
+    await activateTab(container, "连接设置");
+    expect(connection.hidden).toBe(false);
+    expect(container.querySelector<HTMLElement>('[data-provider-tab="models"]')!.hidden).toBe(true);
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-provider-action="route"]')!.click());
+    await act(async () => buttonByText(connection, "更新 API Key").click());
+    await act(async () => buttonByText(connection, CONFIG_COPY.zh.saveContextWindow).click());
+    expect(onEditRoute).toHaveBeenCalledExactlyOnceWith("relay_a");
+    expect(onEditCredential).toHaveBeenCalledExactlyOnceWith("relay_a");
+    expect(onSaveContextWindow).toHaveBeenCalledExactlyOnceWith("relay_a", 128000);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-provider-action="edit-asset"]')!.click());
     const inspector = document.querySelector<HTMLElement>('[data-vui-region="config-asset-inspector"]')!;
-    const advanced = Array.from(inspector.querySelectorAll('button')).find((button) => button.textContent?.includes(CONFIG_COPY.zh.diagnosticsMergeAdvanced))!;
-    await act(async () => advanced.click());
+    await act(async () => buttonByText(inspector, CONFIG_COPY.zh.diagnosticsMergeAdvanced).click());
     expect(inspector.textContent).toContain(CONFIG_COPY.zh.wireProtocolLabel);
     expect(inspector.textContent).toContain(CONFIG_COPY.zh.registryDiagnosticsTitle);
   });
@@ -457,11 +512,8 @@ describe("ConfigProviderRegistryPanel", () => {
   it("edits connection and context directly in the selected supplier page", async () => {
     const onSaveContextWindow = vi.fn();
     const onEditRoute = vi.fn();
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    mountedRoots.push(root);
-    await act(async () => root.render(<ConfigProviderRegistryPanel {...panelProps([], { onSaveContextWindow, onEditRoute })} />));
+    const { container } = await mountWorkspace(panelProps([], { onSaveContextWindow, onEditRoute }));
+    await activateTab(container, "连接设置");
     expect(document.body.querySelector('[role="dialog"]')).toBeNull();
     const connection = container.querySelector('[data-vui-region="config-provider-connection"]');
     expect(connection?.textContent).toContain("https://relay.example/v1");
@@ -613,19 +665,18 @@ describe("ConfigProviderRegistryPanel", () => {
       { onUpdateModel: () => undefined },
     );
     expect(markup).toContain('data-model-section="edit"');
-    // Every whitelist field renders an editable control, in whitelist order.
+    // Entry fields and existing overrides are visible; optional generation
+    // parameters must be added explicitly rather than prefilled by the page.
     const fields = [...markup.matchAll(/data-model-edit-field="([^"]+)"/g)].map((match) => match[1]);
     expect(fields).toEqual([
       "label",
       "model",
       "context_window",
-      "temperature",
-      "max_output_tokens",
-      "timeout",
       "enabled",
       "streaming",
       "default_reasoning_effort",
     ]);
+    expect(markup).toContain(`aria-label="${CONFIG_COPY.zh.modelEditAddParameter}"`);
     // One resolved route is visible. Raw protocol fields stay out of the form.
     expect(markup).toContain('data-model-resolved-route="responses"');
     expect(markup).toContain("OpenAI Responses");
@@ -683,6 +734,27 @@ describe("ConfigProviderRegistryPanel", () => {
       label: "Luna fast",
       context_window: "131072",
     });
+  });
+
+  it("adds an optional parameter without inventing an override until the user enters a value", async () => {
+    const onUpdateModel = vi.fn();
+    const { container } = await mountWorkspace(panelProps([pinnedModelWithDraft()], { onUpdateModel }));
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-model-row="relay_a/luna"] button')!.click());
+    expect(container.querySelector('[data-model-edit-field="temperature"]')).toBeNull();
+    const addParameter = container.querySelector<HTMLButtonElement>(`[role="combobox"][aria-label="${CONFIG_COPY.zh.modelEditAddParameter}"]`)!;
+    await act(async () => addParameter.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+    const options = [...document.querySelectorAll<HTMLElement>('[role="option"]')];
+    expect(options.some((option) => option.textContent === CONFIG_COPY.zh.modelEditFieldTemperature)).toBe(true);
+    expect(options.some((option) => /API Key|wire_protocol|interaction_contract|reasoning_effort_adapter/.test(option.textContent ?? ""))).toBe(false);
+    await act(async () => options.find((option) => option.textContent === CONFIG_COPY.zh.modelEditFieldTemperature)!.click());
+    const input = container.querySelector<HTMLInputElement>('[data-model-edit-field="temperature"] input')!;
+    expect(input.value).toBe("");
+    const save = container.querySelector<HTMLButtonElement>('[data-model-action="save-edit"]')!;
+    expect(save.disabled).toBe(true);
+    expect(onUpdateModel).not.toHaveBeenCalled();
+    await changeInput(input, "0.25");
+    await act(async () => save.click());
+    expect(onUpdateModel).toHaveBeenCalledExactlyOnceWith("relay_a", "luna", { temperature: "0.25" });
   });
 
   it("converges model-domain buttons to one primary weight, ghost filters, and a single danger", async () => {
@@ -844,7 +916,7 @@ describe("ConfigProviderRegistryPanel", () => {
 
   it("fills the desktop workspace with compact Provider rows and a bottom danger zone", () => {
     expect(panelStyles.sectionSurface).toContain("h-full");
-    expect(panelSource).toContain("defaultWidth: 224");
+    expect(panelSource).toContain("layoutId={WORKBENCH_LAYOUT_IDS.configModelAssets}");
     expect(panelStyles.providerList).toContain("min-h-0");
     expect(panelStyles.providerButton).toContain("!min-h-9");
     expect(panelStyles.providerButton).toContain("!flex-row");
@@ -886,7 +958,7 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(panelSource).toContain("confirmed: true");
   });
 
-  it("keeps API Key and context window in setting rows above the model list", () => {
+  it("keeps API Key and context window in their connection tab with settings rows", () => {
     expect(configCopyRaw).toContain("此供应商下的模型共用一把密钥");
     expect(configCopyRaw).toContain("默认上下文上限");
     expect(panelSource).toContain("apiKeySharedHint");
@@ -900,7 +972,8 @@ describe("ConfigProviderRegistryPanel", () => {
     );
     expect(markup).toContain("更新 API Key");
     expect(markup).toContain('data-vui="settings-row"');
-    expect(markup.indexOf('config-provider-connection')).toBeLessThan(markup.indexOf('data-provider-tab="models"'));
+    expect(markup).toContain('role="tablist"');
+    expect(markup).toContain("连接设置");
     expect(markup).toContain("已配置服务");
   });
 
@@ -968,12 +1041,11 @@ describe("ConfigProviderRegistryPanel", () => {
         })}
       />,
     );
-    expect(dirty).toContain('data-save-prompt="pending"');
-    expect(dirty).toContain("有未保存的模型配置");
-    expect(dirty).toContain("保存更改");
-    // savePrompt must not steal the 1fr row from the workspace when present
-    expect(panelStyles.sectionSurface).toContain("[&:has(>_.savePrompt)]:grid-rows-[auto_minmax(0,1fr)]");
-    expect(panelStyles.savePrompt).toContain("shrink-0");
+    // The surrounding settings page owns its single save action. The provider
+    // workspace keeps its full-height list/detail surface when the page is dirty.
+    expect(dirty).not.toContain('data-save-prompt="pending"');
+    expect(dirty).not.toContain(">保存更改<");
+    expect(dirty).toContain('data-vui-region="config-models-main"');
   });
 
   it("keeps the dot on availability only: stale catalog still shows a green dot", () => {
@@ -1085,12 +1157,13 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(markup).not.toContain('data-provider-switch="true"');
   });
 
-  it("marks disabled providers with an off dot, the 已停用 tooltip, and last position", () => {
+  it("marks disabled providers with an off dot and saved switch state after expanding the group", async () => {
     const off = { ...provider([]), providerId: "relay_off", label: "Off Relay", enabled: false };
     const ok = { ...provider([]), providerId: "relay_ok", label: "Ok Relay", enabled: true };
-    const markup = renderToStaticMarkup(
-      <ConfigProviderRegistryPanel {...panelProps([], { rows: [off, ok], onToggleEnabled: () => undefined })} />,
-    );
+    const { container } = await mountWorkspace(panelProps([], { rows: [off, ok], selectedProviderId: "relay_ok", onToggleEnabled: () => undefined }));
+    expect(container.querySelector('[data-provider-enabled="false"]')).toBeNull();
+    await act(async () => buttonByText(container, "未启用的服务 (1)").click());
+    const markup = container.innerHTML;
     expect(markup).toContain('data-provider-dot="off"');
     expect(markup).toContain('data-provider-enabled="false"');
     expect(markup).toContain('data-provider-switch="true"');

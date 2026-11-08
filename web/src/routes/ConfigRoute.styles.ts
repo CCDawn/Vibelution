@@ -106,7 +106,9 @@ const styles = {
   contentModels:
     "vui-routes-configroute contentModels [align-content:stretch] [grid-template-rows:minmax(0,1fr)_auto] [height:100%] [max-height:calc(100dvh_-_76px)] [min-width:0] [&:has(>_.notice)]:[grid-template-rows:auto_minmax(0,1fr)_auto] max-[720px]:[max-height:none] max-[720px]:[height:auto] max-[720px]:[overflow:visible]",
   providerModelsLayout:
-    "vui-routes-configroute providerModelsLayout flex shrink-0 flex-col min-w-0 gap-7 [&>*]:shrink-0",
+    "vui-routes-configroute providerModelsLayout flex h-full min-h-0 min-w-0 flex-col gap-4 [&>div[data-vui=tabs]]:shrink-0",
+  modelServicesView: "vui-routes-configroute modelServicesView min-h-0 min-w-0 flex-1 [&[hidden]]:!hidden",
+  modelUsageView: "vui-routes-configroute modelUsageView min-h-0 min-w-0 flex-1 overflow-y-auto [&[hidden]]:!hidden",
   providerModeButton:
     "vui-routes-configroute providerModeButton self-start",
   providerRouteEditSurface:

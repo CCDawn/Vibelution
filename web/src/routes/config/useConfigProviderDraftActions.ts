@@ -84,6 +84,7 @@ export type UseConfigProviderDraftActionsOptions = {
   providerDraftRequestRef: MutableRefObject<ProviderDraftRequestSnapshot | null>;
   activeWorkspace: ConfigWorkspace | null | undefined;
   providerPresetOptions: Array<{ provider_preset_id: string; provider?: Record<string, unknown> }>;
+  onProviderRemoved?: (providerId: string) => void;
   requireDraft: () => PublicConfigShape;
   syncWorkspace: (workspace: ConfigWorkspace, tone?: NoticeTone, options?: { resetBase?: boolean }) => void;
   markError: (error: unknown) => string;
@@ -116,6 +117,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     activeWorkspace,
     providerPresetOptions,
     requireDraft,
+    onProviderRemoved,
     syncWorkspace,
     markError,
     readableErrorMessage,
@@ -525,6 +527,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
         buildProviderDraftRequest({ providerId, provider }),
       );
       syncWorkspace(response, "success", { resetBase: false });
+      onProviderRemoved?.(providerId);
       setSelectedProviderId("");
     } catch (error) {
       setProviderActionError(readableErrorMessage(error).slice(0, 480));
@@ -537,6 +540,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     copy,
     deleteProviderRequest,
     markError,
+    onProviderRemoved,
     readableErrorMessage,
     requireDraft,
     setBusyAction,

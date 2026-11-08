@@ -1,4 +1,24 @@
 @layer utilities {
+/* The model workspace owns the available height; only the current detail scrolls. */
+[data-vui-recipe="config-settings-workbench"] .pageViewport:has(.providerModelsLayout) {
+  max-width: none;
+  align-content: stretch;
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+}
+[data-vui-recipe="config-settings-workbench"] .providerModelsLayout [hidden] { display: none !important; }
+[data-vui-recipe="config-settings-workbench"] .registryWorkspace { gap: 0; }
+[data-vui-recipe="config-settings-workbench"] .providerRail { padding: 16px; gap: 12px; max-height: none; overflow: hidden; }
+[data-vui-recipe="config-settings-workbench"] .providerListSection { flex: 1; overflow: hidden; }
+[data-vui-recipe="config-settings-workbench"] .providerRail { display: flex; flex-direction: column; }
+[data-vui-recipe="config-settings-workbench"] .modelsColumn { padding: 20px 24px; gap: 20px; }
+[data-vui-recipe="config-settings-workbench"] .modelsDrilldown .modelList { max-height: none; overflow: visible; }
+[data-vui-recipe="config-settings-workbench"] .modelsDrilldown .tableScroll { overflow: visible; }
+@media (max-width: 720px) {
+  [data-vui-recipe="config-settings-workbench"] .pageViewport:has(.providerModelsLayout) { overflow: visible; }
+  [data-vui-recipe="config-settings-workbench"] .modelsColumn { padding: 16px 0; }
+  [data-vui-recipe="config-settings-workbench"] .providerRail { min-height: 320px; padding: 12px 0; }
+}
 /* Scope settings layout so eager route utility sheets cannot override its media rules. */
 [data-vui-recipe="config-settings-workbench"] .settingsSplit[data-vui="split-workspace"] {
   display: grid !important;

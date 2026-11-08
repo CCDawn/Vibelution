@@ -19,6 +19,14 @@ const previewExemptDesignSections = new Set([
   // authorization and canonical draft/apply callbacks. Covered by panel/hook,
   // real route save tests, the approved isolated preview and native settings acceptance.
   "ChatGPTSubscriptionPanel",
+  // Route-owned model settings compositions, with canonical config/catalog,
+  // whitelist drafts and account-scoped actions supplied by ConfigRoute.
+  // Covered by real component interaction and save-boundary tests, the approved
+  // isolated preview and native settings acceptance; no standalone VUI export.
+  "ConfigProviderRegistryPanel",
+  "ProviderModelsTab",
+  "ConfigModelEntryEditor",
+  "ConfigDecisionModelsPanel",
   "ChallengeQuestionStageZones",
   "ResearchAnomalyInboxExtendCta",
   "ResearchWorkflowRecoveryPanel",

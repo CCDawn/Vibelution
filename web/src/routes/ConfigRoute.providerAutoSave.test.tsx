@@ -5,10 +5,18 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { seedControlTokenForTests } from "../api/client";
+import { readConfigDraftPresence } from "./configDraftPresence";
+import { CONFIG_COPY } from "./config/configCopy";
 import { ConfigRoute } from "./ConfigRoute";
 import type { ConfigProviderRegistryPanelProps } from "./ConfigProviderRegistryPanel";
 
 vi.mock("./ConfigProviderRegistryPanel", () => ({ ConfigProviderRegistryPanel: (props: ConfigProviderRegistryPanelProps) => <div>
+  <button data-testid="edit-model-input" onClick={() => props.onModelEditorDraftChange?.("relay/model.v1", { label: "Raw model draft", temperature: "0.4" })}>Edit local model</button>
+  <button data-testid="invalid-model-input" onClick={() => props.onModelEditorDraftChange?.("relay/model.v1", { context_window: "1e" })}>Invalid local model</button>
+  <button data-testid="test-model-input" onClick={() => props.onTestModel("relay/model.v1")}>Test model draft</button>
+  <button data-testid="pin-extra-model" onClick={() => props.onPin("relay", [{ availability: "observed", label: "Extra model", modelKey: "extra", modelRef: "relay/extra", status: "observed", upstreamId: "extra", capabilities: {} }])}>Pin another model</button>
+  <button data-testid="remove-model-input" onClick={() => props.onUnpin("relay/model.v1")}>Remove edited model</button>
+  <output data-testid="raw-model-draft">{JSON.stringify(props.modelEditorDrafts ?? {})}</output>
   <button data-testid="add-subscription" disabled={props.disabled || Boolean(props.subscriptionSetupBlockedReason)} onClick={() => void props.onAddSubscriptionModels?.([
     { slug: "test-plan", display_name: "Plan", visibility: "list", supported_in_api: true, supported_reasoning_levels: [], input_modalities: ["text"] },
   ], { label: "ChatGPT", auth_kind: "oauth", credential_ref: "oauth:chatgpt", driver: "openai", service_class: "official_api", base_url: "https://api.openai.com/v1", protocols: { default: "responses", allowed: ["responses"], routes: { responses: "responses" } } })}>Add subscription</button>
@@ -34,7 +42,7 @@ function workspace(config: typeof BASE | Record<string, unknown> = BASE, meta = 
     modelCatalog: { schemaVersion: 2, providerCount: Object.keys(providers).length, modelCount: 0, providers: {} }, modelAliasUsage: { aliases: [], totalLiveReferenceCount: 0 },
   };
 }
-function installFetch(options: { failApply?: boolean; failProjectionAfterSave?: boolean; waitForApply?: Promise<void>; waitForPin?: Promise<void> } = {}) {
+function installFetch(options: { failApply?: boolean; failProjectionAfterSave?: boolean; waitForApply?: Promise<void>; waitForPin?: Promise<void>; waitForTest?: Promise<void> } = {}) {
   let disk = structuredClone(BASE);
   let hash = "saved-1";
   const applyCalls: Record<string, any>[] = [];
@@ -54,6 +62,17 @@ function installFetch(options: { failApply?: boolean; failProjectionAfterSave?: 
       draft.llm.providers.chatgpt.models[body.upstreamId] = { upstream_id: body.upstreamId, label: body.label };
       return response(workspace(draft, body.draftMeta, hash));
     }
+    if (url.endsWith("/api/config/draft/providers/relay/models")) {
+      const draft = structuredClone(body.publicConfig);
+      draft.llm.providers.relay.models[body.upstreamId] = { upstream_id: body.upstreamId, label: body.label };
+      return response(workspace(draft, body.draftMeta, hash));
+    }
+    if (url.endsWith("/api/config/draft/providers/relay/models/model.v1") && init?.method === "DELETE") {
+      const draft = structuredClone(body.publicConfig);
+      delete draft.llm.providers.relay.models["model.v1"];
+      return response(workspace(draft, body.draftMeta, hash));
+    }
+    if (url.endsWith("/api/config/test-llm")) { await options.waitForTest; return response({ ok: true, provider_id: "relay", model_id: body.modelId, message: "Passed", capability: "text" }); }
     if (url.includes("/api/config/draft/providers/relay")) {
       const draft = structuredClone(body.publicConfig);
       draft.llm.providers.relay = body.provider;
@@ -83,10 +102,11 @@ describe("provider enable auto-save isolation", () => {
     client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); seedControlTokenForTests(); });
   afterEach(async () => { await act(async () => root.unmount()); container.remove(); client.clear(); vi.unstubAllGlobals(); window.sessionStorage.clear(); window.localStorage.clear(); });
   async function ready() {
-    const router = createMemoryRouter([{ path: "/config", element: <QueryClientProvider client={client}><ConfigRoute /></QueryClientProvider> }],
+    const router = createMemoryRouter([{ path: "/config", element: <QueryClientProvider client={client}><ConfigRoute /></QueryClientProvider> }, { path: "/elsewhere", element: <p>Other page</p> }],
       { initialEntries: ["/config?section=models-profiles&page=model-connection"] });
     await act(async () => root.render(<RouterProvider router={router} />));
     await wait(() => !!container.querySelector('[data-testid="toggle-provider"]'));
+    return router;
   }
   async function wait(predicate: () => boolean) { const end = Date.now() + 4000; while (!predicate()) { if (Date.now() > end) throw new Error("condition timed out"); await act(async () => new Promise((resolve) => setTimeout(resolve, 20))); } }
   async function click(id: string) { await act(async () => (container.querySelector(`[data-testid="${id}"]`) as HTMLButtonElement).click()); }
@@ -125,7 +145,7 @@ describe("provider enable auto-save isolation", () => {
     await act(async () => { const button = container.querySelector('[data-testid="toggle-provider"]') as HTMLButtonElement; button.click(); button.click(); });
     await wait(() => calls.length === 1); expect(calls).toHaveLength(1);
     await act(async () => release()); await wait(() => container.querySelector('[data-testid="provider-enabled"]')?.textContent === "false");
-    expect([...container.querySelectorAll('button')].some((button) => button.textContent?.trim() === "保存更改")).toBe(false);
+    expect(([...container.querySelectorAll('button')].find((button) => button.textContent?.trim() === "保存更改") as HTMLButtonElement).disabled).toBe(true);
   });
   it("holds the shared settings busy state throughout subscription pinning and releases it after save", async () => {
     let release!: () => void;
@@ -145,7 +165,8 @@ describe("provider enable auto-save isolation", () => {
   it("saves a decision toggle and unbinds handoff atomically without publishing its text draft", async () => {
     const calls = installFetch(); await ready();
     const panel = container.querySelector('[data-testid="config-decision-models"]')!;
-    const label = panel.querySelector('input[type="text"]') as HTMLInputElement;
+    await act(async () => (panel.querySelector('[aria-label="编辑 Local decision"]') as HTMLButtonElement).click());
+    const label = document.querySelector('[role="dialog"] input[type="text"]') as HTMLInputElement;
     expect(label.value).toBe("Local decision");
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(label, "Draft decision name"); label.dispatchEvent(new Event("input", { bubbles: true })); });
     await act(async () => (panel.querySelector('input[type="checkbox"]') as HTMLInputElement).click());
@@ -156,6 +177,110 @@ describe("provider enable auto-save isolation", () => {
     await act(async () => label.dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
     await wait(() => [...container.querySelectorAll('button')].some((button) => button.textContent?.trim() === "保存更改"));
     expect(calls).toHaveLength(1);
+  });
+
+  it("folds retained model inputs into one explicit save without publishing them during an immediate toggle", async () => {
+    const calls = installFetch(); await ready();
+    await click("edit-model-input");
+    expect(calls).toHaveLength(0);
+    await click("toggle-provider");
+    await wait(() => calls.length === 1);
+    expect(calls[0].publicConfig.llm.providers.relay.models["model.v1"].label).toBe("Saved model");
+    expect(container.querySelector('[data-testid="raw-model-draft"]')?.textContent).toContain("Raw model draft");
+    const save = [...container.querySelectorAll('button')].find((button) => button.textContent?.trim() === "保存更改") as HTMLButtonElement;
+    await wait(() => !save.disabled);
+    await act(async () => save.click());
+    await wait(() => calls.length === 2);
+    expect(calls[1].publicConfig.llm.providers.relay.models["model.v1"]).toEqual({ upstream_id: "test", label: "Raw model draft", defaults: { temperature: 0.4 } });
+    expect(calls[1].publicConfig.llm.decision_models).toEqual(BASE.llm.decision_models);
+    await wait(() => container.querySelector('[data-testid="raw-model-draft"]')?.textContent === "{}");
+  });
+
+  it("retains model inputs after failed save and blocks invalid numeric drafts", async () => {
+    const calls = installFetch({ failApply: true }); await ready();
+    await click("edit-model-input");
+    const save = [...container.querySelectorAll('button')].find((button) => button.textContent?.trim() === "保存更改") as HTMLButtonElement;
+    await act(async () => save.click());
+    await wait(() => calls.length === 1 && !save.disabled);
+    expect(container.querySelector('[data-testid="raw-model-draft"]')?.textContent).toContain("Raw model draft");
+    await click("invalid-model-input");
+    expect(save.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="raw-model-draft"]')?.textContent).toContain("1e");
+    expect(calls).toHaveLength(1);
+  });
+
+  it("keeps the cross-window dirty guard after an explicit override saves a different model", async () => {
+    const calls = installFetch(); await ready();
+    await click("edit-model-input");
+    expect(readConfigDraftPresence()).toBe(true);
+    await click("pin-extra-model");
+    await wait(() => calls.length === 1);
+    await wait(() => !(container.querySelector('[data-testid="toggle-provider"]') as HTMLButtonElement).disabled);
+    expect(calls[0].publicConfig.llm.providers.relay.models).toHaveProperty("extra");
+    expect(calls[0].publicConfig.llm.providers.relay.models["model.v1"].label).toBe("Saved model");
+    expect(container.querySelector('[data-testid="raw-model-draft"]')?.textContent).toContain("Raw model draft");
+    expect(readConfigDraftPresence()).toBe(true);
+  });
+
+  it("tests current model edits without persisting them", async () => {
+    const calls = installFetch(); await ready(); await click("edit-model-input");
+    await click("test-model-input");
+    const request = vi.mocked(fetch).mock.calls.find(([input]) => String(input).endsWith("/api/config/test-llm"));
+    expect(request).toBeDefined();
+    const body = JSON.parse(String(request![1]?.body));
+    expect(body.publicConfig.llm.providers.relay.models["model.v1"]).toEqual({ upstream_id: "test", label: "Raw model draft", defaults: { temperature: 0.4 } });
+    expect(calls).toHaveLength(0);
+    expect(readConfigDraftPresence()).toBe(true);
+  });
+
+  it("clears only the edited model after an accepted removal so remaining config can save", async () => {
+    const calls = installFetch(); await ready(); await click("edit-model-input");
+    await click("remove-model-input");
+    await wait(() => calls.length === 1);
+    expect(calls[0].publicConfig.llm.providers.relay.models).not.toHaveProperty("model.v1");
+    expect(calls[0].publicConfig.llm.decision_models).toEqual(BASE.llm.decision_models);
+    expect(container.querySelector('[data-testid="raw-model-draft"]')?.textContent).toBe("{}");
+  });
+
+  it("blocks leaving retained model inputs while a model test is running", async () => {
+    let release!: () => void;
+    const waitForTest = new Promise<void>((resolve) => { release = resolve; });
+    installFetch({ waitForTest }); const router = await ready();
+    await click("edit-model-input"); await click("test-model-input");
+    await act(async () => { void router.navigate("/elsewhere"); });
+    expect(router.state.location.pathname).toBe("/config");
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("还有未保存的设置");
+    expect(container.querySelector('[data-testid="raw-model-draft"]')?.textContent).toContain("Raw model draft");
+    await act(async () => release());
+  });
+
+  it("reports unfinished decision input to the page and clears it only after explicit discard", async () => {
+    const calls = installFetch(); const router = await ready();
+    const panel = container.querySelector('[data-testid="config-decision-models"]')!;
+    const add = [...panel.querySelectorAll('button')].find((button) => button.textContent?.trim() === "自定义")!;
+    await act(async () => add.click());
+    const editor = document.querySelector('[role="dialog"]')!;
+    const input = editor.querySelector('input[type="text"]') as HTMLInputElement;
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "Unfinished decision"); input.dispatchEvent(new Event("input", { bubbles: true })); });
+    const done = [...editor.querySelectorAll('button')].find((button) => button.textContent?.trim() === "完成")!;
+    await act(async () => done.click());
+    expect(readConfigDraftPresence()).toBe(true);
+    const save = [...container.querySelectorAll('button')].find((button) => button.textContent?.trim() === "保存更改") as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    expect(container.textContent).toContain("有尚未完成的模型编辑");
+    await act(async () => { void router.navigate("/elsewhere"); });
+    expect(router.state.location.pathname).toBe("/config");
+    const leaveDialog = document.querySelector('[role="dialog"]')!;
+    const cancel = [...leaveDialog.querySelectorAll('button')].find((button) => button.textContent?.trim() === "取消")!;
+    await act(async () => cancel.click());
+    const discard = [...container.querySelectorAll('button')].find((button) => button.textContent?.trim() === CONFIG_COPY.zh.discardChanges)!;
+    await act(async () => discard.click());
+    const confirm = document.querySelector('[role="dialog"]')!;
+    const discardConfirm = [...confirm.querySelectorAll('button')].find((button) => button.textContent?.trim() === CONFIG_COPY.zh.discardAndReload)!;
+    await act(async () => discardConfirm.click());
+    await wait(() => !container.textContent?.includes("Unfinished decision"));
+    await wait(() => !readConfigDraftPresence());
+    expect(calls).toHaveLength(0);
   });
 
 });

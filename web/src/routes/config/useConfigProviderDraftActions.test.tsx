@@ -2,7 +2,7 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { addDraftProvider, discoverDraftProvider, fetchConfigWorkspace, pinDraftProviderModel, previewConfigDraft, previewDraftProviderRoute, updateDraftProvider } from "../../api/config";
+import { addDraftProvider, deleteDraftProvider, discoverDraftProvider, fetchConfigWorkspace, pinDraftProviderModel, previewConfigDraft, previewDraftProviderRoute, updateDraftProvider } from "../../api/config";
 import { initialProviderWizardState } from "../configProviderLogic";
 import type { ConfigCatalogModel, ConfigWorkspace } from "../../api/types";
 import { CONFIG_COPY } from "./configCopy";
@@ -46,6 +46,102 @@ async function run(input: UseConfigProviderDraftActionsOptions, action: (actions
     await act(async () => action(actions));
   } finally { await act(async () => root.unmount()); }
 }
+
+describe("confirmed provider deletion draft cleanup", () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  async function runDeleteFlow(
+    input: UseConfigProviderDraftActionsOptions,
+    action: (latest: () => ReturnType<typeof useConfigProviderDraftActions>) => Promise<void>,
+  ) {
+    const root = createRoot(document.createElement("div"));
+    let actions!: ReturnType<typeof useConfigProviderDraftActions>;
+    function Harness() { actions = useConfigProviderDraftActions(input); return null; }
+    try {
+      await act(async () => root.render(<Harness />));
+      await action(() => actions);
+    } finally { await act(async () => root.unmount()); }
+  }
+
+  it("notifies once only after confirmed deletion resolves and the workspace is synchronized", async () => {
+    const input = options();
+    input.onProviderRemoved = vi.fn();
+    const response = { publicConfig: { llm: { providers: {} } }, hash: "after-delete" } as ConfigWorkspace;
+    let acceptDeletion!: (workspace: ConfigWorkspace) => void;
+    vi.mocked(deleteDraftProvider).mockReturnValueOnce(new Promise((resolve) => { acceptDeletion = resolve; }));
+
+    await runDeleteFlow(input, async (latest) => {
+      await act(async () => latest().handleDeleteProvider("relay"));
+      expect(latest().deleteProviderRequest).toEqual({ providerId: "relay" });
+      expect(deleteDraftProvider).not.toHaveBeenCalled();
+      expect(input.onProviderRemoved).not.toHaveBeenCalled();
+
+      let confirmation!: Promise<void>;
+      await act(async () => { confirmation = latest().handleConfirmDeleteProvider(); });
+      expect(deleteDraftProvider).toHaveBeenCalledTimes(1);
+      expect(input.syncWorkspace).not.toHaveBeenCalled();
+      expect(input.onProviderRemoved).not.toHaveBeenCalled();
+
+      await act(async () => { acceptDeletion(response); await confirmation; });
+      expect(latest().deleteProviderRequest).toBeNull();
+      // A stale confirm event after the request is consumed must be harmless.
+      await act(async () => latest().handleConfirmDeleteProvider());
+    });
+
+    expect(deleteDraftProvider).toHaveBeenCalledTimes(1);
+    expect(deleteDraftProvider).toHaveBeenCalledWith("relay", expect.objectContaining({
+      baseHash: "baseline", baseConfig: input.editBaselineRef.current.baseConfig,
+      publicConfig: input.draftConfig, draftMeta: input.draftMeta,
+    }));
+    expect(input.syncWorkspace).toHaveBeenCalledExactlyOnceWith(response, "success", { resetBase: false });
+    expect(input.onProviderRemoved).toHaveBeenCalledExactlyOnceWith("relay");
+    expect(vi.mocked(input.syncWorkspace).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(input.onProviderRemoved).mock.invocationCallOrder[0]);
+    expect(input.setSelectedProviderId).toHaveBeenLastCalledWith("");
+  });
+
+  it("does not delete or notify when the confirmation is canceled", async () => {
+    const input = options();
+    input.onProviderRemoved = vi.fn();
+    const original = structuredClone(input.providerDraftRequestRef.current);
+    await runDeleteFlow(input, async (latest) => {
+      await act(async () => latest().handleDeleteProvider("relay"));
+      await act(async () => latest().handleCancelDeleteProvider());
+      expect(latest().deleteProviderRequest).toBeNull();
+      await act(async () => latest().handleConfirmDeleteProvider());
+    });
+    expect(deleteDraftProvider).not.toHaveBeenCalled();
+    expect(input.syncWorkspace).not.toHaveBeenCalled();
+    expect(input.onProviderRemoved).not.toHaveBeenCalled();
+    expect(input.setSelectedProviderId).not.toHaveBeenCalled();
+    expect(input.providerDraftRequestRef.current).toEqual(original);
+  });
+
+  it.each(["delete request", "workspace sync"])("retains the model drafts when %s fails", async (stage) => {
+    const input = options();
+    input.onProviderRemoved = vi.fn();
+    const original = structuredClone(input.providerDraftRequestRef.current);
+    const error = new Error(`${stage} failed`);
+    if (stage === "delete request") vi.mocked(deleteDraftProvider).mockRejectedValueOnce(error);
+    else {
+      vi.mocked(deleteDraftProvider).mockResolvedValueOnce({ publicConfig: {}, hash: "after-delete" } as ConfigWorkspace);
+      vi.mocked(input.syncWorkspace).mockImplementationOnce(() => { throw error; });
+    }
+    await runDeleteFlow(input, async (latest) => {
+      await act(async () => latest().handleDeleteProvider("relay"));
+      await act(async () => latest().handleConfirmDeleteProvider());
+      expect(latest().deleteProviderRequest).toBeNull();
+    });
+    expect(deleteDraftProvider).toHaveBeenCalledTimes(1);
+    expect(input.syncWorkspace).toHaveBeenCalledTimes(stage === "workspace sync" ? 1 : 0);
+    expect(input.onProviderRemoved).not.toHaveBeenCalled();
+    expect(input.setSelectedProviderId).not.toHaveBeenCalled();
+    expect(input.providerDraftRequestRef.current).toEqual(original);
+    expect(input.setProviderActionError).toHaveBeenCalledWith(error.message);
+    expect(input.markError).toHaveBeenCalledWith(error);
+    expect(input.setBusyAction).toHaveBeenLastCalledWith("");
+  });
+});
 
 describe("provider draft baseline and failure recovery", () => {
   beforeEach(() => vi.resetAllMocks());

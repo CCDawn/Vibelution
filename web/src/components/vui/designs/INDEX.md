@@ -14,6 +14,10 @@
 | `PersonalAssistantComputerPanel` | [product/personal-assistant.md](./product/personal-assistant.md#personalassistantcomputerpanel) |
 | `HumanAttentionNotifier` | [product/personal-assistant.md](./product/personal-assistant.md#humanattentionnotifier) |
 | `ChatGPTSubscriptionPanel` | [product/chatgpt-subscription.md](./product/chatgpt-subscription.md#chatgptsubscriptionpanel) |
+| `ConfigProviderRegistryPanel` | [product/model-settings.md](./product/model-settings.md#configproviderregistrypanel) |
+| `ProviderModelsTab` | [product/model-settings.md](./product/model-settings.md#providermodelstab) |
+| `ConfigModelEntryEditor` | [product/model-settings.md](./product/model-settings.md#configmodelentryeditor) |
+| `ConfigDecisionModelsPanel` | [product/model-settings.md](./product/model-settings.md#configdecisionmodelspanel) |
 
 选型与反冗余入口。路径均为 `designs/` 相对路径。
 
