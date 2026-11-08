@@ -89,7 +89,7 @@ describe("ChatGPT subscription card", () => {
 
   it("keeps the subscription panel behind the optional integration callback", () => {
     expect(registrySource).toContain("onAddSubscriptionModels?: AddSubscriptionModels");
-    expect(registrySource).toContain("{onAddSubscriptionModels ? <ChatGPTSubscriptionPanel");
+    expect(registrySource).toContain("subscriptionOpen && onAddSubscriptionModels ?");
     expect(registrySource).toContain("setupBlockedReason={subscriptionSetupBlockedReason}");
   });
 

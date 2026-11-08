@@ -110,7 +110,7 @@ const styles = {
   configToolbar:
     "vui-routes-configroute configToolbar grid min-w-0 gap-2 border-b border-[var(--vui-border-subtle)] !bg-vui-surface-panel px-3 py-2",
   content:
-    "vui-routes-configroute content max-[720px]:!h-auto max-[720px]:!overflow-visible !flex min-h-0 min-w-0 h-full flex-col overflow-hidden !bg-vui-surface-panel",
+    "vui-routes-configroute content !flex min-h-0 min-w-0 h-full flex-col overflow-hidden !bg-vui-surface-panel",
   pageViewport:
     "vui-routes-configroute pageViewport grid content-start gap-7 w-full max-w-[1104px] mx-auto min-w-0 min-h-0 overflow-y-auto overflow-x-hidden px-12 pb-8 [scrollbar-gutter:stable] max-[980px]:px-7 max-[720px]:px-5 max-[720px]:overflow-visible",
   contentModels:
