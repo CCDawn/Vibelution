@@ -2542,9 +2542,11 @@ def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
         return _probe_llm_http(provider, profile, api_key)
 
     probe_timeout = coerce_llm_runtime_probe_timeout(provider, profile.connect_timeout, profile.timeout)
-    # Thinking-default models emit reasoning tokens before any visible output, so a
-    # 1-token budget deterministically returns finish_reason=length for them.
-    probe_max_output_tokens = 1
+    # 非最小预算不足以判活即可：1-token 预算下任何多于一个 token 的正常回复
+    # （含未声明 reasoning_state_field 的 thinking 模型的开场思考）都会以
+    # finish_reason=length 收场，把可用 provider 误报成截断失败。32 让正常
+    # ping 回复（"OK"/"pong" 级）稳定落地；显式 reasoning 模型仍走下方 2048。
+    probe_max_output_tokens = 32
     if (
         str(getattr(profile, "contract", "") or "").strip().lower() == "reasoning_chat"
         or str(getattr(profile, "reasoning_state_field", "") or "").strip()
