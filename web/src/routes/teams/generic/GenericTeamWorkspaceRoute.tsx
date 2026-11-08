@@ -10,7 +10,7 @@ import { useTeamsCatalogQueries } from "../useTeamsCatalogQueries";
 import { isChallengeCupResearchWorkflowTeam } from "../teamKindModel";
 import { GenericWorkflowWorkspace } from "./GenericWorkflowWorkspace";
 import { WorkflowWorkspaceLoading } from "./WorkflowWorkspaceLoading";
-import { workflowTeamParams } from "./workspaceRouteModel";
+import { workflowTeamDiscussionParams, workflowTeamParams } from "./workspaceRouteModel";
 export function GenericTeamWorkspaceRoute({ forcedTeamId, legacy }: {
     forcedTeamId?: string;
     legacy: ReactNode;
@@ -37,15 +37,13 @@ export function GenericTeamWorkspaceRoute({ forcedTeamId, legacy }: {
         return { ...member, agentName: member.agentName || agent?.displayName || "", agentCode: member.agentCode || agent?.agentCode || "" };
     }) };
     const goToTeamView = (history: boolean) => {
-        const next = workflowTeamParams(params, teamId);
-        next.delete("teamWorkspace");
+        const next = history
+            ? workflowTeamParams(params, teamId)
+            : workflowTeamDiscussionParams(params, teamId, team.linkedChatRoomId);
         if (history) {
+            next.delete("teamWorkspace");
             next.set("workflowWorkspace", "legacy");
             next.set("researchView", "workflow");
-        }
-        else {
-            next.set("teamView", "discussion");
-            next.set("researchView", "discussion");
         }
         setParams(next);
     };
