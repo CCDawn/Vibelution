@@ -1207,7 +1207,9 @@ def _inspect_desktop_shell_package(
         package_root=package_root,
     )
     if not package_block_reason and for_reuse:
-        if not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", current_commit) or packaged_source_commit != current_commit:
+        # Provenance records the build's original commit. Reuse is decided by
+        # the Electron, frontend and assistant content checks below, not HEAD.
+        if not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", packaged_source_commit):
             package_block_reason = "source_commit_mismatch"
         elif not _electron_package_sources_clean(root):
             package_block_reason = "electron_source_unverified"

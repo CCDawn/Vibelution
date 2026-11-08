@@ -147,10 +147,7 @@ def _packaged_build(root: Path, package: Path, *, staged: bool, native_status: d
         source_commit = provenance.get("sourceCommit")
         if not isinstance(source_commit, str) or not _GIT_HASH.fullmatch(source_commit):
             return None
-        current_commit = desktop_shell._git_tree_hash(root, "HEAD")
-        if not isinstance(current_commit, str) or not _GIT_HASH.fullmatch(current_commit):
-            raise RuntimeError("Launcher source commit is unavailable")
-        if source_commit != current_commit or not desktop_shell._electron_package_sources_clean(root):
+        if not desktop_shell._electron_package_sources_clean(root):
             return None
     assistant_root = package / "resources/launcher-assistant"
     if not (
