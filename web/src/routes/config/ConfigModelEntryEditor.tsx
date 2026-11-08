@@ -20,6 +20,7 @@ export type ConfigModelEntryEditorProps = {
   copy: ConfigCopy;
   edits: ModelFieldEdits;
   onEditsChange: (edits: ModelFieldEdits) => void;
+  onEnabledChange?: (enabled: boolean) => void;
   /** Compatibility for old embedded consumers. The page uses its single save. */
   onSave?: (modelKey: string, edits: ModelFieldEdits) => void;
 };
@@ -29,7 +30,7 @@ type GenerationField = (typeof GENERATION_FIELDS)[number];
 
 /** A controlled whitelist editor. Entry and generation values remain page drafts. */
 export function ConfigModelEntryEditor({
-  model, disabled, busy, copy, edits, onEditsChange, onSave,
+  model, disabled, busy, copy, edits, onEditsChange, onSave, onEnabledChange,
 }: ConfigModelEntryEditorProps) {
   const baseline = useMemo(
     () => buildModelFieldValues(model.draftEntry, { label: model.label, upstreamId: model.upstreamId }),
@@ -39,6 +40,7 @@ export function ConfigModelEntryEditor({
   const values: ModelFieldValues = { ...baseline };
   const changedEdits: ModelFieldEdits = {};
   for (const field of EDITABLE_MODEL_FIELDS) {
+    if (field === "enabled" && onEnabledChange) continue;
     const value = edits[field];
     if ((typeof value === "string" || typeof value === "boolean") && value !== baseline[field]) {
       Object.assign(values, { [field]: value });
@@ -111,7 +113,8 @@ export function ConfigModelEntryEditor({
           <span>{copy.modelEditFieldEnabled}</span>
           <div className={styles.modelEditSwitch}>
             <VSwitch isSelected={values.enabled === true} isDisabled={locked} aria-label={copy.modelEditFieldEnabled}
-              onChange={(value) => update("enabled", value)} />
+              title={onEnabledChange ? copy.modelSwitchHint : undefined}
+              onChange={(value) => onEnabledChange ? onEnabledChange(value) : update("enabled", value)} />
           </div>
         </div>
       </div>

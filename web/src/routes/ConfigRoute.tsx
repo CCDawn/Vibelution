@@ -1474,6 +1474,31 @@ export function ConfigRoute() {
     }
   }
 
+  async function handleSaveModelEnabled(modelRef: string, enabled: boolean) {
+    if (structuredActionsDisabled || immediateSaveLockRef.current) return false;
+    const slash = modelRef.indexOf("/");
+    const providerId = modelRef.slice(0, slash);
+    const modelKey = modelRef.slice(slash + 1);
+    try {
+      const providers = asRecord(asRecord(editBaselineRef.current.baseConfig?.llm).providers);
+      if (slash <= 0 || !Object.hasOwn(providers, providerId)
+        || !Object.hasOwn(asRecord(asRecord(providers[providerId]).models), modelKey)) {
+        throw new Error(copy.modelNeedsSave);
+      }
+      await persistImmediateValues([{ path: ["llm", "providers", providerId, "models", modelKey, "enabled"], value: enabled }]);
+      setModelEditorDrafts((current) => {
+        if (!Object.hasOwn(current[modelRef] ?? {}, "enabled")) return current;
+        const edits = { ...current[modelRef] };
+        delete edits.enabled;
+        const next = { ...current };
+        if (Object.keys(edits).length) next[modelRef] = edits;
+        else delete next[modelRef];
+        return next;
+      });
+      return true;
+    } catch (error) { markError(error); return false; }
+  }
+
   async function handleDecisionModelToggle(id: string, enabled: boolean) {
     if (structuredActionsDisabled || immediateSaveLockRef.current) return false;
     try {
@@ -2088,6 +2113,7 @@ export function ConfigRoute() {
                   onToggleEnabled={(providerId, enabled) => {
                     void handleSaveProviderEnabled(providerId, enabled);
                   }}
+                  onToggleModelEnabled={(modelRef, enabled) => { void handleSaveModelEnabled(modelRef, enabled); }}
                   onUpdateModel={(providerId, modelKey, edits) => {
                     // Wave 3 governance path B: whitelist-gated entry edit,
                     // draft-only until「保存到外部配置」.

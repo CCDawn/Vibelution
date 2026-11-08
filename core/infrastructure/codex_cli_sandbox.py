@@ -5,6 +5,51 @@ startup/first use; Agent-facing contracts (``exec_command`` / ``cli_tool`` /
 ``write_stdin``) never select Windows, Linux, Shell or Codex backend.  Public
 session/cwd/security/timeout/cancel orchestration stays here; platform-specific
 executable/shell/sandbox argv lives in ``core.infrastructure.codex_sandbox``.
+
+MXC (Microsoft Execution Containers) backend — ``workspace_write`` tier only,
+Windows only, evaluated before the SANDBOX_UNVERIFIED gate
+------------------------------------------------------------------
+
+On Windows the pre-MXC chain is fail-closed: without one-shot user-approval
+evidence every sandboxed command is rejected (``SANDBOX_UNVERIFIED``) because
+the native Codex offline boundary was never runtime-proven.  When the MXC
+executor is installed at ``%LOCALAPPDATA%\\Vibelution\\sandbox\\wxc-exec.exe``
+(pinned 1.0.x, version+probe+telemetry checked, and runtime self-verified with
+a TTL cache — see ``core.infrastructure.codex_sandbox.mxc``), the
+``workspace_write`` tier executes inside MXC instead: workspace readwrite +
+redirected TEMP, egress/ingress deny, unique per-run child temp, process-tree
+termination on timeout/cancel.  Any MXC failure (probe / version / self-verify
+/ spawn) falls back to the pre-MXC chain unchanged (evidence pass or
+``SANDBOX_UNVERIFIED`` fail-closed) and emits a structured
+``tool.execution.mxc_backend`` event whose ``code`` distinguishes the cause:
+``mxc_unavailable`` / ``mxc_version_unsupported`` / ``mxc_probe_failed`` /
+``mxc_verify_failed`` / ``mxc_spawn_failed`` / ``mxc_non_ascii_argv``.
+
+Tier matrix (executor ``--probe``, PoC baseline Windows 26200.8875):
+
+- ``basecontainer`` (PSEC; **requires Windows >= 26200.9278**): full policy
+  surface — ``deniedPaths`` (workspace ``.git`` protection) and explicit
+  egress rules become available.  This tier unlocks the complete MXC
+  capability set.
+- ``appcontainer-dacl`` (degraded fallback tier): two-state policy only —
+  workspace write + network deny are enforced; ``deniedPaths`` and egress
+  allow rules are silently unsupported there and are never emitted
+  (workspace ``.git`` is NOT protected in this tier).
+- ``danger_full_access`` bypasses MXC entirely (direct subprocess, no
+  sandbox); the route.blocked content gate and ``_resolve_cwd`` boundary
+  semantics keep running before any sandbox selection; ``read_only`` keeps
+  the pre-MXC fail-closed behavior (the MXC two-state policy grants
+  workspace writes, which would widen read-only).
+- git-bash inner payloads never enter MXC (executor refuses: msys binaries
+  fail ``STATUS_DLL_INIT_FAILED`` under MXC UI isolation, measured). Those
+  commands fall back to the fail-closed chain unchanged; native cmd/powershell
+  payloads (including git_bash routes the adapter inlined to cmd) run in MXC,
+  with non-ASCII command text relayed through a UTF-8 script file in the
+  granted child temp (PoC R5 GBK argv mojibake fix).
+
+Approval integration: ``windows_offline_shell_unverified()`` returns False for
+``workspace_write`` when MXC containment is verified, which restores the
+auto_review silent auto-approval premise in the approvals service.
 """
 
 from __future__ import annotations
@@ -25,7 +70,9 @@ from core.infrastructure.tool_execution_trace import record_tool_process_event
 from core.infrastructure.codex_sandbox.environment import (
     sandbox_process_environment as _adapter_sandbox_process_environment,
     sandbox_temp_root as _adapter_sandbox_temp_root,
+    scrub_credential_environment as _adapter_scrub_credential_environment,
 )
+from core.infrastructure.codex_sandbox import mxc as _mxc_backend
 from core.infrastructure.codex_sandbox.platform import host_platform as _host_platform
 from core.infrastructure.codex_sandbox.process import (
     sandbox_popen_command as _sandbox_popen_command,
@@ -91,6 +138,156 @@ def _sandbox_requires_codex(sandbox_mode: str) -> bool:
     return sandbox_mode != _DANGER_FULL_ACCESS_SANDBOX_MODE
 
 
+def windows_mxc_containment_verified() -> bool:
+    """True when the MXC backend proves real ``workspace_write`` containment.
+
+    审批层的沙箱包含前提：executor 二进制在位（固定安装路径）、版本锁
+    1.0.x、probe 通过、且运行时自验证（workspace 写 + 出站必拒）通过。
+    任何一环失败都返回 False —— 沙箱包含前提不成立，宁可多问一次。
+    """
+    if _host_platform() != "windows" or _mxc_backend.sandbox_disabled_by_env():
+        return False
+    return _mxc_availability_with_events("approval_premise").ok
+
+
+def _mxc_availability_with_events(context: str) -> "_mxc_backend.MxcAvailability":
+    """Availability verdict plus one structured event per fresh verification."""
+    availability = _mxc_backend.ensure_verified()
+    if availability.from_cache:
+        return availability
+    record_tool_process_event(
+        "tool.execution.mxc_backend",
+        commandHash="",
+        code="mxc_verified" if availability.ok else (availability.code or "mxc_refused"),
+        context=context,
+        tier=availability.tier,
+        telemetryPolicy=availability.telemetry_policy,
+        detail=availability.detail,
+        processStatus="verified" if availability.ok else "refused",
+    )
+    if availability.ok:
+        _debug_logger.info(
+            f"[Codex CLI 沙盒] MXC 后端自验证通过 tier={availability.tier} "
+            f"telemetryPolicy={availability.telemetry_policy} {availability.detail}"
+        )
+    else:
+        _debug_logger.warning(
+            f"[Codex CLI 沙盒] MXC 后端不可用 code={availability.code or 'mxc_refused'} "
+            f"detail={availability.detail} telemetryPolicy={availability.telemetry_policy}；"
+            "回退既有链路。"
+        )
+    return availability
+
+
+def _mxc_route_candidate(sandbox_mode: str) -> bool:
+    """MXC handles only Windows ``workspace_write`` commands, when enabled."""
+    return (
+        _host_platform() == "windows"
+        and sandbox_mode == _WORKSPACE_WRITE_SANDBOX_MODE
+        and not _mxc_backend.sandbox_disabled_by_env()
+    )
+
+
+def _record_mxc_event(command_hash: str, code: str, *, detail: str = "") -> None:
+    record_tool_process_event(
+        "tool.execution.mxc_backend",
+        commandHash=command_hash,
+        code=code,
+        detail=detail,
+        processStatus="fallback",
+    )
+    _debug_logger.warning(
+        f"[Codex CLI 沙盒] MXC 后端回退 code={code} detail={detail} commandHash={command_hash}"
+    )
+
+
+def _mxc_build_gate_plan(
+    *,
+    sandbox_mode: str,
+    route: Any,
+    workdir: Path,
+    command_hash: str,
+    timeout_seconds: int,
+    git_bash_executable: str,
+) -> "_mxc_backend.MxcCommandPlan | None":
+    """Build the MXC spawn plan for one command; ``None`` = fall back.
+
+    Failure reasons are recorded as structured events (probe/version/verify
+    failures come through the cached availability verdict; argv transport and
+    policy preparation failures are recorded here).
+    """
+    if not _mxc_route_candidate(sandbox_mode):
+        return None
+    availability = _mxc_availability_with_events("gate")
+    if not availability.ok:
+        return None
+    executor = _mxc_backend.executor_path()
+    if executor is None:
+        _record_mxc_event(command_hash, _mxc_backend.REASON_UNAVAILABLE, detail="executor_binary_missing")
+        return None
+    child_temp = (
+        workdir / ".tmp" / "mxc" / f"{command_hash[:8]}-{uuid.uuid4().hex[:6]}"
+    ).resolve()
+    try:
+        child_temp.mkdir(parents=True, exist_ok=False)
+    except OSError as exc:
+        _record_mxc_event(
+            command_hash, _mxc_backend.REASON_SPAWN_FAILED, detail=f"child_temp_{type(exc).__name__}"
+        )
+        return None
+    try:
+        plan = _mxc_backend.build_command_plan(
+            executor,
+            route,
+            workdir=workdir,
+            child_temp=child_temp,
+            # External deadline enforcement stays authoritative; the in-policy
+            # timeout is the last-resort backstop (PoC: 双保险).
+            timeout_ms=(int(timeout_seconds) + 5) * 1000,
+            tier=availability.tier,
+            git_bash_executable=git_bash_executable,
+        )
+    except _mxc_backend.MxcPlanRefused as exc:
+        _record_mxc_event(command_hash, exc.code, detail=exc.detail)
+        _mxc_backend.cleanup_child_temp(child_temp)
+        return None
+    except Exception as exc:
+        _record_mxc_event(
+            command_hash, _mxc_backend.REASON_SPAWN_FAILED, detail=f"plan_{type(exc).__name__}"
+        )
+        _mxc_backend.cleanup_child_temp(child_temp)
+        return None
+    return plan
+
+
+def _mxc_spawn_process(
+    plan: "_mxc_backend.MxcCommandPlan",
+    *,
+    workdir: Path,
+    stdin: int | None,
+) -> subprocess.Popen[str]:
+    """Spawn ``wxc-exec.exe`` window-less with the UTF-8 pipeline contract."""
+    environment = _adapter_scrub_credential_environment(os.environ)
+    environment.setdefault("PYTHONIOENCODING", "utf-8")
+    environment.setdefault("PYTHONUTF8", "1")
+    popen_kwargs: dict[str, Any] = dict(_sandbox_popen_kwargs(platform=_host_platform()))
+    if stdin is not None:
+        popen_kwargs["stdin"] = stdin
+    process = subprocess.Popen(
+        _sandbox_popen_command(plan.spawn_argv, platform=_host_platform()),
+        shell=False,
+        cwd=str(workdir),
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="surrogateescape",
+        **popen_kwargs,
+    )
+    return process
+
+
 def _windows_offline_shell_is_unverified(sandbox_mode: str) -> bool:
     """Fail closed until native Windows offline containment is runtime-proven.
 
@@ -98,15 +295,27 @@ def _windows_offline_shell_is_unverified(sandbox_mode: str) -> bool:
     sufficient evidence: the direct shell boundary must also block outbound
     traffic. Networked work therefore stays on governed tools instead of an
     arbitrary local shell while the native boundary is unverifiable.
+
+    MXC exception: when the MXC backend proves real containment (executor
+    1.0.x in place + runtime self-verification passed), the
+    ``workspace_write`` premise holds and this gate no longer claims
+    otherwise. ``read_only`` keeps fail-closed behavior (the MXC two-state
+    policy grants workspace writes, which would widen read-only).
     """
-    return _host_platform() == "windows" and _sandbox_requires_codex(sandbox_mode)
+    if not (_host_platform() == "windows" and _sandbox_requires_codex(sandbox_mode)):
+        return False
+    if sandbox_mode == _WORKSPACE_WRITE_SANDBOX_MODE and windows_mxc_containment_verified():
+        return False
+    return True
 
 
 def windows_offline_shell_unverified() -> bool:
     """Whether the live host+runtime shell boundary is an unverified Windows sandbox.
 
     Shared with the approval service: silent auto-approval of sandbox-contained
-    tools is only valid where containment is actually proven.
+    tools is only valid where containment is actually proven.  With the MXC
+    backend verified, ``workspace_write`` containment is real and this returns
+    False; without MXC the Windows fail-closed answer is unchanged.
     """
     return _windows_offline_shell_is_unverified(_current_agent_sandbox_mode())
 
@@ -212,8 +421,6 @@ def _resolve_cwd(cwd: str | None) -> Path:
             f"工作目录超出 Agent 工作区边界: {resolved}; allowed={workspace_root}"
         )
     return resolved
-
-
 
 
 def _sandbox_process_environment(
@@ -367,14 +574,17 @@ class _SandboxTerminalSession:
         process: Any,
         command_hash: str,
         workdir: Path,
-        sandbox_temp: Path,
+        sandbox_temp: Path | None,
         timeout_seconds: int,
+        extra_cleanup: Callable[[], None] | None = None,
     ) -> None:
         self.session_id = session_id
         self.process = process
         self.command_hash = command_hash
         self.workdir = workdir
         self.sandbox_temp = sandbox_temp
+        self.timeout_seconds = timeout_seconds
+        self.extra_cleanup = extra_cleanup
         self.started_at = time.monotonic()
         self.idle_timeout_seconds = timeout_seconds
         self.hard_deadline = self.started_at + _TERMINAL_SESSION_MAX_LIFETIME_SECONDS
@@ -490,6 +700,11 @@ class _SandboxTerminalSession:
             exit_code=exit_code,
         )
         _cleanup_sandbox_temp(self.workdir, self.sandbox_temp)
+        if callable(self.extra_cleanup):
+            try:
+                self.extra_cleanup()
+            except Exception:
+                pass
 
     def snapshot(self, *, max_output_chars: int) -> dict[str, Any]:
         self.last_accessed_at = time.monotonic()
@@ -614,6 +829,80 @@ def _terminal_error_payload(code: str, message: str, *, session_id: str = "") ->
     return payload
 
 
+def _try_start_mxc_terminal_session(
+    *,
+    sandbox_mode: str,
+    route: Any,
+    workdir: Path,
+    command_hash: str,
+    timeout_seconds: int,
+    yield_time_ms: int,
+    max_output_chars: int,
+    _cancel_checker: Callable[[], str] | None,
+) -> tuple[dict[str, Any] | None, bool]:
+    """Start one MXC terminal session.
+
+    Returns ``(snapshot, mxc_not_handled)``; ``snapshot is None`` = fall back
+    to the pre-MXC chain. ``mxc_not_handled`` forces the fail-closed evidence
+    gate at the caller (same contract as ``_try_execute_via_mxc``).
+    stdin piping depends on the executor forwarding its own stdin to the
+    sandbox child; when it does not, the existing terminal_not_running /
+    stdin guidance applies unchanged (one-shot ``cli_tool`` remains the
+    reliable path).
+    """
+    if not _mxc_route_candidate(sandbox_mode):
+        return None, False
+    plan = _mxc_build_gate_plan(
+        sandbox_mode=sandbox_mode,
+        route=route,
+        workdir=workdir,
+        command_hash=command_hash,
+        timeout_seconds=timeout_seconds,
+        git_bash_executable=_mxc_git_bash_for_route(route),
+    )
+    if plan is None:
+        return None, True
+    try:
+        process = _mxc_spawn_process(plan, workdir=workdir, stdin=subprocess.PIPE)
+    except Exception as exc:
+        _record_mxc_event(
+            command_hash,
+            _mxc_backend.REASON_SPAWN_FAILED,
+            detail=f"popen_{type(exc).__name__}",
+        )
+        _mxc_backend.cleanup_child_temp(plan.child_temp)
+        return None, True
+    _prune_sandbox_terminal_sessions()
+    session_id = f"sandbox-{uuid.uuid4().hex[:16]}"
+    session = _SandboxTerminalSession(
+        session_id=session_id,
+        process=process,
+        command_hash=command_hash,
+        workdir=workdir,
+        sandbox_temp=None,
+        timeout_seconds=timeout_seconds,
+        extra_cleanup=lambda: _mxc_backend.cleanup_child_temp(plan.child_temp),
+    )
+    with _SANDBOX_TERMINAL_SESSIONS_LOCK:
+        _SANDBOX_TERMINAL_SESSIONS[session_id] = session
+    session.start()
+    tier = plan.tier
+    _debug_logger.info(
+        f"[Codex CLI 沙盒] MXC 后端终端会话 terminalSessionId={session_id} "
+        f"commandHash={command_hash} route={getattr(route, 'route', '')} tier={tier} "
+        f"networkPolicy=deny cwd={workdir} timeout={timeout_seconds}s"
+    )
+    _log_outcome(command_hash, "started", reason="mxc_terminal_session_started", started_at=session.started_at)
+    return (
+        session.wait_for_update(
+            yield_time_ms=yield_time_ms,
+            max_output_chars=max_output_chars,
+            cancel_checker=_cancel_checker,
+        ),
+        False,
+    )
+
+
 def start_codex_sandbox_terminal_session(
     command: str = "",
     *,
@@ -649,7 +938,25 @@ def start_codex_sandbox_terminal_session(
     if route.blocked:
         _log_outcome(command_hash, "blocked", reason=route.reason or "shell_route")
         return _terminal_error_payload("SHELL_ROUTE_BLOCKED", str(route.error or "命令路由被拦截。"))
-    if _windows_offline_shell_is_unverified(sandbox_mode):
+    timeout_seconds = _clamp_terminal_timeout(timeout, default=60, minimum=1, maximum=_TERMINAL_SESSION_MAX_LIFETIME_SECONDS)
+
+    # MXC backend (Windows workspace_write): content gates above already ran;
+    # any MXC non-handling falls through and keeps the fail-closed evidence
+    # gate on (same contract as the one-shot execution path).
+    mxc_result, mxc_not_handled = _try_start_mxc_terminal_session(
+        sandbox_mode=sandbox_mode,
+        route=route,
+        workdir=workdir,
+        command_hash=command_hash,
+        timeout_seconds=timeout_seconds,
+        yield_time_ms=yield_time_ms,
+        max_output_chars=max_output_chars,
+        _cancel_checker=_cancel_checker,
+    )
+    if mxc_result is not None:
+        return mxc_result
+
+    if mxc_not_handled or _windows_offline_shell_is_unverified(sandbox_mode):
         evidence_ok, evidence_reason = _approved_execution_evidence_allows(normalized_command)
         if not evidence_ok:
             _log_outcome(
@@ -665,7 +972,6 @@ def start_codex_sandbox_terminal_session(
     if _sandbox_requires_codex(sandbox_mode) and not executable:
         _log_outcome(command_hash, "unavailable", reason="codex_executable_missing")
         return _terminal_error_payload("CODEX_SANDBOX_UNAVAILABLE", "未找到原生 Codex CLI 可执行文件（codex.exe / codex）；命令未执行。")
-    timeout_seconds = _clamp_terminal_timeout(timeout, default=60, minimum=1, maximum=_TERMINAL_SESSION_MAX_LIFETIME_SECONDS)
     is_native_windows_command, command_env_name, _route_label = _describe_sandbox_route(
         route
     )
@@ -811,6 +1117,160 @@ def write_codex_sandbox_terminal_stdin(
     )
 
 
+def _run_process_loop(
+    process: subprocess.Popen[str],
+    *,
+    command_hash: str,
+    started_at: float,
+    timeout_seconds: int,
+    cancel_checker: Callable[[], str] | None,
+) -> str:
+    """Shared poll loop: cancel + deadline + exit semantics for all backends."""
+    deadline = started_at + timeout_seconds
+    while True:
+        cancellation_reason = ""
+        if callable(cancel_checker):
+            try:
+                cancellation_reason = str(cancel_checker() or "").strip()
+            except Exception:
+                cancellation_reason = ""
+        if cancellation_reason:
+            _terminate_process_tree(process)
+            stdout, stderr = _collect_output(process)
+            preview = _format_output(stdout, stderr, process.returncode)
+            suffix = "" if preview == "[命令执行完成，无输出]" else f"\n\n{preview}"
+            elapsed_ms = int((time.monotonic() - started_at) * 1000)
+            _log_outcome(
+                command_hash,
+                "cancelled",
+                reason="stop_requested",
+                started_at=started_at,
+                exit_code=process.returncode,
+            )
+            return (
+                f"[取消] 命令已因停止请求终止：{cancellation_reason} "
+                f"({elapsed_ms}ms){suffix}"
+            )
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            _terminate_process_tree(process)
+            _collect_output(process)
+            _log_outcome(
+                command_hash,
+                "timeout",
+                reason="deadline_exceeded",
+                started_at=started_at,
+                exit_code=process.returncode,
+            )
+            return (
+                f"[超时] 命令执行超过 {timeout_seconds} 秒被强制终止。\n"
+                "请检查命令是否陷入死循环。"
+            )
+        try:
+            stdout, stderr = process.communicate(
+                timeout=min(_POLL_INTERVAL_SECONDS, remaining)
+            )
+            record_tool_process_event(
+                "tool.execution.process_exit_observed", commandHash=command_hash,
+                processId=getattr(process, "pid", None), exitCode=process.returncode,
+            )
+            result = _format_output(
+                str(stdout or ""),
+                str(stderr or ""),
+                process.returncode,
+            )
+            _log_outcome(
+                command_hash,
+                "completed",
+                reason="process_exit",
+                started_at=started_at,
+                exit_code=process.returncode,
+            )
+            return result
+        except subprocess.TimeoutExpired:
+            continue
+
+
+def _mxc_git_bash_for_route(route: Any) -> str:
+    if str(getattr(route, "route", "") or "") != "git_bash":
+        return ""
+    try:
+        from tools.shell_tools import _find_git_bash
+
+        return _find_git_bash()
+    except Exception:
+        return ""
+
+
+def _try_execute_via_mxc(
+    *,
+    sandbox_mode: str,
+    route: Any,
+    workdir: Path,
+    command_hash: str,
+    timeout_seconds: int,
+    cancel_checker: Callable[[], str] | None,
+) -> tuple[str | None, bool]:
+    """Run one command through MXC.
+
+    Returns ``(output, mxc_not_handled)``. ``output is None`` means fall back
+    to the pre-MXC chain; ``mxc_not_handled`` is True whenever MXC was the
+    selected backend candidate but the command did not go through it
+    (availability refusal, argv transport refusal, or spawn failure). The
+    caller applies the fail-closed evidence gate in that case even though MXC
+    containment may be cached as verified — the fallback would otherwise
+    execute in the never-proven Windows Codex sandbox with the gate open.
+    """
+    if not _mxc_route_candidate(sandbox_mode):
+        return None, False
+    plan = _mxc_build_gate_plan(
+        sandbox_mode=sandbox_mode,
+        route=route,
+        workdir=workdir,
+        command_hash=command_hash,
+        timeout_seconds=timeout_seconds,
+        git_bash_executable=_mxc_git_bash_for_route(route),
+    )
+    if plan is None:
+        return None, True
+    started_at = time.monotonic()
+    try:
+        process = _mxc_spawn_process(plan, workdir=workdir, stdin=None)
+    except Exception as exc:
+        _record_mxc_event(
+            command_hash,
+            _mxc_backend.REASON_SPAWN_FAILED,
+            detail=f"popen_{type(exc).__name__}",
+        )
+        _mxc_backend.cleanup_child_temp(plan.child_temp)
+        return None, True
+    tier = plan.tier
+    _debug_logger.info(
+        f"[Codex CLI 沙盒] MXC 后端执行 commandHash={command_hash} "
+        f"route={getattr(route, 'route', '')} tier={tier} networkPolicy=deny "
+        f"cwd={workdir} timeout={timeout_seconds}s"
+    )
+    record_tool_process_event(
+        "tool.execution.process_started", commandHash=command_hash,
+        processId=getattr(process, "pid", None),
+        route=f"mxc:{tier}" if tier else "mxc", timeoutSeconds=timeout_seconds,
+    )
+    try:
+        return (
+            _run_process_loop(
+                process,
+                command_hash=command_hash,
+                started_at=started_at,
+                timeout_seconds=timeout_seconds,
+                cancel_checker=cancel_checker,
+            ),
+            False,
+        )
+    finally:
+        _mxc_backend.cleanup_child_temp(plan.child_temp)
+
+
 def execute_codex_sandbox_command(
     command: str = "",
     timeout: int = 60,
@@ -848,7 +1308,29 @@ def execute_codex_sandbox_command(
     if route.blocked:
         _log_outcome(command_hash, "blocked", reason=route.reason or "shell_route")
         return route.error
-    if _windows_offline_shell_is_unverified(sandbox_mode):
+
+    try:
+        timeout_seconds = max(int(timeout), 1)
+    except (TypeError, ValueError):
+        timeout_seconds = 60
+
+    # MXC backend (Windows workspace_write): content gates above already ran;
+    # containment is runtime-proven before any command may enter MXC. Any MXC
+    # non-handling (refusal or spawn failure) falls through and keeps the
+    # fail-closed evidence gate on — the fallback Codex path is never trusted
+    # on the strength of MXC's containment.
+    mxc_result, mxc_not_handled = _try_execute_via_mxc(
+        sandbox_mode=sandbox_mode,
+        route=route,
+        workdir=workdir,
+        command_hash=command_hash,
+        timeout_seconds=timeout_seconds,
+        cancel_checker=_cancel_checker,
+    )
+    if mxc_result is not None:
+        return mxc_result
+
+    if mxc_not_handled or _windows_offline_shell_is_unverified(sandbox_mode):
         evidence_ok, evidence_reason = _approved_execution_evidence_allows(normalized_command)
         if not evidence_ok:
             _log_outcome(
@@ -868,11 +1350,6 @@ def execute_codex_sandbox_command(
             "[错误] Codex CLI 沙盒不可用：未找到原生 Codex CLI（codex.exe / codex）。"
             "命令未执行，也未回退到非沙盒模式。"
         )
-
-    try:
-        timeout_seconds = max(int(timeout), 1)
-    except (TypeError, ValueError):
-        timeout_seconds = 60
 
     is_native_windows_command, command_env_name, route_label = _describe_sandbox_route(
         route
@@ -929,74 +1406,17 @@ def execute_codex_sandbox_command(
             errors="surrogateescape",
             **_sandbox_popen_kwargs(platform=_host_platform()),
         )
-        deadline = started_at + timeout_seconds
         record_tool_process_event(
             "tool.execution.process_started", commandHash=command_hash,
             processId=getattr(process, "pid", None), route=route_label, timeoutSeconds=timeout_seconds,
         )
-        while True:
-            cancellation_reason = ""
-            if callable(_cancel_checker):
-                try:
-                    cancellation_reason = str(_cancel_checker() or "").strip()
-                except Exception:
-                    cancellation_reason = ""
-            if cancellation_reason:
-                _terminate_process_tree(process)
-                stdout, stderr = _collect_output(process)
-                preview = _format_output(stdout, stderr, process.returncode)
-                suffix = "" if preview == "[命令执行完成，无输出]" else f"\n\n{preview}"
-                elapsed_ms = int((time.monotonic() - started_at) * 1000)
-                _log_outcome(
-                    command_hash,
-                    "cancelled",
-                    reason="stop_requested",
-                    started_at=started_at,
-                    exit_code=process.returncode,
-                )
-                return (
-                    f"[取消] 命令已因停止请求终止：{cancellation_reason} "
-                    f"({elapsed_ms}ms){suffix}"
-                )
-
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                _terminate_process_tree(process)
-                _collect_output(process)
-                _log_outcome(
-                    command_hash,
-                    "timeout",
-                    reason="deadline_exceeded",
-                    started_at=started_at,
-                    exit_code=process.returncode,
-                )
-                return (
-                    f"[超时] 命令执行超过 {timeout_seconds} 秒被强制终止。\n"
-                    "请检查命令是否陷入死循环。"
-                )
-            try:
-                stdout, stderr = process.communicate(
-                    timeout=min(_POLL_INTERVAL_SECONDS, remaining)
-                )
-                record_tool_process_event(
-                    "tool.execution.process_exit_observed", commandHash=command_hash,
-                    processId=getattr(process, "pid", None), exitCode=process.returncode,
-                )
-                result = _format_output(
-                    str(stdout or ""),
-                    str(stderr or ""),
-                    process.returncode,
-                )
-                _log_outcome(
-                    command_hash,
-                    "completed",
-                    reason="process_exit",
-                    started_at=started_at,
-                    exit_code=process.returncode,
-                )
-                return result
-            except subprocess.TimeoutExpired:
-                continue
+        return _run_process_loop(
+            process,
+            command_hash=command_hash,
+            started_at=started_at,
+            timeout_seconds=timeout_seconds,
+            cancel_checker=_cancel_checker,
+        )
     except FileNotFoundError:
         _log_outcome(
             command_hash,

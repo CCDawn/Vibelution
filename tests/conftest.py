@@ -298,6 +298,22 @@ def reset_polling_memo_caches():
 
 
 @pytest.fixture(autouse=True)
+def hermetic_mxc_sandbox(monkeypatch):
+    """Default MXC sandbox off + clean cache so tests stay hermetic.
+
+    开发机可能装有真实 ``wxc-exec.exe``；不显式关闭会让任何 Windows 沙箱门
+    测试触发真实 probe/verify 子进程。MXC 专项测试用 ``enable_mxc_sandbox``
+    或直接删掉该环境变量 + 注入 fake executor 显式打开。
+    """
+    from core.infrastructure.codex_sandbox import mxc as mxc_backend
+
+    monkeypatch.setenv(mxc_backend.MXC_DISABLE_ENV, "1")
+    mxc_backend.reset_verification_cache()
+    yield
+    mxc_backend.reset_verification_cache()
+
+
+@pytest.fixture(autouse=True)
 def reset_singletons(request):
     """
     每个测试前后重置所有模块级单例变量，防止测试间状态泄漏。

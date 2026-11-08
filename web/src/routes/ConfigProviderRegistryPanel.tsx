@@ -116,6 +116,7 @@ export type ConfigProviderRegistryPanelProps = {
    * that accepted state. Selection-surface semantics only: no running call is cut off.
    */
   onToggleEnabled?: (providerId: string, enabled: boolean) => void;
+  onToggleModelEnabled?: (modelRef: string, enabled: boolean) => void;
   /**
    * Wave 3 governance path B: whitelist-governed pinned-model entry edit.
    * `edits` only ever carries EDITABLE_MODEL_FIELDS keys; the draft action
@@ -565,6 +566,7 @@ export type ProviderModelsTabProps = {
   modelEditorDrafts?: ModelEditorDrafts;
   onModelEditorDraftChange?: (modelRef: string, edits: ModelFieldEdits) => void;
   drilldown?: boolean;
+  onToggleModelEnabled?: (modelRef: string, enabled: boolean) => void;
 };
 
 /** P1 model row dot: availability-only tone; the status word lives in the title. */
@@ -624,6 +626,7 @@ function ModelListRowItem({
   enabled,
   disabled,
   onToggle,
+  toggleHint,
 }: {
   model: ConfigCatalogModel;
   selected: boolean;
@@ -633,6 +636,7 @@ function ModelListRowItem({
   enabled?: boolean;
   disabled?: boolean;
   onToggle?: (enabled: boolean) => void;
+  toggleHint?: string;
 }) {
   const dot = deriveModelDotClass(model);
   return (
@@ -662,7 +666,7 @@ function ModelListRowItem({
         {typeof model.draftEntry?.context_window === "number" ? <span className={styles.modelContext}>{Math.round(model.draftEntry.context_window / 1000)}K</span> : null}
         <ChevronRight size={14} aria-hidden="true" />
       </VButton>
-      {onToggle ? <VSwitch aria-label={`${model.label || model.modelKey} · ${copy.modelEditFieldEnabled}`} isSelected={enabled} isDisabled={disabled} onChange={onToggle} /> : null}
+      {onToggle ? <VSwitch aria-label={`${model.label || model.modelKey} · ${copy.modelEditFieldEnabled}`} title={toggleHint} isSelected={enabled} isDisabled={disabled} onChange={onToggle} /> : null}
     </div>
   );
 }
@@ -692,6 +696,7 @@ function ModelDetailBody({
   onModelEditsChange,
   stageModelEdits = false,
   drilldown = false,
+  onEnabledChange,
 }: {
   provider: ProviderRegistryRow;
   model: ConfigCatalogModel;
@@ -714,6 +719,7 @@ function ModelDetailBody({
   onUpdateModel?: (providerId: string, modelKey: string, edits: ModelFieldEdits) => void;
   stageModelEdits?: boolean;
   drilldown?: boolean;
+  onEnabledChange?: (enabled: boolean) => void;
   modelEdits?: ModelFieldEdits;
   onModelEditsChange?: (edits: ModelFieldEdits) => void;
 }) {
@@ -775,6 +781,7 @@ function ModelDetailBody({
             copy={copy}
             edits={modelEdits}
             onEditsChange={(edits) => onModelEditsChange?.(edits)}
+            onEnabledChange={onEnabledChange}
             onSave={!stageModelEdits ? undefined : (modelKey, edits) => onUpdateModel?.(provider.providerId, modelKey, edits)}
           />
         </section>
@@ -919,6 +926,7 @@ export function ProviderModelsTab({
   modelEditorDrafts,
   onModelEditorDraftChange,
   drilldown = false,
+  onToggleModelEnabled,
 }: ProviderModelsTabProps) {
   const [localDrafts, setLocalDrafts] = useState<ModelEditorDrafts>({});
   const drafts = modelEditorDrafts ?? localDrafts;
@@ -1021,9 +1029,10 @@ export function ProviderModelsTab({
                   selected={detailModelRef === model.modelRef}
                   liveReferenceCount={liveReferenceCountByModelRef[model.modelRef] ?? 0}
                   copy={copy}
-                  enabled={Boolean(drafts[model.modelRef]?.enabled ?? model.draftEntry?.enabled ?? model.availability !== "disabled")}
+                  enabled={Boolean((onToggleModelEnabled ? undefined : drafts[model.modelRef]?.enabled) ?? model.draftEntry?.enabled ?? model.availability !== "disabled")}
                   disabled={disabled || modelUpdateBusy}
-                  onToggle={model.draftEntry && onModelEditorDraftChange ? (enabled) => {
+                  toggleHint={onToggleModelEnabled ? copy.modelSwitchHint : copy.modelEditPendingSave}
+                  onToggle={model.draftEntry && onToggleModelEnabled ? (enabled) => onToggleModelEnabled(model.modelRef, enabled) : model.draftEntry && onModelEditorDraftChange ? (enabled) => {
                     const edits = { ...drafts[model.modelRef] };
                     if (enabled === (model.draftEntry?.enabled !== false)) delete edits.enabled;
                     else edits.enabled = enabled;
@@ -1055,6 +1064,7 @@ export function ProviderModelsTab({
               onUpdateModel={onUpdateModel}
               stageModelEdits={!onModelEditorDraftChange}
               drilldown={drilldown}
+              onEnabledChange={onToggleModelEnabled ? (enabled) => onToggleModelEnabled(detailModel.modelRef, enabled) : undefined}
               modelEdits={drafts[detailModel.modelRef] ?? {}}
               onModelEditsChange={(edits) => changeDraft(detailModel.modelRef, edits)}
             />
@@ -1168,6 +1178,7 @@ export function ConfigProviderRegistryPanel({
   onDeleteProvider,
   onAddConnection,
   onToggleEnabled,
+  onToggleModelEnabled,
   onUpdateModel,
   modelUpdateBusy = false,
   modelEditorDrafts,
@@ -1553,6 +1564,7 @@ export function ConfigProviderRegistryPanel({
                 modelUpdateBusy={modelUpdateBusy}
                 modelEditorDrafts={modelEditorDrafts}
                 onModelEditorDraftChange={onModelEditorDraftChange}
+                onToggleModelEnabled={onToggleModelEnabled}
                 drilldown
               />
             </div>
