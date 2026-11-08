@@ -1409,7 +1409,15 @@ def _mint_command_execution_evidence(
 
 
 def _sandbox_containment_unverified_for_current_runtime() -> bool:
-    """True when the live host cannot prove sandboxed shell containment."""
+    """True when the live host cannot prove sandboxed shell containment.
+
+    MXC 后端成立时（executor 1.0.x 在位、probe 通过、运行时自验证
+    workspace 写 + 出站必拒通过），``workspace_write`` 的沙箱包含前提
+    真实成立，auto_review 档 ``_SANDBOX_CONTAINED_TOOLS`` 的静默自动批
+    随之恢复；MXC 不可用/被禁用/自验证失败时维持 Windows 原状（弹卡 +
+    证据链）。``windows_offline_shell_unverified`` 内部即含该 MXC 判定；
+    探测失败从不静默自动批准执行，宁可多问一次。
+    """
 
     try:
         from core.infrastructure.codex_cli_sandbox import windows_offline_shell_unverified
