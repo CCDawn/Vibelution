@@ -14,10 +14,7 @@ import type {
 } from "../../api/types";
 import type { TranslationKey } from "../../i18n/dictionary";
 import { cacheCompositionSegmentLabel } from "./chatRoutePresentation";
-import {
-  ChatGroupManagementDialog,
-  type ChatGroupManagementDialogProps,
-} from "./ChatGroupManagementDialog";
+import type { ChatGroupManagementDialogProps } from "./ChatGroupManagementDialog";
 import { ChatDangerConfirmDialog } from "./ChatDangerConfirmDialog";
 import type { ChatCacheDetailViewModel } from "./chatCacheDetailModel";
 import {
@@ -28,6 +25,14 @@ import type { RightIndexPanel } from "./useChatConversationIndexChrome";
 const AgentCreateWizardDialog = lazy(() =>
   import("../agent-create/AgentCreateWizardDialog").then((module) => ({
     default: module.AgentCreateWizardDialog,
+  })),
+);
+
+// Same lazy-dialog pattern as CacheDetailDialog: the group management dialog
+// is mounted only while open, so its chunk stays out of the chat first paint.
+const ChatGroupManagementDialog = lazy(() =>
+  import("./ChatGroupManagementDialog").then((module) => ({
+    default: module.ChatGroupManagementDialog,
   })),
 );
 
@@ -85,7 +90,11 @@ export function ChatCodingWorkbenchDialogs({
 }: ChatCodingWorkbenchDialogsProps) {
   return (
     <>
-      <ChatGroupManagementDialog {...groupDialog} />
+      {groupDialog.open ? (
+        <Suspense fallback={null}>
+          <ChatGroupManagementDialog {...groupDialog} />
+        </Suspense>
+      ) : null}
       {cacheDetailOpen && cacheDetailAvailable ? (
         <Suspense fallback={null}>
           <CacheDetailDialog

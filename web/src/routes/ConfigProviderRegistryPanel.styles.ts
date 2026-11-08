@@ -1,4 +1,12 @@
 const styles = {
+  mobileList: "vui-routes-configproviderregistrypanel mobileList h-full min-h-0 max-[720px]:[&_[data-vui=split-main]]:hidden",
+  mobileDetail: "vui-routes-configproviderregistrypanel mobileDetail h-full min-h-0 max-[720px]:[&_[data-vui=split-sidebar]]:hidden max-[720px]:[&_[role=separator]]:hidden",
+  backProviders: "vui-routes-configproviderregistrypanel backProviders min-[721px]:!hidden max-[720px]:!inline-flex self-start",
+  backAction: "vui-routes-configproviderregistrypanel backAction self-start !min-h-10",
+  modelsDrilldown: "vui-routes-configproviderregistrypanel modelsDrilldown grid min-h-0 min-w-0 content-start gap-4 [&_[hidden]]:!hidden",
+  modelDrilldownDetail: "vui-routes-configproviderregistrypanel modelDrilldownDetail min-w-0 [&[hidden]]:!hidden",
+  modelEvidence: "vui-routes-configproviderregistrypanel modelEvidence grid gap-3 border-t border-vui-border-subtle pt-4 [&>summary]:cursor-pointer [&>summary]:py-2 [&>summary]:text-vui-xs [&>summary]:text-vui-fg-secondary",
+  filterNotice: "vui-routes-configproviderregistrypanel filterNotice flex min-w-0 flex-wrap items-center gap-2 rounded-md border border-vui-border-subtle bg-vui-surface-row p-3 text-vui-xs text-vui-fg-secondary",
   compactHome: "vui-routes-configproviderregistrypanel compactHome grid min-h-0 min-w-0 content-start gap-3 !border-0 !rounded-none !bg-transparent !shadow-none",
   homeList: "vui-routes-configproviderregistrypanel homeList grid min-w-0 divide-y divide-vui-border-subtle",
   homeRow: "vui-routes-configproviderregistrypanel homeRow flex min-w-0 items-center justify-between gap-4 py-4 max-[560px]:flex-wrap max-[560px]:gap-2",

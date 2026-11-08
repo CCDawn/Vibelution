@@ -1001,3 +1001,72 @@ def test_persisted_hook_error_redacts_credential_text(tmp_path):
     )
 
     assert failed["error"]["message"] == "request failed: token=[REDACTED]"
+
+
+def _write_autonomous_snapshot(tmp_path, run_id: str, payload) -> None:
+    runs_dir = tmp_path / "work-runs" / "self_evolution_autonomous_loop" / "runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    (runs_dir / f"{run_id}.json").write_text(
+        json.dumps(payload, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _seed_active_index(tmp_path, run_id: str) -> None:
+    kind_dir = tmp_path / "work-runs" / "self_evolution_autonomous_loop"
+    kind_dir.mkdir(parents=True, exist_ok=True)
+    (kind_dir / "index.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "updatedAt": "2026-08-01T00:00:00+00:00",
+                "activeRunId": run_id,
+                "activeRunIds": [run_id],
+                "latestRunId": run_id,
+                "recentRunIds": [run_id],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_corrupt_detail_record_is_reported_as_corrupt_not_unknown(tmp_path):
+    """ISS-071：详情目标记录存在但字段类型损坏时，必须以「记录损坏」失败，
+    而不是把损坏记录原样交给响应校验（500）或误报为不存在。"""
+    service, _calls = _build_service(tmp_path)
+    _write_autonomous_snapshot(
+        tmp_path,
+        "self-loop-corrupt",
+        {"runId": "self-loop-corrupt", "status": 12345, "phase": "running"},
+    )
+
+    with pytest.raises(AutonomousLoopValidationError) as excinfo:
+        service.load("self-loop-corrupt")
+
+    assert "corrupt" in str(excinfo.value)
+    assert "Unknown" not in str(excinfo.value)
+
+
+def test_corrupt_active_and_latest_records_are_skipped_with_none(tmp_path):
+    """ISS-071：active/latest 读取遇到单条损坏记录必须跳过并返回 None（200 语义），
+    不得让整个读取面 500。"""
+    service, _calls = _build_service(tmp_path)
+    _write_autonomous_snapshot(
+        tmp_path,
+        "self-loop-corrupt",
+        {"runId": 12345, "status": "running"},
+    )
+    _seed_active_index(tmp_path, "self-loop-corrupt")
+
+    assert service.load_active() is None
+    assert service.load_latest() is None
+
+
+def test_healthy_active_and_latest_records_still_resolve(tmp_path):
+    service, _calls = _build_service(tmp_path)
+    healthy = {"runId": "self-loop-001", "status": "running", "phase": "observe"}
+    _write_autonomous_snapshot(tmp_path, "self-loop-001", healthy)
+    _seed_active_index(tmp_path, "self-loop-001")
+
+    assert service.load_active()["runId"] == "self-loop-001"
+    assert service.load_latest()["runId"] == "self-loop-001"

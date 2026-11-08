@@ -33,10 +33,12 @@ def test_team_catalog_initializes_and_survives_repeated_navigation(request, e2e_
     bundled = [agent for agent in agents if (agent.get("metadata") or {}).get("builtinPreset")]
     starter = [agent for agent in bundled if agent["metadata"]["builtinPreset"] == "general_assistant_v1"]
     research = [agent for agent in bundled if agent["metadata"]["builtinPreset"].startswith("research_role_v1:")]
+    planner = [agent for agent in bundled if agent["metadata"]["builtinPreset"] == "platform_planner"]
     assert len(starter) == 1, starter
     assert starter[0]["primaryMode"] == "chat"
     assert len(research) == 6, research
-    assert len({agent["agentId"] for agent in bundled}) == 7
+    assert len(planner) == 1, planner
+    assert len(bundled) == len({agent["agentId"] for agent in bundled}) == 8
     for agent in bundled:
         assert agent["status"] == "active"
         session = e2e_instance.api_get(f"/api/sessions/{agent['directSessionId']}")

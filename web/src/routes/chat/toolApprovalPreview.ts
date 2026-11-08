@@ -598,16 +598,48 @@ export function toolApprovalActionPreview(
 export function toolApprovalSessionGrantDescription(
   scope: Record<string, unknown> | null | undefined,
   lang: "zh" | "en",
+  toolName?: string | null,
 ) {
+  // A2b: for shell/file development tools the "A" button grants the tool-level
+  // session tier (this tool, this session) — the copy must say exactly that.
+  if (approvalGrantMapsToSessionTool(toolName)) {
+    return lang === "zh"
+      ? "始终：本会话内此工具不再询问"
+      : "Always: stop asking for this tool for the rest of this session";
+  }
   const kind = String(scope?.kind || "").trim();
   if (kind === "terminal_session") {
     return lang === "zh"
       ? "始终：永久允许此 Agent 对同一终端的后续输入（跨会话、重启后仍有效）"
       : "Always: permanently allow later input for this terminal on this agent (survives sessions and restarts)";
   }
+  if (String(toolName || "").trim() === "web_fetch_tool") {
+    return lang === "zh"
+      ? "始终：永久允许此 Agent 访问同一来源（协议+域名+端口）的网页（跨会话、重启后仍有效）"
+      : "Always: permanently allow pages from this origin (scheme+host+port) on this agent (survives sessions and restarts)";
+  }
   return lang === "zh"
     ? "始终：永久允许此 Agent 参数完全相同的调用（跨会话、重启后仍有效）"
     : "Always: permanently allow identical-argument calls on this agent (survives sessions and restarts)";
+}
+
+/**
+ * Shell/file development tools whose always-tier is the tool-level session
+ * grant (A2b): exact-args and durable grants never repeat-hit for them, so the
+ * "A" button maps to acceptForSessionTool. web_fetch keeps its durable
+ * origin-level grant; CUA/network/destructive tools are excluded server-side.
+ */
+export const APPROVAL_DEV_TOOL_BUNDLE_TOOLS: ReadonlySet<string> = new Set([
+  "cli_tool",
+  "exec_command",
+  "write_stdin",
+  "apply_diff_edit_tool",
+  "apply_patch_tool",
+  "write_file_tool",
+]);
+
+export function approvalGrantMapsToSessionTool(toolName: string | null | undefined): boolean {
+  return APPROVAL_DEV_TOOL_BUNDLE_TOOLS.has(String(toolName || "").trim());
 }
 
 export function toolApprovalCodexTitle(lang: "zh" | "en") {

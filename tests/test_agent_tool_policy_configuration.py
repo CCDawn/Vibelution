@@ -217,3 +217,43 @@ def test_editor_update_keeps_reset_policy_savable(configured_agent, monkeypatch)
     assert response.json()["policyVersion"] == detail["policyVersion"] + 1
     persisted = client.get(f"/api/agents/{agent_id}/tool-policy").json()
     assert persisted["currentPolicy"]["maxCallsPerTurn"] == 48
+
+
+def test_validate_and_update_reject_invalid_enum_values_before_service(configured_agent):
+    """Invalid networkAccess/mutationAccess values fail as request validation
+    (422) instead of surfacing as ToolPolicyInvalidError (500) from the
+    runtime evaluator; evaluator-accepted aliases stay valid."""
+    invalid_network = client.post(
+        f"/api/agents/{configured_agent['agentId']}/tool-policy/validate",
+        json={"toolPolicy": {"networkAccess": "radio_free"}},
+    )
+    assert invalid_network.status_code == 422, invalid_network.text
+
+    invalid_update = client.put(
+        f"/api/agents/{configured_agent['agentId']}/tool-policy",
+        json={
+            "toolPolicy": {"mutationAccess": "everything", "delegationAccess": "all"},
+            "expectedAgentUpdatedAt": "revision-1",
+            "expectedPolicyFingerprint": "fingerprint-1",
+        },
+    )
+    assert invalid_update.status_code == 422, invalid_update.text
+
+    invalid_override = client.post(
+        f"/api/agents/{configured_agent['agentId']}/tool-policy/validate",
+        json={"toolPolicy": {"approvalOverrides": {"cli_tool": "sometimes"}}},
+    )
+    assert invalid_override.status_code == 422, invalid_override.text
+
+    aliased = client.post(
+        f"/api/agents/{configured_agent['agentId']}/tool-policy/validate",
+        json={
+            "toolPolicy": {
+                "networkAccess": "controlled",
+                "mutationAccess": "inherit",
+                "delegationAccess": "assigned_only",
+                "approvalOverrides": {"cli_tool": "always"},
+            }
+        },
+    )
+    assert aliased.status_code == 200, aliased.text

@@ -202,6 +202,11 @@ def _bootstrap(root: Path | str, *, offline_migration: bool) -> dict[str, Any]:
                         "自己的私有正式知识用 search_agent_private_memory_tool 查询；"
                         "上下文需要整理时用 compress_context_tool，不删除或改写原生历史。"
                         "电脑窗口操作使用原生电脑工具，只能操作用户已选择并授权的窗口。"
+                        "网页任务先用 browser_state 获取当前页签；已有目标用 browser_select 或 browser_ensure 复用，"
+                        "用 browser_show 显示现有工作区，并用 browser_read 重新观察后判断结果。"
+                        "内置网页与用户授权的桌面窗口是不同控制面；不得把网页已打开当成桌面窗口已授权。"
+                        "授权或交回控制后先重新观察，不重放未知结果的点击、输入或提交；"
+                        "不得根据旧对话宣称当前页面仍打开、已经授权或任务已完成。"
                         "只执行实时目录已登记的动作；目录之外的旧平台动作尚不可用。"
                     ),
                     "constraints": (
@@ -538,13 +543,29 @@ def read_assistant_avatar() -> dict[str, Any]:
 
 
 def submit(message: str, request_id: str, attachment_ids: list[str] | None = None,
-           references: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+           references: list[dict[str, Any]] | None = None,
+           control_continuation: dict[str, Any] | None = None) -> dict[str, Any]:
     """Use native acceptance and journal idempotency, without a second queue."""
     if not isinstance(message, str):
         raise ValueError("message must be text")  # noqa: TRY004 - preserve the existing submit contract.
     if not isinstance(request_id, str) or not request_id.strip():
         raise ValueError("request_id is required")
+    expected = None
+    if control_continuation is not None:
+        from .control_continuation import CONTROL_CONTINUATION_MESSAGE, normalize_control_continuation
+        try:
+            expected = normalize_control_continuation(control_continuation)
+        except ValueError:
+            raise AssistantSessionError("SESSION_INVALID") from None
+        if (message != CONTROL_CONTINUATION_MESSAGE or attachment_ids or references
+                or re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", request_id) is None):
+            raise AssistantSessionError("SESSION_INVALID")
     with _session_command() as (sessions, session_id):
+        if expected is not None:
+            if expected["sessionId"] != session_id or expected["agentId"] != _AGENT_ID:
+                raise AssistantSessionError("ASSISTANT_IDENTITY_INVALID")
+            from .control_continuation import submit_control_continuation
+            return submit_control_continuation(sessions, session_id, message, request_id, expected)
         if attachment_ids is not None:
             from . import attachments
             attachments.validate_ids(sessions, session_id, attachment_ids)

@@ -453,6 +453,53 @@ def test_model_curation_stats_aggregates_decided_turns(tmp_path, monkeypatch):
     }
 
 
+def test_model_curation_stats_skips_corrupt_queue_lines_and_records_skip(tmp_path, monkeypatch):
+    monkeypatch.setattr(chat_review_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    queue_path = resolve_chat_dataset_paths(project_root=tmp_path).review_queue_path
+
+    _seed_queue_candidate(
+        queue_path,
+        candidate_id="stats-good",
+        session_id="session-good",
+        candidate_timestamp="2026-05-18T12:00:00+00:00",
+        turns=[_turn_payload(1, assistant_message_id="g-1", user_message_id="u-1", model_id="model-a")],
+        decision="positive",
+        decision_timestamp="2026-05-18T12:01:00+00:00",
+    )
+    with queue_path.open("ab") as handle:
+        handle.write(b"\xff\xfe not utf-8 \xff\n")
+        handle.write(b'{"event": "candidate", "candidate_id": broken\n')
+
+    scene_events = []
+
+    def _capture_scene(scene, phase, event_code, *, message="", level="info", outcome="observed", fields=None, **kwargs):
+        scene_events.append(
+            {
+                "phase": phase,
+                "eventCode": event_code,
+                "level": level,
+                "outcome": outcome,
+                "fields": dict(fields or {}),
+            }
+        )
+        return {"accepted": True}
+
+    monkeypatch.setattr(chat_review_service, "record_runtime_scene_event", _capture_scene)
+
+    response = client.get("/api/chat-review/model-curation-stats")
+    assert response.status_code == 200
+    # The surviving good record still aggregates; corrupt lines do not 500.
+    assert response.json() == {
+        "models": [{"modelId": "model-a", "included": 1, "excluded": 0}]
+    }
+    skip_events = [event for event in scene_events if event["eventCode"] == "chat_review.curation_stats.corrupt_lines_skipped"]
+    assert len(skip_events) == 1
+    assert skip_events[0]["level"] == "warning"
+    assert skip_events[0]["outcome"] == "degraded"
+    assert skip_events[0]["fields"]["skippedLines"] == 2
+
+
 def test_set_message_curation_rejects_unsupported_inputs(tmp_path, monkeypatch):
     _seed_two_turn_session(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)

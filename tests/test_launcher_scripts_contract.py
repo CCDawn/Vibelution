@@ -17,30 +17,32 @@ def test_launcher_script_repairs_start_menu_shortcut_entry():
 
     assert '"repair-shortcut"' in source
     assert "function Repair-LauncherShortcut" in source
-    assert "function Resolve-PackagedElectronDesktopEntryPath" in source
-    assert "function Set-LauncherShellShortcut" in source
-    assert "launch_vibelution_shortcut.ps1" in source
+    assert "function Resolve-ManagedDesktopPublicEntryPath" in source
     assert "Vibelution.lnk" in source
     catalog = (PROJECT_ROOT / "scripts" / "desktop_entry_catalog.ps1").read_text(encoding="utf-8")
     assert "Vibelution Launcher.lnk" in catalog
     assert "Set-VibelutionDesktopLauncherShortcut" in source
     assert "scripts\\desktop_entry_catalog.ps1" in source
     assert "Resolve-DesktopPublicEntryPath" in source
-    assert "Run scripts\\build_desktop_package.ps1" in source
+    assert "Run scripts\\install_windows.ps1 before repairing the shortcut." in source
     assert "assets\\icons\\vibelution.ico" in source
-    assert "CreateShortcut" in source
-    assert "$shortcut.TargetPath = $TargetPath" in source
-    assert '$shortcutArguments = (\'--workspace "{0}"\' -f $projectDir)' in source
-    assert '$shortcutMode = "electron_package"' in source
-    assert '$shortcutMode = "native_shortcut_bootstrap"' in source
-    assert "$shortcut.IconLocation" in source
+    assert "function Set-VibelutionLauncherShellShortcut" in catalog
+    assert "$shortcut.TargetPath = $TargetPath" in catalog
+    assert "$shortcut.WorkingDirectory = Split-Path -Parent $TargetPath" in catalog
+    assert "$shortcut.IconLocation" in catalog
 
     repair_start = source.index("function Repair-LauncherShortcut")
     repair_end = source.index("function Repair-StaleLauncherControlState")
     repair_source = source[repair_start:repair_end]
-    assert "Resolve-PackagedElectronDesktopEntryPath" in repair_source
-    assert "launch_vibelution_shortcut.ps1" in repair_source
-    assert "native_shortcut_bootstrap" in repair_source
+    assert "Resolve-ManagedDesktopPublicEntryPath -Catalog $catalog" in repair_source
+    assert "Resolve-DesktopPublicEntryArguments -Catalog $catalog" in repair_source
+    assert "Set-VibelutionStartMenuLauncherShortcut" in repair_source
+    assert 'shortcut_mode = "managed_assistant"' in repair_source
+    assert "$iconPath = $shortcutTargetPath" in repair_source
+    assert "--workspace" not in repair_source
+    assert "launch_vibelution_shortcut.ps1" not in repair_source
+    assert "native_shortcut_bootstrap" not in repair_source
+    assert "catch" not in repair_source
     assert "Ensure-NativeLauncherEntryExecutable" not in repair_source
     assert "vibelution_desktop_entry.vbs" not in repair_source
 
@@ -54,8 +56,12 @@ def test_windows_installer_uses_the_shared_desktop_shortcut_owner_after_publicat
     published = source.index('-Label "Build and publish managed desktop package"')
     shortcut = source.index("$null = Set-VibelutionDesktopLauncherShortcut")
     assert shortcut > published
-    assert "Resolve-DesktopPublicEntryPath -Catalog $catalog -ProjectDir $ProjectDir" in source
-    assert '-Arguments (\'--workspace "{0}"\' -f $ProjectDir)' in source
+    assert "$desktopEntry = Resolve-DesktopPublicEntryPath -Catalog $catalog\n" in source
+    assert "$desktopArguments = Resolve-DesktopPublicEntryArguments -Catalog $catalog" in source
+    assert "Set-VibelutionStartMenuLauncherShortcut" in source
+    assert "-TargetPath $desktopEntry -Arguments $desktopArguments -IconPath $desktopEntry" in source
+    assert "Managed native Launcher entry is missing after installation" in source
+    assert "--workspace" not in source
     assert "CreateShortcut" not in source
 
 

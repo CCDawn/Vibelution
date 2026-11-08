@@ -466,14 +466,19 @@ Invoke-Native `
     -ArgumentList @($ManagedDesktopInstaller, "--project", $ProjectDir, "--apply") `
     -Label "Build and publish managed desktop package"
 
-Write-Step "Refresh the canonical desktop Launcher shortcut"
+Write-Step "Refresh the canonical desktop and Start Menu Launcher shortcuts"
 . (Join-Path $ProjectDir "scripts\desktop_entry_catalog.ps1")
 $catalog = Assert-DesktopEntryCatalog -ProjectDir $ProjectDir
-$desktopEntry = Resolve-DesktopPublicEntryPath -Catalog $catalog -ProjectDir $ProjectDir
+$desktopEntry = Resolve-DesktopPublicEntryPath -Catalog $catalog
+$desktopArguments = Resolve-DesktopPublicEntryArguments -Catalog $catalog
+if (-not (Test-Path -LiteralPath $desktopEntry -PathType Leaf)) {
+    throw "Managed native Launcher entry is missing after installation: $desktopEntry"
+}
 $shortcutShell = New-Object -ComObject WScript.Shell
+$null = Set-VibelutionStartMenuLauncherShortcut -Shell $shortcutShell `
+    -TargetPath $desktopEntry -Arguments $desktopArguments -IconPath $desktopEntry
 $null = Set-VibelutionDesktopLauncherShortcut -Shell $shortcutShell -ProjectDir $ProjectDir `
-    -TargetPath $desktopEntry -Arguments ('--workspace "{0}"' -f $ProjectDir) `
-    -IconPath (Join-Path $ProjectDir "assets\icons\vibelution.ico")
+    -TargetPath $desktopEntry -Arguments $desktopArguments -IconPath $desktopEntry
 
 $configHome = Join-Path ([Environment]::GetFolderPath("MyDocuments")) "Vibelution\config"
 Write-Host ""

@@ -99,6 +99,29 @@ def test_export_bundle_contract(tmp_path, monkeypatch):
     assert MODEL_ID in bundle["dependencies"]["providers"]
 
 
+def test_empty_team_bundle_roundtrips_as_memberless_team(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = _create_team("空团队导出", [])
+    assert team["members"] == []
+
+    bundle = export_team_bundle(str(team["teamId"]))
+    assert bundle["agents"] == []
+    assert bundle["team"]["members"] == []
+
+    preview = import_team_bundle(bundle, dry_run=True)
+    assert preview["status"] == "ready"
+    assert preview["agents"]["create"] == []
+
+    # Archive the original so the import exercises the create path, as it
+    # would when restoring the bundle into a fresh environment.
+    team_service.archive_team(str(team["teamId"]))
+    result = import_team_bundle(bundle, dry_run=False)
+    assert result["status"] == "completed"
+    imported = team_service.get_team(str(result["result"]["teamId"]))
+    assert imported["name"] == "空团队导出"
+    assert imported["members"] == []
+
+
 def test_reimport_upserts_instead_of_duplicating(tmp_path, monkeypatch):
     team = _seed_two_agent_team(tmp_path, monkeypatch)
     agents_before = {a["agentId"] for a in agent_directory_service.list_agents()}
@@ -189,7 +212,8 @@ def test_future_schema_major_requires_confirm(tmp_path, monkeypatch):
     "mutate, code",
     [
         (lambda b: b.update(kind="other-kind"), "unsupported_kind"),
-        (lambda b: b.update(agents=[]), "invalid_agents"),
+        (lambda b: b.pop("agents", None), "invalid_agents"),
+        (lambda b: b.update(agents="not-a-list"), "invalid_agents"),
         (lambda b: b.update(team={"name": ""}), "invalid_team"),
         (lambda b: b.update(schemaVersion=None), "invalid_schema_version"),
     ],

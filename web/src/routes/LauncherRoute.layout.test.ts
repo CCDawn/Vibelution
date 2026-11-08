@@ -478,10 +478,13 @@ describe("LauncherRoute layout contract", () => {
     expect(routeStylesSource).toContain("px-2");
     expect(routeStylesSource).toContain("w-fit");
     expect(routeStylesSource).toContain("whitespace-nowrap");
-    expect(launcherShellStylesSource).toContain("bg-vui-surface-workspace");
-    expect(launcherShellSource).toContain('<VSurface as="div" tone="panel"');
-    expect(launcherShellStylesSource).toContain("!rounded-none");
+    // Launcher chrome intentionally aligns with the workbench frame (3a39235aa):
+    // light rail surface, VWorkbenchFrame/VSplitWorkspace shell, no panel round-overrides.
+    expect(launcherShellStylesSource).toContain("bg-vui-surface-rail");
     expect(launcherShellStylesSource).toContain("text-vui-fg-primary");
+    expect(launcherShellStylesSource).toContain("!gap-0");
+    expect(launcherShellSource).toContain("<VWorkbenchFrame>");
+    expect(launcherShellSource).toContain('chrome="workbench"');
   });
 
   it("keeps the Launcher route root and header background-aware", () => {
@@ -816,8 +819,12 @@ describe("LauncherRoute layout contract", () => {
     expect(launcherShellSource).toContain("<VSplitWorkspace");
     expect(navigationSource).toContain('"/launcher?view=settings"');
     expect(navigationSource).toContain("launcherAssistantPanelPath");
-    expect(navigationSource).toContain('"个人助理"');
-    expect(navigationSource).toContain('["dialogue", MessageCircle]');
+    // Assistant dialogue and projects/branches entries are shell-nav route buttons (fa56a6929).
+    expect(navigationSource).toContain('<VRouteLinkButton to={launcherAssistantPanelPath("dialogue")}');
+    expect(navigationSource).toContain("MessageCircle");
+    expect(navigationSource).toContain('? "对话" : "Chat"');
+    expect(navigationSource).toContain('<VRouteLinkButton to="/launcher"');
+    expect(navigationSource).toContain('? "项目与分支" : "Projects & branches"');
     expect(homeRouteSource).toContain("hidden={!settingsVisible}");
     expect(homeRouteSource).toContain("hidden={settingsVisible}");
     expect(homeRouteSource).toContain("useBlocker");

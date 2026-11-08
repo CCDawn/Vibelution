@@ -43,6 +43,54 @@ describe("Assistant embedded browser isolation", () => {
     expect(browser.getState().pages[0].url).toBe("https://example.com/0?token=secret#fragment");
     await expect(browser.open("https://example.com/5", "assistant")).rejects.toMatchObject({ code: "BROWSER_PAGE_LIMIT" });
   });
+  it("reuses and selects an exact canonical URL even when all four pages are occupied", async () => {
+    const { browser } = setup(); const url = "https://example.com/path?q=one#part";
+    const id = (await browser.open(url, "assistant")).activePageId!;
+    const load = vi.spyOn(mocks.views[0].webContents, "loadURL");
+    for (let i = 0; i < 3; i++) await browser.open(`https://other.example/${i}`, "assistant");
+    for (const target of ["https://EXAMPLE.com:443/path?q=one#part", url]) {
+      expect((await browser.ensure(target, "assistant")).activePageId).toBe(id);
+      expect(browser.getState().pages).toHaveLength(4);
+    }
+    expect(load).not.toHaveBeenCalled(); expect(mocks.views).toHaveLength(4);
+    expect(await browser.snapshot(id)).toMatchObject({ pageId: id, url });
+  });
+  it.each(["https://example.com/path?q=two#part", "https://example.com/path?q=one#other", "https://example.com/else?q=one#part"])("does not reuse a different complete URL %s", async url => {
+    const { browser } = setup(); const first = (await browser.open("https://example.com/path?q=one#part", "assistant")).activePageId!;
+    const state = await browser.ensure(url, "assistant");
+    expect(state.pages).toHaveLength(2); expect(state.activePageId).not.toBe(first);
+    expect(state.pages.find(p => p.id === state.activePageId)?.url).toBe(url);
+  });
+  it("matches the current destination rather than a page's pre-redirect requested URL", async () => {
+    const { browser } = setup(); const requested = "https://example.com/start", destination = "https://example.org/result";
+    const id = (await browser.open(requested, "assistant")).activePageId!;
+    mocks.views[0].webContents.url = destination;
+    expect((await browser.ensure(destination, "assistant")).activePageId).toBe(id);
+    expect((await browser.ensure(requested, "assistant")).pages).toHaveLength(2);
+  });
+  it("selects an existing page for the assistant and reads that page's current snapshot", async () => {
+    const { browser } = setup(); const url = "https://example.com/selected?q=now#current";
+    const id = (await browser.open(url, "assistant")).activePageId!;
+    await browser.open("https://other.example/", "assistant");
+    const first = mocks.views[0], second = mocks.views[1];
+    const state = browser.select(id, "assistant");
+    expect(state.activePageId).toBe(id); expect(state.pages).toHaveLength(2);
+    expect(await browser.snapshot(id)).toMatchObject({ pageId: id, url });
+    expect(first.webContents.execute).toHaveBeenCalledTimes(1); expect(second.webContents.execute).not.toHaveBeenCalled();
+    expect(() => browser.select("not-an-existing-page", "assistant")).toThrow("BROWSER_PAGE_NOT_FOUND");
+  });
+  it("keeps explicit open creating pages and blocks ensure or selection during takeover", async () => {
+    const { browser } = setup(); const url = "https://example.com/";
+    const id = (await browser.open(url, "assistant")).activePageId!;
+    expect((await browser.open(url, "assistant")).pages).toHaveLength(2);
+    const pending = browser.requestTakeover("operator");
+    await expect(browser.ensure(url, "assistant")).rejects.toMatchObject({ code: "BROWSER_TAKEOVER_ACTIVE" });
+    expect(() => browser.select(id, "assistant")).toThrow("BROWSER_TAKEOVER_ACTIVE");
+    await pending;
+    await expect(browser.ensure("https://new.example/", "assistant")).rejects.toMatchObject({ code: "BROWSER_TAKEOVER_ACTIVE" });
+    expect(() => browser.resume("assistant")).toThrow("BROWSER_SOURCE_FORBIDDEN");
+    expect(browser.getState()).toMatchObject({ takeover: true, pages: [{}, {}] });
+  });
   it("opens only the verified anchor destination in the same view and reports unknown outcome", async () => {
     const { browser } = setup(); const id = (await browser.open("https://example.com", "assistant")).activePageId!; const w = mocks.views[0].webContents;
     const snap = await browser.snapshot(id); const load = vi.spyOn(w, "loadURL");

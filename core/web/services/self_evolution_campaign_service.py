@@ -16,7 +16,13 @@ from typing import Any, Callable
 
 from core.infrastructure.file_lock import cross_process_file_lock
 from core.infrastructure.process_liveness import is_pid_alive
-from core.runtime_manager.work_run_store import WorkRunStore, normalize_run_id
+from core.logging import debug as _debug_logger
+from core.runtime_manager.work_run_store import (
+    WorkRunStore,
+    normalize_run_id,
+    work_run_snapshot_shape_error,
+)
+from core.web.services.runtime_scene_service import record_runtime_scene_event_quietly
 from .self_evolution_autonomous_loop_service import (
     AutonomousLoopConflictError, AutonomousLoopValidationError, _normalize_request,
 )
@@ -83,6 +89,12 @@ def _load(store: WorkRunStore, run_id: str, *, required: bool = True) -> dict | 
         return None
     if snapshot.get("runKind") != RUN_KIND or snapshot.get("runId") != run_id or snapshot.get("schemaVersion") != 1:
         raise CampaignValidationError("Campaign snapshot identity is invalid.")
+    shape_error = work_run_snapshot_shape_error(snapshot)
+    if shape_error:
+        # A record that exists but cannot be served must stay distinguishable
+        # from a missing one, so detail reads fail with a corrupt reason
+        # instead of emitting wire fields that break response validation.
+        raise CampaignValidationError(f"Campaign snapshot record is corrupt: {shape_error}")
     return snapshot
 
 
@@ -202,7 +214,34 @@ class SelfEvolutionCampaignService:
         with _lock(self.store):
             index = self.store.load_run_index(RUN_KIND)
             active = index.get("activeRunId")
-            return _load(self.store, active) if active else None
+            if not active:
+                return None
+            try:
+                return _load(self.store, active)
+            except (ValueError, OSError) as exc:
+                # Fail soft: a corrupt/missing active record must not 500 the
+                # active read; it is skipped with a structured skip event and
+                # the read reports "no active campaign" instead.
+                _debug_logger.warning(
+                    f"Skipped unreadable self-evolution campaign active snapshot: "
+                    f"{type(exc).__name__}: {exc}",
+                    tag="SELF_EVOLUTION",
+                )
+                record_runtime_scene_event_quietly(
+                    "work_run",
+                    "state",
+                    "self_evolution.campaign.snapshot_skipped",
+                    message="Self-evolution campaign active read skipped an unreadable snapshot.",
+                    level="warning",
+                    outcome="partial",
+                    fields={
+                        "runKind": RUN_KIND,
+                        "runId": str(active),
+                        "surface": "active",
+                        "errorType": type(exc).__name__,
+                    },
+                )
+                return None
 
     def queue(self, request: dict) -> dict:
         normalized = _normalize(request)

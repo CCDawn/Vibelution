@@ -137,6 +137,9 @@ def _validate_v2_provider_security_fields(provider: Any, *, context: str) -> Non
     from .llm_credentials import canonicalize_credential_ref
 
     credential_ref = canonicalize_credential_ref(str(_read_field(provider, "credential_ref", "none") or "none"))
+    from .chatgpt_subscription import validate_subscription_provider
+
+    validate_subscription_provider(provider)
     if credential_ref.startswith("env:"):
         validate_llm_api_key_env(
             credential_ref.removeprefix("env:"),

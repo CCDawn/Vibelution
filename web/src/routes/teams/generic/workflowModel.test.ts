@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createWorkflow } from "./workflowTemplates";
 import { mergeSavedFlows, missingInputLabels, sameFlowContent } from "./workflowModel";
-import { shouldOfferGenericWorkspace, workflowTeamParams } from "./workspaceRouteModel";
+import { shouldOfferGenericWorkspace, workflowTeamDiscussionParams, workflowTeamParams } from "./workspaceRouteModel";
 
 describe("user-owned workflow boundaries", () => {
   it("keeps a new blank flow free of business inputs and research prerequisites", () => {
@@ -40,7 +40,17 @@ describe("user-owned workflow boundaries", () => {
     expect(shouldOfferGenericWorkspace({}, new URLSearchParams("team=research-team&researchView=workflow&workflowId=challenge-cup-research"))).toBe(true);
   });
   it("switches team scope without carrying a previous run or research selection", () => {
-    const next = workflowTeamParams(new URLSearchParams("teamId=old&workflowRunId=run-1&questionId=SCI-1&workflowId=old&teamConversation=a"), "new-team");
+    const next = workflowTeamParams(new URLSearchParams("teamId=old&workflowRunId=run-1&questionId=SCI-1&workflowId=old&teamConversation=a&teamConversationTeamId=old&teamMember=old&companion=old"), "new-team");
     expect(Object.fromEntries(next)).toEqual({ team: "new-team", teamWorkspace: "flows" });
+  });
+  it("opens the selected team's group discussion instead of a stale team or research workspace", () => {
+    const previous = new URLSearchParams("teamId=old&teamConversationTeamId=old&teamConversation=member&teamMember=old&room=old-room&session=old-session&workflowRunId=old-run");
+    const next = workflowTeamDiscussionParams(previous, "knowledge-expansion-team", "current-room");
+    expect(Object.fromEntries(next)).toEqual({
+      team: "knowledge-expansion-team", teamConversationTeamId: "knowledge-expansion-team",
+      teamConversation: "group", teamView: "discussion", room: "current-room",
+    });
+    expect(previous.get("room")).toBe("old-room");
+    expect(workflowTeamDiscussionParams(previous, "new-team", "").has("room")).toBe(false);
   });
 });

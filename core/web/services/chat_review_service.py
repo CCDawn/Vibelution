@@ -20,7 +20,12 @@ from core.evaluation.chat_dataset_capture import (
     record_negative_chat_candidate,
     resolve_chat_dataset_paths,
 )
-from core.evaluation.chat_review_queue import get_review_item, list_review_items, normalize_review_status
+from core.evaluation.chat_review_queue import (
+    get_review_item,
+    list_review_items,
+    normalize_review_status,
+    queue_corrupt_line_count,
+)
 
 from .i18n import get_web_language, text_for
 from .runtime_scene_service import record_runtime_scene_event
@@ -352,6 +357,19 @@ def get_chat_curation_model_stats(*, project_root: Path | None = None) -> dict[s
             model_id = str(turn_metadata.get("llm_model_id") or "").strip()
             row = stats.setdefault(model_id, {"modelId": model_id, "included": 0, "excluded": 0})
             row[bucket_key] += 1
+    corrupt_lines = queue_corrupt_line_count(paths.review_queue_path)
+    if corrupt_lines:
+        _record_chat_review_scene_event(
+            "curation_stats",
+            "chat_review.curation_stats.corrupt_lines_skipped",
+            message="Skipped corrupt chat review queue lines while aggregating curation stats.",
+            level="warning",
+            outcome="degraded",
+            fields={
+                "queuePath": str(paths.review_queue_path),
+                "skippedLines": int(corrupt_lines),
+            },
+        )
     models = sorted(
         stats.values(),
         key=lambda row: (-(row["included"] + row["excluded"]), row["modelId"]),

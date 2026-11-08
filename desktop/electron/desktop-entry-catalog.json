@@ -4,7 +4,9 @@
     {
       "id": "vibelution-desktop-package",
       "label": "Vibelution",
-      "path": "dist/desktop/win-unpacked/Vibelution.exe",
+      "pathBase": "localAppData",
+      "path": "Vibelution/Launcher/VibelutionLauncher.exe",
+      "arguments": ["--assistant"],
       "target": "launcher",
       "windowProvider": "electron",
       "shortcutAllowed": true,
@@ -12,6 +14,14 @@
     }
   ],
   "operatorEntries": [
+    {
+      "id": "desktop-package-artifact",
+      "pathBase": "project",
+      "path": "dist/desktop/win-unpacked/Vibelution.exe",
+      "shortcutAllowed": false,
+      "publicProductEntry": false,
+      "reason": "Checkout build artifact for package verification; not a public product shortcut."
+    },
     {
       "id": "powershell-launcher-adapter",
       "path": "scripts/vibelution_launcher.ps1",

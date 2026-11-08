@@ -28,7 +28,16 @@ completion state currently uses the head motion. Other activity states use
 model parameters, including the question-mark and happiness parameters.
 They are not nine newly authored motion files.
 
-The existing /api/pet/activity projection remains the sole state source.
+The Launcher assistant's native Session detail is the desktop character's state
+source, decoded by `resolveSessionActivity` and mapped by `launcherAssistantActivity`.
+Reading, tools/editing, verification and answering retain their activity poses;
+queued/stopping, paused and continuation-required states use a waiting pose.
+The first detail snapshot never celebrates historical work. A newly settled,
+explicitly successful native Turn can acknowledge completion for four seconds,
+once per terminal Turn identity, when `showCompletion` is enabled. This visual
+acknowledgement does not claim business acceptance. Unknown/unavailable reads
+wait neutrally rather than presenting idle or failure. The separate `/api/pet/activity`
+aggregate is not the Launcher character's state source.
 No ordinary Session code changes. Drag threshold, HUD, close and tray reopening
 remain in their existing owners. Loading/failure states are explicit.
 Reduced motion freezes animation; hidden pages suspend rendering.

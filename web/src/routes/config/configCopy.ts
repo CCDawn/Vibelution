@@ -13,6 +13,10 @@ export type ConfigLanguage = "zh" | "en";
 
 export const CONFIG_COPY = {
   zh: {
+    modelEditGenerationTitle: "生成参数",
+    modelEditGenerationHint: "默认继承，仅为此模型覆盖需要调整的参数；清空数值可恢复继承。",
+    modelEditAddParameter: "添加参数覆盖",
+    modelEditPendingSave: "修改已保留，点击页面底部保存后生效。",
     homeManageAction: "管理",
     homeManageDisabledAction: "管理已禁用服务 ({count})",
     homeGetModelsAction: "获取模型",
@@ -849,6 +853,10 @@ export const CONFIG_COPY = {
     confirmAction: "确认",
   },
   en: {
+    modelEditGenerationTitle: "Generation parameters",
+    modelEditGenerationHint: "Parameters are inherited by default. Add only model-specific overrides; clear a value to inherit.",
+    modelEditAddParameter: "Add parameter override",
+    modelEditPendingSave: "Changes are retained until you save at the bottom.",
     homeManageAction: "Manage",
     homeManageDisabledAction: "Manage disabled services ({count})",
     homeGetModelsAction: "Get models",

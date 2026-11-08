@@ -92,14 +92,22 @@ def _read_windows_user_env_var(name: str) -> Optional[str]:
 
 
 def _read_env_var(name: str) -> Optional[str]:
-    """读取环境变量；Windows 下在进程环境缺失时回退到用户级环境变量。"""
+    """读取环境变量；flag 开启时 HKCU 用户级环境变量优先于进程环境。
+
+    HKCU 是 UI 保存密钥的权威位置；产品进程可能从改值前的旧会话块继承了
+    同名旧值，os.environ 直读会让旧 key 永久遮蔽 UI 新保存的值（重新保存
+    只影响写入那一刻的进程）。HKCU 没有该名字时回退进程环境；flag 关闭时
+    保持 os.environ 直读的现状。
+    """
+    fallback_enabled = str(os.environ.get("VIBELUTION_ENABLE_USER_ENV_FALLBACK", "") or "").strip().lower()
+    if fallback_enabled in {"1", "true", "yes", "on"}:
+        user_value = _read_windows_user_env_var(name)
+        if user_value:
+            return user_value
     value = os.environ.get(name)
     if value:
         return value
-    fallback_enabled = str(os.environ.get("VIBELUTION_ENABLE_USER_ENV_FALLBACK", "") or "").strip().lower()
-    if fallback_enabled not in {"1", "true", "yes", "on"}:
-        return None
-    return _read_windows_user_env_var(name)
+    return None
 
 
 def _is_local_base_url(base_url: str) -> bool:
@@ -379,6 +387,10 @@ class ProviderConfig(BaseModel):
 
         normalize_provider_endpoint(self.base_url)
         canonical_ref = canonicalize_credential_ref(self.credential_ref or "none")
+        self.credential_ref = canonical_ref
+        from .chatgpt_subscription import validate_subscription_provider
+
+        validate_subscription_provider(self)
         if self.auth_kind == "none" and canonical_ref != "none":
             raise ValueError("auth_kind none requires credential_ref none")
         if self.auth_kind != "none" and canonical_ref == "none" and self.requires_credential:
@@ -397,7 +409,7 @@ class ProviderConfig(BaseModel):
         if self.credential_ref:
             from .llm_credentials import resolve_credential_ref
 
-            resolution = resolve_credential_ref(self.credential_ref)
+            resolution = resolve_credential_ref(self.credential_ref, resolve_secret=True)
             return resolution.secret or None
         env_candidates: List[str] = []
         if self.api_key_env:
@@ -830,6 +842,10 @@ class LLMConfig(BaseModel):
     def resolve_api_key_for_profile(self, profile_id: Optional[str] = None, role: str = "primary") -> Optional[str]:
         profile = self.get_profile(profile_id=profile_id, role=role)
         provider = self.get_provider(profile.provider_id)
+        from .chatgpt_subscription import is_subscription_provider
+
+        if is_subscription_provider(provider):
+            return provider.resolve_api_key()
         profile_model_env = str(getattr(profile, "api_key_env", "") or "").strip()
         if profile_model_env:
             value = _read_env_var(profile_model_env)
@@ -847,6 +863,10 @@ class LLMConfig(BaseModel):
     def get_api_key_source_label_for_profile(self, profile_id: Optional[str] = None, role: str = "primary") -> str:
         profile = self.get_profile(profile_id=profile_id, role=role)
         provider = self.get_provider(profile.provider_id)
+        from .chatgpt_subscription import is_subscription_provider
+
+        if is_subscription_provider(provider):
+            return "oauth:chatgpt"
         profile_model_env = str(getattr(profile, "api_key_env", "") or "").strip()
         _, model_entry = self.get_model_library_entry_for_profile(profile)
         model_env = ""

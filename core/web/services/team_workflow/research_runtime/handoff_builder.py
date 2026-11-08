@@ -85,6 +85,15 @@ def build_handoff_record(
         if target
         else None
     )
+    # ISS-077: a handoff is a definition-edge transition (ADR 0007 identity).
+    # An undeclared from->to pair used to be accepted with a fabricated
+    # ``from->to`` edgeId and a defaulted ``auto`` gate — silently turning a
+    # free-form label into a routing decision.  Reject it instead.
+    if target and edge is None:
+        raise ValueError(
+            f"handoff transition {from_node_id} -> {target} is not declared "
+            "in the pinned workflow definition"
+        )
     kind = artifact_kind_for_gate(from_node_id)
     artifacts = artifacts or {}
     content_hash = str(artifacts.get(kind) or artifacts.get("knowledge_package") or "")

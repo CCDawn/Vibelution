@@ -1,4 +1,4 @@
-import { AlertTriangle, CircleHelp, Database, Image as ImageIcon, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CircleHelp, Database, Image as ImageIcon, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
@@ -10,6 +10,8 @@ import {
   VDialog,
   VEntityList,
   VInput,
+  VListDetailPage,
+  VTabs,
   VPanelHeader,
   VSection,
   VSettingsGroupCard,
@@ -29,14 +31,11 @@ import type {
   ConfigProviderMergePreview,
   ConfigProviderMergeResult,
 } from "../api/types";
-import { type ConfigCopy, formatConfigCopy, resolvedRouteText } from "./config/configCopy";
-import {
-  buildModelFieldValues,
-  EDITABLE_MODEL_FIELDS,
-  extractProtocolFacts,
-  type ModelFieldEdits,
-  type ModelFieldValues,
-} from "./config/modelEditableFields";
+import { CONFIG_COPY, type ConfigCopy, formatConfigCopy, resolvedRouteText } from "./config/configCopy";
+import { type ModelFieldEdits } from "./config/modelEditableFields";
+import { ConfigModelEntryEditor as ModelEntryEditor } from "./config/ConfigModelEntryEditor";
+import type { ModelEditorDrafts } from "./config/modelEditorDrafts";
+import { MODEL_SETTINGS_COPY } from "./config/modelSettingsCopy";
 import {
   buildProviderSetupChecklist,
   canonicalProviderRoute,
@@ -57,6 +56,7 @@ import {
   type ProviderRegistryRow,
 } from "./configProviderLogic";
 import styles from "./ConfigProviderRegistryPanel.styles";
+import { ChatGPTSubscriptionPanel, type AddSubscriptionModels } from "./config/ChatGPTSubscriptionPanel";
 
 export type ConfigProviderRegistryTab = "connection" | "models" | "protocols" | "diagnostics";
 
@@ -70,6 +70,9 @@ export type ProviderActionFeedback = {
 } | null;
 
 export type ConfigProviderRegistryPanelProps = {
+  language?: "zh" | "en";
+  onAddSubscriptionModels?: AddSubscriptionModels;
+  subscriptionSetupBlockedReason?: string;
   /** Show the flat service home; the complete workspace opens from Manage. */
   compactHome?: boolean;
   /** Bilingual copy table (wave 4): every user-facing string comes from here. */
@@ -120,6 +123,8 @@ export type ConfigProviderRegistryPanelProps = {
    */
   onUpdateModel?: (providerId: string, modelKey: string, edits: ModelFieldEdits) => void;
   modelUpdateBusy?: boolean;
+  modelEditorDrafts?: ModelEditorDrafts;
+  onModelEditorDraftChange?: (modelRef: string, edits: ModelFieldEdits) => void;
 };
 
 const TABS: Array<{ id: ConfigProviderRegistryTab; copyKey: "registryTabConnection" | "registryTabModels" | "registryTabProtocols" | "registryTabDiagnostics" }> = [
@@ -556,6 +561,9 @@ export type ProviderModelsTabProps = {
   /** Whitelist-governed pinned-model edit (wave 3 governance path B). */
   onUpdateModel?: (providerId: string, modelKey: string, edits: ModelFieldEdits) => void;
   modelUpdateBusy?: boolean;
+  modelEditorDrafts?: ModelEditorDrafts;
+  onModelEditorDraftChange?: (modelRef: string, edits: ModelFieldEdits) => void;
+  drilldown?: boolean;
 };
 
 /** P1 model row dot: availability-only tone; the status word lives in the title. */
@@ -650,181 +658,6 @@ function ModelListRowItem({
 }
 
 /**
- * Wave 3 governance path B: whitelist-governed editor for one pinned model
- * entry. Whitelist fields (EDITABLE_MODEL_FIELDS) render editable controls;
- * protocol-layer fields render read-only with the「由协议规则供给」note —
- * visible but not editable, so users cannot break protocol combinations.
- * Saving only sends changed whitelist fields; the draft write action applies
- * them through applyModelEntryEdits (the same single source).
- */
-function ModelEntryEditor({
-  model,
-  disabled,
-  busy,
-  copy,
-  onSave,
-}: {
-  model: ConfigCatalogModel;
-  disabled: boolean;
-  busy: boolean;
-  copy: ConfigCopy;
-  onSave: (modelKey: string, edits: ModelFieldEdits) => void;
-}) {
-  const baseline = useMemo(
-    () => buildModelFieldValues(model.draftEntry, { label: model.label, upstreamId: model.upstreamId }),
-    // Rebuild only when the underlying entry changes identity, not on every render.
-    [model.draftEntry, model.label, model.upstreamId],
-  );
-  const baselineKey = JSON.stringify(baseline);
-  const [draft, setDraft] = useState<ModelFieldValues>(baseline);
-  // Follow externally applied entry changes (save/discovery refresh); explicit
-  // keying on the serialized baseline keeps the form mirroring the draft.
-  useEffect(() => {
-    setDraft(JSON.parse(baselineKey) as ModelFieldValues);
-  }, [baselineKey]);
-
-  const edits: ModelFieldEdits = {};
-  for (const field of EDITABLE_MODEL_FIELDS) {
-    if (draft[field] !== baseline[field]) {
-      edits[field] = draft[field];
-    }
-  }
-  const dirty = Object.keys(edits).length > 0;
-  const reasoningOptions = model.reasoningEffortValues ?? [];
-
-  return (
-    <div className={styles.modelEditForm} data-model-edit-form={model.modelRef}>
-      <p className={styles.modelEditHint}>{copy.modelEditSectionHint}</p>
-      <div className={styles.modelEditGrid} aria-label={copy.modelEditFieldsAria}>
-        <label className={styles.modelEditField} data-model-edit-field="label">
-          <span>{copy.modelEditFieldLabel}</span>
-          <VInput
-            value={draft.label}
-            disabled={disabled || busy}
-            onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))}
-          />
-        </label>
-        <label className={styles.modelEditField} data-model-edit-field="model">
-          <span>{copy.modelEditFieldModel}</span>
-          <VInput
-            value={draft.model}
-            disabled={disabled || busy}
-            title={copy.modelEditModelHint}
-            onChange={(event) => setDraft((current) => ({ ...current, model: event.target.value }))}
-          />
-        </label>
-        <label className={styles.modelEditField} data-model-edit-field="context_window">
-          <span>{copy.modelEditFieldContextWindow}</span>
-          <VInput
-            type="number"
-            min={1}
-            step={1}
-            value={draft.context_window}
-            disabled={disabled || busy}
-            placeholder={copy.useModelDeclared}
-            onChange={(event) => setDraft((current) => ({ ...current, context_window: event.target.value }))}
-          />
-        </label>
-        <label className={styles.modelEditField} data-model-edit-field="temperature">
-          <span>{copy.modelEditFieldTemperature}</span>
-          <VInput
-            type="number"
-            step="any"
-            value={draft.temperature}
-            disabled={disabled || busy}
-            onChange={(event) => setDraft((current) => ({ ...current, temperature: event.target.value }))}
-          />
-        </label>
-        <label className={styles.modelEditField} data-model-edit-field="max_output_tokens">
-          <span>{copy.modelEditFieldMaxOutputTokens}</span>
-          <VInput
-            type="number"
-            min={1}
-            step={1}
-            value={draft.max_output_tokens}
-            disabled={disabled || busy}
-            onChange={(event) => setDraft((current) => ({ ...current, max_output_tokens: event.target.value }))}
-          />
-        </label>
-        <label className={styles.modelEditField} data-model-edit-field="timeout">
-          <span>{copy.modelEditFieldTimeout}</span>
-          <VInput
-            type="number"
-            min={1}
-            step={1}
-            value={draft.timeout}
-            disabled={disabled || busy}
-            onChange={(event) => setDraft((current) => ({ ...current, timeout: event.target.value }))}
-          />
-        </label>
-        <div className={styles.modelEditField} data-model-edit-field="enabled">
-          <span>{copy.modelEditFieldEnabled}</span>
-          <VSwitch
-            isSelected={draft.enabled === true}
-            isDisabled={disabled || busy}
-            aria-label={copy.modelEditFieldEnabled}
-            onChange={(next) => setDraft((current) => ({ ...current, enabled: next }))}
-          />
-        </div>
-        <div className={styles.modelEditField} data-model-edit-field="streaming">
-          <span>{copy.modelEditFieldStreaming}</span>
-          <VSwitch
-            isSelected={draft.streaming === true}
-            isDisabled={disabled || busy}
-            aria-label={copy.modelEditFieldStreaming}
-            onChange={(next) => setDraft((current) => ({ ...current, streaming: next }))}
-          />
-        </div>
-        {reasoningOptions.length > 0 ? (
-          <label className={styles.modelEditField} data-model-edit-field="default_reasoning_effort">
-            <span>{copy.modelEditFieldReasoningEffort}</span>
-            <VStringSelect
-              ariaLabel={copy.modelEditFieldReasoningEffort}
-              value={draft.default_reasoning_effort}
-              isDisabled={disabled || busy}
-              options={[
-                { value: "", label: copy.modelEditReasoningFollowRules },
-                ...reasoningOptions.map((value) => ({ value, label: value })),
-              ]}
-              onValueChange={(value) => setDraft((current) => ({ ...current, default_reasoning_effort: value }))}
-            />
-          </label>
-        ) : null}
-      </div>
-      {(() => {
-        const wire = extractProtocolFacts(model.draftEntry).find((fact) => fact.field === "wire_protocol")?.value ?? "";
-        const route = canonicalProviderRoute(wire) || wire.trim();
-        if (!route) return null;
-        return (
-          <div className={styles.modelEditProtocol} data-model-resolved-route={route}>
-            <span className={styles.modelEditProtocolHeading}>{copy.modelEditProtocolHeading}</span>
-            <span className={styles.modelEditProtocolValue}>{resolvedRouteText(copy, route)}</span>
-            <VStatusChip tone="neutral">{copy.modelEditProtocolNote}</VStatusChip>
-          </div>
-        );
-      })()}
-      <VActionGroup ariaLabel={`${model.modelRef}${copy.modelActionsAriaSuffix}`}>
-        <VButton
-          variant="primary"
-          data-model-action="save-edit"
-          isDisabled={disabled || busy || !dirty}
-          onPress={() => onSave(model.modelKey, edits)}
-        >
-          {busy ? copy.actionModelUpdateBusy : copy.modelEditSaveAction}
-        </VButton>
-        <VButton
-          data-model-action="cancel-edit"
-          isDisabled={disabled || busy || !dirty}
-          onPress={() => setDraft(baseline)}
-        >
-          {copy.modelEditCancelAction}
-        </VButton>
-      </VActionGroup>
-    </div>
-  );
-}
-
-/**
  * P1 detail pane: carries everything the old inline table squeezed into rows —
  * identity, verification, capabilities, and all actions with converged weight
  * (primary=添加一个 / secondary=测试与探测 / danger=移除).
@@ -845,6 +678,9 @@ function ModelDetailBody({
   onProbeImageInput,
   onProbeReasoning,
   onUpdateModel,
+  modelEdits = {},
+  onModelEditsChange,
+  stageModelEdits = false,
 }: {
   provider: ProviderRegistryRow;
   model: ConfigCatalogModel;
@@ -865,7 +701,11 @@ function ModelDetailBody({
   onProbeImageInput?: (modelRef: string) => void;
   onProbeReasoning?: (modelRef: string) => void;
   onUpdateModel?: (providerId: string, modelKey: string, edits: ModelFieldEdits) => void;
+  stageModelEdits?: boolean;
+  modelEdits?: ModelFieldEdits;
+  onModelEditsChange?: (edits: ModelFieldEdits) => void;
 }) {
+  const hasModelEdits = Object.keys(modelEdits).length > 0;
   const action = deriveProviderModelActionState(provider, model, liveReferenceCount, disabled, copy);
   const testAvailable = canTestProviderModel(model);
   const imageCapability = model.capabilities?.image_input;
@@ -904,7 +744,29 @@ function ModelDetailBody({
           <VStatusChip tone={model.availability === "disabled" ? "danger" : "neutral"}>{providerStatusLabel(model.availability, copy)}</VStatusChip>
         </span>
       </div>
-      <section className={styles.modelDetailSection} data-model-section="verification">
+      {onUpdateModel && ["pinned", "missing_remote"].includes(model.availability) ? (
+      <section className={styles.modelDetailSection} data-model-section="edit">
+          <div className={styles.modelDetailSectionHead}>
+            <h3>{copy.modelEditSectionTitle}</h3>
+            <TermHelp
+              ariaLabel={`${copy.modelEditSectionTitle}${copy.termHelpAriaSuffix}`}
+              help={copy.modelEditSectionHint}
+            />
+          </div>
+          <ModelEntryEditor
+            key={model.modelRef}
+            model={model}
+            disabled={disabled}
+            busy={Boolean(modelUpdateBusy)}
+            copy={copy}
+            edits={modelEdits}
+            onEditsChange={(edits) => onModelEditsChange?.(edits)}
+            onSave={!stageModelEdits ? undefined : (modelKey, edits) => onUpdateModel?.(provider.providerId, modelKey, edits)}
+          />
+        </section>
+      ) : null}
+      {hasModelEdits ? <p className={styles.muted}>{copy.modelEditPendingSave}</p> : null}
+      <details className={styles.modelEvidence}><summary>{copy.verificationHeader} · {copy.columnCapabilities}</summary>      <section className={styles.modelDetailSection} data-model-section="verification">
         <div className={styles.modelDetailSectionHead}>
           <h3>{copy.verificationHeader}</h3>
           <TermHelp
@@ -924,25 +786,8 @@ function ModelDetailBody({
         </div>
         <CapabilityList model={model} copy={copy} termReasoningHelp={copy.termReasoningHelp} termReasoningLabel={copy.reasoningTermLabel} termHelpAriaSuffix={copy.termHelpAriaSuffix} />
       </section>
-      {onUpdateModel && ["pinned", "missing_remote"].includes(model.availability) ? (
-        <section className={styles.modelDetailSection} data-model-section="edit">
-          <div className={styles.modelDetailSectionHead}>
-            <h3>{copy.modelEditSectionTitle}</h3>
-            <TermHelp
-              ariaLabel={`${copy.modelEditSectionTitle}${copy.termHelpAriaSuffix}`}
-              help={copy.modelEditSectionHint}
-            />
-          </div>
-          <ModelEntryEditor
-            key={model.modelRef}
-            model={model}
-            disabled={disabled}
-            busy={Boolean(modelUpdateBusy)}
-            copy={copy}
-            onSave={(modelKey, edits) => onUpdateModel(provider.providerId, modelKey, edits)}
-          />
-        </section>
-      ) : null}
+      </details>
+
       <section className={styles.modelDetailSection} data-model-section="actions">
         <div className={styles.modelDetailSectionHead}>
           <h3>{copy.columnActions}</h3>
@@ -974,8 +819,8 @@ function ModelDetailBody({
               variant="secondary"
               data-model-capability-action="image_input"
               icon={<ImageIcon size={14} />}
-              isDisabled={disabled || imageCapabilityBusy}
-              title={copy.imageProbeHint}
+              isDisabled={disabled || imageCapabilityBusy || hasModelEdits}
+              title={hasModelEdits ? copy.modelEditPendingSave : copy.imageProbeHint}
               onPress={() => onProbeImageInput?.(model.modelRef)}
             >
               {imageCapabilityBusy
@@ -1002,8 +847,8 @@ function ModelDetailBody({
           ) : reasoningProbeAvailable ? (
             <VButton
               variant="secondary"
-              isDisabled={disabled || reasoningFeedback?.phase === "busy"}
-              title={copy.reasoningProbeHint}
+              isDisabled={disabled || hasModelEdits || reasoningFeedback?.phase === "busy"}
+              title={hasModelEdits ? copy.modelEditPendingSave : copy.reasoningProbeHint}
               onPress={() => onProbeReasoning?.(model.modelRef)}
             >
               {reasoningFeedback?.phase === "busy" ? copy.reasoningProbeBusy : copy.reasoningProbeAction}
@@ -1053,7 +898,17 @@ export function ProviderModelsTab({
   onProbeReasoning,
   onUpdateModel,
   modelUpdateBusy = false,
+  modelEditorDrafts,
+  onModelEditorDraftChange,
+  drilldown = false,
 }: ProviderModelsTabProps) {
+  const [localDrafts, setLocalDrafts] = useState<ModelEditorDrafts>({});
+  const drafts = modelEditorDrafts ?? localDrafts;
+  const changeDraft = (ref: string, edits: ModelFieldEdits) => {
+    if (onModelEditorDraftChange) onModelEditorDraftChange(ref, edits);
+    else setLocalDrafts((current) => ({ ...current, [ref]: edits }));
+  };
+  const text = MODEL_SETTINGS_COPY[copy.modelEditFieldLabel === CONFIG_COPY.zh.modelEditFieldLabel ? "zh" : "en"];
   const summary = useMemo(() => summarizeProviderModels(provider.models), [provider.models]);
   const pinnableModels = useMemo(
     () => pinnableProviderModels(filterProviderModels(provider.models, modelQuery, "discovered")),
@@ -1137,8 +992,10 @@ export function ProviderModelsTab({
         </div>
       ) : null}
       </div>
-      <div className={styles.modelsSplit} data-vui-region="config-models-split">
-        <div className={styles.modelListPane}>
+      <div className={drilldown ? styles.modelsDrilldown : styles.modelsSplit} data-vui-region="config-models-split" data-model-drilldown={drilldown ? "true" : undefined}>
+        {drilldown && detailModel ? <VButton variant="ghost" className={styles.backAction} icon={<ArrowLeft size={14} />} onPress={() => setDetailModelRef("")}>{text.backModels}</VButton> : null}
+        {detailModel && !visibleModels.some((model) => model.modelRef === detailModel.modelRef) ? <p className={styles.filterNotice} role="status">{text.outsideFilter} <VButton variant="ghost" onPress={() => { onQueryChange(""); onFilterChange("all"); }}>{text.clearFilter}</VButton></p> : null}
+        <div className={styles.modelListPane} hidden={drilldown && Boolean(detailModel)}>
           <p className={styles.modelListHeading}>{copy.modelListHeading} · {visibleModels.length}</p>
           <div className={styles.tableScroll}>
             <VEntityList
@@ -1159,7 +1016,7 @@ export function ProviderModelsTab({
             />
           </div>
         </div>
-        <div className={styles.modelDetailPane} data-vui-region="config-models-detail" aria-label={copy.modelDetailPaneAria}>
+        <div className={drilldown ? styles.modelDrilldownDetail : styles.modelDetailPane} hidden={drilldown && !detailModel} data-vui-region="config-models-detail" aria-label={copy.modelDetailPaneAria}>
           {detailModel ? (
             <ModelDetailBody
               provider={provider}
@@ -1177,6 +1034,9 @@ export function ProviderModelsTab({
               onProbeImageInput={onProbeImageInput}
               onProbeReasoning={onProbeReasoning}
               onUpdateModel={onUpdateModel}
+              stageModelEdits={!onModelEditorDraftChange}
+              modelEdits={drafts[detailModel.modelRef] ?? {}}
+              onModelEditsChange={(edits) => changeDraft(detailModel.modelRef, edits)}
             />
           ) : (
             <VStateSurface tone="empty" title={copy.modelDetailEmptyTitle}>{copy.modelDetailEmptyBody}</VStateSurface>
@@ -1251,6 +1111,9 @@ function DiagnosticsTab({
 }
 
 export function ConfigProviderRegistryPanel({
+  language = "zh",
+  onAddSubscriptionModels,
+  subscriptionSetupBlockedReason,
   compactHome = false,
   copy,
   rows,
@@ -1287,6 +1150,8 @@ export function ConfigProviderRegistryPanel({
   onToggleEnabled,
   onUpdateModel,
   modelUpdateBusy = false,
+  modelEditorDrafts,
+  onModelEditorDraftChange,
 }: ConfigProviderRegistryPanelProps) {
   const orderedRows = useMemo(() => sortProviderRegistryRows(rows), [rows]);
   // P0 single list: every provider shows once; dot carries availability, in-use sorts first.
@@ -1314,20 +1179,26 @@ export function ConfigProviderRegistryPanel({
     },
     [copy, listRows, rows],
   );
+  const text = MODEL_SETTINGS_COPY[language === "en" ? "en" : "zh"];
+  const [providerQuery, setProviderQuery] = useState("");
+  const [showDisabled, setShowDisabled] = useState(false);
+  const [mobileDetail, setMobileDetail] = useState(false);
+  const [subscriptionOpen, setSubscriptionOpen] = useState(false);
   const [managedDisabledOnly, setManagedDisabledOnly] = useState(false);
   const workspaceListRows = useMemo(
-    () => managedDisabledOnly ? listRows.filter((row) => !row.enabled) : listRows,
-    [listRows, managedDisabledOnly],
+    () => listRows.filter((row) => {
+      const full = rows.find((item) => item.providerId === row.providerId);
+      const matches = [row.name, row.providerId, ...(full?.models.map((model) => `${model.label} ${model.upstreamId}`) ?? [])].join(" ").toLowerCase().includes(providerQuery.toLowerCase());
+      return matches && (showDisabled || Boolean(providerQuery) || row.enabled);
+    }),
+    [listRows, rows, providerQuery, showDisabled],
   );
-  const workspaceListItems = managedDisabledOnly
-    ? listItems.filter((item) => !item.enabled)
-    : listItems;
-  const homeItems = compactHome ? listItems.filter((item) => item.enabled) : listItems;
+  const workspaceListItems = listItems.filter((item) => workspaceListRows.some((row) => row.providerId === item.providerId));
   const disabledProviderCount = listItems.filter((item) => !item.enabled).length;
   const provider =
-    rows.find((row) => row.providerId === selectedProviderId && workspaceListRows.some((item) => item.providerId === row.providerId))
-    ?? (workspaceListRows[0]
-      ? rows.find((row) => row.providerId === workspaceListRows[0].providerId) ?? null
+    rows.find((row) => row.providerId === selectedProviderId)
+    ?? (listRows[0]
+      ? rows.find((row) => row.providerId === listRows[0].providerId) ?? null
       : null);
   const [modelQuery, setModelQuery] = useState("");
   const [contextWindowDraft, setContextWindowDraft] = useState("");
@@ -1335,7 +1206,6 @@ export function ConfigProviderRegistryPanel({
     defaultProviderModelFilter(provider?.models ?? []),
   );
   const [showAdvancedTools, setShowAdvancedTools] = useState(false);
-  const [managedOpen, setManagedOpen] = useState(false);
 
   useEffect(() => {
     if (!provider) {
@@ -1347,10 +1217,10 @@ export function ConfigProviderRegistryPanel({
 
   // Keep the selection in the visible workspace list; default to its first row.
   useEffect(() => {
-    if (!workspaceListRows.length) return;
-    if (selectedProviderId && workspaceListRows.some((row) => row.providerId === selectedProviderId)) return;
-    onSelectProvider(workspaceListRows[0].providerId);
-  }, [onSelectProvider, selectedProviderId, workspaceListRows]);
+    if (!listRows.length) return;
+    if (selectedProviderId && listRows.some((row) => row.providerId === selectedProviderId)) return;
+    onSelectProvider(listRows[0].providerId);
+  }, [onSelectProvider, selectedProviderId, listRows]);
 
   const [mergePreview, setMergePreview] = useState<ConfigProviderMergePreview | null>(null);
   const [mergeResult, setMergeResult] = useState<ConfigProviderMergeResult | null>(null);
@@ -1518,32 +1388,15 @@ export function ConfigProviderRegistryPanel({
   };
 
   const workspaceView = (
-    <VSurface as="section" id={compactHome ? "config-models-workspace" : "config-models"} className={styles.sectionSurface} padding="none">
-      {hasPendingApply ? (
-        <div className={styles.savePrompt} role="status" data-save-prompt="pending" aria-live="polite">
-          <div className={styles.savePromptCopy}>
-            <strong>{copy.unsavedModelsTitle}</strong>
-          </div>
-          <VButton
-            variant="primary"
-            data-save-prompt-action="apply"
-            icon={<Save size={14} />}
-            isDisabled={!canSaveConfig || disabled || saveBusy}
-            tooltip={copy.savePromptTooltip}
-            onPress={() => onSaveExternal?.()}
-          >
-            {saveBusy ? copy.saveBusy : copy.saveConfig}
-          </VButton>
-        </div>
-      ) : null}
-      <VSplitWorkspace
-        className={`${styles.registryWorkspace} ${styles.registryWorkspaceMedium}`}
-        resize={{
-          layoutId: WORKBENCH_LAYOUT_IDS.configModelAssets,
-          sidebar: { defaultWidth: 224, minWidth: 180, maxWidth: 300 },
-        }}
-        sidebar={(
+    <VSurface as="section" id="config-models" className={styles.sectionSurface} padding="none">
+      <VListDetailPage hideHeader title={text.services}
+        className={mobileDetail ? styles.mobileDetail : styles.mobileList}
+        workspaceClassName={`${styles.registryWorkspace} ${styles.registryWorkspaceMedium}`}
+        layoutId={WORKBENCH_LAYOUT_IDS.configModelAssets}
+        resize={{ sidebar: { defaultWidth: 244, minWidth: 200, maxWidth: 340 } }}
+        list={(
           <div className={styles.providerRail}>
+            <VInput aria-label={text.searchProviders} placeholder={text.searchProviders} value={providerQuery} onChange={(event) => setProviderQuery(event.target.value)} />
             <div className={styles.providerListSection}>
               <p className={styles.providerListHeading}>{copy.configuredProvidersHeading} · {workspaceListRows.length}</p>
               <VEntityList
@@ -1573,12 +1426,14 @@ export function ConfigProviderRegistryPanel({
                     inspecting={inspectorOpen && provider?.providerId === row.providerId}
                     disabled={disabled}
                     copy={copy}
-                    onSelect={() => onSelectProvider(row.providerId)}
+                    onSelect={() => { onSelectProvider(row.providerId); setSubscriptionOpen(false); setMobileDetail(true); }}
                     onToggle={onToggleEnabled}
                   />
                 )}
               />
             </div>
+            {disabledProviderCount ? <VButton variant="ghost" aria-pressed={showDisabled} onPress={() => setShowDisabled((value) => !value)}>{text.hiddenProviders} ({disabledProviderCount})</VButton> : null}
+            {onAddSubscriptionModels ? <VButton variant="ghost" data-provider-action="subscription" onPress={() => { setSubscriptionOpen(true); setMobileDetail(true); }}>{text.subscription}</VButton> : null}
             {onAddConnection ? (
               <VButton
                 className={styles.providerAddRow}
@@ -1595,8 +1450,12 @@ export function ConfigProviderRegistryPanel({
             ) : null}
           </div>
         )}
-        main={provider ? (
+        detail={subscriptionOpen && onAddSubscriptionModels ? <div className={styles.modelsColumn}><VButton variant="ghost" className={styles.backAction} icon={<ArrowLeft size={14} />} onPress={() => { setSubscriptionOpen(false); setMobileDetail(false); }}>{text.backProviders}</VButton><ChatGPTSubscriptionPanel language={language} disabled={disabled || saveBusy} setupBlockedReason={subscriptionSetupBlockedReason} onAddModels={onAddSubscriptionModels} /></div> : provider ? (
           <div className={styles.modelsColumn} data-provider-status={provider.status} data-vui-region="config-models-main">
+            <VButton className={styles.backProviders} variant="ghost" icon={<ArrowLeft size={14} />} onPress={() => setMobileDetail(false)}>{text.backProviders}</VButton>
+            {!workspaceListRows.some((row) => row.providerId === provider.providerId) ? <p className={styles.filterNotice} role="status">{text.outsideFilter} <VButton variant="ghost" onPress={() => { setProviderQuery(""); setShowDisabled(true); }}>{text.clearFilter}</VButton></p> : null}
+            <VPanelHeader title={<span title={provider.providerId}>{provider.label || provider.providerId}</span>} headingLevel={2} />
+            <VTabs aria-label={provider.label || provider.providerId} value={selectedTab === "models" ? "models" : "connection"} onValueChange={(tab) => onSelectTab(tab as ConfigProviderRegistryTab)} items={[{ id: "models", label: text.models }, { id: "connection", label: text.connection }]} />
             {visibleFeedback ? (
               <p
                 className={
@@ -1624,8 +1483,8 @@ export function ConfigProviderRegistryPanel({
                 ) : null}
               </p>
             ) : null}
-            <div className={styles.providerSettings} data-vui-region="config-provider-connection">
-              <VPanelHeader title={provider.label || provider.providerId} headingLevel={3}
+            <div className={styles.providerSettings} hidden={selectedTab === "models"} data-vui-region="config-provider-connection">
+              <VPanelHeader title={text.connection} headingLevel={3}
                 actions={(
                   <VActionGroup ariaLabel={copy.providerHeaderActionsAria} className={styles.actions}>
                     <VButton
@@ -1666,20 +1525,12 @@ export function ConfigProviderRegistryPanel({
                 onCredentialValueChange={onCredentialValueChange} onCancelCredential={onCancelCredential}
                 onSaveCredential={() => onSaveCredential(provider.providerId)} />
             </div>
-            <div className={styles.detailBody} data-provider-tab="models">
+            <div className={styles.detailBody} hidden={selectedTab !== "models"} data-provider-tab="models">
               <ProviderModelsTab
+                toolbarActions={<VButton variant="secondary" data-provider-action="discover-models" isDisabled={disabled || discoverBusy} icon={<Plus size={14} />} onPress={() => { onDiscover(provider.providerId); setModelFilter("discovered"); }}>{copy.registryFilterDiscovered}</VButton>}
                 copy={copy}
-                toolbarIdentity={(
-              <span className={styles.detailIdentity}>
-                <strong title={provider.providerId}>{provider.label || provider.providerId}</strong>
-                <small className={styles.muted}>
-                  {formatConfigCopy(copy.pinnedModelsTemplate, { count: provider.pinnedCount })}
-
-                </small>
-              </span>
-                )}
                 provider={provider}
-                disabled={disabled}
+                disabled={disabled || visibleFeedback?.phase === "busy"}
                 modelQuery={modelQuery}
                 modelFilter={modelFilter}
                 liveReferenceCountByModelRef={liveReferenceCountByModelRef}
@@ -1695,6 +1546,9 @@ export function ConfigProviderRegistryPanel({
                 onProbeReasoning={(modelRef) => void probeReasoning(modelRef)}
                 onUpdateModel={onUpdateModel}
                 modelUpdateBusy={modelUpdateBusy}
+                modelEditorDrafts={modelEditorDrafts}
+                onModelEditorDraftChange={onModelEditorDraftChange}
+                drilldown
               />
             </div>
           </div>
@@ -1797,99 +1651,5 @@ export function ConfigProviderRegistryPanel({
     </VSurface>
   );
 
-  if (!compactHome) return workspaceView;
-
-  return (
-    <>
-      <VSurface as="section" id="config-models" className={styles.compactHome} padding="none" data-vui-region="config-model-services-home">
-        {actionFeedback ? (
-          <p
-            className={actionFeedback.phase === "error" ? styles.actionFeedbackError : actionFeedback.phase === "success" ? styles.actionFeedbackSuccess : styles.actionFeedback}
-            data-feedback-phase={actionFeedback.phase}
-            data-feedback-kind={actionFeedback.kind}
-            role={actionFeedback.phase === "error" ? "alert" : "status"}
-            aria-live="polite"
-          >
-            {actionFeedback.message}
-            {actionFeedback.kind === "enabled" && actionFeedback.phase === "error" && canRetryEnabledChange ? (
-              <VButton
-                variant="ghost"
-                density="compact"
-                contentLayout="plain"
-                data-provider-retry-action="enabled"
-                isDisabled={disabled || saveBusy}
-                onPress={retryEnabledChange}
-              >{copy.retryAction}</VButton>
-            ) : null}
-          </p>
-        ) : null}
-        <div role="list" aria-label={copy.configuredListAria} className={styles.homeList}>
-          {homeItems.map((item) => {
-            const row = rows.find((candidate) => candidate.providerId === item.providerId)!;
-            const testModel = row.models.find((model) => model.availability === "pinned"
-              && model.draftEntry?.enabled !== false && canTestProviderModel(model)
-              && model.modelRef.startsWith(`${row.providerId}/`));
-            const busy = actionFeedback?.providerId === row.providerId && actionFeedback.phase === "busy";
-            return (
-              <div key={row.providerId} role="listitem" className={styles.homeRow} data-provider-home-row={row.providerId}>
-                <div className={styles.homeIdentity}>
-                  <strong>{row.label || row.providerId}</strong>
-                  {item.showProviderId ? <small>{row.providerId}</small> : null}
-                  <span className={styles.homeEndpoint}>{row.baseUrl || copy.notConfigured}</span>
-                  <span className={styles.homeStatus} data-provider-status={row.enabled === false ? "disabled" : row.status}>
-                    {formatConfigCopy(copy.pinnedModelsTemplate, { count: row.pinnedCount })}
-                    {" · "}{providerStatusLabel(row.enabled === false ? "disabled" : row.status, copy)}
-                  </span>
-                </div>
-                <VActionGroup ariaLabel={`${row.label || row.providerId} ${copy.providerHeaderActionsAria}`} className={styles.homeActions}>
-                  <VButton
-                    variant="secondary"
-                    data-provider-home-action={testModel ? "test" : "discover"}
-                    isDisabled={disabled || busy || row.enabled === false}
-                    title={testModel ? copy.testCallHint : copy.detectHint}
-                    onPress={() => testModel ? onTestModel(testModel.modelRef) : onDiscover(row.providerId)}
-                  >{busy ? copy.detectBusy : testModel ? copy.testCall : copy.homeGetModelsAction}</VButton>
-                  <VButton
-                    variant="ghost"
-                    data-provider-home-action="manage"
-                    isDisabled={disabled}
-                    onPress={() => { setManagedDisabledOnly(false); onSelectProvider(row.providerId); setManagedOpen(true); }}
-                  >{copy.homeManageAction}</VButton>
-                </VActionGroup>
-              </div>
-            );
-          })}
-        </div>
-        {!homeItems.length ? (
-          <VStateSurface
-            tone="empty"
-            title={disabledProviderCount ? copy.homeNoEnabledServicesTitle : copy.emptyConfiguredTitle}
-          >
-            {disabledProviderCount ? copy.homeNoEnabledServicesBody : copy.emptyConfiguredNormal}
-            {onAddConnection ? <VButton variant="secondary" icon={<Plus size={14} />} isDisabled={disabled} onPress={onAddConnection}>{copy.addProvider}</VButton> : null}
-          </VStateSurface>
-        ) : null}
-        {disabledProviderCount ? (
-          <VButton
-            className={styles.homeDisabledManageAction}
-            variant="ghost"
-            density="compact"
-            contentLayout="plain"
-            data-provider-home-action="manage-disabled"
-            isDisabled={disabled}
-            onPress={() => {
-              const firstDisabled = listItems.find((item) => !item.enabled);
-              if (!firstDisabled) return;
-              setManagedDisabledOnly(true);
-              onSelectProvider(firstDisabled.providerId);
-              setManagedOpen(true);
-            }}
-          >{formatConfigCopy(copy.homeManageDisabledAction, { count: disabledProviderCount })}</VButton>
-        ) : null}
-      </VSurface>
-      <VDialog open={managedOpen} onOpenChange={setManagedOpen} title={copy.homeManageTitle} size="xl" contentClassName={styles.managementDialog}>
-        {workspaceView}
-      </VDialog>
-    </>
-  );
+  return workspaceView;
 }

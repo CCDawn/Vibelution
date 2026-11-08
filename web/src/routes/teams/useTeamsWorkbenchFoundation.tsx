@@ -134,6 +134,7 @@ import {
 import { workflowGraphLayout } from "../TeamWorkflowGraphLayout";
 import {
   RESEARCH_TEAM_ID,
+  resolveRequestedRouteTeamId,
 } from "../TeamsRoute.canvasData";
 // Task 9: Challenge Cup stage-rail/operations shell removed; workflow runs on ResearchProcessWorkspace.
 export function useTeamsWorkbenchFoundation({
@@ -164,7 +165,9 @@ export function useTeamsWorkbenchFoundation({
   // Late-bound: mutations hook is declared above scroll helper; keep stable identity via ref.
   const scrollSourceCollectionPanelIntoViewRef = useRef<(panelId: string) => void>(() => {});
 
-  const requestedTeamId = searchParams.get("teamId") ?? "";
+  // Honor both team identity params so the generic workflow workspace's
+  // `team=` links resolve to the same team the discussion entry targets (ISS-029).
+  const requestedTeamId = resolveRequestedRouteTeamId(searchParams);
   const requestedAgentId = searchParams.get("agent") ?? "";
   const {
     teamsQuery,

@@ -67,6 +67,17 @@ HEADER_LINES = [
     "# ============================================================",
 ]
 PUBLIC_PROVIDER_FIELDS = PUBLIC_INLINE_PROVIDER_FIELDS
+_V2_MODEL_OPTION_PROVIDER_FIELDS = (
+    *PUBLIC_INLINE_PROVIDER_FIELDS,
+    "auth_kind",
+    "vendor",
+    "driver",
+)
+_V2_MODEL_OPTION_PROVIDER_OBJECT_FIELDS = {
+    "protocols": ("default", "allowed", "routes"),
+    "discovery": ("mode", "adapter", "models_url_override", "cache_ttl_seconds", "include", "exclude"),
+    "deployment": ("runtime_framework", "artifact_path"),
+}
 PROFILE_OVERRIDE_FIELDS = PROFILE_REFERENCE_OVERRIDE_FIELDS
 SCHEMA_V2_LEGACY_MODEL_WRITE_ERROR = (
     "schema v2 model writes must use provider-scoped configuration; "
@@ -1585,13 +1596,17 @@ def _read_windows_user_env_var(name: str) -> str:
 
 
 def _read_env_var(name: str) -> str:
-    value = os.environ.get(name, "")
-    if value:
-        return value
+    # HKCU-first mirrors config.models._read_env_var: HKCU is the authoritative
+    # location where the UI persists keys; a value inherited into the process
+    # may come from a session block written before the key changed and would
+    # shadow the fresh HKCU value forever. Without the flag, keep reading
+    # os.environ only.
     fallback_enabled = str(os.environ.get("VIBELUTION_ENABLE_USER_ENV_FALLBACK", "") or "").strip().lower()
-    if fallback_enabled not in {"1", "true", "yes", "on"}:
-        return ""
-    return _read_windows_user_env_var(name)
+    if fallback_enabled in {"1", "true", "yes", "on"}:
+        user_value = _read_windows_user_env_var(name)
+        if user_value:
+            return user_value
+    return os.environ.get(name, "")
 
 
 def read_persisted_user_env_var(name: str) -> str:
@@ -2041,7 +2056,7 @@ def list_llm_model_options(public_config: dict) -> list[dict[str, object]]:
                 provider = {
                     **{
                         field: copy.deepcopy(raw_provider.get(field))
-                        for field in PUBLIC_INLINE_PROVIDER_FIELDS
+                        for field in _V2_MODEL_OPTION_PROVIDER_FIELDS
                         if field in raw_provider
                     },
                     "id": str(provider_id),
@@ -2052,6 +2067,10 @@ def list_llm_model_options(public_config: dict) -> list[dict[str, object]]:
                     "requires_api_key": bool(raw_provider.get("requires_api_key", requires_credential)),
                     "requires_credential": requires_credential,
                 }
+                for field, allowed_fields in _V2_MODEL_OPTION_PROVIDER_OBJECT_FIELDS.items():
+                    value = raw_provider.get(field)
+                    if isinstance(value, dict):
+                        provider[field] = {key: copy.deepcopy(value[key]) for key in allowed_fields if key in value}
                 protocols = raw_provider.get("protocols") if isinstance(raw_provider.get("protocols"), dict) else {}
                 for model_key, raw_model in raw_models.items():
                     if not isinstance(raw_model, dict) or raw_model.get("enabled", True) is False:
@@ -2808,9 +2827,31 @@ def _config_edit_lock(config_path: Path, *, timeout_seconds: float = 10.0, stale
             yield
 
 
+_CONFIG_EDIT_LOCK_DEPTH = threading.local()
+
+
 @contextmanager
 def _config_edit_lock_unfenced(config_path: Path, *, timeout_seconds: float = 10.0, stale_seconds: float = 300.0):
     lock_path = resolve_config_lock_path(config_path)
+    key = os.path.normcase(str(lock_path))
+    depths = getattr(_CONFIG_EDIT_LOCK_DEPTH, "counts", None)
+    if depths is None:
+        depths = _CONFIG_EDIT_LOCK_DEPTH.counts = {}
+    if depths.get(key, 0) > 0:
+        # Same-thread re-entry: a long-span writer (apply_config_workspace's
+        # read-baseline-merge-persist critical section, or the config
+        # bootstrap's schema upgrader) already owns the sidecar, and a nested
+        # save_public_config / load_public_config must re-enter instead of
+        # self-deadlocking on its own O_EXCL sidecar. Other threads and other
+        # processes still serialize on the lock file below.
+        depths[key] += 1
+        try:
+            yield
+        finally:
+            depths[key] -= 1
+            if depths[key] <= 0:
+                depths.pop(key, None)
+        return
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     token = f"{os.getpid()}:{uuid.uuid4().hex}"
     deadline = time.monotonic() + timeout_seconds
@@ -2833,9 +2874,11 @@ def _config_edit_lock_unfenced(config_path: Path, *, timeout_seconds: float = 10
             if time.monotonic() >= deadline:
                 raise RuntimeError(f"Config edit lock is busy: {lock_path}")
             time.sleep(0.05)
+    depths[key] = 1
     try:
         yield
     finally:
+        depths.pop(key, None)
         if acquired:
             try:
                 if lock_path.read_text(encoding="utf-8").strip() == token:

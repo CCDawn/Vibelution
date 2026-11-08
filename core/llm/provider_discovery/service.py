@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 
 from config.llm_credentials import resolve_credential_ref
+from config.chatgpt_subscription import is_subscription_provider
 from config.llm_identity import provider_discovery_fingerprint, validate_provider_id
 from config.llm_security import validate_llm_provider_target
 from config.model_catalog import (
@@ -75,7 +76,9 @@ def discover_provider_models(
     if int(llm.get("schema_version") or 2) != 2 or not isinstance(provider, dict):
         raise ValueError(f"unknown schema v2 provider: {canonical_provider_id}")
     validate_llm_provider_target(provider, context="llm.provider.discovery", resolve_dns=True)
-    resolution = resolve_credential_ref(str(provider.get("credential_ref") or "none"))
+    if is_subscription_provider(provider) and credential_override:
+        raise ValueError("ChatGPT subscription credentials must come from the authorized account")
+    resolution = resolve_credential_ref(str(provider.get("credential_ref") or "none"), resolve_secret=True)
     credential = str(credential_override or resolution.secret)
     if provider.get("requires_credential", True) and not credential:
         raise ValueError("provider credential is missing")

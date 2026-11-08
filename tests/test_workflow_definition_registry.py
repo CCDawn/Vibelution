@@ -449,3 +449,52 @@ def test_ledger_v5_database_upgrades_in_place_with_empty_hash(tmp_path: Path) ->
         assert loaded.structure_hash == ""
     finally:
         store.close()
+
+
+def test_handoff_record_rejects_undeclared_transition() -> None:
+    """ISS-077: a from->to pair absent from the pinned definition must be
+    rejected instead of being accepted with a fabricated ``from->to`` edgeId
+    and a defaulted ``auto`` gate (undeclared node + label-style decision)."""
+
+    definition = build_challenge_cup_workflow_definition()
+
+    with pytest.raises(ValueError) as exc:
+        build_handoff_record(
+            run_id="run-1",
+            workflow_id=definition.workflowId,
+            workflow_version_id=definition.schemaVersion,
+            from_node_id="problem_understanding",
+            to_node_id="result_package",
+            status="pending",
+            definition=definition,
+        )
+    assert "not declared" in str(exc.value)
+
+    with pytest.raises(ValueError) as exc:
+        build_handoff_record(
+            run_id="run-1",
+            workflow_id=definition.workflowId,
+            workflow_version_id=definition.schemaVersion,
+            from_node_id="totally_unknown_node",
+            to_node_id="problem_understanding",
+            status="pending",
+            definition=definition,
+        )
+    assert "not declared" in str(exc.value)
+
+
+def test_handoff_record_accepts_declared_transition() -> None:
+    definition = build_challenge_cup_workflow_definition()
+
+    record = build_handoff_record(
+        run_id="run-1",
+        workflow_id=definition.workflowId,
+        workflow_version_id=definition.schemaVersion,
+        from_node_id="problem_understanding",
+        status="pending",
+        definition=definition,
+    )
+
+    assert record["toNodeId"] == "hypothesis_design"
+    assert record["edgeId"] == "e_problem_hypothesis"
+    assert record["gateKind"] != ""

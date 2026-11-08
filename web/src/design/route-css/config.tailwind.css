@@ -10,3 +10,5 @@
 @source "../../routes/ConfigRoute.styles.ts";
 @source "../../routes/Config*.tsx";
 @source "../../routes/Config*.styles.ts";
+/* ConfigDraftPanel is the only consumer of the lazy JSON editor. */
+@source "../../components/editor/**/*.{ts,tsx}";

@@ -157,6 +157,8 @@ def _custom_prompt_templates_for(agent_ids_prompt_ids: list[str]) -> list[dict[s
 
 
 def export_team_bundle(team_id: str) -> dict[str, Any]:
+    # Contract: `agents: []` (memberless team) is a legal export shape and the
+    # importer restores it as a memberless team.
     try:
         team = team_service.get_team(team_id)
     except _TeamNotFoundError:
@@ -226,8 +228,10 @@ def _normalize_incoming_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(team, dict) or not str(team.get("name") or "").strip():
         raise TeamBundleError("Bundle is missing team.name.", code="invalid_team")
     agents = bundle.get("agents")
-    if not isinstance(agents, list) or not agents:
+    if not isinstance(agents, list):
         raise TeamBundleError("Bundle has no agents.", code="invalid_agents")
+    # An empty list is legal: the exporter emits `agents: []` for memberless
+    # teams, so re-import must restore them as memberless teams.
     for agent in agents:
         if not isinstance(agent, dict) or not str(agent.get("bundleAgentKey") or agent.get("displayName") or "").strip():
             raise TeamBundleError("Bundle agent is missing bundleAgentKey/displayName.", code="invalid_agent")

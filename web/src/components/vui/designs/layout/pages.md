@@ -533,7 +533,7 @@ import { VSplitWorkspace } from "@/components/vui";
 
 旧 `/personal-assistant` 工作台页已退役；助理会话由 Launcher 控制面与浮动窗承载。以下仅保留桌面聊天窗与桌宠角色的布局契约。
 
-角色复用 `DesktopPetCharacter`、现有 `PetActivity` 与原生 Session 的只读消息窗口。待确认、近期异常优先；新消息用原生 `turnId` + 逻辑 `itemId` 去重，首次历史快照不提醒，界面只保存有界 ID 与查看标记。未读提醒短暂播放后恢复，未读数保留到实际查看；减少动态效果时保留静态提示。
+角色复用 `DesktopPetCharacter` 与 Launcher 绑定的原生 Session 只读详情，动作由 `resolveSessionActivity` 解码后投影，不读取独立 `/api/pet/activity` 聚合。待确认/待回答优先；阅读、工具/编辑、验证和回复使用对应姿态，排队、停止、暂停和待继续使用等待姿态，未知或读取不可用时中性等待。首次历史快照不庆祝；`showCompletion` 开启时，新观察到的明确成功终态按原生 terminal `turnId` 去重，短暂反馈四秒后恢复，反馈只表示该 Turn 结束，不表示业务验收。切换会话不重播历史，新工作与待确认优先于庆祝；减少动态效果时保留静态姿态。聊天新消息仍用原生 `turnId` + 逻辑 `itemId` 去重，界面只保存有界 ID 与查看标记，未读数保留到实际查看。
 
 桌面模式点击角色切换为 400×530 的聊天窗口，顶栏保留身份、状态、返回工作台、收起和关闭。正文继续挂载同一原生 `ChatCodingRoute`，不展示平台概览和会话列表，不另建 transcript、composer 或 SSE。窗口尺寸仍由 Electron 预设限定并夹紧到屏幕工作区；权限审批与错误保留在原生聊天中。
 

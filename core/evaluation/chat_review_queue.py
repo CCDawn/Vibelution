@@ -4,10 +4,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
+
+logger = logging.getLogger(__name__)
 
 LEGACY_STATUS_MAP = {
     "approved": "positive",
@@ -67,21 +70,55 @@ def append_review_decision(
     )
 
 
-def iter_queue_events(queue_path: Path) -> Iterable[Dict[str, Any]]:
+def read_queue_events_with_health(queue_path: Path) -> Tuple[List[Dict[str, Any]], int]:
+    """Read queue events, skipping corrupt lines instead of failing the read.
+
+    Returns ``(events, corrupt_line_count)`` where the count covers lines that
+    were not valid UTF-8 or not parseable JSON. A single corrupt line must not
+    turn queue/stats reads into server errors; it is isolated and reported so
+    the remaining records still aggregate.
+    """
     if not queue_path.exists():
-        return []
+        return [], 0
     events: List[Dict[str, Any]] = []
-    for line in queue_path.read_text(encoding="utf-8").splitlines():
-        text = line.strip()
+    corrupt_lines = 0
+    try:
+        raw_lines = queue_path.read_bytes().splitlines()
+    except OSError:
+        return [], 0
+    for raw_line in raw_lines:
+        try:
+            text = raw_line.decode("utf-8").strip()
+        except UnicodeDecodeError:
+            corrupt_lines += 1
+            continue
         if not text:
             continue
         try:
             payload = json.loads(text)
         except json.JSONDecodeError:
+            corrupt_lines += 1
             continue
         if isinstance(payload, dict):
             events.append(payload)
+    if corrupt_lines:
+        logger.warning(
+            "chat_review_queue corrupt lines skipped path=%s skippedLines=%d",
+            queue_path,
+            corrupt_lines,
+        )
+    return events, corrupt_lines
+
+
+def iter_queue_events(queue_path: Path) -> Iterable[Dict[str, Any]]:
+    events, _ = read_queue_events_with_health(queue_path)
     return events
+
+
+def queue_corrupt_line_count(queue_path: Path) -> int:
+    """Return the number of corrupt lines a fresh queue read would skip."""
+    _, corrupt_lines = read_queue_events_with_health(queue_path)
+    return corrupt_lines
 
 
 def load_review_items(queue_path: Path) -> List[Dict[str, Any]]:
@@ -154,4 +191,6 @@ __all__ = [
     "list_review_items",
     "load_review_items",
     "normalize_review_status",
+    "queue_corrupt_line_count",
+    "read_queue_events_with_health",
 ]

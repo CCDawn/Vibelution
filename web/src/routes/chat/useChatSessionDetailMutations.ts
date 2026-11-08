@@ -5,8 +5,10 @@ import { resolveAgentToolGovernanceRequest } from "../../api/agents";
 import {
   isFetchJsonHttpError,
   resolveSessionToolApprovalDecision,
+  trustSessionDevelopmentTools,
   updateSessionBudgetParameters,
   updateSessionModelParameters,
+  type SessionDevelopmentTrustResult,
   type SessionToolApprovalDecision,
 } from "../../api/chat";
 import { postPetAction } from "../../api/pet";
@@ -68,6 +70,12 @@ export type UseChatSessionDetailMutationsResult = {
     SessionToolApprovalRequest,
     Error,
     { request: SessionToolApprovalRequest; decision: SessionToolApprovalDecision },
+    unknown
+  >;
+  trustDevelopmentToolsMutation: UseMutationResult<
+    SessionDevelopmentTrustResult,
+    Error,
+    { sessionId: string; requestId: string },
     unknown
   >;
 };
@@ -272,11 +280,71 @@ export function useChatSessionDetailMutations({
     },
   });
 
+  const trustDevelopmentToolsMutation = useMutation({
+    mutationFn: ({ sessionId, requestId }: { sessionId: string; requestId: string }) =>
+      trustSessionDevelopmentTools(sessionId, requestId),
+    onMutate: async (variables) => {
+      const key = queryKeys.sessionToolApprovals(variables.sessionId);
+      const operationKey = JSON.stringify([variables.sessionId, variables.requestId]);
+      const operation = ++approvalOperationSequence.current;
+      approvalOperations.current.set(operationKey, operation);
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<SessionToolApprovalRequest[]>(key);
+      // The bundle resolves the pending request server-side; drop the banner
+      // immediately so the operator is not blocked on the network round-trip.
+      queryClient.setQueryData<SessionToolApprovalRequest[]>(
+        key,
+        (current) => (current ?? []).filter((item) => item.requestId !== variables.requestId),
+      );
+      return {
+        previousRequest: previous?.find((item) => item.requestId === variables.requestId),
+        sessionId: variables.sessionId,
+        operationKey,
+        operation,
+      };
+    },
+    onSuccess: (_payload, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.sessionToolApprovals(variables.sessionId),
+      });
+      void Promise.resolve().then(() => {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.session(variables.sessionId),
+        });
+        void chatWorkspaceCache.refreshSessionRuntime(variables.sessionId);
+      });
+    },
+    onError: (error, variables, context) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessionToolApprovals(variables.sessionId) });
+      if (context && approvalOperations.current.get(context.operationKey) !== context.operation) return;
+      if (context?.previousRequest && approvalOperations.current.get(context.operationKey) === context.operation) {
+        queryClient.setQueryData<SessionToolApprovalRequest[]>(
+          queryKeys.sessionToolApprovals(context.sessionId),
+          (current) => (current ?? []).some((item) => item.requestId === variables.requestId)
+            ? current : [...(current ?? []), context.previousRequest!],
+        );
+      }
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [variables.sessionId]: describeError(
+          error,
+          lang === "zh" ? "本会话信任开发操作失败" : "Trust development operations failed",
+        ),
+      }));
+    },
+    onSettled: (_data, _error, _variables, context) => {
+      if (context && approvalOperations.current.get(context.operationKey) === context.operation) {
+        approvalOperations.current.delete(context.operationKey);
+      }
+    },
+  });
+
   return {
     sessionModelParametersMutation,
     sessionBudgetParametersMutation,
     loadEarlierSessionMessagesMutation,
     resolveToolApprovalMutation,
     resolveSessionToolApprovalMutation,
+    trustDevelopmentToolsMutation,
   };
 }

@@ -179,14 +179,58 @@ describe("Launcher assistant state", () => {
     expect(conversation?.turnError).toBeNull();
   });
 
-  it("reads its own collapsed session once for recovery and does not poll an idle session", async () => {
+  it("reads its own collapsed session and approvals once and does not poll while idle", async () => {
     await renderAssistant();
     expect(bridge.getLauncherAssistantDetail).toHaveBeenCalledTimes(1);
-    expect(bridge.getLauncherAssistantApprovals).not.toHaveBeenCalled();
+    expect(bridge.getLauncherAssistantApprovals).toHaveBeenCalledTimes(1);
     expect(bridge.getLauncherAssistantDispatches).not.toHaveBeenCalled();
     await pollCycle();
     expect(bridge.getLauncherAssistantDetail).toHaveBeenCalledTimes(1);
     expect(bridge.getLauncherAssistantStatus).toHaveBeenCalledTimes(1);
+    expect(bridge.getLauncherAssistantApprovals).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps collapsed native approvals ahead of work and restores the current phase after resolution", async () => {
+    await renderAssistant({ id: "s", status: "running", currentPhase: "reading", activeTurnId: "active", messages: [] });
+    expect(character).toMatchObject({ animationState: "reading", tone: "running" });
+    bridge.getLauncherAssistantApprovals.mockResolvedValue([{
+      requestId: "approval", sessionId: "s", agentId: "a", turnId: "active", status: "pending",
+    }]);
+    await pollCycle();
+    expect(container?.querySelector('[data-expanded="false"]')).toBeTruthy();
+    expect(character).toMatchObject({ animationState: "waiting", tone: "approval" });
+    expect(container?.querySelector('[role="status"]')?.textContent).toBe("待你确认");
+    bridge.getLauncherAssistantApprovals.mockResolvedValue([]);
+    bridge.getLauncherAssistantDetail.mockResolvedValue({ id: "s", status: "running", currentPhase: "verifying", activeTurnId: "active", messages: [] });
+    await pollCycle();
+    expect(character).toMatchObject({ animationState: "verifying", tone: "running" });
+    expect(container?.querySelector('[role="status"]')?.textContent).toBe("验证中");
+    expect(bridge.getLauncherAssistantDispatches).not.toHaveBeenCalled();
+  }, 15_000);
+
+  it("acknowledges a newly completed native Turn in the collapsed character", async () => {
+    await renderAssistant({ id: "s", status: "running", currentPhase: "answering", activeTurnId: "active", messages: [] });
+    expect(character).toMatchObject({ animationState: "answering" });
+    await act(async () => client?.setQueryData(["launcher-assistant", "detail", "s"], {
+      id: "s", status: "ready", terminalReason: "success", lastTurnTerminalTurnId: "active", messages: [],
+    }));
+    await settle(); await settle();
+    expect(character).toMatchObject({ animationState: "celebrating", tone: "completed" });
+  });
+
+  it("does not let a cached approval hide an unavailable collapsed session", async () => {
+    await renderAssistant({ id: "s", status: "running", currentPhase: "reading", messages: [] });
+    bridge.getLauncherAssistantApprovals.mockResolvedValue([{
+      requestId: "approval", sessionId: "s", agentId: "a", status: "pending",
+    }]);
+    await act(async () => { await client?.refetchQueries({ queryKey: ["launcher-assistant", "approvals"] }); });
+    await settle();
+    expect(container?.querySelector('[role="status"]')?.textContent).toBe("待你确认");
+    bridge.getLauncherAssistantDetail.mockRejectedValue(new Error("detail unavailable"));
+    await act(async () => { await client?.refetchQueries({ queryKey: ["launcher-assistant", "detail", "s"] }); });
+    await settle();
+    expect(character).toMatchObject({ animationState: "waiting", tone: "idle" });
+    expect(container?.querySelector('[role="status"]')?.textContent).toBe("个人助理暂不可用");
   });
 
   it("recovers a collapsed active session, applies terminal appearance and stops idle polling", async () => {
@@ -201,7 +245,7 @@ describe("Launcher assistant state", () => {
     await pollCycle();
     expect(bridge.getLauncherAssistantDetail).toHaveBeenCalledTimes(settledReads);
     expect(bridge.getLauncherAssistantStatus).toHaveBeenCalledTimes(2);
-    expect(bridge.getLauncherAssistantApprovals).not.toHaveBeenCalled();
+    expect(bridge.getLauncherAssistantApprovals).toHaveBeenCalled();
     expect(bridge.getLauncherAssistantDispatches).not.toHaveBeenCalled();
   }, 10_000);
 
@@ -220,7 +264,7 @@ describe("Launcher assistant state", () => {
     expect(container?.querySelector('[data-expanded="false"]')).toBeTruthy();
     expect(character).toMatchObject({ characterId: "xiaoluo", name: "自动生效" });
     expect(bridge.getLauncherAssistantStatus).toHaveBeenCalledTimes(statusReads + 1);
-    expect(bridge.getLauncherAssistantApprovals).toHaveBeenCalledTimes(approvalReads);
+    expect(bridge.getLauncherAssistantApprovals.mock.calls.length).toBeGreaterThan(approvalReads);
     expect(bridge.getLauncherAssistantDispatches).toHaveBeenCalledTimes(dispatchReads);
     expect(bridge.sendLauncherAssistantMessage).toHaveBeenCalledTimes(1);
   });
@@ -1309,7 +1353,7 @@ describe("Launcher assistant route lifecycle", () => {
     bridge.getLauncherAssistantApprovals.mockResolvedValue([{ requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
       toolName: "command_tool", status: "pending", risk: "high", argumentSummary: {}, availableDecisions: ["accept", "decline"] }]);
     await showConversation();
-    expect(container?.querySelector("header [role='status']")?.textContent).toBe("已完成");
+    expect(container?.querySelector("header [role='status']")?.textContent).toBe("待你确认");
     expect(container?.querySelector('[role="dialog"]')).toBeTruthy();
   });
 

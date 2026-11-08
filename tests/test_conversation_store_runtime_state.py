@@ -5,7 +5,9 @@ sealed by an archived Agent (archive_state.status=archived,
 source=agent_archive) while the sessions directory row was rebound to a
 different Agent. The store must re-seal and re-bind the row to the
 payload-proven Agent at open, the bridge must repair only proven splits, and
-the explicit CAS repair must refuse guarded rows.
+the explicit CAS repair must refuse guarded rows. The live-row twin
+(ISS-037) rebinds a drifted live owner to the Agent that holds the
+direct-session claim, under the same family/admission/revision guards.
 """
 
 from __future__ import annotations
@@ -262,3 +264,123 @@ def test_owner_repair_preserves_historical_admission_identity_and_rejects_active
         assert connection.execute(
             "SELECT agent_id, agent_config_revision_id, state FROM session_admissions"
         ).fetchone() == ("old", old_revision, state)
+
+
+def test_live_owner_repair_rebinds_live_row_to_claim_proven_agent(store):
+    revision = store.repository.get_agent("repaired")["currentConfigRevisionId"]
+    result = store.repository.repair_live_directory_owner(
+        session_id="history", expected_agent_id="old", agent_id="repaired",
+        agent_config_revision_id=revision,
+    ).result(timeout=5)
+    assert result["action"] == "repaired"
+    assert result["previousAgentId"] == "old"
+    row = directory_row(store)
+    assert row["agent_id"] == "repaired"
+    assert row["agent_config_revision_id"] == revision
+    assert row["archived_at_ms"] is None  # live rows stay live
+
+
+def test_live_owner_repair_enforces_expected_owner_cas(store):
+    revision = store.repository.get_agent("repaired")["currentConfigRevisionId"]
+    with pytest.raises(ValueError, match="changed before repair"):
+        store.repository.repair_live_directory_owner(
+            session_id="history", expected_agent_id="repaired", agent_id="repaired",
+            agent_config_revision_id=revision,
+        ).result(timeout=5)
+    assert directory_row(store)["agent_id"] == "old"
+
+
+def test_live_owner_repair_is_idempotent_when_row_already_bound(store):
+    revision = store.repository.get_agent("repaired")["currentConfigRevisionId"]
+    arguments = dict(session_id="history", expected_agent_id="old", agent_id="repaired",
+                     agent_config_revision_id=revision)
+    assert store.repository.repair_live_directory_owner(**arguments).result(timeout=5)["action"] == "repaired"
+    before = directory_row(store)
+    # A second call still carrying the stale expected owner must report the
+    # noop instead of failing the caller that raced a concurrent repair.
+    result = store.repository.repair_live_directory_owner(**arguments).result(timeout=5)
+    assert result["action"] == "already_bound"
+    after = directory_row(store)
+    assert after["agent_id"] == "repaired"
+    assert after["updated_at_ms"] == before["updated_at_ms"]
+
+
+def test_live_owner_repair_rejects_family_rows(store):
+    revision_old = store.repository.get_agent("old")["currentConfigRevisionId"]
+    revision = store.repository.get_agent("repaired")["currentConfigRevisionId"]
+    store.repository.create_session(
+        session_id="child", parent_session_id="history", agent_id="old",
+        agent_config_revision_id=revision_old, title="Child",
+    ).result(timeout=5)
+    with pytest.raises(ValueError, match="session family"):
+        store.repository.repair_live_directory_owner(
+            session_id="history", expected_agent_id="old", agent_id="repaired",
+            agent_config_revision_id=revision,
+        ).result(timeout=5)
+    assert directory_row(store)["agent_id"] == "old"
+
+
+@pytest.mark.parametrize("state", ["reserved", "journaled", "projected"])
+def test_live_owner_repair_rejects_active_admissions_but_allows_projected(store, state):
+    old_revision = store.repository.get_agent("old")["currentConfigRevisionId"]
+    revision = store.repository.get_agent("repaired")["currentConfigRevisionId"]
+    with sqlite3.connect(store.database.path) as connection:
+        connection.execute(
+            "INSERT INTO session_admissions (session_id, client_submission_id, turn_id, agent_id, "
+            "agent_config_revision_id, state, created_at_ms, updated_at_ms) VALUES (?,?,?,?,?,?,?,?)",
+            ("history", "submission", "turn", "old", old_revision, state, 1, 1),
+        )
+    future = store.repository.repair_live_directory_owner(
+        session_id="history", expected_agent_id="old", agent_id="repaired",
+        agent_config_revision_id=revision,
+    )
+    if state == "projected":
+        assert future.result(timeout=5)["action"] == "repaired"
+    else:
+        with pytest.raises(ValueError, match="active admission"):
+            future.result(timeout=5)
+        assert directory_row(store)["agent_id"] == "old"
+
+
+def test_live_owner_repair_refuses_sealed_rows(store):
+    revision_old = store.repository.get_agent("old")["currentConfigRevisionId"]
+    revision = store.repository.get_agent("repaired")["currentConfigRevisionId"]
+    store.repository.upsert_directory_session(
+        session_id="history", agent_id="old", agent_config_revision_id=revision_old,
+        title="History", archived=True,
+    ).result(timeout=5)
+    with pytest.raises(ValueError, match="sealed rows"):
+        store.repository.repair_live_directory_owner(
+            session_id="history", expected_agent_id="old", agent_id="repaired",
+            agent_config_revision_id=revision,
+        ).result(timeout=5)
+    row = directory_row(store)
+    assert row["agent_id"] == "old"
+    assert row["archived_at_ms"] is not None  # sealed rows keep the seal repair
+
+
+def test_live_owner_repair_requires_persisted_target_revision(store):
+    with pytest.raises(ValueError, match="persisted Agent config revision"):
+        store.repository.repair_live_directory_owner(
+            session_id="history", expected_agent_id="old", agent_id="repaired",
+            agent_config_revision_id="missing-revision",
+        ).result(timeout=5)
+    assert directory_row(store)["agent_id"] == "old"
+
+
+def test_live_owner_repair_allows_archived_stale_owner(store):
+    """Proof strength sits on the target's claim, not the stale owner's state.
+
+    An archived (or deleted outright) expected owner must not block the
+    rebind: the store never validates the stale owner at all, so the
+    read-time recovery's uncovered drift shapes stay repairable at sync.
+    """
+    revision = store.repository.get_agent("repaired")["currentConfigRevisionId"]
+    with sqlite3.connect(store.database.path) as connection:
+        connection.execute("UPDATE agents SET status='archived' WHERE agent_id='old'")
+    result = store.repository.repair_live_directory_owner(
+        session_id="history", expected_agent_id="old", agent_id="repaired",
+        agent_config_revision_id=revision,
+    ).result(timeout=5)
+    assert result["action"] == "repaired"
+    assert directory_row(store)["agent_id"] == "repaired"

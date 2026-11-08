@@ -2122,3 +2122,62 @@ def test_terminal_backstop_never_writes_foreign_session_row(tmp_path, monkeypatc
         item[1].get("fields", {}).get("backstop") == "identity_mismatch_skipped"
         for item in _sync_failed_events(events)
     )
+
+
+def test_corrupt_task_store_degrades_to_empty_with_observable_event(
+    tmp_path, monkeypatch
+):
+    """ISS-063: a corrupt task store still degrades to an empty task list
+    (fail-soft preserved), but the unreadable read must record a structured
+    workflow event instead of silently reporting zero tasks."""
+
+    team, project, _agents = _team_project_and_agents(tmp_path, monkeypatch)
+    workflow_events: list[dict] = []
+
+    def _capture_event(event_code, event_team_id, *, fields, **kwargs):
+        workflow_events.append(
+            {
+                "eventCode": event_code,
+                "teamId": event_team_id,
+                "fields": fields,
+                **kwargs,
+            }
+        )
+
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_record_workflow_event",
+        _capture_event,
+    )
+    store_path = research_project_agent_tasks._store_path(
+        team["teamId"], project["projectId"]
+    )
+    store_path.parent.mkdir(parents=True, exist_ok=True)
+
+    store_path.write_text("{not valid json", encoding="utf-8")
+    corrupt_json_status = get_research_project_agent_task_status(
+        team["teamId"], project["projectId"]
+    )
+    assert corrupt_json_status["tasks"] == []
+
+    store_path.write_text(json.dumps(["not", "an", "object"]), encoding="utf-8")
+    non_object_status = get_research_project_agent_task_status(
+        team["teamId"], project["projectId"]
+    )
+    assert non_object_status["tasks"] == []
+
+    degraded = [
+        event
+        for event in workflow_events
+        if event["eventCode"] == "research_project_agent_task_store_unreadable"
+    ]
+    assert len(degraded) == 2
+    assert all(event["teamId"] == team["teamId"] for event in degraded)
+    assert all(
+        event["fields"]["researchProjectId"] == project["projectId"]
+        for event in degraded
+    )
+    assert {event["fields"]["errorType"] for event in degraded} == {
+        "JSONDecodeError",
+        "TypeError",
+    }

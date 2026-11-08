@@ -118,6 +118,13 @@ def prewarm_llm_imports() -> Dict[str, Dict[str, Any]]:
 def _provider_credentials_ready(provider: Any) -> bool:
     """Mirror the runtime's fail-closed credential gate for provider probes."""
 
+    from config.chatgpt_subscription import is_subscription_provider
+
+    if is_subscription_provider(provider):
+        # This route cannot honor the automatic warmup's one-token ceiling.
+        # Let the first explicit native invocation establish connectivity.
+        return False
+
     if str(getattr(provider, "auth_kind", "api_key") or "") == "none":
         return True
     if not bool(getattr(provider, "requires_api_key", True)) and not bool(
@@ -220,6 +227,12 @@ def warmup_provider(
     never blocks the claim path. Failures are swallowed into the returned
     summary and one info log line.
     """
+
+    from config.chatgpt_subscription import is_subscription_provider
+
+    provider = (getattr(getattr(config, "llm", None), "providers", None) or {}).get(provider_id)
+    if is_subscription_provider(provider):
+        return {"provider": provider_id, "profileId": profile_id, "skipped": "subscription_requires_explicit_inference"}
 
     with _WARMUP_STATE_LOCK:
         if provider_id in _WARMED_PROVIDER_IDS:

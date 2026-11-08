@@ -8127,6 +8127,59 @@ def test_v2_route_uses_representation_version_for_etag(monkeypatch: pytest.Monke
     assert not_modified.status_code == 304
 
 
+def test_v2_route_conditional_requests_cover_wildcard_mismatch_and_missing_header(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshot = finalize_state_versions(_initial_snapshot(), reset_id="origin")
+    version = snapshot["representationVersion"]
+    monkeypatch.setattr(
+        hypothesis_first_routes.hypothesis_first_state_v2,
+        "project_hypothesis_first_state_v2",
+        lambda *_args, **_kwargs: snapshot,
+    )
+
+    wildcard = hypothesis_first_routes.team_workflow_hypothesis_first_chain_state_v2(
+        "team-1",
+        Response(),
+        question_id="SCI-001",
+        if_none_match="*",
+        include_source_cursor=False,
+    )
+    assert isinstance(wildcard, Response)
+    assert wildcard.status_code == 304
+    assert wildcard.headers["etag"] == f'"{version}"'
+
+    matched = hypothesis_first_routes.team_workflow_hypothesis_first_chain_state_v2(
+        "team-1",
+        Response(),
+        question_id="SCI-001",
+        if_none_match=f'W/"{version}", "other-v1", *',
+        include_source_cursor=False,
+    )
+    assert isinstance(matched, Response)
+    assert matched.status_code == 304
+
+    mismatched = hypothesis_first_routes.team_workflow_hypothesis_first_chain_state_v2(
+        "team-1",
+        Response(),
+        question_id="SCI-001",
+        if_none_match='"stale-version-000"',
+        include_source_cursor=False,
+    )
+    assert mismatched == snapshot
+    assert isinstance(mismatched, dict)
+
+    fresh = hypothesis_first_routes.team_workflow_hypothesis_first_chain_state_v2(
+        "team-1",
+        Response(),
+        question_id="SCI-001",
+        if_none_match=None,
+        include_source_cursor=False,
+    )
+    assert fresh == snapshot
+    assert isinstance(fresh, dict)
+
+
 def test_v2_diagnostic_route_is_no_store_and_never_returns_304(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

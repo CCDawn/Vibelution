@@ -1410,7 +1410,7 @@ def compose_runtime_wire_payload(
         payload["messages"] = normalized_messages
     payload["model"] = (
         route.effective_model
-        if str(getattr(route, "adapter_id", "") or "") == "anthropic_messages_native"
+        if str(getattr(route, "adapter_id", "") or "") in {"anthropic_messages_native", "chatgpt_subscription_responses"}
         else adapter.litellm_model_name()
     )
     payload["timeout"] = _provider_timeout(profile)
@@ -1455,6 +1455,11 @@ def compose_runtime_wire_payload(
     if headers:
         payload["extra_headers"] = headers
 
+    if route.adapter_id == "chatgpt_subscription_responses":
+        from .chatgpt_subscription.inference import prepare_subscription_runtime_payload
+
+        payload = prepare_subscription_runtime_payload(payload, collect_response=not build_input.stream)
+
     try:
         validation_summary = assert_payload_valid(payload, route)
     except LLMError as exc:
@@ -1473,6 +1478,8 @@ def compose_runtime_wire_payload(
     summary.update(validation_summary)
     summary.update(actions.to_log_dict())
     summary.update(_payload_message_snapshot(payload))
+    if route.adapter_id == "chatgpt_subscription_responses":
+        summary.update({"chatgptPlanUsage": True, "providerOutputLimitSupported": False})
     return BuiltPayload(payload=payload, route=route, summary=summary, warnings=route.warnings)
 
 

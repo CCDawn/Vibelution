@@ -49,7 +49,7 @@ FROZEN_HOST_FIELD_GAP = frozenset({
     "continuation",
 })
 
-HOST_MESSAGE_FIELDS = frozenset({"message", "requestId", "attachmentIds", "references"})
+HOST_MESSAGE_FIELDS = frozenset({"message", "requestId", "attachmentIds", "references", "controlContinuation"})
 
 ASSISTANT = {"agentId": "local-assistant", "directSessionId": "native-session"}
 AUTH = {"Authorization": "Bearer private-test-token"}
@@ -232,3 +232,32 @@ def test_host_events_stream_pins_full_initial_and_fixed_direct_session(monkeypat
     assert response.status_code == 200
     assert "text/event-stream" in response.headers.get("content-type", "")
     assert seen == [("native-session", {"initial": "full", "last_event_id": 7})]
+
+
+def test_host_curate_route_maps_session_curation_errors_like_platform(monkeypatch):
+    from core.web.services import session_service
+
+    facade = NativeFacade(None)
+    facade.assistant = dict(ASSISTANT)
+    client = TestClient(create_app(native=facade, token="private-test-token"),
+                        base_url="http://127.0.0.1", headers=AUTH)
+
+    def raiser(exc):
+        def _raise(session_id, message_id, *, action):
+            raise exc("curation blocked")
+        return _raise
+
+    monkeypatch.setattr(session_service, "set_session_message_curation",
+                        raiser(session_service.SessionNotFoundError))
+    missing = client.post("/api/assistant/curation", json={"messageId": "msg-1", "action": "include"})
+    assert missing.status_code == 404, missing.text
+
+    monkeypatch.setattr(session_service, "set_session_message_curation",
+                        raiser(session_service.SessionMessageCurationStateError))
+    conflict = client.post("/api/assistant/curation", json={"messageId": "msg-1", "action": "exclude"})
+    assert conflict.status_code == 409, conflict.text
+
+    monkeypatch.setattr(session_service, "set_session_message_curation",
+                        raiser(session_service.SessionValidationError))
+    invalid = client.post("/api/assistant/curation", json={"messageId": "msg-1", "action": "bogus"})
+    assert invalid.status_code == 422, invalid.text

@@ -15,6 +15,18 @@ const indexPath = join(vuiRoot, "designs", "INDEX.md");
 // ConversationView row metaActions) whose meaningful state cannot be expressed
 // as a static preview.
 const previewExemptDesignSections = new Set([
+  // ConfigRoute-owned composition depends on account queries, native browser
+  // authorization and canonical draft/apply callbacks. Covered by panel/hook,
+  // real route save tests, the approved isolated preview and native settings acceptance.
+  "ChatGPTSubscriptionPanel",
+  // Route-owned model settings compositions, with canonical config/catalog,
+  // whitelist drafts and account-scoped actions supplied by ConfigRoute.
+  // Covered by real component interaction and save-boundary tests, the approved
+  // isolated preview and native settings acceptance; no standalone VUI export.
+  "ConfigProviderRegistryPanel",
+  "ProviderModelsTab",
+  "ConfigModelEntryEditor",
+  "ConfigDecisionModelsPanel",
   "ChallengeQuestionStageZones",
   "ResearchAnomalyInboxExtendCta",
   "ResearchWorkflowRecoveryPanel",

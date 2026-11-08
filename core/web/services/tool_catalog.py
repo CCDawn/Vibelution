@@ -961,12 +961,11 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "capabilityTags": ["desktop_action", "test_document"],
         "riskTags": ["computer_control"],
         "permissionTier": HIGH_PERMISSION_TIER,
-        "approval": "always",
         "availability": {"platforms": ["windows"], "requiredConfig": ["VIBELUTION_DESKTOP_CUA_CONFIG"]},
     },
     "personal_assistant_computer_observe_tool": {
         "category": "runtime_control",
-        "capabilityTags": ["desktop_observation", "single_window", "read_only"],
+        "capabilityTags": ["desktop_observation", "window_selection", "read_only"],
         "riskTags": ["model_cost"],
         "permissionTier": HIGH_PERMISSION_TIER,
         "approval": "never",
@@ -974,10 +973,9 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
     },
     "personal_assistant_computer_action_tool": {
         "category": "runtime_control",
-        "capabilityTags": ["desktop_action", "single_window"],
+        "capabilityTags": ["desktop_action", "window_selection"],
         "riskTags": ["computer_control"],
         "permissionTier": HIGH_PERMISSION_TIER,
-        "approval": "always",
         "availability": {"platforms": ["windows"]},
     },
     "research_knowledge_query_tool": {

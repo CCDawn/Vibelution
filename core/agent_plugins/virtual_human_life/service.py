@@ -1757,6 +1757,25 @@ class VirtualHumanLifeService:
                 )
             return deepcopy(next_binding)
 
+    def _read_schedule_file(self, agent_id: str, relative_path: str) -> dict[str, Any] | None:
+        """Read a schedule projection, degrading a corrupt file to missing.
+
+        Schedules are derived, regenerable projections: a corrupted schedule
+        file must not turn schedule reads into hard failures, so it is treated
+        like a missing file. The degradation is logged for diagnosis; the
+        deterministic planner rebuilds (and rewrites) the schedule on demand.
+        """
+        try:
+            return self.store.read_json(agent_id, relative_path)
+        except VirtualHumanLifeStorageError as exc:
+            logger.warning(
+                "virtual_human_life corrupt schedule degraded agent=%s file=%s error=%s",
+                str(agent_id or "").strip(),
+                relative_path,
+                exc,
+            )
+            return None
+
     def snapshot(self, agent_id: str) -> dict[str, Any]:
         self.require_agent(agent_id)
         binding = self.binding_for(agent_id)
@@ -1780,8 +1799,8 @@ class VirtualHumanLifeService:
         today = local_now.date().isoformat()
         tomorrow = (local_now.date() + timedelta(days=1)).isoformat()
         state = self.store.read_json(agent_id, "state.json")
-        today_schedule = self.store.read_json(agent_id, f"schedules/{today}.json")
-        tomorrow_schedule = self.store.read_json(agent_id, f"schedules/{tomorrow}.json")
+        today_schedule = self._read_schedule_file(agent_id, f"schedules/{today}.json")
+        tomorrow_schedule = self._read_schedule_file(agent_id, f"schedules/{tomorrow}.json")
         if isinstance(binding, dict) and bool(binding.get("enabled")):
             if isinstance(today_schedule, dict):
                 today_schedule = self._sync_calendar_schedule(
@@ -1844,7 +1863,7 @@ class VirtualHumanLifeService:
     def schedule_for(self, agent_id: str, local_date: str) -> dict[str, Any]:
         self.require_agent(agent_id)
         local_date = _local_date_text(local_date)
-        payload = self.store.read_json(agent_id, f"schedules/{local_date}.json")
+        payload = self._read_schedule_file(agent_id, f"schedules/{local_date}.json")
         if payload is None:
             binding = self._require_enabled_binding(agent_id)
             # Reads and ordinary snapshot projections must stay cheap and
@@ -6699,13 +6718,13 @@ class VirtualHumanLifeService:
         local_today = self._local_now(binding).date()
         for target_date in (local_today, local_today + timedelta(days=1)):
             path = f"schedules/{target_date.isoformat()}.json"
-            if self.store.read_json(agent_id, path) is None:
+            if self._read_schedule_file(agent_id, path) is None:
                 self.store.write_json(
                     agent_id,
                     path,
                     self._deterministic_schedule(agent_id, target_date, binding),
                 )
-            existing_schedule = self.store.read_json(agent_id, path)
+            existing_schedule = self._read_schedule_file(agent_id, path)
             if isinstance(existing_schedule, dict):
                 self._sync_calendar_schedule(
                     agent_id, existing_schedule, binding=binding, now=self._now()

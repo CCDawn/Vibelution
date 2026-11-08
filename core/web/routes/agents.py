@@ -8,7 +8,7 @@ from typing import Any, Iterator, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from core.web.routes.agent_catalog_models import (
     AgentAvatarOptionsResponse,
@@ -222,6 +222,34 @@ class AgentToolPolicyValidatePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     toolPolicy: dict[str, Any]
+
+    @model_validator(mode="after")
+    def _reject_unsupported_policy_enum_values(self) -> "AgentToolPolicyValidatePayload":
+        # Enum-valued patch fields must fail as request validation (422) before
+        # reaching the service, where the strict runtime evaluator would raise
+        # ToolPolicyInvalidError and surface as an unmapped 500. Accepted sets
+        # mirror the evaluator exactly, including its inherit/controlled
+        # aliases; absent or empty values keep the service-level defaults.
+        allowed_by_field = {
+            "networkAccess": {"none", "restricted", "full", "inherit", "controlled"},
+            "mutationAccess": {"none", "workspace", "controlled", "inherit", "restricted"},
+            "delegationAccess": {"none", "assigned_only"},
+        }
+        for field_name, allowed in allowed_by_field.items():
+            raw_value = self.toolPolicy.get(field_name)
+            normalized = str(raw_value or "").strip()
+            if not normalized:
+                continue
+            if normalized not in allowed:
+                raise ValueError(f"Unsupported {field_name}: {normalized}")
+        overrides = self.toolPolicy.get("approvalOverrides")
+        if overrides is not None and not isinstance(overrides, dict):
+            raise ValueError("approvalOverrides must be an object")
+        if isinstance(overrides, dict):
+            for tool_name, mode in overrides.items():
+                if str(mode or "").strip() not in {"never", "on_request", "always"}:
+                    raise ValueError(f"Unsupported approval override for {tool_name}: {mode}")
+        return self
 
 
 class AgentToolPolicyUpdatePayload(AgentToolPolicyValidatePayload):

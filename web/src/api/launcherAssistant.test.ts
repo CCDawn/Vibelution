@@ -14,10 +14,32 @@ import {
   getLauncherAssistantBudget, setLauncherAssistantBudget,
   getLauncherAssistantUsageSummary,
   updateLauncherAssistantQueuedTurn, removeLauncherAssistantQueuedTurn, sendNowLauncherAssistantQueuedTurn,
+  LAUNCHER_ASSISTANT_CONTROL_CONTINUATION_MESSAGE,
 } from "./launcherAssistant";
 import type { SessionToolApprovalRequest } from "./types";
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe("operator continuation send", () => {
+  it.each(["ASSISTANT_IDENTITY_INVALID", "Error invoking remote method 'assistant:request': Error: ASSISTANT_IDENTITY_INVALID"])("treats %s as pre-admission only for a bound continuation", async message => {
+    const invoke = vi.fn().mockRejectedValue(new Error(message));
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    const expected = { agentId: "a", sessionId: "s", turnId: "t", headId: "h", ledgerSeq: 5 };
+    await expect(sendLauncherAssistantMessage(LAUNCHER_ASSISTANT_CONTROL_CONTINUATION_MESSAGE, "original", [], [], expected)).rejects.toMatchObject({ name: "LauncherAssistantRejectedError" });
+    await expect(sendLauncherAssistantMessage("normal send", "ordinary")).rejects.toMatchObject({ name: "Error", message });
+  });
+  it("preserves the exact native snapshot and rejects arbitrary content or attachments before IPC", async () => {
+    const invoke = vi.fn().mockResolvedValue({ accepted: true, turnId: "next" });
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    const expected = { agentId: "a", sessionId: "s", turnId: "t", headId: "h", ledgerSeq: 5 };
+    await expect(sendLauncherAssistantMessage(LAUNCHER_ASSISTANT_CONTROL_CONTINUATION_MESSAGE, "original", [], [], expected)).resolves.toEqual({ turnId: "next" });
+    expect(invoke).toHaveBeenCalledWith({ operation: "send", message: LAUNCHER_ASSISTANT_CONTROL_CONTINUATION_MESSAGE, requestId: "original", controlContinuation: expected });
+    for (const send of [() => sendLauncherAssistantMessage("changed", "original", [], [], expected),
+      () => sendLauncherAssistantMessage(LAUNCHER_ASSISTANT_CONTROL_CONTINUATION_MESSAGE, "original", ["file"], [], expected),
+      () => sendLauncherAssistantMessage(LAUNCHER_ASSISTANT_CONTROL_CONTINUATION_MESSAGE, "original", [], [], { ...expected, ledgerSeq: 0 })]) await expect(send()).rejects.toThrow();
+    expect(invoke).toHaveBeenCalledOnce();
+  });
+});
 
 function usageSnapshot() {
   const numbers = { inputTokens: 100, cachedInputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0,

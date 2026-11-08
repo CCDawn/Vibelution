@@ -31,15 +31,14 @@ describe("ChatToolApprovalDialog", () => {
     const markup = renderToStaticMarkup(createElement(ChatToolApprovalDialog, {
       lang: "zh",
       pending: false,
-      rawTitle: "shell_command, read_file",
+      rawTitle: "web_fetch_tool",
       riskLabel: "需要审批",
       scopeLabel: "当前会话",
-      actionPreview: '$ .\\.venv\\Scripts\\python.exe -c "print(123)"\ncwd: C:\\workspace\\repo',
+      actionPreview: "https://example.com/research",
       sessionGrantScope: { kind: "exact_arguments" },
-      toolName: "exec_command",
+      toolName: "web_fetch_tool",
       toolLabels: [
-        { id: "shell", label: "shell_command" },
-        { id: "read", label: "read_file" },
+        { id: "web_fetch_tool", label: "web_fetch" },
       ],
       onApprove: () => undefined,
       onApproveForSession: () => undefined,
@@ -56,15 +55,41 @@ describe("ChatToolApprovalDialog", () => {
     expect(markup).toContain("否");
     expect(markup).toContain("需要审批");
     expect(markup).toContain("当前会话");
-    expect(markup).toContain("python.exe -c");
-    expect(markup).toContain("C:\\workspace\\repo");
-    expect(markup).toContain("参数完全相同");
+    expect(markup).toContain("https://example.com/research");
+    // web_fetch keeps the durable always-tier; the copy states the origin scope.
+    expect(markup).toContain("同一来源");
     expect(markup).not.toContain("是=本次");
     expect(markup.match(/Y 是 · A 始终 · N 否/g)?.length).toBe(1);
     expect(markup).toContain('role="list"');
-    expect(markup.match(/role="listitem"/g)?.length).toBe(2);
-    expect(markup).toContain("shell_command");
-    expect(markup).toContain("read_file");
+    expect(markup.match(/role="listitem"/g)?.length).toBe(1);
+    expect(markup).toContain("web_fetch");
+  });
+
+  it("maps the always button to the tool-session tier for shell/file tools (A2b)", () => {
+    const markup = renderToStaticMarkup(createElement(ChatToolApprovalDialog, {
+      lang: "zh",
+      pending: false,
+      rawTitle: "shell_command",
+      riskLabel: "需要审批",
+      scopeLabel: "本次调用",
+      actionPreview: "$ pytest -q",
+      sessionGrantScope: { kind: "shell_command_family", "family": "pytest" },
+      toolName: "exec_command",
+      toolLabels: [{ id: "exec_command", label: "exec_command" }],
+      onApprove: () => undefined,
+      onApproveForSession: () => undefined,
+      onApproveForDevelopmentBundle: () => undefined,
+      onReject: () => undefined,
+    }));
+
+    // The copy must match the actual decision: session-scoped tool grant.
+    expect(markup).toContain("本会话此工具");
+    expect(markup).toContain("本会话内此工具不再询问（A）");
+    expect(markup).not.toContain("始终（此 Agent）");
+    expect(markup).not.toContain("参数完全相同");
+    expect(markup).toContain("本会话信任开发操作");
+    expect(markup).toContain('data-chat-approval-accept-session="tool-session"');
+    expect(markup).toContain('data-chat-approval-trust-development-session="true"');
   });
 
   it("keeps compact previews by default and offers an explicitly scrollable full preview", () => {

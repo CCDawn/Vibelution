@@ -3658,17 +3658,37 @@ def _submit_supervised_runtime_manager_command(command_type: str, *, run_id: str
 
 
 def _load_immediate_runtime_manager_command_result(command_id: str) -> dict[str, Any] | None:
+    payload, _corruption = _load_runtime_manager_command_result_state(command_id)
+    return payload
+
+
+def _load_runtime_manager_command_result_state(command_id: str) -> tuple[dict[str, Any] | None, str]:
+    """Load an immediate command receipt with its corruption verdict.
+
+    Returns ``(payload, "")`` when a receipt parsed cleanly, ``(None, "")``
+    when no receipt exists yet (genuinely pending), and ``(None, reason)``
+    when a receipt exists but is unreadable — so status readers can tell a
+    damaged receipt apart from an unfinished one instead of mapping both to
+    ``pending``.
+    """
+
     normalized = str(command_id or "").strip()
     if not normalized:
-        return None
+        return None, ""
     result_path = RESULTS_DIR / f"{normalized}.json"
     if not result_path.exists():
-        return None
+        return None, ""
     try:
-        payload = json.loads(result_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    return payload if isinstance(payload, dict) else None
+        text = result_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return None, f"unreadable: {type(exc).__name__}"
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None, "json_decode_error"
+    if not isinstance(payload, dict):
+        return None, "non_object_json"
+    return payload, ""
 
 
 def _normalize_runtime_manager_command_id(command_id: str) -> str:
@@ -3682,8 +3702,25 @@ def _normalize_runtime_manager_command_id(command_id: str) -> str:
 
 def get_supervised_runtime_manager_command_status(command_id: str) -> dict[str, Any]:
     normalized = _normalize_runtime_manager_command_id(command_id)
-    result = _load_immediate_runtime_manager_command_result(normalized)
+    result, corruption = _load_runtime_manager_command_result_state(normalized)
     if result is None:
+        if corruption:
+            # A receipt that exists but cannot be parsed must never masquerade
+            # as "pending": pending means "not finished yet", corrupted means
+            # the receipt is damaged and needs operator attention.
+            _debug_logger.warning(
+                f"Runtime manager command receipt is corrupt for {normalized}: {corruption}",
+                tag="SUPERVISED",
+            )
+            return {
+                "commandId": normalized,
+                "accepted": False,
+                "completed": False,
+                "ok": None,
+                "status": "corrupted",
+                "message": f"Command result receipt is unreadable: {corruption}",
+                "errorType": "CommandResultCorrupt",
+            }
         return {
             "commandId": normalized,
             "accepted": False,
@@ -3697,6 +3734,24 @@ def get_supervised_runtime_manager_command_status(command_id: str) -> dict[str, 
     raw_ok = result.get("ok")
     ok = raw_ok if isinstance(raw_ok, bool) else None
     completed = bool(result.get("completed"))
+    if completed and ok is None:
+        # The command queue's own validity contract says a completed receipt
+        # always carries a boolean ok (see complete_command); a receipt that
+        # claims completion without one is damaged, not pending.
+        _debug_logger.warning(
+            f"Runtime manager command receipt is corrupt for {normalized}: "
+            "completed receipt without a boolean ok",
+            tag="SUPERVISED",
+        )
+        return {
+            "commandId": normalized,
+            "accepted": bool(result.get("accepted")),
+            "completed": completed,
+            "ok": None,
+            "status": "corrupted",
+            "message": "Command result receipt is corrupt: completed without a boolean ok",
+            "errorType": "CommandResultCorrupt",
+        }
     if completed and ok is False:
         command_status = "failed"
     elif completed and ok is True:

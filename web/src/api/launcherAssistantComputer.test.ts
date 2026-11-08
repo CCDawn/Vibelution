@@ -31,6 +31,18 @@ describe("Launcher computer operator transport", () => {
     await expect(computer.control({ grantId: "g", action: "click" as never })).rejects.toThrow();
     expect(invoke).toHaveBeenCalledTimes(2);
   });
+  it("passes unknown open-contract actions through while keeping response bounds", async () => {
+    const invoke = vi.fn();
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    const waiting = (action: string): typeof idle => ({ ...idle, status: "waiting_confirmation", grantId: "grant",
+      window: target, pending: { id: "p", action, targetLabel: "Button", text: null } });
+    for (const action of ["launch", "click_at", "hotkey"]) {
+      invoke.mockResolvedValueOnce(waiting(action));
+      expect(await computer.state()).toEqual(waiting(action));
+    }
+    invoke.mockResolvedValueOnce(waiting("x".repeat(41)));
+    await expect(computer.state()).rejects.toThrow();
+  });
   it("ignores late read results after a caller aborts", async () => {
     let resolve!: (value: unknown) => void;
     vi.stubGlobal("vibelutionLauncherAssistant", { invoke: () => new Promise(done => { resolve = done; }) });

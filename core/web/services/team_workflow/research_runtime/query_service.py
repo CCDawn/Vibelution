@@ -1029,13 +1029,58 @@ def _node_blocked_reason(latest: Any, run_blocked_reason: str | None) -> str:
     return str(run_blocked_reason or "")
 
 
+def _record_budget_receipt_degraded(
+    *,
+    receipt_id: str,
+    payload_kind: str,
+    error: Exception,
+) -> None:
+    """ISS-066: a corrupt budget receipt payload silently became zero usage.
+
+    Keep the fail-soft empty-payload semantics, but record one structured
+    scene event (receipt id, payload kind, parse failure) through the
+    existing runtime-scene channel so the drop is observable.
+    """
+
+    from core.web.services.runtime_scene_service import (
+        record_runtime_scene_event_quietly,
+    )
+
+    record_runtime_scene_event_quietly(
+        "team_workflow_orchestration",
+        "research_runtime_query",
+        "budget_receipt_payload_unreadable",
+        level="warning",
+        outcome="degraded",
+        fields={
+            "receiptId": receipt_id,
+            "payloadKind": payload_kind,
+            "errorType": error.__class__.__name__,
+            "message": str(error)[:200],
+        },
+    )
+
+
 def _budget_receipt_summary(row: tuple) -> dict[str, Any]:
-    def payload(raw: object) -> dict[str, Any]:
+    receipt_id = str(row[0] or "")
+
+    def payload(raw: object, *, payload_kind: str) -> dict[str, Any]:
         try:
             decoded = json.loads(str(raw or "{}"))
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            _record_budget_receipt_degraded(
+                receipt_id=receipt_id, payload_kind=payload_kind, error=exc
+            )
             return {}
-        return dict(decoded) if isinstance(decoded, Mapping) else {}
+        if not isinstance(decoded, Mapping):
+            error = TypeError(
+                f"budget receipt {payload_kind} payload is not an object"
+            )
+            _record_budget_receipt_degraded(
+                receipt_id=receipt_id, payload_kind=payload_kind, error=error
+            )
+            return {}
+        return dict(decoded)
 
     return {
         "receiptId": row[0],
@@ -1044,8 +1089,8 @@ def _budget_receipt_summary(row: tuple) -> dict[str, Any]:
         "reservationId": row[3],
         "stageId": row[4],
         "policyHash": row[5],
-        "reservedPayload": payload(row[6]),
-        "settledPayload": payload(row[7]),
+        "reservedPayload": payload(row[6], payload_kind="reserved"),
+        "settledPayload": payload(row[7], payload_kind="settled"),
         "status": row[8],
         "createdAtMs": row[9],
         "updatedAtMs": row[10],

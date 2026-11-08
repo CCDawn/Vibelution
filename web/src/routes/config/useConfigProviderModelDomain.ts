@@ -91,7 +91,7 @@ export function useConfigProviderModelDomain(options: UseConfigProviderModelDoma
     copy,
   } = options;
   const [selectedProviderId, setSelectedProviderId] = useState("");
-  const [selectedProviderTab, setSelectedProviderTab] = useState<ConfigProviderRegistryTab>("connection");
+  const [selectedProviderTab, setSelectedProviderTab] = useState<ConfigProviderRegistryTab>("models");
 
   const [providerWizardState, dispatchProviderWizard] = useReducer(providerWizardReducer, undefined, initialProviderWizardState);
 
@@ -131,7 +131,7 @@ export function useConfigProviderModelDomain(options: UseConfigProviderModelDoma
 
   const credentialProvider = providerRows.find((row) => row.providerId === providerCredentialEditId);
 
-  async function handleTestProviderModel(modelRef: string) {
+  async function handleTestProviderModel(modelRef: string, draftOverride?: PublicConfigShape) {
     if (structuredActionsDisabled) return;
     setBusyAction(formatConfigCopy(copy.testModelBusyTemplate, { ref: modelRef }));
     setProviderActionError("");
@@ -143,7 +143,7 @@ export function useConfigProviderModelDomain(options: UseConfigProviderModelDoma
     });
     try {
       const result = await testConfigLlm({
-        publicConfig: requireDraft(),
+        publicConfig: draftOverride ?? requireDraft(),
         draftMeta,
         baseHash,
         modelId: modelRef,

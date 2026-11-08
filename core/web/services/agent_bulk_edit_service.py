@@ -14,6 +14,7 @@ from .agent_directory_service import (
     normalize_agent_llm_bindings,
     update_agent_instance,
 )
+from .prompt_template_service import get_prompt_template
 from .runtime_scene_service import record_runtime_scene_event
 
 
@@ -121,6 +122,11 @@ def bulk_update_agent_config(agent_ids: list[str] | None, patch: dict[str, Any] 
     fields = _clean_apply_fields(apply_fields, patch_payload)
     if not fields:
         raise AgentDirectoryError("At least one bulk Agent config field is required.")
+    if "promptTemplateId" in fields:
+        patch_template_id = str(patch_payload.get("promptTemplateId") or "").strip()
+        # Empty string clears the binding; only a concrete id must exist.
+        if patch_template_id:
+            _require_existing_prompt_template(patch_template_id)
 
     started_at = perf_counter()
     success: list[dict[str, Any]] = []
@@ -162,6 +168,19 @@ def bulk_update_agent_config(agent_ids: list[str] | None, patch: dict[str, Any] 
     return result
 
 
+def _require_existing_prompt_template(normalized_template_id: str) -> None:
+    """Reject unknown prompt templates before any Agent binding is written.
+
+    A missing template is a request-level input error (independent of any
+    individual Agent), so it fails the whole bulk request the same way an
+    empty id does; the route maps AgentDirectoryError to 422 and every
+    Agent keeps its original binding.
+    """
+
+    if get_prompt_template(normalized_template_id) is None:
+        raise AgentDirectoryError(f"Unknown prompt template: {normalized_template_id}")
+
+
 def bulk_update_agent_prompt_template(agent_ids: list[str] | None, prompt_template_id: str) -> dict[str, Any]:
     """Apply one prompt template to many active Agents."""
 
@@ -169,6 +188,7 @@ def bulk_update_agent_prompt_template(agent_ids: list[str] | None, prompt_templa
     normalized_template_id = str(prompt_template_id or "").strip()
     if not normalized_template_id:
         raise AgentDirectoryError("Prompt template id is required.")
+    _require_existing_prompt_template(normalized_template_id)
 
     started_at = perf_counter()
     success: list[dict[str, Any]] = []

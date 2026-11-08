@@ -147,6 +147,37 @@ def test_session_side_response_models_keep_unknown_fields(monkeypatch) -> None:
     assert approvals.status_code == 200
     assert approvals.json() == expected_approvals
 
+    # b3 one-click trust endpoint: passes through the bundle projection and
+    # maps approval errors to 404/409/422 like the per-request decision route.
+    expected_bundle = {
+        "sessionId": "session-live",
+        "requestId": "req-1",
+        "grantedTools": ["cli_tool", "exec_command"],
+        "customBundle": True,
+    }
+    monkeypatch.setattr(
+        session_routes,
+        "grant_session_development_tool_bundle",
+        lambda *_args, **_kwargs: expected_bundle,
+    )
+    bundle = client.post("/api/sessions/session-live/tool-approvals/req-1/trust-development-session")
+    assert bundle.status_code == 200
+    assert bundle.json() == expected_bundle
+
+    def _raise_conflict(*_args, **_kwargs):
+        raise session_routes.ToolApprovalConflictError("tool approval request is already accepted")
+
+    monkeypatch.setattr(session_routes, "grant_session_development_tool_bundle", _raise_conflict)
+    conflict = client.post("/api/sessions/session-live/tool-approvals/req-1/trust-development-session")
+    assert conflict.status_code == 409
+
+    def _raise_not_found(*_args, **_kwargs):
+        raise session_routes.ToolApprovalNotFoundError("tool approval request does not exist")
+
+    monkeypatch.setattr(session_routes, "grant_session_development_tool_bundle", _raise_not_found)
+    missing = client.post("/api/sessions/session-live/tool-approvals/req-1/trust-development-session")
+    assert missing.status_code == 404
+
     expected_review = {
         "candidateId": "cand-1",
         "sessionId": "session-live",

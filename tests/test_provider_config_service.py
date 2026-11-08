@@ -349,6 +349,55 @@ def test_provider_draft_add_returns_stable_provider_without_secret(monkeypatch) 
     assert workspace["draftMeta"]["pending_api_keys"]
 
 
+def test_subscription_draft_add_and_pin_return_real_workspace_without_saving_or_resolving_bearer(monkeypatch, tmp_path) -> None:
+    import config.public_config as public_config_module
+    from config.chatgpt_subscription import build_subscription_provider
+    from config.models import ProviderConfig
+    from config.toml_writer import dumps_public_config
+    from core.llm import chatgpt_subscription as auth
+
+    config_path = tmp_path / "config.toml"
+    saved = config_service._with_config_workspace_defaults(_v2_with_provider())
+    config_path.write_text(dumps_public_config(saved), encoding="utf-8")
+    monkeypatch.setattr(public_config_module, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(config_service, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(provider_config_service, "CONFIG_PATH", config_path)
+    public_config_module._reset_public_config_cache()
+    monkeypatch.setattr(config_service, "_read_env_var", lambda _: None)
+    monkeypatch.setattr(config_service, "save_public_config", lambda *_args, **_kwargs: pytest.fail("draft operations must not save"))
+    monkeypatch.setattr(provider_config_service, "_record_provider_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(auth, "get_chatgpt_subscription_auth", lambda: SimpleNamespace(
+        status=lambda: {"connected": True},
+        get_access_token=lambda: pytest.fail("workspace projection must not refresh or resolve a bearer"),
+    ))
+    original_toml = config_path.read_text(encoding="utf-8")
+    try:
+        baseline = public_config_module.load_public_config()
+        base_hash = public_config_hash(baseline)
+        added = provider_config_service.draft_add_provider(
+            baseline, draft_meta={}, base_hash=base_hash, base_config=baseline,
+            provider_id="subscription", provider=build_subscription_provider(),
+        )
+        pinned = provider_config_service.draft_pin_provider_model(
+            added["publicConfig"], draft_meta=added["draftMeta"], base_hash=base_hash, base_config=baseline,
+            provider_id="subscription", upstream_id="plan-test", model_key="plan-test",
+            overrides={"wire_protocol": "responses", "model_protocol": "openai_responses", "interaction_contract": "tool_chat",
+                       "context_window": 65536, "defaults": {"reasoning_effort_values": ["low"],
+                       "reasoning_effort_adapter": "reasoning_object", "default_reasoning_effort": "low"}},
+        )
+        provider = pinned["publicConfig"]["llm"]["providers"]["subscription"]
+        assert ProviderConfig.model_validate(provider).auth_kind == "oauth"
+        assert provider["credential_ref"] == "oauth:chatgpt"
+        assert "plan-test" in provider["models"]
+        option = next(item for item in pinned["modelOptions"] if item["model_id"] == "subscription/plan-test")
+        assert option["api_key_source"] == "oauth:chatgpt"
+        assert option["api_key_configured"] is True
+        assert pinned["baseHash"] == base_hash
+        assert config_path.read_text(encoding="utf-8") == original_toml
+    finally:
+        public_config_module._reset_public_config_cache()
+
+
 def test_provider_draft_mutations_require_nonempty_current_base_hash(monkeypatch) -> None:
     config = _v2_config()
     _patch_saved(monkeypatch, config)

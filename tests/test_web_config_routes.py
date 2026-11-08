@@ -28,6 +28,7 @@ from core.web.services.model_reference_service import ModelReferenceConflictErro
 from core.web.services import (
     config_editor_schema,
     config_service,
+    diagnostics_service,
     log_service,
     provider_config_service,
     runtime_scene_service,
@@ -1444,6 +1445,56 @@ def test_health_diagnostics_endpoint_returns_log_helpers(tmp_path, monkeypatch):
     assert any(item["resetItemId"] == "stopped_runtime_scenes" for item in payload["quickActions"])
 
 
+def test_health_diagnostics_failed_finding_routes_to_failed_session(tmp_path, monkeypatch):
+    runtime_log = tmp_path / "logs" / "agent_realtime.log"
+    runtime_log.parent.mkdir(parents=True, exist_ok=True)
+    runtime_log.write_text("runtime line\n", encoding="utf-8")
+    monkeypatch.setattr(log_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        diagnostics_service,
+        "list_sessions",
+        lambda *, repair_collisions: [
+            {
+                "id": "session-live",
+                "title": "活跃会话",
+                "status": "ready",
+                "currentPhase": "ready",
+                "activeSessionId": "session-live",
+                "updatedAt": "2026-05-18T12:00:00",
+            },
+            {
+                "id": "session-broken",
+                "title": "失败会话",
+                "status": "failed",
+                "currentPhase": "failed",
+                "activeSessionId": "",
+                "updatedAt": "2026-05-18T11:00:00",
+            },
+        ],
+    )
+
+    response = client.get("/api/diagnostics/health")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "blocked"
+    session_helpers = {item["id"]: item for item in payload["sessionHelpers"]}
+    assert session_helpers["chat_sessions"]["sessionCount"] == 2
+    assert session_helpers["chat_sessions"]["failedCount"] == 1
+    assert session_helpers["chat_sessions"]["failedSessionId"] == "session-broken"
+    assert session_helpers["chat_sessions"]["activeSessionId"] == "session-live"
+    assert session_helpers["chat_sessions"]["route"] == "/chat?session=session-live"
+    failed_finding = next(item for item in payload["findings"] if item["id"] == "session_failed")
+    assert failed_finding["severity"] == "blocked"
+    assert failed_finding["route"] == "/chat?session=session-broken"
+    assert any(
+        item["label"] == "失败会话" and item["value"] == "session-broken"
+        for item in failed_finding["evidence"]
+    )
+    assert payload["quickActions"][0]["route"] == "/chat?session=session-broken"
+
+
 def test_config_workspace_surfaces_llm_security_diagnostics_without_blocking_read(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
     public_config["llm"] = {
@@ -1977,6 +2028,113 @@ def test_model_option_capability_probe_preserves_schema_v2_responses_route(monke
     assert target["profile"].contract == "tool_chat"
     assert target["provider"].provider_id == "relay_a"
     assert target["api_key"] == "relay-secret"
+
+
+def _credential_ref_probe_provider() -> ProviderConfig:
+    # Mirrors the reported opencode_go shape: credential_ref present, no kind
+    # (defaults to "openai"), so kind-based vendor env must not win the probe.
+    return ProviderConfig.model_validate(
+        {
+            "provider_id": "opencode_probe",
+            "label": "OpenCode Probe",
+            "service_class": "relay",
+            "vendor": "multi_model",
+            "driver": "openai",
+            "base_url": "https://opencode.example/v1",
+            "auth_kind": "api_key",
+            "credential_ref": "env:VIBELUTION_LLM_TEST_OPENCODE_KEY",
+            "requires_credential": True,
+        }
+    )
+
+
+def _isolate_probe_env(monkeypatch) -> None:
+    # Hermetic resolution: keep the HKCU fallback out so a real operator key
+    # (e.g. an actual OPENAI_API_KEY in the registry) can never leak into an
+    # assertion or outrank the fake process-env values under test.
+    monkeypatch.delenv("VIBELUTION_ENABLE_USER_ENV_FALLBACK", raising=False)
+    monkeypatch.setattr("config.models._read_windows_user_env_var", lambda name: None)
+
+
+def test_resolve_model_option_api_key_prefers_provider_credential_ref(monkeypatch):
+    _isolate_probe_env(monkeypatch)
+    provider = _credential_ref_probe_provider()
+    profile = LLMProfile(profile_id="__probe", provider_id=provider.provider_id, model="kimi-k2")
+    monkeypatch.setenv("VIBELUTION_LLM_TEST_OPENCODE_KEY", "opencode-fake-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "unrelated-openai-fake-key")
+
+    api_key, api_key_source = config_service._resolve_model_option_api_key(provider, profile, None)
+
+    assert api_key == "opencode-fake-key"
+    assert api_key_source == "credential-ref:env:VIBELUTION_LLM_TEST_OPENCODE_KEY"
+
+
+def test_resolve_model_option_api_key_falls_back_when_credential_ref_unresolved(monkeypatch):
+    _isolate_probe_env(monkeypatch)
+    provider = _credential_ref_probe_provider()
+    profile = LLMProfile(profile_id="__probe", provider_id=provider.provider_id, model="kimi-k2")
+    monkeypatch.delenv("VIBELUTION_LLM_TEST_OPENCODE_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-fallback-fake-key")
+
+    api_key, api_key_source = config_service._resolve_model_option_api_key(provider, profile, None)
+
+    assert api_key == "openai-fallback-fake-key"
+    assert api_key_source == "provider-env:OPENAI_API_KEY"
+
+
+def test_resolve_model_option_api_key_pending_draft_beats_credential_ref(monkeypatch):
+    _isolate_probe_env(monkeypatch)
+    provider = _credential_ref_probe_provider()
+    profile = LLMProfile(profile_id="__probe", provider_id=provider.provider_id, model="kimi-k2")
+    monkeypatch.setenv("VIBELUTION_LLM_TEST_OPENCODE_KEY", "persisted-fake-key")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    draft_meta = config_service._with_pending_api_key({}, "VIBELUTION_LLM_TEST_OPENCODE_KEY", "draft-fake-key")
+
+    api_key, api_key_source = config_service._resolve_model_option_api_key(provider, profile, draft_meta)
+
+    assert api_key == "draft-fake-key"
+    assert api_key_source == "pending-env:VIBELUTION_LLM_TEST_OPENCODE_KEY"
+
+
+def test_decorate_model_options_reports_credential_ref_state(monkeypatch):
+    _isolate_probe_env(monkeypatch)
+    public_config = {
+        "llm": {
+            "schema_version": 2,
+            "providers": {
+                "opencode_go": {
+                    "label": "OpenCode",
+                    "service_class": "relay",
+                    "vendor": "multi_model",
+                    "driver": "openai",
+                    "base_url": "https://opencode.example/v1",
+                    "auth_kind": "api_key",
+                    "credential_ref": "env:VIBELUTION_LLM_TEST_OPENCODE_KEY",
+                    "requires_credential": True,
+                    "protocols": {"default": "responses", "allowed": ["responses"]},
+                    "discovery": {"mode": "manual", "adapter": "openai_compatible", "cache_ttl_seconds": 0},
+                    "models": {
+                        "kimi-k2": {
+                            "upstream_id": "kimi-k2",
+                            "label": "Kimi",
+                            "enabled": True,
+                        }
+                    },
+                }
+            },
+            "profiles": {"primary": {"model_ref": "opencode_go/kimi-k2", "overrides": {}}},
+            "model_aliases": {},
+        }
+    }
+    monkeypatch.setenv("VIBELUTION_LLM_TEST_OPENCODE_KEY", "opencode-fake-key")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    options = config_service._decorate_model_options(public_config, None)
+    option = next(item for item in options if item.get("model_id") == "opencode_go/kimi-k2")
+
+    assert option["api_key_configured"] is True
+    assert option["api_key_state"] == "configured"
+    assert option["api_key_source"] == "credential-ref:env:VIBELUTION_LLM_TEST_OPENCODE_KEY"
 
 
 def test_image_capability_runtime_view_does_not_add_legacy_library_to_schema_v2():

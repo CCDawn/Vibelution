@@ -50,7 +50,10 @@ def find_entry(project_root: str | os.PathLike[str]) -> tuple[str, dict[str, Any
     wanted = normalize_path(project_root)
     registry = load_registry()
     for key, entry in registry["instances"].items():
-        if isinstance(entry, dict) and normalize_path(entry.get("projectRoot", "")) == wanted:
+        if not isinstance(entry, dict):
+            continue
+        entry_root = entry.get("projectRoot")
+        if isinstance(entry_root, str) and entry_root.strip() and normalize_path(entry_root) == wanted:
             return key, entry
     known = "\n".join(
         f"  {k}: {v.get('status')} {v.get('projectRoot')}"
@@ -232,7 +235,7 @@ def assert_health_serves_worktree(
     serving = health.get("serving") or {}
     frontend = serving.get("frontend") or {}
     workspace_root = health.get("workspaceRoot")
-    if normalize_path(workspace_root or "") != normalize_path(project_root):
+    if not str(workspace_root or "").strip() or normalize_path(workspace_root) != normalize_path(project_root):
         problems.append(f"workspaceRoot={workspace_root!r} != {project_root}")
     from vibelution_storage import ProjectIdentityError, load_project_identity
 
@@ -245,7 +248,7 @@ def assert_health_serves_worktree(
     else:
         expected_storage = Path(data_home) / "workspace"
         storage_root = health.get("storageWorkspaceRoot")
-        if normalize_path(storage_root or "") != normalize_path(expected_storage):
+        if not str(storage_root or "").strip() or normalize_path(storage_root) != normalize_path(expected_storage):
             problems.append(f"storageWorkspaceRoot={storage_root!r} != {expected_storage}")
     if not frontend.get("builtFromCommit"):
         problems.append(f"serving.frontend.builtFromCommit 为空: {frontend!r}")

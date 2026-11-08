@@ -1,4 +1,4 @@
-import type { LauncherAssistantDispatch, LauncherAssistantSessionEvent } from "../../api/launcherAssistant";
+import type { LauncherAssistantControlContinuation, LauncherAssistantDispatch, LauncherAssistantSessionEvent } from "../../api/launcherAssistant";
 import type { PetActivityTone, PetAnimationState } from "../../api/types/petActivity";
 import type { ConversationMessage, SessionDetail, SessionPendingQuestion, SessionQueuedTurn, SessionReferenceAttachment } from "../../api/types";
 import { exactAcceptedSubmitTurnId, findSubmitAcceptanceEvidence } from "../chat/chatSubmitAcceptanceReadback";
@@ -9,10 +9,10 @@ import {
 } from "../chat/composerContextModel";
 import { promptSegmentDisplayLabel } from "../chat/chatRoutePresentation";
 import { dispatchFailureCodeLabel } from "./assistantTasks/assistantTaskPresentation";
-import { hasExecutionOwnership, resolveSessionActivity, type SessionActivitySource } from "../sessionActivityState";
+import { activityNeedsContinuation, hasExecutionOwnership, resolveSessionActivity, type SessionActivitySource } from "../sessionActivityState";
 
 export type LauncherAssistantQuestionDraft = { question: SessionPendingQuestion; value: string };
-export type LauncherAssistantSubmission = { message: string; requestId: string; draftSnapshot?: string; attachmentIds?: string[]; attachmentSnapshotIds?: string[]; references?: SessionReferenceAttachment[]; preserveDraft?: true; answerQuestion?: SessionPendingQuestion };
+export type LauncherAssistantSubmission = { message: string; requestId: string; draftSnapshot?: string; attachmentIds?: string[]; attachmentSnapshotIds?: string[]; references?: SessionReferenceAttachment[]; preserveDraft?: true; answerQuestion?: SessionPendingQuestion; controlContinuation?: LauncherAssistantControlContinuation };
 export type LauncherAssistantQueuedAcceptance = { id: string; clientSubmissionId: string; observed: boolean };
 type LauncherAssistantActivitySource = SessionActivitySource & Partial<Pick<SessionDetail, "messages" | "activeTask">>
   & { queuedTurns?: Array<Pick<SessionQueuedTurn, "id" | "status" | "clientSubmissionId">> };
@@ -137,13 +137,27 @@ export function launcherAssistantLifecycleClosing(error: unknown): boolean {
   return error instanceof Error && launcherAssistantSendBusyMatch(error, "ASSISTANT_LIFECYCLE_CLOSING");
 }
 
-export function launcherAssistantActivity(source: SessionActivitySource = {}): {
+export function launcherAssistantActivity(source: SessionActivitySource = {}, options: {
+  needsAttention?: boolean; unavailable?: boolean; celebrating?: boolean;
+} = {}): {
   tone: PetActivityTone; animationState: PetAnimationState;
 } {
   const state = resolveSessionActivity(source);
+  if (options.unavailable) return { tone: "idle", animationState: "waiting" };
+  if (options.needsAttention) return { tone: "approval", animationState: "waiting" };
   if (state.outcome === "failed") return { tone: "error", animationState: "alert" };
-  if (state.execution === "paused") return { tone: "approval", animationState: "waiting" };
-  if (hasExecutionOwnership(state.execution)) return { tone: "running", animationState: "thinking" };
+  if (state.execution === "paused" || activityNeedsContinuation(state.outcome)) {
+    return { tone: "approval", animationState: "waiting" };
+  }
+  if (state.execution === "queued" || state.execution === "stopping") return { tone: "running", animationState: "waiting" };
+  if (state.execution === "running") {
+    const phase = state.phase === "editing" ? "tooling" : state.phase;
+    const animationState = phase === "reading" || phase === "tooling" || phase === "verifying" || phase === "answering"
+      ? phase : "thinking";
+    return { tone: "running", animationState };
+  }
+  if (state.outcome === "completed" && options.celebrating) return { tone: "completed", animationState: "celebrating" };
+  if (state.execution === "unknown") return { tone: "idle", animationState: "waiting" };
   // Resting/ready says nothing about whether the user's goal was achieved.
   return { tone: "idle", animationState: "idle" };
 }

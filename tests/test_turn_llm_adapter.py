@@ -726,6 +726,37 @@ def test_adapter_does_not_switch_before_retry_budget_is_exhausted():
     assert not any(event == "llm_route_fallback_switched" for event, _fields in events)
 
 
+def test_subscription_failure_never_switches_to_a_declared_paid_fallback():
+    primary = _route_llm("subscription", fallback="paid_api")
+    primary.provider = SimpleNamespace(credential_ref="oauth:chatgpt")
+    requested_profiles = []
+    called = []
+
+    def get_client(**kwargs):
+        requested_profiles.append(kwargs.get("profile_id"))
+        assert kwargs.get("profile_id") is None, "subscription must not select paid fallback"
+        return primary
+
+    def fail(client, *_args, **_kwargs):
+        called.append(client.profile_id)
+        raise LLMError("server_error", "subscription unavailable", retryable=True,
+                       details={"attempt": 5, "max_attempts": 5})
+
+    result = invoke_agent_llm_turn(
+        messages=[AIMessage(content="hello")],
+        hooks=_adapter_hooks(
+            get_llm_for_mode=get_client, invoke_outcome=fail,
+            plan_recovery=lambda *_args, **_kwargs: _recovery(
+                category="server_error", retryable=True, action="retry_with_backoff",
+                stop_current_turn=True, user_message="subscription unavailable",
+            ),
+        ),
+    )
+    assert called == ["subscription"]
+    assert requested_profiles == [None]
+    assert result.payload is None and result.route_fallback == {}
+
+
 def test_adapter_switches_once_to_declared_fallback_and_emits_event():
     llm_calls = []
     profile_requests = []

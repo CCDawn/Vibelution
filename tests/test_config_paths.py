@@ -1,5 +1,7 @@
 import hashlib
 import json
+import threading
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -12,6 +14,7 @@ from config.paths import (
     ensure_global_config_initialized,
     resolve_config_backup_dir,
     resolve_config_home,
+    resolve_config_lock_path,
     resolve_config_meta_path,
     resolve_config_path,
     resolve_data_backup_dir,
@@ -266,3 +269,70 @@ def test_global_config_initialization_upgrades_existing_meta_without_overwriting
     assert upgraded["createdAt"] == "2026-06-11T09:20:00+00:00"
     assert Path(upgraded["backupDir"]) == external_config.parent / "backups"
     assert Path(upgraded["lockPath"]) == external_config.parent / "config-edit.lock"
+
+
+def test_ensure_global_config_initialized_waits_for_config_edit_lock(tmp_path, monkeypatch):
+    """ISS-034 regression: the bootstrap's check-then-write windows (starter,
+    example, thin-starter upgrade, meta) used to run without any cross-process
+    lock, so a concurrent writer could be clobbered between the exists check
+    and the write. The whole bootstrap now holds the shared config edit lock,
+    turning those checks into in-lock rechecks; while another holder owns the
+    lock the bootstrap must neither write nor finish."""
+
+    from config.public_config import _config_edit_lock
+
+    external_config = tmp_path / "external" / "config.toml"
+    monkeypatch.setenv(CONFIG_PATH_ENV, str(external_config))
+    started = threading.Event()
+    finished = threading.Event()
+    failures: list[Exception] = []
+
+    def initialize() -> None:
+        try:
+            started.set()
+            ensure_global_config_initialized()
+        except Exception as exc:  # collected and asserted below
+            failures.append(exc)
+        finally:
+            finished.set()
+
+    with _config_edit_lock(resolve_config_path()):
+        worker = threading.Thread(target=initialize)
+        worker.start()
+        assert started.wait(5)
+        assert not finished.wait(1.5), "bootstrap wrote while another holder owns the config edit lock"
+        assert not external_config.exists()
+    assert finished.wait(15)
+    worker.join(timeout=15)
+    assert failures == []
+    assert external_config.exists()
+    tomllib.loads(external_config.read_text(encoding="utf-8"))
+    assert not resolve_config_lock_path(external_config).exists()
+
+
+def test_ensure_global_config_initialized_concurrent_calls_serialize(tmp_path, monkeypatch):
+    """Concurrent bootstraps serialize on the config edit lock: every caller
+    succeeds, the starter is created exactly once and stays parseable."""
+
+    external_config = tmp_path / "external" / "config.toml"
+    monkeypatch.setenv(CONFIG_PATH_ENV, str(external_config))
+    caller_count = 4
+    barrier = threading.Barrier(caller_count, timeout=10)
+    failures: list[Exception] = []
+
+    def initialize() -> None:
+        try:
+            barrier.wait()
+            ensure_global_config_initialized()
+        except Exception as exc:  # collected and asserted below
+            failures.append(exc)
+
+    workers = [threading.Thread(target=initialize) for _ in range(caller_count)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=60)
+    assert failures == []
+    assert external_config.exists()
+    tomllib.loads(external_config.read_text(encoding="utf-8"))
+    assert not resolve_config_lock_path(external_config).exists()

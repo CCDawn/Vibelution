@@ -32,6 +32,43 @@ def _counter(value: object) -> int:
     return int(value) if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
 
 
+def _invalid_counter_keys(value: Any) -> list[str]:
+    """Counter keys present with invalid values that `_counter` zeroed."""
+
+    raw = value if isinstance(value, dict) else {}
+    aliases = {"wallClockSeconds": "seconds", "maxRetries": "retries"}
+    invalid: list[str] = []
+    for key in _BUDGET_COUNTER_KEYS:
+        counter = raw.get(key)
+        if key not in raw and key in aliases:
+            counter = raw.get(aliases[key])
+        if counter is not None and (isinstance(counter, bool) or not isinstance(counter, int) or counter < 0):
+            invalid.append(key)
+    return invalid
+
+
+def _record_usage_counters_degraded(receipt_id: str, dropped_keys: list[str]) -> None:
+    """ISS-066: settled usage counters with wrong-typed values are zeroed in
+    the budget summary; keep fail-soft totals but make the drop observable
+    through the existing runtime-scene channel."""
+
+    from core.web.services.runtime_scene_service import (
+        record_runtime_scene_event_quietly,
+    )
+
+    record_runtime_scene_event_quietly(
+        "team_workflow_orchestration",
+        "research_runtime_projection",
+        "budget_usage_counters_invalid",
+        level="warning",
+        outcome="degraded",
+        fields={
+            "receiptId": receipt_id,
+            "droppedKeys": dropped_keys[:12],
+        },
+    )
+
+
 def _normalized_budget_counters(value: Any, *, requested: bool = False) -> dict[str, int]:
     raw = dict(value) if isinstance(value, dict) else {}
     tokens = raw.get("tokens")
@@ -68,10 +105,16 @@ def _budget_records(snapshot: ResearchWorkflowSnapshot) -> tuple[list[dict[str, 
             requested=True,
         )
         limits = _normalized_budget_counters(reserved_payload.get("limits"))
-        actual = _actual_usage(settled_payload.get("usage"))
+        raw_usage = settled_payload.get("usage")
+        actual = _actual_usage(raw_usage)
         actual_counters = _normalized_budget_counters(actual)
         stage_id = str(ref.stage_id or "")
         status = str(ref.status or "")
+        invalid_actual_keys = _invalid_counter_keys(raw_usage)
+        if invalid_actual_keys and status in _TERMINAL_CONSUMED_STATUSES:
+            _record_usage_counters_degraded(
+                str(ref.reservation_id or ref.receipt_id or ""), invalid_actual_keys
+            )
         reservation = {
             "reservationId": str(ref.reservation_id or ""),
             "receiptId": str(ref.receipt_id or ""),

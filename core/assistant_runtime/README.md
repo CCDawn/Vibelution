@@ -446,6 +446,12 @@ The native Launcher assistant exposes a closed browser action family through
 isolated, sandboxed `WebContentsView` partition with no product preload. The
 Launcher browser workspace shares the native assistant Session and contains up
 to four HTTP(S) pages; ordinary project Sessions gain no browser authority.
+`browser_state` is the fresh page inventory. `browser_ensure(url)` reuses only
+an exact normalized current full URL, otherwise opens a page; query/fragment
+differences remain distinct and `browser_open` always opens a new page.
+`browser_select(page_id)` selects an existing page and reveals its workspace;
+`browser_show()` reveals without creating, navigating, or releasing takeover.
+History is not evidence that a page still exists in the current Electron instance.
 Page text and element names are untrusted data. Reads return bounded snapshots;
 click/fill approval binds page ID, snapshot ID, element reference, element name,
 and the complete address (including query and fragment). Password/file inputs,
@@ -460,6 +466,18 @@ Synthetic page events can be ignored by a website; event dispatch alone is not
 evidence that a search, submission or business action succeeded. If essential
 bindings cannot fit the tool output budget, the tool returns a bounded error
 instead of truncating an address or returning a partial success.
+
+Explicit operator grant/return/resume may continue the current native task via
+the existing composer send/ACK/readback flow. The click captures its origin;
+only the exact successful operator RPC completes that intent. A running origin
+must finish naturally in the same branch before continuation. New instructions,
+stop, questions, approvals, queues, migration or identity changes cancel it.
+The optional `send.controlContinuation` binds agent/session/turn/head/ledgerSeq;
+the assistant adapter holds the existing Session admission lock across fresh
+snapshot validation and native submission. Accepted retries reuse the original
+request ID and fingerprint; unknown outcomes remain in composer recovery.
+No grant is inferred from polling, no tool input is replayed, and native Session
+Journal/worker/SSE remain the sole transcript and execution authority.
 
 `tests/test_assistant_runtime_{native,host,actions,dispatch}.py` cover storage
 identity, crash recovery, transport auth and task associations. Frontend uses

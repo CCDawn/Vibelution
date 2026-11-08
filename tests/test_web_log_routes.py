@@ -1,5 +1,8 @@
 import json
+import os
+import sys
 
+import pytest
 from fastapi.testclient import TestClient
 
 from core.web.app import create_app
@@ -12,6 +15,21 @@ client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_tok
 
 def _seed_runtime_scene_root(project_root):
     (project_root / "logs" / "runtime_scenes" / "scene-tree").mkdir(parents=True, exist_ok=True)
+
+
+def _seed_protected_log_groups(tmp_path):
+    (tmp_path / "logs" / "runtime_scenes").mkdir(parents=True, exist_ok=True)
+    scene_log = tmp_path / "logs" / "runtime_scenes" / "scene.log"
+    scene_log.write_text("scene\n", encoding="utf-8")
+    (tmp_path / "logs" / "conversations").mkdir(parents=True, exist_ok=True)
+    conversation_log = tmp_path / "logs" / "conversations" / "chat.jsonl"
+    conversation_log.write_text("{}\n", encoding="utf-8")
+    return scene_log, conversation_log
+
+
+def _assert_untouched(scene_log, conversation_log):
+    assert scene_log.read_text(encoding="utf-8") == "scene\n"
+    assert conversation_log.read_text(encoding="utf-8") == "{}\n"
 
 
 def test_logs_roots_and_tree_are_read_only(tmp_path, monkeypatch):
@@ -202,3 +220,94 @@ def test_delete_logs_rejects_directory_targets(tmp_path, monkeypatch):
 
     assert response.status_code == 400
     assert "Only log files can be deleted" in response.json()["detail"]
+
+
+def test_log_routes_reject_relative_alias_into_protected_groups(tmp_path, monkeypatch):
+    scene_log, conversation_log = _seed_protected_log_groups(tmp_path)
+    monkeypatch.setattr(log_service, "PROJECT_ROOT", tmp_path)
+
+    responses = [
+        client.post(
+            "/api/logs/clear",
+            json={"root": "runtime_logs", "path": "foo/../runtime_scenes/scene.log"},
+        ),
+        client.post(
+            "/api/logs/delete",
+            json={"root": "runtime_logs", "paths": ["foo/../runtime_scenes/scene.log"]},
+        ),
+        client.post(
+            "/api/logs/clear",
+            json={"root": "runtime_logs", "path": "x/../conversations/chat.jsonl"},
+        ),
+        client.post(
+            "/api/logs/delete",
+            json={"root": "runtime_logs", "paths": ["x/../conversations/chat.jsonl"]},
+        ),
+        client.get(
+            "/api/logs/content",
+            params={"root": "runtime_logs", "path": "x/../conversations/chat.jsonl"},
+        ),
+    ]
+
+    assert all(response.status_code == 400 for response in responses), [
+        response.json() for response in responses
+    ]
+    _assert_untouched(scene_log, conversation_log)
+
+
+def test_log_routes_reject_direct_runtime_scenes_clear_and_delete(tmp_path, monkeypatch):
+    scene_log, _ = _seed_protected_log_groups(tmp_path)
+    monkeypatch.setattr(log_service, "PROJECT_ROOT", tmp_path)
+
+    clear_response = client.post(
+        "/api/logs/clear",
+        json={"root": "runtime_logs", "path": "runtime_scenes/scene.log"},
+    )
+    delete_response = client.post(
+        "/api/logs/delete",
+        json={"root": "runtime_logs", "paths": ["runtime_scenes/scene.log"]},
+    )
+
+    assert clear_response.status_code == 400
+    assert "Runtime scene bundles must be managed" in clear_response.json()["detail"]
+    assert delete_response.status_code == 400
+    assert scene_log.read_text(encoding="utf-8") == "scene\n"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows case-insensitive path aliases")
+def test_log_routes_reject_windows_case_alias_into_protected_group(tmp_path, monkeypatch):
+    scene_log, _ = _seed_protected_log_groups(tmp_path)
+    monkeypatch.setattr(log_service, "PROJECT_ROOT", tmp_path)
+
+    response = client.post(
+        "/api/logs/clear",
+        json={"root": "runtime_logs", "path": "Runtime_Scenes/scene.log"},
+    )
+
+    assert response.status_code == 400
+    assert "Runtime scene bundles must be managed" in response.json()["detail"]
+    assert scene_log.read_text(encoding="utf-8") == "scene\n"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows symlink privilege semantics")
+def test_log_routes_reject_root_symlink_into_protected_group(tmp_path, monkeypatch):
+    scene_log, conversation_log = _seed_protected_log_groups(tmp_path)
+    alias = tmp_path / "logs" / "alias_to_scenes"
+    try:
+        os.symlink(tmp_path / "logs" / "runtime_scenes", alias, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlink unavailable on this host: {exc}")
+    monkeypatch.setattr(log_service, "PROJECT_ROOT", tmp_path)
+
+    clear_response = client.post(
+        "/api/logs/clear",
+        json={"root": "runtime_logs", "path": "alias_to_scenes/scene.log"},
+    )
+    delete_response = client.post(
+        "/api/logs/delete",
+        json={"root": "runtime_logs", "paths": ["alias_to_scenes/../conversations/chat.jsonl"]},
+    )
+
+    assert clear_response.status_code == 400
+    assert delete_response.status_code == 400
+    _assert_untouched(scene_log, conversation_log)

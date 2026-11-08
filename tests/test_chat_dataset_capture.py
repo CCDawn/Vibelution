@@ -306,3 +306,28 @@ def test_chat_candidate_decisions_update_queue_and_datasets(tmp_path: Path):
         config=config,
     )
     assert legacy_discard["status"] == "discard"
+
+
+def test_chat_review_queue_skips_corrupt_lines_without_failing(tmp_path: Path):
+    queue_path = tmp_path / "review_queue.jsonl"
+    append_review_queue_candidate(
+        {
+            "candidate_id": "candidate-good",
+            "session_id": "session-good",
+            "status": "pending",
+            "topic_summary": "完好记录",
+        },
+        queue_path,
+    )
+    # A line with illegal UTF-8 bytes and a line with broken JSON must be
+    # isolated as corrupt records instead of failing the whole queue read.
+    with queue_path.open("ab") as handle:
+        handle.write(b"\xff\xfe not utf-8 \xff\n")
+        handle.write(b'{"event": "candidate", "candidate_id": broken\n')
+
+    events = list(chat_review_queue.iter_queue_events(queue_path))
+    assert [event.get("candidate_id") for event in events] == ["candidate-good"]
+    assert chat_review_queue.queue_corrupt_line_count(queue_path) == 2
+
+    items = list_review_items(queue_path)
+    assert [item["candidate_id"] for item in items] == ["candidate-good"]

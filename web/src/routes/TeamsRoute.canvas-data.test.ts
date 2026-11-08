@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { canvasFromKnownTeamId, canvasFromTeamOrFallback, memberCanvasFromTeam, resolveTeamsRouteEffectiveTeamId } from "./TeamsRoute.canvasData";
+import { RESEARCH_TEAM_ID, canvasFromKnownTeamId, canvasFromTeamOrFallback, memberCanvasFromTeam, resolveRequestedRouteTeamId, resolveTeamsRouteEffectiveTeamId } from "./TeamsRoute.canvasData";
 
 describe("TeamsRoute canvas data bootstrap", () => {
   it("uses a known URL team id before the slow team list arrives", () => {
@@ -40,6 +40,33 @@ describe("TeamsRoute canvas data bootstrap", () => {
         fallbackTeamId: "ai-search-team",
       }),
     ).toBe("research-team");
+  });
+});
+
+describe("requested team route param resolution (ISS-029)", () => {
+  it("respects the generic workspace team= param written by workflowTeamParams", () => {
+    expect(resolveRequestedRouteTeamId(new URLSearchParams("team=team-5&teamWorkspace=flows"))).toBe("team-5");
+  });
+
+  it("still honors the canonical teamId param", () => {
+    expect(resolveRequestedRouteTeamId(new URLSearchParams("teamId=team-5"))).toBe("team-5");
+  });
+
+  it("returns no requested team when neither param is present", () => {
+    expect(resolveRequestedRouteTeamId(new URLSearchParams("researchView=workflow"))).toBe("");
+  });
+
+  it("a visible team= request wins over the research fallback instead of showing the wrong team", () => {
+    expect(
+      resolveTeamsRouteEffectiveTeamId({
+        forcedTeamId: "",
+        selectedTeamId: "",
+        requestedTeamId: resolveRequestedRouteTeamId(new URLSearchParams("team=team-5")),
+        requestedAgentTeamId: "",
+        visibleTeamIds: ["team-5", RESEARCH_TEAM_ID],
+        fallbackTeamId: RESEARCH_TEAM_ID,
+      }),
+    ).toBe("team-5");
   });
 });
 

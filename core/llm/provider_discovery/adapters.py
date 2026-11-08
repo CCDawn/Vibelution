@@ -379,6 +379,9 @@ class OpenAICompatibleDiscoveryAdapter:
     adapter_id: str
 
     def discover(self, request: ProviderDiscoveryRequest) -> ProviderDiscoveryResult:
+        from config.chatgpt_subscription import is_subscription_provider
+
+        subscription = is_subscription_provider(request.provider)
         endpoints = list(resolve_discovery_endpoints(request.provider, self.adapter_id))
         headers = {"Authorization": f"Bearer {request.credential}"} if request.credential else {}
         return _discover_candidates(
@@ -389,8 +392,10 @@ class OpenAICompatibleDiscoveryAdapter:
             params=None,
             normalize=lambda payload: [
                 model
-                for raw in payload.get("data", []) if isinstance(payload, dict)
-                if (model := _model(raw)) is not None
+                for raw in payload.get("models" if subscription else "data", []) if isinstance(payload, dict)
+                if not subscription or (isinstance(raw, dict) and raw.get("visibility") == "list"
+                                        and raw.get("supported_in_api", True) is not False)
+                if (model := _model(raw, id_field="slug" if subscription else "id")) is not None
             ],
         )
 

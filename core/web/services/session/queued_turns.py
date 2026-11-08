@@ -1200,16 +1200,58 @@ def notify_parent_session_of_child_return(session_id: str, *, turn_id: str) -> d
         from .. import runtime_task_registry as runtime_tasks
 
         store = runtime_tasks.default_store()
-        if store.get_task(normalized_session_id):
+        snapshot = store.get_task(normalized_session_id)
+        if snapshot:
             dropped = str((queued or {}).get("dropped") or "")
+            if dropped == "stale_branch":
+                terminal_status = "dropped"
+            else:
+                # A child turn the user (or model) explicitly stopped did not
+                # complete: it was interrupted. Mirror the real terminal
+                # outcome instead of stamping "completed" over a stop (the
+                # turn journal already carries stopped_by_user for this turn).
+                stopped_return = str(
+                    snapshot.get("stopInitiator") or ""
+                ).strip().lower() in runtime_tasks.STOP_INITIATORS or _child_turn_interrupted(
+                    conversation, normalized_turn_id
+                )
+                terminal_status = "stopped" if stopped_return else "completed"
             store.mark_task_terminal(
                 normalized_session_id,
-                status="dropped" if dropped == "stale_branch" else "completed",
-                reason="child_session_return",
+                status=terminal_status,
+                reason=(
+                    "child_session_return_stopped"
+                    if terminal_status == "stopped"
+                    else "child_session_return"
+                ),
             )
     except Exception:
         pass
     return queued
+
+
+def _child_turn_interrupted(conversation: dict[str, Any], turn_id: str) -> bool:
+    """True when the child's settled turn was interrupted by a user stop.
+
+    Reads the terminal anchor the worker persisted at settlement time
+    (``last_turn_terminal_turn_id`` / ``last_turn_terminal_reason``); the
+    turn-id match keeps a stale stop from an earlier turn from mislabeling a
+    later, genuinely completed return.
+    """
+
+    terminal_turn_id = str(
+        conversation.get("last_turn_terminal_turn_id")
+        or conversation.get("lastTurnTerminalTurnId")
+        or ""
+    ).strip()
+    if not turn_id or terminal_turn_id != turn_id:
+        return False
+    terminal_reason = str(
+        conversation.get("last_turn_terminal_reason")
+        or conversation.get("lastTurnTerminalReason")
+        or ""
+    ).strip().lower()
+    return terminal_reason == "stopped_by_user"
 
 
 def _reset_stale_starting_rows(s: Any, rows: list[dict[str, Any]]) -> bool:

@@ -6,94 +6,28 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
+# ProjectDir supplies installation metadata and identifies legacy aliases only.
 $ProjectDir = (Resolve-Path -LiteralPath $ProjectDir).Path
-$buildScript = Join-Path $ProjectDir "scripts\windows_launcher_entry\build_vibelution_launcher_entry.ps1"
-$sourcePath = Join-Path $ProjectDir "scripts\windows_launcher_entry\VibelutionLauncher.cs"
-$assistantSourcePath = Join-Path $ProjectDir "scripts\windows_launcher_entry\ManagedDesktopAssistant.cs"
-$iconPath = Join-Path $ProjectDir "assets\icons\vibelution.ico"
-
-if (-not (Test-Path -LiteralPath $buildScript)) {
-    throw "Native launcher build script not found: $buildScript"
+$catalogScript = Join-Path $ProjectDir "scripts\desktop_entry_catalog.ps1"
+if (-not (Test-Path -LiteralPath $catalogScript -PathType Leaf)) {
+    throw "Desktop entry catalog helper is missing: $catalogScript. Run scripts\install_windows.ps1."
 }
-if (-not (Test-Path -LiteralPath $sourcePath)) {
-    throw "Native launcher source not found: $sourcePath"
-}
-
-function Get-NativeEntryCacheKey {
-    param(
-        [string]$SourcePath,
-        [string]$AssistantSourcePath,
-        [string]$BuildScriptPath,
-        [string]$IconPath
-    )
-
-    $parts = @(
-        (Get-FileHash -LiteralPath $SourcePath -Algorithm SHA256).Hash
-        (Get-FileHash -LiteralPath $AssistantSourcePath -Algorithm SHA256).Hash
-        (Get-FileHash -LiteralPath $BuildScriptPath -Algorithm SHA256).Hash
-    )
-    if (Test-Path -LiteralPath $IconPath) {
-        $parts += (Get-FileHash -LiteralPath $IconPath -Algorithm SHA256).Hash
-    }
-    $combined = ($parts -join "|")
-    $sha256 = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        $hash = $sha256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($combined))
-        return ([System.BitConverter]::ToString($hash).Replace("-", "").Substring(0, 16)).ToLowerInvariant()
-    } finally {
-        $sha256.Dispose()
-    }
+. $catalogScript
+$catalog = Assert-DesktopEntryCatalog -ProjectDir $ProjectDir
+$entryExe = Resolve-DesktopPublicEntryPath -Catalog $catalog
+$startArgs = Resolve-DesktopPublicEntryArguments -Catalog $catalog
+if (-not (Test-Path -LiteralPath $entryExe -PathType Leaf)) {
+    throw "Managed native Launcher entry is missing: $entryExe. Run scripts\install_windows.ps1 before launching the assistant."
 }
 
-$localAppData = [Environment]::GetFolderPath("LocalApplicationData")
-if (-not $localAppData) {
-    $localAppData = Join-Path $ProjectDir ".runtime\launcher"
-}
-$cacheDir = Join-Path $localAppData "Vibelution\Launcher\entry-cache"
-New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
-
-$cacheKey = Get-NativeEntryCacheKey -SourcePath $sourcePath -AssistantSourcePath $assistantSourcePath -BuildScriptPath $buildScript -IconPath $iconPath
-$entryExe = Join-Path $cacheDir ("VibelutionLauncher.{0}.exe" -f $cacheKey)
-
-if (-not (Test-Path -LiteralPath $entryExe)) {
-    $null = & $buildScript -ProjectDir $ProjectDir -OutputPath $entryExe
-    if (-not (Test-Path -LiteralPath $entryExe)) {
-        throw "Native launcher entry build did not produce: $entryExe"
-    }
-}
-
-$startArgs = @(
-    "--from-shortcut",
-    "--project",
-    $ProjectDir,
-    "--action",
-    "launcher"
-)
-
-function Repair-DesktopLauncherShortcut {
-    $desktopDir = [Environment]::GetFolderPath("Desktop")
-    if (-not $desktopDir) {
-        return
-    }
-    $powershellExe = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
-    $wrapperScript = $PSCommandPath
-    if (-not $wrapperScript) {
-        $wrapperScript = $MyInvocation.MyCommand.Path
-    }
-    $shortcutArguments = ('-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -ProjectDir "{1}"' -f $wrapperScript, $ProjectDir)
-    try {
-        $shell = New-Object -ComObject WScript.Shell
-        . (Join-Path $ProjectDir "scripts\desktop_entry_catalog.ps1")
-        $null = Set-VibelutionDesktopLauncherShortcut -Shell $shell -ProjectDir $ProjectDir -TargetPath $powershellExe -Arguments $shortcutArguments -IconPath $iconPath -DesktopDirectory $desktopDir
-    } catch {
-        # Desktop shortcut repair must not block launching.
-    }
-}
-
-Repair-DesktopLauncherShortcut
+$shell = New-Object -ComObject WScript.Shell
+$null = Set-VibelutionStartMenuLauncherShortcut -Shell $shell `
+    -TargetPath $entryExe -Arguments $startArgs -IconPath $entryExe
+$null = Set-VibelutionDesktopLauncherShortcut -Shell $shell -ProjectDir $ProjectDir `
+    -TargetPath $entryExe -Arguments $startArgs -IconPath $entryExe
 
 Start-Process `
     -FilePath $entryExe `
     -ArgumentList $startArgs `
-    -WorkingDirectory $ProjectDir `
+    -WorkingDirectory (Split-Path -Parent $entryExe) `
     -WindowStyle Hidden | Out-Null

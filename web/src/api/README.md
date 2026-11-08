@@ -32,6 +32,7 @@
 | `chat.ts` | `/api/sessions`, `/api/chat-rooms`, session tool approvals |
 | `cliAgents.ts` | `/api/cli-agents/terminal-sessions/*` (JSON only) |
 | `config.ts` | `/api/config/*` workspace and draft mutations |
+| `chatgptSubscription.ts` | `/api/config/chatgpt-subscription/*`, safe account status, OAuth lifecycle and account-specific model metadata; no tokens in renderer DTOs |
 | `dataProcessing.ts` | `/api/data-processing/*` |
 | `diagnostics.ts` | `/api/diagnostics/*` |
 | `evolution.ts` | `/api/evolution/*` supervised/review JSON |

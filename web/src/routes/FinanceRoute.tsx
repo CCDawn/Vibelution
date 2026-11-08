@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "react-router-dom";
 
+// Route utilities live in the lazy finance CSS entry (see design/route-css).
+import "../design/route-css/finance.tailwind.css";
+
 import { fetchSessionDetail, querySessions } from "../api/chat";
 import { createFinancialAssistant, type FinancialAssistant } from "../api/financialAssistant";
 import { queryKeys } from "../api/queryKeys";

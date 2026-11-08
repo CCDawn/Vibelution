@@ -356,3 +356,17 @@ def test_real_agent_directory_http_configuration_cas_and_closed_runtime(tmp_path
     runtime_json = runtime_response.json()
     assert runtime_json["enabled"] is False
     assert all(row["readableCount"] == 0 for row in runtime_json["readableSources"])
+
+
+def test_runtime_route_maps_missing_agent_directory_miss_to_404(monkeypatch):
+    """The runtime facade raises AgentNotFoundError for unknown Agents; the
+    route must translate it to 404 instead of an unmapped 500."""
+    from core.web.services import agent_directory_service
+
+    monkeypatch.setattr(
+        agent_directory_service, "get_agent", lambda _agent_id, include_archived=False: None
+    )
+    runtime_response = client.get("/api/agents/agent-missing/perception/runtime")
+    assert runtime_response.status_code == 404, runtime_response.text
+    cancel_response = client.post("/api/agents/agent-missing/perception/cancel", json={})
+    assert cancel_response.status_code == 404, cancel_response.text
