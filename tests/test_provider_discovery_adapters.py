@@ -29,6 +29,15 @@ def public_dns(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+@pytest.fixture(autouse=True)
+def seal_user_env_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 从产品进程树启动的测试运行会继承 VIBELUTION_ENABLE_USER_ENV_FALLBACK=1，
+    # 使 _read_env_var 走 HKCU 优先——本机真实 key 会遮蔽测试 setenv 注入的
+    # 假值（如 OPENAI_API_KEY 遮蔽 preset-test-secret）。密封回 os.environ
+    # 直读语义，让测试与用户注册表状态解耦。
+    monkeypatch.delenv("VIBELUTION_ENABLE_USER_ENV_FALLBACK", raising=False)
+
+
 def _config(adapter: str, *, base_url: str = "https://models.example/v1") -> dict:
     return {
         "llm": {
