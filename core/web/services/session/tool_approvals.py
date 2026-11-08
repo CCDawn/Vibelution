@@ -412,7 +412,18 @@ def authorize_or_wait(
     normalized_config_hash = _required_identity(config_hash, "configHash")
     if normalized_config_revision < 1:
         raise ToolApprovalError("Agent configRevision is required")
+    command_execution_hash = _command_execution_evidence_hash(normalized_tool, tool_args)
     if normalized_permission_preset == "full_access" and not reminder_recovery:
+        # full_access 短路放行与 grant/auto_approved 同处一条 Windows 未验证
+        # 沙箱链路：无一次性执行证据时沙箱门 fail-closed，短路会变成无出口
+        # 死路。与既有两路径同口径签发；非沙箱受控命令在 _mint 内部无副作用。
+        _mint_command_execution_evidence(
+            session_id=normalized_session,
+            turn_id=normalized_turn,
+            call_id=normalized_call,
+            tool_name=normalized_tool,
+            command_execution_hash=command_execution_hash,
+        )
         return ToolApprovalOutcome(True, "full_access_auto_approved")
 
     args_hash = _arguments_hash(tool_args)
@@ -429,7 +440,6 @@ def authorize_or_wait(
         normalized_tool,
         _session_grant_key(session_grant_scope),
     )
-    command_execution_hash = _command_execution_evidence_hash(normalized_tool, tool_args)
     native_management = False
     if normalized_tool == "personal_assistant_manage_tool":
         from core.web.services.local_assistant.consent import _native_launcher

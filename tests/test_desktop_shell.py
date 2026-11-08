@@ -3020,6 +3020,19 @@ def _shell_tree_snapshot(root: Path) -> dict:
     }
 
 
+def test_prebuild_reuses_staging_after_an_unrelated_commit(tmp_path, monkeypatch):
+    live, staged = _write_current_staging_beside_stale_live(tmp_path, monkeypatch)
+    before_live, before_staged = _shell_tree_snapshot(live), _shell_tree_snapshot(staged)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda _root, spec: "c" * 40 if spec == "HEAD" else "a" * 40)
+    monkeypatch.setattr(desktop_shell, "_run_desktop_shell_package_build",
+        lambda *_args, **_kwargs: pytest.fail("unchanged package inputs must not rebuild for a new commit"))
+
+    result = desktop_shell.run_desktop_shell_prebuild(tmp_path)
+    assert result["ok"] is True and result["staged"] is True
+    assert _shell_tree_snapshot(live) == before_live
+    assert _shell_tree_snapshot(staged) == before_staged
+
+
 def test_prebuild_reuses_current_staging_without_touching_live_or_building(tmp_path, monkeypatch):
     live, staged = _write_current_staging_beside_stale_live(tmp_path, monkeypatch)
     before_live, before_staged = _shell_tree_snapshot(live), _shell_tree_snapshot(staged)
@@ -3068,7 +3081,7 @@ def test_live_inspection_keeps_assistant_rejection_before_frontend_rejection(tmp
 
 @pytest.mark.parametrize("fault", [
     "exe_missing", "asar_missing", "provenance_missing", "electron_tree", "electron_tree_unavailable",
-    "native_source_commit", "native_source_commit_missing", "electron_dirty", "electron_source_dirty", "electron_status_unavailable",
+    "native_source_commit_invalid", "native_source_commit_missing", "electron_dirty", "electron_source_dirty", "electron_status_unavailable",
     "frontend_bytes", "frontend_tree", "frontend_build_key", "frontend_source_commit", "frontend_source_stale",
     "active_frontend_bytes", "assistant_missing", "assistant_bytes", "assistant_source", "assistant_provenance",
 ])
@@ -3082,15 +3095,16 @@ def test_prebuild_rebuilds_staging_when_current_package_cannot_be_proven(tmp_pat
             "provenance_missing": proof_path, "assistant_missing": staged / "resources/launcher-assistant/manifest.json",
         }
         paths[fault].unlink()
-    elif fault in {"electron_tree", "native_source_commit", "native_source_commit_missing", "frontend_tree",
+    elif fault in {"electron_tree", "native_source_commit_invalid", "native_source_commit_missing", "frontend_tree",
                    "frontend_build_key", "frontend_source_commit", "assistant_provenance"}:
         key = {
-            "electron_tree": "electronTreeHash", "native_source_commit": "sourceCommit",
+            "electron_tree": "electronTreeHash", "native_source_commit_invalid": "sourceCommit",
             "native_source_commit_missing": "sourceCommit", "frontend_tree": "frontendTreeHash",
             "frontend_build_key": "frontendBuildKey", "frontend_source_commit": "frontendSourceCommit",
             "assistant_provenance": "assistant",
         }[fault]
-        proof[key] = {} if key == "assistant" else ("" if fault.endswith("missing") else "c" * len(str(proof[key])))
+        proof[key] = ({} if key == "assistant" else "not-a-commit" if fault.endswith("invalid")
+                      else "" if fault.endswith("missing") else "c" * len(str(proof[key])))
         proof_path.write_text(json.dumps(proof), encoding="utf-8")
     elif fault == "electron_tree_unavailable":
         monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda _root, spec: "" if ":" in spec else "a" * 40)

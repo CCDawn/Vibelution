@@ -296,24 +296,30 @@ def test_builder_resolves_the_admitted_output_root_once(package_fixture, monkeyp
     assert resolutions == 1
 
 
-def test_owned_file_guard_accepts_an_exact_existing_path_without_fallback(tmp_path, monkeypatch):
+def test_path_guard_accepts_an_exact_existing_path_without_rewalking_ancestors(tmp_path, monkeypatch):
     from scripts import build_assistant_runtime as builder
 
     _write(tmp_path, "one/two/data.bin", b"data")
     root = builder._trusted_root(tmp_path)
-    monkeypatch.setattr(builder, "_checked", lambda *_args, **_kwargs: pytest.fail("unexpected fallback"))
-    assert builder._checked_built_file(root, "one/two/data.bin", resolved_root=root).read_bytes() == b"data"
+    original = builder._reject_link
+    checks = []
+    def reject(path, **kwargs):
+        checks.append(path)
+        return original(path, **kwargs)
+    monkeypatch.setattr(builder, "_reject_link", reject)
+    assert builder._checked(root, "one/two/data.bin", resolved_root=root).read_bytes() == b"data"
+    assert root / "one" not in checks
+    assert root / "one/two" not in checks
 
 
 @pytest.mark.parametrize("phase", ["observe", "resolve"])
-def test_owned_file_guard_rechecks_the_legacy_chain_after_an_observation_error(tmp_path, monkeypatch, phase):
+def test_path_guard_reports_observation_errors_and_preserves_normalization_fallback(tmp_path, monkeypatch, phase):
     from scripts import build_assistant_runtime as builder
 
     _write(tmp_path, "data.bin", b"data")
     root = builder._trusted_root(tmp_path)
     target = root / "data.bin"
-    original_checked, original_reject, original_resolve = builder._checked, builder._reject_link, Path.resolve
-    calls = []
+    original_reject, original_resolve = builder._reject_link, Path.resolve
     faulted = False
 
     def reject(path, **kwargs):
@@ -325,24 +331,23 @@ def test_owned_file_guard_rechecks_the_legacy_chain_after_an_observation_error(t
 
     def resolve(path, *args, **kwargs):
         nonlocal faulted
-        if phase == "resolve" and kwargs.get("strict") is True:
+        if phase == "resolve" and path == target and not faulted:
             faulted = True
             raise PermissionError("normalization unavailable")
         return original_resolve(path, *args, **kwargs)
 
-    def checked(path, relative, **kwargs):
-        calls.append(relative)
-        return original_checked(path, relative, **kwargs)
-
     monkeypatch.setattr(builder, "_reject_link", reject)
     monkeypatch.setattr(Path, "resolve", resolve)
-    monkeypatch.setattr(builder, "_checked", checked)
-    assert builder._checked_built_file(root, "data.bin", resolved_root=root).read_bytes() == b"data"
-    assert faulted and calls == ["data.bin"]
+    if phase == "observe":
+        with pytest.raises(PermissionError):
+            builder._checked(root, "data.bin", resolved_root=root)
+    else:
+        assert builder._checked(root, "data.bin", resolved_root=root).read_bytes() == b"data"
+    assert faulted
 
 
 @pytest.mark.parametrize("kind", ["inside", "outside", "broken", "case_only_resolution"])
-def test_owned_file_guard_retains_ancestor_junction_rejection(tmp_path, monkeypatch, kind):
+def test_path_guard_retains_ancestor_junction_rejection(tmp_path, monkeypatch, kind):
     from scripts import build_assistant_runtime as builder
 
     if builder.os.name != "nt":
@@ -361,7 +366,7 @@ def test_owned_file_guard_retains_ancestor_junction_rejection(tmp_path, monkeypa
     original_resolve = Path.resolve
 
     def resolve(path, *args, **kwargs):
-        if kind == "case_only_resolution" and kwargs.get("strict") is True:
+        if kind == "case_only_resolution" and path == root / "Pkg/data.bin":
             # Model a case-sensitive directory's Pkg -> pkg junction; the real
             # junction still lets the fallback exercise the original guard.
             return root / "pkg/data.bin"
@@ -369,10 +374,10 @@ def test_owned_file_guard_retains_ancestor_junction_rejection(tmp_path, monkeypa
 
     monkeypatch.setattr(Path, "resolve", resolve)
     with pytest.raises(ValueError, match="links"):
-        builder._checked_built_file(root, "Pkg/data.bin", resolved_root=root)
+        builder._checked(root, "Pkg/data.bin", resolved_root=root)
 
 
-def test_owned_file_guard_preserves_case_alias_and_short_name_inputs(tmp_path):
+def test_path_guard_preserves_case_alias_and_short_name_inputs(tmp_path):
     from scripts import build_assistant_runtime as builder
 
     if builder.os.name != "nt":
@@ -383,7 +388,7 @@ def test_owned_file_guard_preserves_case_alias_and_short_name_inputs(tmp_path):
     root = builder._trusted_root(tmp_path)
     if not (root / "LongDirectoryNameForGuard/case.bin").is_file():
         pytest.skip("The temporary directory is case sensitive")
-    assert builder._checked_built_file(root, "LongDirectoryNameForGuard/case.bin", resolved_root=root).read_bytes() == b"data"
+    assert builder._checked(root, "LongDirectoryNameForGuard/case.bin", resolved_root=root).read_bytes() == b"data"
     get_short = ctypes.WinDLL("kernel32", use_last_error=True).GetShortPathNameW
     get_short.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
     get_short.restype = ctypes.c_uint32
@@ -397,17 +402,17 @@ def test_owned_file_guard_preserves_case_alias_and_short_name_inputs(tmp_path):
     short_name = Path(buffer.value).name
     if short_name == "LongDirectoryNameForGuard":
         pytest.skip("Short-name creation is disabled on this volume")
-    assert builder._checked_built_file(root, f"{short_name}/Case.bin", resolved_root=root).read_bytes() == b"data"
+    assert builder._checked(root, f"{short_name}/Case.bin", resolved_root=root).read_bytes() == b"data"
 
 
-def test_owned_file_guard_preserves_hardlink_inputs(tmp_path):
+def test_path_guard_preserves_hardlink_inputs(tmp_path):
     from scripts import build_assistant_runtime as builder
 
     target = _write(tmp_path, "original.bin", b"data")
     linked = tmp_path / "hardlink.bin"
     linked.hardlink_to(target)
     root = builder._trusted_root(tmp_path)
-    assert builder._checked_built_file(root, "hardlink.bin", resolved_root=root).read_bytes() == b"data"
+    assert builder._checked(root, "hardlink.bin", resolved_root=root).read_bytes() == b"data"
 
 
 @pytest.mark.parametrize("verify_content", [False, True])
@@ -437,21 +442,32 @@ def test_public_verifier_does_not_repeat_canonical_ancestor_link_checks(package_
     monkeypatch.setattr(builder, "_reject_link", reject)
     monkeypatch.setattr(Path, "relative_to", relative_to)
     verify_launcher_assistant_payload(output, expected_manifest_sha256=result["manifestSha256"], **kwargs)
-    # The package walk already inspects the directory; each child must not
-    # repeat the same check after canonical resolution proved its full path.
-    assert observations == 1
-    assert max(relative_reads.values()) == 1
+    # Admit the directory once and inspect it once in the final inventory walk;
+    # the number of child files must not multiply either operation.
+    assert observations <= 2
+    assert max(relative_reads.values(), default=0) <= 1
 
 
 @pytest.mark.parametrize("verify_content", [False, True])
-def test_public_verifier_retains_the_full_path_guard(package_fixture, monkeypatch, verify_content):
+def test_verifier_reuses_admitted_parents_for_file_reads(package_fixture, monkeypatch, verify_content):
     from scripts import build_assistant_runtime as builder
 
     result = _build(package_fixture)
     output = package_fixture[-1]
     kwargs = _content_verification_kwargs(output, verify_content)
-    monkeypatch.setattr(builder, "_checked_built_file", lambda *_args, **_kwargs: pytest.fail("public guard changed"))
+    target = builder._io_path(output) / builder._CONTRACTS_MODULE
+    original = Path.resolve
+    resolutions = 0
+
+    def resolve(path, *args, **kwargs):
+        nonlocal resolutions
+        if path == target:
+            resolutions += 1
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", resolve)
     verify_launcher_assistant_payload(output, expected_manifest_sha256=result["manifestSha256"], **kwargs)
+    assert resolutions == 0
 
 
 @pytest.mark.parametrize("phase", ["copy", "verify"])

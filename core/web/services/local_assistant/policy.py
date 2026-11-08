@@ -84,6 +84,10 @@ _COMPILEALL_OPTIONS = {
     **dict.fromkeys(("-q", "-f", "-l", "-b"), "flag"),
     "-j": "value", "-o": "value", "--invalidation-mode": "value",
 }
+_PIP_INSTALL_OPTIONS = {
+    **dict.fromkeys(("-q", "--quiet", "--upgrade", "--no-input"), "flag"),
+    "-r": "path", "--requirement": "path", "--target": "path",
+}
 _VITEST_OPTIONS = {
     **dict.fromkeys(("--root", "--dir", "--config", "-c", "--outputFile",
                     "--coverage.reportsDirectory", "--related"), "path"),
@@ -394,9 +398,40 @@ def _git_development(argv: list[str], cwd: Path, root: Path) -> bool:
     if action == "merge":
         return len(rest) == 2 and rest[0] == "--ff-only" and not rest[1].startswith("-")
     if action == "stash":
-        return bool(rest) and rest[0] in {"list", "show"} and _git_options_allowed(
-            rest[1:], _GIT_READ_FLAGS, _GIT_READ_VALUES, "abcehilnopqrtuvwzBCDEHILNPSVW", "UfeGS")
+        if not rest:
+            return False
+        if rest[0] in {"list", "show"}:
+            return _git_options_allowed(
+                rest[1:], _GIT_READ_FLAGS, _GIT_READ_VALUES, "abcehilnopqrtuvwzBCDEHILNPSVW", "UfeGS")
+        if rest[0] == "pop":
+            return not rest[1:]
+        if rest[0] == "push":
+            return _stash_push_options_allowed(rest[1:])
+        return False
     return False
+
+
+def _stash_push_options_allowed(argv: list[str]) -> bool:
+    """``git stash push`` keeps worktree changes recoverable, so only message
+    options, the ``--`` separator and in-repository pathspecs are covered;
+    interactive or deeper flags keep native approval. ``drop``/``clear``
+    destroy entries and never enter this predicate."""
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        index += 1
+        if token == "--":
+            # Stash only matches pathspecs inside the repository worktree.
+            return True
+        if token in {"-m", "--message"}:
+            # The message is free text, but never hide an option behind it.
+            if index >= len(argv) or argv[index].startswith("-"):
+                return False
+            index += 1
+            continue
+        if not token.startswith("--message=") and token.startswith("-"):
+            return False
+    return True
 
 
 def _vitest_run(argv: list[str], cwd: Path, root: Path) -> bool:
@@ -442,9 +477,15 @@ def _development_argv(argv: list[str], cwd: Path, root: Path) -> bool:
     if executable == "git":
         return _git_development(argv, cwd, root)
     if re.fullmatch(r"python(?:\d+(?:\.\d+)*)?", executable):
-        if len(argv) < 2 or argv[0] != "-m" or argv[1] not in {"pytest", "unittest", "compileall"}:
+        if len(argv) < 2 or argv[0] != "-m" or argv[1] not in {"pytest", "unittest", "compileall", "pip"}:
             return False
         module, arguments = argv[1], argv[2:]
+        if module == "pip":
+            # Only the install subcommand; uninstall, custom indexes and bare
+            # pip stay with native approval. Package specs resolve like
+            # relative paths, so local installs must remain in the workspace.
+            return bool(arguments) and arguments[0] == "install" and _scoped_arguments(
+                arguments[1:], _PIP_INSTALL_OPTIONS, cwd, root)
         if module == "unittest" and arguments[:1] == ["discover"]:
             arguments = arguments[1:]
         schema = {"pytest": _PYTEST_OPTIONS, "unittest": _UNITTEST_OPTIONS, "compileall": _COMPILEALL_OPTIONS}[module]

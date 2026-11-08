@@ -91,6 +91,46 @@ def test_external_read_only_runtime_disables_mutation_even_if_agent_is_full_acce
     )
 
 
+def test_external_task_stays_pinned_while_launcher_task_follows_agent_preset() -> None:
+    # 防回归：外部委派任务始终钉死 request_approval（防扩散）；本地 Launcher
+    # 任务跟随 Agent 自己配置的权限档（方案 A），未配置时落到默认档。
+    assert (
+        projections._runtime_permission_preset(
+            "full_access",
+            runtime_tool_source="external_agent_task:workspace_write",
+        )
+        == "request_approval"
+    )
+    assert (
+        projections._runtime_permission_preset(
+            "auto_review",
+            runtime_tool_source="external_agent_task:read_only",
+        )
+        == "request_approval"
+    )
+    assert (
+        projections._runtime_permission_preset(
+            "full_access",
+            runtime_tool_source="launcher_assistant_task:workspace_write",
+        )
+        == "full_access"
+    )
+    assert (
+        projections._runtime_permission_preset(
+            "auto_review",
+            runtime_tool_source="launcher_assistant_task:workspace_write",
+        )
+        == "auto_review"
+    )
+    assert (
+        projections._runtime_permission_preset(
+            "",
+            runtime_tool_source="launcher_assistant_task:workspace_write",
+        )
+        == "request_approval"
+    )
+
+
 def test_worker_only_accepts_external_profile_from_internal_external_source() -> None:
     trusted = {
         "user_message_source": "external_agent_task",

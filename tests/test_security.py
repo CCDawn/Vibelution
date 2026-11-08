@@ -264,6 +264,37 @@ class TestSecurityValidator:
             is_safe, error = validator.validate_command(cmd)
             assert is_safe is True, f"应允许非破坏 Git 操作: {cmd}: {error}"
 
+    def test_validate_command_allows_consent_layer_expanded_stash_and_pip_install(self, validator):
+        """consent 层新增放行的 stash push/pop 与受控 pip install 不得在本层封禁。
+
+        按本文件 security.py 契约注释：consent 层放行的操作不得在本层封禁。
+        stash push/pop 不在 FORBIDDEN_GIT_SUBCOMMANDS，_destructive_git_variant
+        只拦 stash drop/clear；python -m pip install 走默认黑名单模式放行。
+        同时核对 tools.shell_tools._is_command_dangerous 的执行层放行。
+        """
+        from tools.shell_tools import _is_command_dangerous
+
+        allowed_commands = [
+            "git stash push -m wip",
+            "git stash push -m wip -- core/example.py",
+            "git stash pop",
+            "python -m pip install requests",
+            "python -m pip install -r requirements.txt",
+            "python -m pip install --upgrade --quiet --no-input requests",
+        ]
+        for cmd in allowed_commands:
+            is_safe, error = validator.validate_command(cmd)
+            assert is_safe is True, f"应允许 consent 层放行的新命令: {cmd}: {error}"
+            is_dangerous, message = _is_command_dangerous(cmd)
+            assert not is_dangerous, f"shell 执行层应放行: {cmd}: {message}"
+
+    def test_validate_command_still_blocks_stash_destructive_variants(self, validator):
+        """执行层对 stash 破坏变体的兜底保持不变（drop/clear 销毁暂存条目）。"""
+        for cmd in ["git stash drop", "git stash clear", "git -C submodule stash clear"]:
+            is_safe, error = validator.validate_command(cmd)
+            assert is_safe is False, f"应继续阻止 stash 破坏变体: {cmd}"
+            assert "禁止" in error, f"拦截文案应可区分: {cmd}: {error}"
+
     def test_validate_command_whitelist_allowed(self, validator):
         """测试白名单允许的命令"""
         allowed_commands = [
