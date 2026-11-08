@@ -487,7 +487,10 @@ export function createConversationCodexSurface({
             messageOrder={activeTimelineMessageOrder}
             onUserToggle={handleProcessDisclosureUserToggle}
             focusScope={`${sessionId}:${rowIdentity.processKey}`}
-            workExpanded={getExpansionState(message.id, "work", streaming || finalCells.length === 0
+            // Codex collapses the finished work trail as soon as the final answer
+            // starts rendering; keep it open only while no answer exists yet or the
+            // turn still needs attention.
+            workExpanded={getExpansionState(message.id, "work", finalCells.length === 0
               || turnWorkForceExpand(message)
               || processCells.some(conversationToolActivityNeedsAttention))}
             onWorkExpandedChange={(expanded) => setExpansionState(message.id, "work", expanded)}
