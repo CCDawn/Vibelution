@@ -1466,6 +1466,31 @@ describe("resident assistant startup", () => {
     expect(context.AssistantHost).not.toHaveBeenCalled();
     expect(context.createAssistantTray).not.toHaveBeenCalled();
   });
+
+  it("warns once per episode about a blocked reminder owner and resumes on the recovery action", async () => {
+    const { context, paths } = fixture();
+    const pump = Object.assign(vi.fn(async () => undefined), {
+      drainForMigration: vi.fn(async () => undefined), resumeAfterMigration: vi.fn(), resumeFromBlocked: vi.fn(),
+    });
+    context.startAssistantReminderPump = vi.fn(() => pump);
+    await context.start(paths);
+    const options = context.startAssistantReminderPump.mock.calls[0][0];
+    options.onBlocked("receipt_integrity_failed");
+    await vi.waitFor(() => expect(context.dialog.showMessageBox).toHaveBeenCalledOnce());
+    expect(context.dialog.showMessageBox.mock.calls[0][0].detail).toContain("回执账本");
+    // A still-blocked probe never repeats the dialog inside the same episode.
+    options.onBlocked("receipt_integrity_failed");
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(context.dialog.showMessageBox).toHaveBeenCalledOnce();
+    // The recovery button re-probes the owner immediately.
+    await vi.waitFor(() => expect(pump.resumeFromBlocked).toHaveBeenCalledOnce());
+    // A successful reminder RPC re-arms the episode.
+    options.onSuccess();
+    options.onBlocked("receipt_capacity_exceeded");
+    await vi.waitFor(() => expect(context.dialog.showMessageBox).toHaveBeenCalledTimes(2));
+    expect(context.dialog.showMessageBox.mock.calls[1][0].detail).toContain("次日自动恢复");
+    await context.stop();
+  });
 });
 
 describe("native Launcher inventory wiring", () => {
