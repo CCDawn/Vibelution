@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fetchJson } from "./client";
-import { fetchConfigBootstrap, fetchPublicConfig } from "./config";
+import { fetchConfigBootstrap, fetchPublicConfig, hasAssistantHostRestartBridge, restartAssistantHost } from "./config";
 import type { ConfigBootstrap, ConfigSummary } from "./types";
 
 vi.mock("./client", () => ({ fetchJson: vi.fn() }));
@@ -137,5 +137,34 @@ describe("Config bootstrap transport", () => {
 
     await expect(fetchPublicConfig()).resolves.toBe(summary);
     expect(fetchJson).toHaveBeenCalledWith("/api/config/public", { signal: undefined });
+  });
+});
+
+
+describe("Assistant host restart bridge", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("reports no bridge on plain browsers and never invokes", async () => {
+    expect(hasAssistantHostRestartBridge()).toBe(false);
+    await expect(restartAssistantHost("config_apply")).resolves.toBeNull();
+  });
+
+  it("maps a ready restart to restarted and forwards the bounded reason", async () => {
+    const invoke = vi.fn().mockResolvedValue({ restarted: true, state: "ready" });
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    expect(hasAssistantHostRestartBridge()).toBe(true);
+    await expect(restartAssistantHost("user_request")).resolves.toEqual({ restarted: true, state: "ready" });
+    expect(invoke).toHaveBeenCalledWith({ operation: "restartHost", reason: "user_request" });
+  });
+
+  it("keeps bounded host codes and folds unknown failures without throwing", async () => {
+    const invoke = vi.fn()
+      .mockRejectedValueOnce(new Error("Error invoking remote method 'assistant:invoke': Error: ASSISTANT_LIFECYCLE_CLOSING"))
+      .mockRejectedValueOnce(new Error("socket exploded"))
+      .mockResolvedValueOnce("not-an-object");
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    await expect(restartAssistantHost("config_apply")).resolves.toEqual({ restarted: false, state: "ASSISTANT_LIFECYCLE_CLOSING" });
+    await expect(restartAssistantHost("config_apply")).resolves.toEqual({ restarted: false, state: "failed" });
+    await expect(restartAssistantHost("config_apply")).resolves.toEqual({ restarted: false, state: "unknown" });
   });
 });

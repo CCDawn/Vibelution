@@ -11,6 +11,7 @@ import {
   Image as ImageIcon,
   Pencil,
   Plus,
+  RefreshCw,
   RotateCcw,
   Save,
   Upload,
@@ -33,8 +34,10 @@ import { type BlockerFunction, useBlocker, useNavigate, useSearchParams } from "
 
 import {
   applyConfigWorkspace,
+  hasAssistantHostRestartBridge,
   openConfigEnvironment,
   previewConfigDraft,
+  restartAssistantHost,
   updateConfigLanguage,
   uploadConfigAvatarImage,
   uploadConfigThemeBackgroundImage,
@@ -250,6 +253,10 @@ export function ConfigRoute() {
   const [jsonText, setJsonText] = useState("{}");
   const [notice, setNotice] = useState<{ tone: NoticeTone; text: string }>({ tone: "neutral", text: "" });
   const [busyAction, setBusyAction] = useState("");
+  // Desktop-only bridge probe (stable for the page lifetime): the assistant
+  // restart verbs only exist in the Launcher shell.
+  const [assistantBridgeAvailable] = useState(() => hasAssistantHostRestartBridge());
+  const [assistantRestarting, setAssistantRestarting] = useState(false);
   const [providerConnecting, setProviderConnecting] = useState(false);
   const [discardDraftOpen, setDiscardDraftOpen] = useState(false);
   const [providerShowMore, setProviderShowMore] = useState(false);
@@ -909,6 +916,25 @@ export function ConfigRoute() {
     return text;
   }
 
+  /** Shared restart UX for the save chain (B1) and the explicit button (B5):
+   * the host rereads config.toml and refreshes saved API keys at startup, so
+   * one stop+start applies both. The bridge is desktop-only; plain browsers
+   * return null and get neither a restart nor notice noise. */
+  async function restartAssistantHostWithNotice(context: "save" | "manual") {
+    setAssistantRestarting(true);
+    try {
+      const outcome = await restartAssistantHost(context === "save" ? "config_apply" : "user_request");
+      if (!outcome) return;
+      if (outcome.restarted) {
+        setNotice({ tone: "success", text: context === "save" ? copy.saveAssistantRestartDone : copy.restartAssistantDone });
+      } else {
+        setNotice({ tone: "error", text: context === "save" ? copy.saveAssistantRestartFailed : copy.restartAssistantFailed });
+      }
+    } finally {
+      setAssistantRestarting(false);
+    }
+  }
+
   function requireDraft(): PublicConfigShape {
     if (!draftConfig) {
       throw new Error(copy.loadFailed);
@@ -1226,6 +1252,14 @@ export function ConfigRoute() {
       }
       publishConfigDraftPresence(false);
       await invalidateWorkbenchQueries(payload.publicConfig);
+      // B1: a saved provider config only reaches the resident assistant host
+      // through a restart — the host reads config.toml and refreshes saved
+      // keys when it boots. Desktop shells restart it automatically and say
+      // so; a failed restart never fails the save itself.
+      if (hasAssistantHostRestartBridge()) {
+        setNotice({ tone: "neutral", text: copy.saveAssistantRestarting });
+        void restartAssistantHostWithNotice("save");
+      }
       return true;
     } catch (error) {
       markError(error);
@@ -1678,6 +1712,9 @@ export function ConfigRoute() {
             ) : null}
             {isSectionVisible("overview") ? <VButton variant="ghost" icon={<RotateCcw size={14} />} isDisabled={Boolean(busyAction)}
               onPress={() => { if (hasLocalConfigChanges) setDiscardDraftOpen(true); else void reloadWorkspace(); }}>{copy.refresh}</VButton> : null}
+            {assistantBridgeAvailable ? <VButton variant="ghost" icon={<RefreshCw size={14} />} isDisabled={Boolean(busyAction) || assistantRestarting}
+              isPending={assistantRestarting} title={copy.restartAssistantHint}
+              onPress={() => { void restartAssistantHostWithNotice("manual"); }}>{copy.restartAssistant}</VButton> : null}
           </div>
         }
         footerClassName={styles.saveFooter}

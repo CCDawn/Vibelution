@@ -113,8 +113,21 @@ def main():
     from core.assistant_runtime.history_preview import HistoryPreview
     from core.assistant_runtime.host import NativeFacade, create_app
     from config.paths import resolve_config_path
+    from config.public_config import refresh_llm_api_key_envs_from_user_registry
     from core.infrastructure.atomic_io import atomic_write_json
     from core.infrastructure.file_lock import cross_process_file_lock
+
+    # This process inherits the Electron main environment snapshot, which can
+    # carry an API key saved before the operator updated the settings page.
+    # Every LLM key lookup prefers os.environ over the user-registry fallback,
+    # so a restart would keep the stale key forever without this refresh.
+    # Must run before any config/LLM consumer resolves a key.
+    try:
+        refresh_llm_api_key_envs_from_user_registry()
+    except Exception:
+        # A refresh failure must never block host startup; the inherited env
+        # and the registry fallback keep their pre-existing semantics.
+        pass
 
     dispatch = DispatchService(root, {}, projects_suspended=args.projects_suspended)
     dispatch.history_preview = HistoryPreview(dispatch, resolve_config_path())

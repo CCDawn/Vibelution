@@ -498,7 +498,19 @@ def _project_provider_option(value: Any) -> dict[str, Any]:
         bounded = _bounded_string(option.get(key), max_length=max_length)
         if bounded is None:
             continue
-        if key == "base_url" and ("?" in bounded or "#" in bounded):
+        if key == "base_url":
+            # A base_url carrying "?"/"#" can only come from an external edit:
+            # validate_llm_provider_target already rejects query/fragment on
+            # every write path. Dropping the whole field here used to make the
+            # saved value vanish from the provider options view with no
+            # explanation. Project the stripped bare URL instead and flag the
+            # rejected suffix explicitly — without echoing the suffix itself,
+            # which may smuggle credentials in query parameters.
+            suffix_stripped = "?" in bounded or "#" in bounded
+            bounded = re.split(r"[?#]", bounded, maxsplit=1)[0]
+            projected[key] = bounded
+            if suffix_stripped:
+                projected["base_url_suffix_stripped"] = True
             continue
         projected[key] = bounded
     pinned_count = option.get("pinned_count")

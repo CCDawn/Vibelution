@@ -850,6 +850,32 @@ export class AssistantHost {
   }
 
   /**
+   * User-initiated host restart (main-only). This is the explicit human
+   * consent that the automatic respawn budget deliberately waits for: it
+   * refills an exhausted budget (ASSISTANT_HOST_UNAVAILABLE recovery) and it
+   * is also how a saved provider config reaches a resident host (stop +
+   * start spawn a fresh interpreter that reads the new config.toml and,
+   * through the startup registry refresh, the newly persisted API keys).
+   * Automatic respawn semantics are untouched: the budget still trips after
+   * RESPAWN_MAX_ATTEMPTS unexpected deaths, and only an explicit call like
+   * this one can clear it.
+   */
+  restartForUser(input?: { reason?: "config_apply" | "user_request" }): Promise<AssistantHostSnapshot> {
+    if (this.options.startupSignal?.aborted) return Promise.reject(new HostError("ASSISTANT_STOPPED"));
+    if (this.migrationAdmission || this.lifecycleAdmission || this.stopping) {
+      return Promise.reject(new HostError("ASSISTANT_LIFECYCLE_CLOSING"));
+    }
+    // Refill the whole budget first: this explicit restart is exactly the
+    // consent the circuit breaker waits for, and startGeneration re-runs
+    // resetRespawnState on success anyway.
+    const wasSuspended = this.respawnSuspended;
+    this.resetRespawnState();
+    console.warn(`ASSISTANT_HOST_RESTART phase=user_restart reason=${input?.reason ?? "user_request"} `
+      + `budget_refilled=${wasSuspended ? "exhausted" : "healthy"} state=${this.view.state}`);
+    return this.stop().then(() => this.startOwned(false));
+  }
+
+  /**
    * Main-only: caller must retain every producer and native-session fence from
    * before this call until the captured Job has exited and output has drained.
    * A missing acknowledgement or incomplete drain retains the same Job and is

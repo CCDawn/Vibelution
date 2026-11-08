@@ -2124,6 +2124,69 @@ describe("AssistantHost liveness watch and bounded respawn", () => {
     warnSpy.mockRestore();
   });
 
+  it("restartForUser refills an exhausted respawn budget and starts a fresh generation", async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { host, native, active, inputs } = fixture({ graceful: true });
+    await host.start();
+    killCurrentGeneration(active);
+    native.spawn.mockImplementation(() => { throw new Error("spawn refused"); });
+    await vi.advanceTimersByTimeAsync(64_000);
+    expect(host.snapshot()).toEqual({ state: "failed", errorCode: "ASSISTANT_HOST_UNAVAILABLE" });
+    // Only the explicit user restart may cross the exhausted budget.
+    await expect(host.start()).rejects.toThrow("ASSISTANT_HOST_UNAVAILABLE");
+    let restartedJob: WorkbenchJobHandle | undefined;
+    native.spawn.mockImplementation((input: WorkbenchJobSpawnInput) => {
+      inputs.push(input);
+      const runtime = input.arguments[input.arguments.indexOf("--runtime-dir") + 1];
+      writeFileSync(join(runtime, "ready.json"), JSON.stringify({ protocolVersion: 1, role: "launcher_assistant",
+        instanceId: input.arguments[input.arguments.indexOf("--instance-id") + 1], pid: 900, port: 12_345 }));
+      const job = {};
+      active.set(job, 1);
+      restartedJob = job;
+      return { pid: 100, job };
+    });
+    const snapshot = await host.restartForUser({ reason: "user_request" });
+    expect(snapshot).toEqual({ state: "ready", errorCode: null });
+    const restartLine = warnSpy.mock.calls.map(([line]) => String(line)).find(line => line.includes("ASSISTANT_HOST_RESTART"));
+    expect(restartLine).toContain("budget_refilled=exhausted");
+    // Retire the fresh generation the way stop expects: a dead Job lets
+    // waitDrain complete without real timers under vi.useFakeTimers().
+    active.set(restartedJob!, 0);
+    warnSpy.mockRestore();
+    await host.stop();
+  });
+
+  it("restartForUser replaces a ready generation so saved config applies (B1)", async () => {
+    const { host, native, active, inputs } = fixture({ graceful: true });
+    await host.start();
+    const firstJob = [...active.keys()].at(-1)!;
+    const envKeysBefore = inputs[0]!.env ? Object.keys(inputs[0]!.env).length : -1;
+    const snapshot = await host.restartForUser({ reason: "config_apply" });
+    expect(snapshot).toEqual({ state: "ready", errorCode: null });
+    expect(native.spawn).toHaveBeenCalledTimes(2);
+    // The old generation is retired, not left behind.
+    expect(active.get(firstJob)).toBeUndefined();
+    // The fresh generation spawns with a full environment again.
+    expect(inputs[1]!.env && Object.keys(inputs[1]!.env).length).toBeGreaterThanOrEqual(envKeysBefore);
+    await host.stop();
+  });
+
+  it("restartForUser refuses while a migration admission owns the lifecycle", async () => {
+    const { host, active } = fixture({ graceful: true });
+    await host.start();
+    const admission = host.beginMigrationAdmission();
+    await expect(host.restartForUser({ reason: "user_request" })).rejects.toThrow("ASSISTANT_LIFECYCLE_CLOSING");
+    admission.release();
+    // After a completed stop an explicit user restart is exactly the consent
+    // to run the host again; the ordinary start path admits it.
+    await host.stop();
+    await expect(host.restartForUser({ reason: "user_request" })).resolves.toEqual({ state: "ready", errorCode: null });
+    const job = [...active.keys()].at(-1)!;
+    active.set(job, 0);
+    await host.stop();
+  });
+
   it("does not respawn after a shell-initiated stop", async () => {
     vi.useFakeTimers();
     const { host, native, active } = fixture({ graceful: true });
