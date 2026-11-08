@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from config.llm_identity import split_model_ref
 from core.infrastructure import developer_sandbox
 from core.infrastructure.atomic_io import atomic_write_text
 from vibelution_storage import resolve_project_runtime_home, resolve_project_workspace_home
@@ -27,6 +28,12 @@ _HISTORICAL_REFERENCE_LIMIT = 50
 _SCAN_YIELD_EVERY = 25
 _ACTIVE_RUN_STATUSES = {"", "active", "queued", "running", "paused", "stopping", "started", "in_progress"}
 MIGRATION_WRITABLE_RUN_STATUSES = frozenset({"active", "running", "paused"})
+_COMPILED_REFERENCE_PINS_CTE = """WITH pins(owner_type, owner_id, agent_id, revision_id) AS (
+    SELECT 'agent',agent_id,agent_id,current_config_revision_id FROM agents
+    UNION ALL SELECT 'session',session_id,agent_id,agent_config_revision_id FROM sessions
+    UNION ALL SELECT 'admission',turn_id,agent_id,agent_config_revision_id FROM session_admissions
+        WHERE state IN ('reserved','journaled','projected')
+) """
 
 
 def _yield_gil() -> None:
@@ -217,12 +224,7 @@ def read_existing_model_reference_metadata(workspace_root: Path, runtime_root: P
             count = connection.execute("SELECT COUNT(*) FROM agents").fetchone()[0]
             if type(count) is not int or count > maximum:
                 raise ValueError("Too many Agent references")
-            sql = """WITH pins(owner_type, owner_id, agent_id, revision_id) AS (
-                SELECT 'agent',agent_id,agent_id,current_config_revision_id FROM agents
-                UNION ALL SELECT 'session',session_id,agent_id,agent_config_revision_id FROM sessions
-                UNION ALL SELECT 'admission',turn_id,agent_id,agent_config_revision_id FROM session_admissions
-                    WHERE state IN ('reserved','journaled','projected')
-            ) SELECT p.owner_type,p.owner_id,p.agent_id,p.revision_id,r.agent_id AS revision_owner,
+            sql = _COMPILED_REFERENCE_PINS_CTE + """SELECT p.owner_type,p.owner_id,p.agent_id,p.revision_id,r.agent_id AS revision_owner,
                 r.config_hash,json_type(r.config_json) AS config_type,
                 json_extract(r.config_json,'$.modelId') AS model_id,
                 json_extract(r.config_json,'$.dialogueModelId') AS dialogue_id,
@@ -447,30 +449,19 @@ def _scan_agent_binding_payload(
 ) -> None:
     if not isinstance(payload, dict):
         return
-    _append_if_model_ref(
-        refs,
-        model_id,
-        payload.get("modelId"),
-        source=source,
-        source_path=source_path,
-        path=f"{base_path}.modelId",
-        field="modelId",
-        owner_type=owner_type,
-        owner_id=owner_id,
-        label=label,
-    )
-    _append_if_model_ref(
-        refs,
-        model_id,
-        payload.get("dialogueModelId"),
-        source=source,
-        source_path=source_path,
-        path=f"{base_path}.dialogueModelId",
-        field="dialogueModelId",
-        owner_type=owner_type,
-        owner_id=owner_id,
-        label=label,
-    )
+    for field in ("modelId", "dialogueModelId", "agentTemplateLabel"):
+        _append_if_model_ref(
+            refs,
+            model_id,
+            payload.get(field),
+            source=source,
+            source_path=source_path,
+            path=f"{base_path}.{field}",
+            field=field,
+            owner_type=owner_type,
+            owner_id=owner_id,
+            label=label,
+        )
     _scan_llm_bindings(
         refs,
         model_id,
@@ -547,7 +538,7 @@ def _scan_agent_registry_refs(refs: list[dict[str, Any]], model_id: str, project
             continue
         agent_id = _normalized_model_id(agent.get("agentId") or agent.get("id")) or str(index)
         label = str(agent.get("displayName") or agent.get("name") or agent_id).strip()
-        for field in ("dialogueModelId", "agentTemplateLabel"):
+        for field in ("modelId", "dialogueModelId", "agentTemplateLabel"):
             _append_if_model_ref(
                 refs,
                 model_id,
@@ -573,16 +564,14 @@ def _scan_agent_registry_refs(refs: list[dict[str, Any]], model_id: str, project
         )
 
 
-def _iter_agent_store_bindings(project_root: Path) -> list[tuple[str, str, str, dict[str, Any]]]:
-    """Read per-agent dialogue bindings from the SQLite conversation store.
+def _iter_agent_store_bindings(project_root: Path) -> list[tuple[str, str, str, str, dict[str, Any]]]:
+    """Read compiled bindings pinned by Agents, Sessions and active admissions.
 
-    The agent registry moved from agent_directory/agents/agents.json into
-    conversations.sqlite3 (``agents`` + ``agent_config_revisions``), so the
-    deletion guards must consult the store or every live session binding
-    turns invisible. Each agent contributes its latest revision's compiled
-    config (max created_at_ms, revision_id as tie-breaker). Read-only and
-    best effort: a missing/corrupt database, absent tables or unparsable
-    config payloads yield nothing instead of breaking the guard.
+    Use the same native pin authorities as the strict metadata collector.
+    Unpinned historical revisions are not live; a Session's pinned revision
+    remains live after the Agent changes its current config. Read-only and
+    best effort: missing/corrupt stores or invalid config payloads yield no
+    bindings instead of breaking this presentation index.
     """
     from core.web.services.session.directory_runtime import conversation_store_path
 
@@ -591,49 +580,52 @@ def _iter_agent_store_bindings(project_root: Path) -> list[tuple[str, str, str, 
     except (ImportError, OSError, ValueError):
         return []
     source_path = _display_path(path, project_root)
-    bindings: list[tuple[str, str, str, dict[str, Any]]] = []
+    bindings: list[tuple[str, str, str, str, dict[str, Any]]] = []
     try:
         connection = sqlite3.connect(f"file:{path.resolve().as_posix()}?mode=ro", uri=True, timeout=0.5)
         try:
             rows = connection.execute(
+                _COMPILED_REFERENCE_PINS_CTE + """
+                SELECT p.owner_type, p.owner_id, a.display_name,
+                    CASE WHEN json_valid(r.config_json) THEN json_object(
+                        'modelId',json_extract(r.config_json,'$.modelId'),
+                        'dialogueModelId',json_extract(r.config_json,'$.dialogueModelId'),
+                        'agentTemplateLabel',json_extract(r.config_json,'$.agentTemplateLabel'),
+                        'llmBindings',json_extract(r.config_json,'$.llmBindings')) END
+                FROM pins AS p
+                JOIN agents AS a ON a.agent_id = p.agent_id
+                JOIN agent_config_revisions AS r
+                    ON r.agent_id = p.agent_id AND r.revision_id = p.revision_id
+                ORDER BY p.owner_type, p.owner_id
                 """
-                SELECT a.agent_id AS agent_id, a.display_name AS display_name, r.config_json AS config_json
-                FROM agents AS a
-                JOIN agent_config_revisions AS r ON r.agent_id = a.agent_id
-                WHERE r.revision_id = (
-                    SELECT r2.revision_id FROM agent_config_revisions AS r2
-                    WHERE r2.agent_id = a.agent_id
-                    ORDER BY r2.created_at_ms DESC, r2.revision_id DESC
-                    LIMIT 1
-                )
-                """
-            ).fetchall()
+            )
+            # Project only binding fields and stream rows: compiled configs can
+            # contain large prompts repeated across many admission pins.
+            for owner_type, owner_id, display_name, config_json in rows:
+                try:
+                    payload = json.loads(config_json) if config_json else None
+                except (TypeError, ValueError):
+                    continue
+                if isinstance(payload, dict):
+                    bindings.append((owner_type, str(owner_id or "").strip(), str(display_name or "").strip(), source_path, payload))
         finally:
             connection.close()
     except (OSError, sqlite3.Error):
         return bindings
-    for agent_id, display_name, config_json in rows:
-        try:
-            payload = json.loads(config_json) if config_json else None
-        except (TypeError, ValueError):
-            continue
-        if not isinstance(payload, dict):
-            continue
-        bindings.append((str(agent_id or "").strip(), str(display_name or "").strip(), source_path, payload))
     return bindings
 
 
 def _scan_agent_store_refs(refs: list[dict[str, Any]], model_id: str, project_root: Path) -> None:
-    for agent_id, label, source_path, payload in _iter_agent_store_bindings(project_root):
+    for owner_type, owner_id, label, source_path, payload in _iter_agent_store_bindings(project_root):
         _scan_agent_binding_payload(
             refs,
             model_id,
             payload,
             source="agent_store",
             source_path=source_path,
-            base_path=f"agents[{agent_id}]",
-            owner_type="agent",
-            owner_id=agent_id,
+            base_path=f"{owner_type}s[{owner_id}]",
+            owner_type=owner_type,
+            owner_id=owner_id,
             label=label,
         )
 
@@ -643,7 +635,7 @@ def _binding_model_id_values(payload: Any) -> list[tuple[str, str, Any]]:
     if not isinstance(payload, dict):
         return []
     values: list[tuple[str, str, Any]] = []
-    for field in ("modelId", "dialogueModelId"):
+    for field in ("modelId", "dialogueModelId", "agentTemplateLabel"):
         values.append((field, field, payload.get(field)))
     bindings = payload.get("llmBindings")
     if isinstance(bindings, dict):
@@ -673,6 +665,7 @@ def scan_provider_live_references(
     if not normalized_provider:
         return {
             "providerId": "",
+            "modelIds": [],
             "liveReferences": [],
             "liveReferenceCount": 0,
             "blocking": False,
@@ -680,6 +673,7 @@ def scan_provider_live_references(
     root = Path(project_root) if project_root is not None else PROJECT_ROOT
     prefix = f"{normalized_provider}/"
     refs: list[dict[str, Any]] = []
+    model_ids: set[str] = set()
 
     def _collect(
         values: list[tuple[str, str, Any]],
@@ -695,6 +689,12 @@ def scan_provider_live_references(
             raw = _normalized_model_id(value)
             if not raw.startswith(prefix):
                 continue
+            if field == "agentTemplateLabel":
+                try:
+                    split_model_ref(raw)
+                except ValueError:
+                    continue
+            model_ids.add(raw)
             refs.append(
                 _reference(
                     source=source,
@@ -725,14 +725,14 @@ def scan_provider_live_references(
                 label=str(agent.get("displayName") or agent.get("name") or "").strip(),
             )
 
-    for agent_id, label, store_source, payload in _iter_agent_store_bindings(root):
+    for owner_type, owner_id, label, store_source, payload in _iter_agent_store_bindings(root):
         _collect(
             _binding_model_id_values(payload),
             source="agent_store",
             source_path=store_source,
-            base_path=f"agents[{agent_id}]",
-            owner_type="agent",
-            owner_id=agent_id,
+            base_path=f"{owner_type}s[{owner_id}]",
+            owner_type=owner_type,
+            owner_id=owner_id,
             label=label,
         )
 
@@ -811,6 +811,7 @@ def scan_provider_live_references(
 
     return {
         "providerId": normalized_provider,
+        "modelIds": sorted(model_ids),
         "liveReferences": refs,
         "liveReferenceCount": len(refs),
         "blocking": bool(refs),
@@ -840,7 +841,7 @@ def _scan_chat_room_refs(refs: list[dict[str, Any]], model_id: str, project_root
             owner_id = f"{room_id}:{participant_id}"
             label = str(participant.get("title") or participant.get("agentCode") or participant_id).strip()
             base_path = f"rooms[{room_index}].participants[{participant_index}]"
-            for field in ("dialogueModelId", "agentTemplateLabel"):
+            for field in ("modelId", "dialogueModelId", "agentTemplateLabel"):
                 _append_if_model_ref(
                     refs,
                     model_id,
@@ -965,7 +966,7 @@ def _scan_active_supervised_run_refs(refs: list[dict[str, Any]], model_id: str, 
 
 
 def _team_live_policy_paths(project_root: Path) -> tuple[Path, ...]:
-    teams_root = _workspace_path(project_root, "teams")
+    teams_root = _workspace_path(project_root, "teams", "teams")
     if not teams_root.exists():
         return ()
     return tuple(sorted(teams_root.glob("*/workflow_orchestration.json"), key=lambda item: str(item)))
