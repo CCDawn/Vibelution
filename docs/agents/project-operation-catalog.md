@@ -51,6 +51,15 @@ Launcher 的平台管理使用实时 `index/describe` 的闭合契约。`runtime
 | `OPERATOR_ONLY` | 仅操作者可执行；普通 Agent 不开放 | agent purge（不可逆） |
 | `INTERNAL_ONLY` | 仅供系统服务内部使用 | 内部辅助 / 无外部面的端点 |
 
+### 2.1 平台动作两档裁剪（默认档 / operator 档）
+
+Launcher 个人助理平台动作目录（`personal_assistant_action_tool` / `personal_assistant_manage_tool` 的 `index/describe/execute`，装配真源 `core/assistant_runtime/actions.py`）按两档裁剪：
+
+- **默认档（默认可见可执行）**：只读与日常安全写，含只读对账/预览类（`*_receipt`、`*_preview`、`branch_cleanup_plan`、`affairs_conflict_*`、`episodic_conflict_review`、`legacy_*`）。
+- **operator 档（默认关闭）**：不可逆删除、生命周期与归档、团队/流程编排写、权限收缩与 ACL、一次性迁移写、清理执行。精确清单以 `core/assistant_runtime/action_tiers.py` 的 `OPERATOR_TIER_ACTIONS` 为准（本节是派生投影）。
+
+开关位置：活跃 operator config（`%USERPROFILE%\Documents\Vibelution\config\config.toml`）的 `[assistant] operator_tier_enabled`（bool，默认 `false`）。只能由操作者手动编辑开启；任何助理动作面（`settings_update`、`config_update` 等）均不可写该键。开关关闭时，operator 档动作从 `index` 隐藏，`describe` 与两条执行路径统一返回 `operator_tier_disabled`（与「动作不存在」可区分）；开启后目录恢复完整现状。动作契约与原生审批语义在两档下完全一致，本门只做可见性/可达性过滤。
+
 ## 3. 检索知识卡片 Schema（Retrieval-Oriented）
 
 卡片用于**检索与决策**，不复制运行时状态；正文最小，指针指向 SSOT。schema 字段：

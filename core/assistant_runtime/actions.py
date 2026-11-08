@@ -16,6 +16,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model, model_validator
 
+from . import action_tiers
 from .dispatch import DispatchError
 from .dispatch_approval import DispatchWrite, MAX_WRITE_TASK_CHARS
 from .task_source import TaskSelector
@@ -619,6 +620,20 @@ def _index_page(parameters: dict, schemas: dict, local: dict, managed: dict) -> 
             "indexParameters": _schema_without_titles(ActionIndex.model_json_schema())}
 
 
+def _operator_tier_rejection(action: str) -> dict:
+    """Structured, distinguishable rejection for a hidden operator-tier action.
+
+    ``operator_tier_disabled`` differs from the "Unknown Launcher action"
+    error: the action exists but stays invisible until the operator opens the
+    tier in the active operator config. The same shape serves describe and
+    both execution tools, so a hidden action can never be told apart from a
+    missing one only to leak its contract.
+    """
+    return {"ok": False, "code": "operator_tier_disabled", "action": action,
+            "message": "该动作属于 operator 档，当前 operator config 未开启（[assistant] operator_tier_enabled）；"
+                       "动作目录不展示本动作，也不能执行。只能由操作者手动编辑 config.toml 开启，助理动作无权改写该开关。"}
+
+
 def bind_actions(service, loop, main_control=None):
     global _binding
     if _binding is not None:
@@ -916,7 +931,17 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
         main_contracts.update({key: {"action": key, "description": _BROWSER_HELP[key],
             "parameters": model.model_json_schema(), "governed": key == "browser_interact"}
             for key, model in _BROWSER_SCHEMAS.items()})
+    # Operator-tier gate, re-read on every assembly (live operator config, no
+    # process cache). Closed by default: it can only be opened by an operator
+    # config edit, and no action surface can write that key.
+    operator_open = action_tiers.operator_tier_enabled()
     if action == "index":
+        if not operator_open:
+            hidden = action_tiers.OPERATOR_TIER_ACTIONS
+            schemas = {key: value for key, value in schemas.items() if key not in hidden}
+            local = {key: value for key, value in local.items() if key not in hidden}
+            managed = {key: value for key, value in managed.items() if key not in hidden}
+            main_contracts = {key: value for key, value in main_contracts.items() if key not in hidden}
         return _index_page(parameters, schemas, {**local, **main_contracts}, managed)
     if action == "describe":
         if parameters == {"action": "index"}:
@@ -925,6 +950,8 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
         if set(parameters) != {"action"} or parameters["action"] not in {*schemas, *local, *managed, *main_contracts}:
             raise ValueError("Unknown Launcher action")
         key = parameters["action"]
+        if not operator_open and key in action_tiers.OPERATOR_TIER_ACTIONS:
+            return _operator_tier_rejection(key)
         if key in main_contracts:
             return _describe_contract(main_contracts[key])
         if key in local:
@@ -932,6 +959,12 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
         if key in managed:
             return _describe_contract(managed[key][1])
         return _describe_contract({"action": key, "description": _HELP[key], "parameters": schemas[key].model_json_schema()})
+    if not operator_open and action in action_tiers.OPERATOR_TIER_ACTIONS:
+        # Same predicate for both tool paths (personal_assistant_action_tool
+        # and personal_assistant_manage_tool): the tier gate intercepts before
+        # any dispatch, so a hidden action cannot be bypassed by calling it
+        # directly against the tool.
+        return _operator_tier_rejection(action)
     if action in local:
         if not runtime:
             raise ValueError("Launcher native tool identity is required")

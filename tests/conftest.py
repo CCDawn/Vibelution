@@ -298,6 +298,24 @@ def reset_polling_memo_caches():
 
 
 @pytest.fixture(autouse=True)
+def pin_assistant_operator_tier_gate_open(monkeypatch):
+    """Keep the assistant operator-tier gate open unless a test says otherwise.
+
+    The Launcher action catalog reads the live operator config on every
+    assembly. Without a pin, a developer machine's real config.toml would
+    leak into catalog-visibility assertions. The existing suite was written
+    against the full catalog (the open tier restores exactly that behavior),
+    so the suite-wide default pins the tier OPEN at the config-read seam.
+    Tests that verify the closed default re-pin the same seam explicitly, or
+    call the pure reader with a config dict directly.
+    """
+    from core.assistant_runtime import action_tiers
+
+    monkeypatch.setattr(action_tiers, "read_operator_config_snapshot",
+                        lambda: {"assistant": {"operator_tier_enabled": True}})
+
+
+@pytest.fixture(autouse=True)
 def hermetic_mxc_sandbox(monkeypatch):
     """Default MXC sandbox off + clean cache so tests stay hermetic.
 

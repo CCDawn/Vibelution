@@ -55,7 +55,14 @@ def _run(tmp_path: Path, code: str, *, role: str = "launcher_assistant", root: s
     native_root = tmp_path / "native"
     native_root.mkdir(exist_ok=True)
     config = tmp_path / "config.toml"
-    config.write_text(config_text, encoding="utf-8")
+    # The synthetic operator config mirrors the suite-wide conftest pin: the
+    # historical suites exercise the full catalog, so child processes also run
+    # with the operator tier open. A test that pins the closed tier passes its
+    # own config_text containing the [assistant] section.
+    child_config_text = config_text
+    if "[assistant]" not in child_config_text:
+        child_config_text += "\n[assistant]\noperator_tier_enabled = true\n"
+    config.write_text(child_config_text, encoding="utf-8")
     env = {key: value for key, value in os.environ.items()
            if not key.upper().startswith("VIBELUTION_") and "API_KEY" not in key.upper()
            and key.upper() != "OPENAI_ADMIN_KEY"}

@@ -2489,6 +2489,29 @@ class SoundConfig(BaseModel):
 
 
 # ============================================================================
+# 个人助理平台配置
+# ============================================================================
+
+class AssistantConfig(BaseModel):
+    """个人助理平台级开关。
+
+    本段只承载操作者手动编辑的开关，不进入任何助理动作面
+    （settings_update / config_update 等白名单均不包含本段）。
+    """
+    model_config = ConfigDict(extra="ignore")
+
+    operator_tier_enabled: bool = Field(
+        default=False,
+        description=(
+            "operator 档平台动作总开关。false（默认）时个人助理动作目录只暴露"
+            "默认档（只读与日常安全写）；true 时完整目录（含破坏性、生命周期、"
+            "权限收缩、一次性迁移与清理执行动作）可见可执行。仅操作者手动编辑"
+            "config.toml 可改，助理动作不可写。"
+        ),
+    )
+
+
+# ============================================================================
 # 主配置类
 # ============================================================================
 
@@ -2514,6 +2537,7 @@ class AppConfig(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     avatar: AvatarConfig = Field(default_factory=AvatarConfig)
     user_profile: UserProfileConfig = Field(default_factory=UserProfileConfig)
+    assistant: AssistantConfig = Field(default_factory=AssistantConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     web_chat: WebChatConfig = Field(default_factory=WebChatConfig)
     session_catalog: SessionCatalogConfig = Field(
