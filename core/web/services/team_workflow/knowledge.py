@@ -2283,7 +2283,7 @@ def decide_transfer_request(team_id: str, transfer_id: str, payload: dict[str, A
         if decided_by_agent != str(workflow.get("ownerAgentId") or s.DEFAULT_OWNER_AGENT_ID):
             raise s.TeamWorkflowOrchestrationError("Only the workflow owner agent can decide transfer requests.")
         candidate_store = s._load_candidate_store(normalized_team_id)
-        transfers = s._load_transfer_records(normalized_team_id)
+        transfers = s._load_transfer_records(normalized_team_id, require_valid_utf8=True)
         transfer = s._find_transfer(transfers, normalized_transfer_id)
         if transfer is None:
             raise s.TeamWorkflowOrchestrationError("Transfer request not found.")

@@ -3662,14 +3662,23 @@ def _normalize_optional_bool(value: Any) -> bool | None:
     return None
 
 
-def _load_transfer_records(team_id: str) -> list[dict[str, Any]]:
+def _load_transfer_records(team_id: str, *, require_valid_utf8: bool = False) -> list[dict[str, Any]]:
     s = _service()
     path = s._transfer_records_path(team_id)
     if not path.exists():
         return []
     records: list[dict[str, Any]] = []
     skipped_reasons: list[str] = []
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+    for line_number, raw_line in enumerate(path.read_bytes().splitlines(), start=1):
+        try:
+            line = raw_line.decode("utf-8")
+        except UnicodeDecodeError:
+            if require_valid_utf8:
+                raise s.TeamWorkflowOrchestrationError(
+                    f"Transfer records contain invalid UTF-8 at line {line_number}; repair the file before updating it."
+                ) from None
+            skipped_reasons.append(f"line {line_number}: invalid UTF-8")
+            continue
         if not line.strip():
             continue
         try:

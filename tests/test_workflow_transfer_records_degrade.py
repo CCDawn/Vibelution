@@ -6,8 +6,15 @@ from __future__ import annotations
 
 import json
 
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from core.web.services import team_workflow_orchestration_service
 from core.web.services.team_workflow.knowledge_kernel import _load_transfer_records
+from core.web.services.team_workflow.knowledge import decide_transfer_request
+from core.web.routes.team_workflows.knowledge import router
+from core.web.routes.team_workflows.research_ops import router as research_router
 
 
 def _capture_workflow_event(monkeypatch) -> list[dict]:
@@ -91,3 +98,69 @@ def test_clean_transfer_records_write_no_degraded_event(
 
     assert [record["transferId"] for record in records] == ["tr-ok"]
     assert events == []
+
+
+def test_invalid_utf8_skips_only_bad_line_and_reports_it(tmp_path, monkeypatch):
+    records_path = tmp_path / "transfer_records.jsonl"
+    original = b'{"transferId":"before"}\n\xff\n{bad json\n{"transferId":"after"}\n'
+    records_path.write_bytes(original)
+    monkeypatch.setattr(team_workflow_orchestration_service, "_transfer_records_path", lambda _: records_path)
+    events = _capture_workflow_event(monkeypatch)
+
+    records = _load_transfer_records("team-1")
+
+    assert [record["transferId"] for record in records] == ["before", "after"]
+    assert records_path.read_bytes() == original
+    assert len(events) == 1
+    assert events[0]["fields"]["skippedLineCount"] == 2
+    assert events[0]["fields"]["skippedReasons"][0] == "line 2: invalid UTF-8"
+    assert events[0]["fields"]["skippedReasons"][1].startswith("line 3:")
+
+
+def test_coordination_status_survives_invalid_utf8(tmp_path, monkeypatch):
+    records_path = tmp_path / "transfer_records.jsonl"
+    records_path.write_bytes(b'{"transferId":"good"}\n\xff\n')
+    s = team_workflow_orchestration_service
+    monkeypatch.setattr(s.team_service, "assert_team_exists", lambda *_: True)
+    monkeypatch.setattr(s, "_load_or_create_workflow", lambda *_: {"workflowId": "wf", "workflowKind": "test", "routingPolicy": {}})
+    monkeypatch.setattr(s, "_load_candidate_store", lambda *_: {"candidates": []})
+    monkeypatch.setattr(s, "_transfer_records_path", lambda *_: records_path)
+    monkeypatch.setattr(s, "_relative_path", lambda *_: "synthetic/records.jsonl")
+    events = _capture_workflow_event(monkeypatch)
+    app = FastAPI()
+    app.include_router(router, prefix="/api")
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/api/teams/synthetic-team/workflow-orchestration/coordination/status")
+
+    assert response.status_code == 200
+    assert any(event["eventCode"] == "workflow.transfer_records_corrupt_lines_skipped" for event in events)
+
+
+def test_decision_refuses_to_overwrite_invalid_utf8(tmp_path, monkeypatch):
+    records_path = tmp_path / "transfer_records.jsonl"
+    original = b'{"transferId":"good","status":"requested"}\n\xff\n'
+    records_path.write_bytes(original)
+    s = team_workflow_orchestration_service
+    monkeypatch.setattr(s.team_service, "get_team", lambda *_: {})
+    monkeypatch.setattr(s, "_load_or_create_workflow", lambda *_: {"ownerAgentId": "owner"})
+    monkeypatch.setattr(s, "_load_candidate_store", lambda *_: {"candidates": []})
+    monkeypatch.setattr(s, "_transfer_records_path", lambda *_: records_path)
+    writes = []
+    monkeypatch.setattr(s, "_write_json", lambda *args: writes.append(args))
+
+    with pytest.raises(s.TeamWorkflowOrchestrationError, match="invalid UTF-8 at line 2"):
+        decide_transfer_request("team-1", "good", {"decision": "approved", "decidedByAgent": "owner"})
+
+    app = FastAPI()
+    app.include_router(research_router, prefix="/api")
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(
+            "/api/teams/team-1/workflow-orchestration/transfers/good/decide",
+            json={"decision": "approved", "decidedByAgent": "owner"},
+        )
+
+    assert response.status_code == 422
+    assert "invalid UTF-8 at line 2" in response.text
+    assert writes == []
+    assert records_path.read_bytes() == original
