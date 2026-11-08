@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AssistantHost, type AssistantHostOptions, type AssistantHostRequest } from "../src/assistant/assistantHost.js";
+import { AssistantHost, HostError, type AssistantHostOptions, type AssistantHostRequest } from "../src/assistant/assistantHost.js";
 import { invokeAssistant, LAUNCHER_ASSISTANT_URL } from "../src/assistant/assistantBridge.js";
 import { affairsSyncMigrationId } from "../src/assistant/mainControlTransport.js";
 import { applyDesktopLaunchSettingsToEnvironment } from "../src/launch/desktopLaunchSettings.js";
@@ -144,6 +144,20 @@ describe("AssistantHost", () => {
       fetchImpl.mockResolvedValueOnce(Response.json({ ...snapshot, [key]: "foreign" }));
       await expect(host.request({ operation: "usageSummary" })).rejects.toThrow("ASSISTANT_IDENTITY_INVALID");
     }
+    await host.stop();
+  });
+
+  it("maps a fail-closed reminder owner to ASSISTANT_REMINDER_BLOCKED with its backend code", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    fetchImpl.mockResolvedValueOnce(Response.json({ detail: { code: "receipt_integrity_failed" } }, { status: 409 }));
+    const failure = await host.nextReminder().catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(HostError);
+    expect((failure as HostError).code).toBe("ASSISTANT_REMINDER_BLOCKED");
+    expect((failure as HostError).detail).toBe("receipt_integrity_failed");
+    // A transient owner failure keeps the retryable status-only mapping.
+    fetchImpl.mockResolvedValueOnce(Response.json({ detail: { code: "receipt_store_busy" } }, { status: 503 }));
+    await expect(host.nextReminder()).rejects.toThrow("ASSISTANT_HTTP_FAILED");
     await host.stop();
   });
 

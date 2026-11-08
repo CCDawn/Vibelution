@@ -332,6 +332,37 @@ def _candidate_can_fall_through(exc: Exception) -> bool:
     return isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in {404, 405}
 
 
+# Provider 自定义 extra_headers 透传的有界信任校验（与 config/llm_security 的
+# extra_headers 校验思想一致，但在本模块内联小校验：discovery 是只读 GET，
+# 鉴权仍由各 adapter 的原生头唯一持有，extra_headers 不得携带或覆盖）。
+_EXTRA_HEADER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9-]+$")
+_EXTRA_HEADER_VALUE_MAX_LENGTH = 500
+_EXTRA_HEADER_NAME_MAX_LENGTH = 128
+# 原生鉴权头：provider extra_headers 中的同名条目一律剔除，防止重复/覆盖
+# credential_ref 解析出的鉴权值（openai 系 Authorization、anthropic x-api-key）。
+_NATIVE_CREDENTIAL_HEADER_NAMES = frozenset({"authorization", "x-api-key"})
+
+
+def _provider_extra_headers(provider: Any) -> dict[str, str]:
+    raw = provider.get("extra_headers") if isinstance(provider, dict) else None
+    if not isinstance(raw, dict):
+        return {}
+    merged: dict[str, str] = {}
+    for raw_name, raw_value in raw.items():
+        name = str(raw_name or "").strip()
+        if not name or len(name) > _EXTRA_HEADER_NAME_MAX_LENGTH:
+            continue
+        if not _EXTRA_HEADER_NAME_PATTERN.fullmatch(name):
+            continue
+        if name.lower() in _NATIVE_CREDENTIAL_HEADER_NAMES:
+            continue
+        value = str(raw_value or "").strip()
+        if not value or len(value) > _EXTRA_HEADER_VALUE_MAX_LENGTH:
+            continue
+        merged[name] = value
+    return merged
+
+
 def _discover_candidates(
     request: ProviderDiscoveryRequest,
     adapter_id: str,
@@ -344,10 +375,13 @@ def _discover_candidates(
     attempted: list[str] = []
     last_error: Exception | None = None
     saw_empty_response = False
+    # provider.extra_headers 先铺底，adapter 原生头后写覆盖：鉴权头冲突时以
+    # 原生鉴权优先（extra_headers 中的 Authorization/x-api-key 已被剔除）。
+    effective_headers = {**_provider_extra_headers(request.provider), **headers}
     for endpoint in endpoints:
         attempted.append(_safe_endpoint(endpoint))
         try:
-            payload = _bounded_json_get(endpoint, headers=headers, params=params, request=request)
+            payload = _bounded_json_get(endpoint, headers=effective_headers, params=params, request=request)
             models = _validate_models(normalize(payload))
         except Exception as exc:
             last_error = exc

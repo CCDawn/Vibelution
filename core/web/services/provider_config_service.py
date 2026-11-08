@@ -104,6 +104,10 @@ def _provider_discovery_failure_details(exc: Exception) -> tuple[str, bool]:
             return "protocol_mismatch", False
         if status_code == 429:
             return "rate_limited", True
+        if status_code == 503:
+            # 503 统一映射 service_unavailable（前端已有该 reason 的独立文案），
+            # 不再与 5xx 泛化的 upstream_rejected 双名并存。
+            return "service_unavailable", True
         return "upstream_rejected", status_code >= 500
     if isinstance(exc, httpx.TimeoutException) or isinstance(exc, TimeoutError):
         return "timeout", True

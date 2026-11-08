@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { startAssistantReminderPump } from "../src/assistant/reminderPump.js";
-import type { AssistantReminder } from "../src/assistant/assistantHost.js";
+import { HostError, type AssistantReminder } from "../src/assistant/assistantHost.js";
 
 afterEach(() => vi.useRealTimers());
 
@@ -280,5 +280,75 @@ describe("Launcher assistant reminders", () => {
     expect(onError).toHaveBeenNthCalledWith(1, "transport");
     expect(onError).toHaveBeenNthCalledWith(3, "transport");
     await pump();
+  });
+
+  it("stops on a blocked owner, reports its backend code once, and keeps probing slowly", async () => {
+    vi.useFakeTimers();
+    const { host } = fixture();
+    const blocked = new HostError("ASSISTANT_REMINDER_BLOCKED", "receipt_integrity_failed");
+    host.nextReminder.mockReset().mockRejectedValueOnce(blocked)
+      .mockRejectedValueOnce(blocked)
+      .mockResolvedValue(null);
+    const onBlocked = vi.fn(), onError = vi.fn(), onSuccess = vi.fn();
+    const pump = startAssistantReminderPump({ host, available: () => true, notify: vi.fn(), openAssistant: vi.fn(),
+      onError, onBlocked, onSuccess, blockedRetryMs: 900_000 });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(onBlocked).toHaveBeenCalledOnce();
+    expect(onBlocked).toHaveBeenCalledWith("receipt_integrity_failed");
+    // A blocked owner never feeds the transport warning streak.
+    expect(onError).not.toHaveBeenCalled();
+    // The fast poll stays stopped inside the retry window.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(host.nextReminder).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(900_000);
+    expect(host.nextReminder).toHaveBeenCalledTimes(2);
+    expect(onBlocked).toHaveBeenCalledTimes(2);
+    // A resolved cause resumes the poll on its own.
+    await vi.advanceTimersByTimeAsync(900_000);
+    expect(host.nextReminder).toHaveBeenCalledTimes(3);
+    expect(onSuccess).toHaveBeenCalled();
+    await pump();
+  });
+
+  it("resumes immediately from a blocked stop through the recovery action", async () => {
+    vi.useFakeTimers();
+    const { host } = fixture();
+    host.nextReminder.mockReset().mockRejectedValueOnce(new HostError("ASSISTANT_REMINDER_BLOCKED", "reminder_imported_profile_blocked"))
+      .mockResolvedValue(null);
+    const onBlocked = vi.fn();
+    const pump = startAssistantReminderPump({ host, available: () => true, notify: vi.fn(), openAssistant: vi.fn(),
+      onError: vi.fn(), onBlocked });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(onBlocked).toHaveBeenCalledWith("reminder_imported_profile_blocked");
+    pump.resumeFromBlocked();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(host.nextReminder).toHaveBeenCalledTimes(2);
+    await pump();
+  });
+
+  it("ignores a recovery action during migration drain and after permanent stop", async () => {
+    vi.useFakeTimers();
+    const { host } = fixture();
+    host.nextReminder.mockReset().mockRejectedValue(new HostError("ASSISTANT_REMINDER_BLOCKED", "receipt_integrity_failed"));
+    const onBlocked = vi.fn();
+    const pump = startAssistantReminderPump({ host, available: () => true, notify: vi.fn(), openAssistant: vi.fn(),
+      onError: vi.fn(), onBlocked, blockedRetryMs: 900_000 });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(host.nextReminder).toHaveBeenCalledTimes(1);
+    const drain = pump.drainForMigration();
+    pump.resumeFromBlocked();
+    await drain;
+    // The drain owns admission: no probe timer fires and the recovery action stays parked.
+    await vi.advanceTimersByTimeAsync(900_000);
+    expect(host.nextReminder).toHaveBeenCalledTimes(1);
+    // The ordinary resume restarts the poll and re-detects the block.
+    pump.resumeAfterMigration();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(host.nextReminder).toHaveBeenCalledTimes(2);
+    expect(onBlocked).toHaveBeenCalledTimes(2);
+    await pump();
+    pump.resumeFromBlocked();
+    await vi.advanceTimersByTimeAsync(900_000);
+    expect(host.nextReminder).toHaveBeenCalledTimes(2);
   });
 });

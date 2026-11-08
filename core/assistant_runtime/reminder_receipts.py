@@ -470,6 +470,45 @@ class ReminderReceiptStore:
         return {"created": True, **self._public((event_id, "submitted", "attention_fallback")),
                 "attemptToken": raw}
 
+    def requeue_system_notification(self, event_id: str) -> dict:
+        """Reclaim an unopened system toast through the attention fallback.
+
+        The Windows toast API exposes no suppression or dismissal callback: a
+        do-not-disturb shell swallows the toast while the "show" callback has
+        already fired, so a submitted system_notification receipt would stay
+        unread for the rest of the day. Exactly like recover_fallback, the
+        caller must hold the native profile's host-owner OS lock for its
+        entire lifetime and main must have drained any previous dialog; the
+        receipt row stays submitted (an unconfirmed display, never a seen
+        receipt) while the channel moves to attention_fallback and a fresh
+        attempt token replaces the old one, so a stale toast can no longer
+        settle. Unlike recover_fallback, an attempt this owner itself
+        delivered may be reclaimed: a submitted row proves the one permitted
+        submission already returned, so no external attempt is running. A
+        pending or opened receipt is never requeued.
+        """
+        event_id = _token(event_id)
+        raw = secrets.token_hex(32)
+        digest = hashlib.sha256(raw.encode("ascii")).hexdigest()
+        with self._transaction() as conn:
+            if list(conn.execute("SELECT phase FROM receipt_fence WHERE singleton=1")) != [("OPEN",)]:
+                raise ReminderReceiptError("receipt_admission_closed")
+            rows = list(conn.execute("SELECT state,channel FROM reminder_receipts WHERE event_id=?", (event_id,)))
+            if rows != [("submitted", "system_notification")]:
+                raise ReminderReceiptError("receipt_fallback_not_allowed")
+            old = list(conn.execute("SELECT sender_id FROM receipt_inflight WHERE event_id=?", (event_id,)))
+            conn.execute("INSERT OR IGNORE INTO receipt_senders VALUES (?,1)", (self._sender_id,))
+            conn.execute("UPDATE reminder_receipts SET token_hash=?,channel='attention_fallback' WHERE event_id=?",
+                         (digest, event_id))
+            conn.execute("DELETE FROM receipt_inflight WHERE event_id=?", (event_id,))
+            conn.execute("INSERT INTO receipt_inflight VALUES (?,?,1)", (event_id, self._sender_id))
+            if old and old[0][0] != self._sender_id:
+                conn.execute("DELETE FROM receipt_senders WHERE sender_id=? AND NOT EXISTS "
+                             "(SELECT 1 FROM receipt_inflight WHERE sender_id=?)", (old[0][0], old[0][0]))
+        self._owned[event_id] = digest
+        return {"created": True, **self._public((event_id, "submitted", "attention_fallback")),
+                "attemptToken": raw}
+
     @staticmethod
     def _attempt_digest(event_id, token, channel):
         event_id = _token(event_id)

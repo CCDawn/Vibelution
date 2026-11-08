@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Tuple
 
 from .types import LLMError, LLMOutputTruncatedError
@@ -72,6 +73,46 @@ def _is_gateway_transient_400(message: str) -> bool:
     if any(phrase in message for phrase in GATEWAY_TRANSIENT_400_PHRASES):
         return True
     return "渠道" in message and any(token in message for token in _GATEWAY_CHANNEL_DISABLED_TOKENS)
+
+
+# 结构化 HTTP 状态证据：只认 "HTTP 503" / '"status_code": 429' / "code=401"
+# 形态（Error code: 400 属同族）。纯文本三位数（模型名、request id、trace
+# 片段里的 "-403-"、"4013"）不是状态码证据——词边界要求三位数后紧跟非数字，
+# "HTTP 1429"、"error_code=4013" 都不命中。
+_UPSTREAM_HTTP_STATUS_PATTERN = re.compile(
+    r"\bHTTP\s+([1-5][0-9]{2})\b"
+    r"|['\"]?status_code['\"]?\s*[:=]\s*([1-5][0-9]{2})\b"
+    r"|\bcode\s*[=:]\s*([1-5][0-9]{2})\b",
+    re.IGNORECASE,
+)
+
+# 401/403 文案证据同样要求两侧数字边界："request id 4013"、"端口 1401" 不再
+# 误判成认证失败；"401"/"403" 独立 token 或 "-403-" 这类非数字邻接仍命中。
+_AUTH_STATUS_CODE_PATTERN = re.compile(r"(?<![0-9])40[13](?![0-9])")
+
+
+def _upstream_http_status(exc: Exception, message: str) -> int | None:
+    """读取上游异常对象携带的结构化状态码；缺失时回退消息里的结构化形态。"""
+
+    for candidate in (exc, getattr(exc, "__cause__", None)):
+        if candidate is None:
+            continue
+        raw = getattr(candidate, "status_code", None)
+        if raw is None:
+            response = getattr(candidate, "response", None)
+            raw = getattr(response, "status_code", None)
+        if raw is None:
+            continue
+        try:
+            status = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if 100 <= status <= 599:
+            return status
+    match = _UPSTREAM_HTTP_STATUS_PATTERN.search(message)
+    if match:
+        return int(next(group for group in match.groups() if group))
+    return None
 
 
 def classify_exception(exc: Exception) -> LLMError:
@@ -167,9 +208,44 @@ def classify_exception(exc: Exception) -> LLMError:
         or "api_error" in lower
     ):
         return LLMError("server_error", exc_msg or "provider 服务异常", retryable=True)
+    # 结构化状态码优先于文案子串：异常对象携带的上游状态码或消息里的
+    # "HTTP 401"/"code=400" 形态是硬证据，先按状态码定类。这样 "invalid
+    # authorization header" + 上游 400 归 provider_protocol_error 而不是被
+    # "authorization" 文案拖进 auth_error；真 401 消息里夹带 "400" 文案时
+    # 仍归 auth_error，不被 bad_request 子串抢走。只覆盖 401/403/400 三类：
+    # 429/5xx 仍走下方关键词表——litellm.RateLimitError 等异常对象自带
+    # status_code=429 但依赖关键词表语义（类型证据提升归 error_classification
+    # 管），这里抢先判定会漂移既有判例。
+    upstream_status = _upstream_http_status(exc, exc_msg)
+    if upstream_status in (401, 403):
+        return LLMError(
+            "auth_error",
+            "认证失败，请检查 provider 凭据",
+            retryable=False,
+            details={"httpStatus": upstream_status},
+        )
+    if upstream_status == 400:
+        return LLMError(
+            "provider_protocol_error",
+            exc_msg or "provider 请求参数错误",
+            retryable=False,
+            details={"httpStatus": 400},
+        )
     if "bad_request" in lower or "bad request" in lower or "invalid params" in lower or "400" in lower:
         return LLMError("provider_protocol_error", exc_msg or "provider 请求参数错误", retryable=False)
-    if "auth" in lower or "401" in lower or "403" in lower:
+    # auth 文案证据收紧为具体短语 + 独立 401/403 token：裸 "auth" 子串会误伤
+    # "authorizer"，裸 "401" 会误伤 "4013"。常见厂商文案（unauthorized /
+    # authentication / invalid api key / api key not valid）与独立状态码才
+    # 构成认证失败证据。
+    if (
+        "unauthorized" in lower
+        or "authentication" in lower
+        or "invalid api key" in lower
+        or "invalid_api_key" in lower
+        or "api key not valid" in lower
+        or "incorrect api key" in lower
+        or bool(_AUTH_STATUS_CODE_PATTERN.search(lower))
+    ):
         return LLMError("auth_error", "认证失败，请检查 provider 凭据", retryable=False)
     if "429" in lower or "rate limit" in lower:
         return LLMError("rate_limit", "请求频率受限", retryable=True)
