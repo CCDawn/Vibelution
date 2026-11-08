@@ -1509,10 +1509,19 @@ def test_web_workbench_open_browser_is_explicit_and_no_browser_wins():
 
 
 def test_web_workbench_main_does_not_open_browser_by_default(monkeypatch):
+    # main() 的非 reload 分支走 create_workbench_server + own_server + server.run()
+    # （uvicorn.run 只属于 reload 分支）。mock 必须覆盖真实服务路径，否则本测试会
+    # 启动真实服务器：端口空闲时挂起、被占时 bind 失败。
+    from contextlib import contextmanager
+
     from scripts import web_workbench
 
     opened: list[str] = []
     uvicorn_calls: list[dict[str, object]] = []
+    server_factories: list[dict[str, object]] = []
+    server_runs: list[dict[str, object]] = []
+    own_server_entries: list[object] = []
+    fallback_calls: list[bool] = []
 
     monkeypatch.setattr(
         web_workbench,
@@ -1525,13 +1534,48 @@ def test_web_workbench_main_does_not_open_browser_by_default(monkeypatch):
         "run",
         lambda app, **kwargs: uvicorn_calls.append({"app": app, **kwargs}),
     )
+    # 不让 main() 改进程环境 flag，也不真正启动 runtime scene。
+    monkeypatch.setattr(
+        web_workbench,
+        "enable_user_env_fallback_for_workbench",
+        lambda: fallback_calls.append(True),
+    )
+    monkeypatch.setattr(web_workbench, "bootstrap_runtime_scene_for_workbench", lambda: False)
 
+    class _FakeWorkbenchServer:
+        def __init__(self, factory_args: dict[str, object]) -> None:
+            self._factory_args = factory_args
+
+        def run(self) -> None:
+            server_runs.append(dict(self._factory_args))
+
+    def fake_create_workbench_server(app, *, host, port):
+        factory_args = {"app": app, "host": host, "port": port}
+        server_factories.append(dict(factory_args))
+        return _FakeWorkbenchServer(factory_args)
+
+    monkeypatch.setattr(web_workbench, "create_workbench_server", fake_create_workbench_server)
+
+    @contextmanager
+    def fake_own_server(server):
+        own_server_entries.append(server)
+        yield
+
+    monkeypatch.setattr(web_workbench, "own_server", fake_own_server)
+
+    monkeypatch.delenv(web_workbench.DEFER_RUNTIME_SCENE_RETENTION_ENV, raising=False)
     web_workbench.main()
 
     assert opened == []
-    assert uvicorn_calls == [
-        {"app": "core.web.app:app", "host": "127.0.0.1", "port": 8000, "reload": False}
+    assert uvicorn_calls == []
+    assert fallback_calls == [True]
+    assert server_factories == [
+        {"app": "core.web.app:app", "host": "127.0.0.1", "port": 8000}
     ]
+    assert len(server_runs) == 1
+    assert own_server_entries and own_server_entries[0] is not None
+    # finally 语义：场景未启动时 DEFER flag 必须被清除，不泄漏到进程环境。
+    assert web_workbench.DEFER_RUNTIME_SCENE_RETENTION_ENV not in os.environ
 
 
 def _powershell_exe() -> str:
