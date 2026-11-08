@@ -235,7 +235,8 @@ def test_failed_discovery_never_falls_back_to_previous_success(operator, discove
     discovery(status=503)
     before = operator.read_bytes()
     result = call(model_query="Opus5.5")
-    assert result["error"] == "upstream_rejected" and "modelRef" not in result
+    # 503 统一映射 service_unavailable（不再与 5xx 泛化 upstream_rejected 双名）。
+    assert result["error"] == "service_unavailable" and "modelRef" not in result
     assert "candidates" not in result and operator.read_bytes() == before
 
 

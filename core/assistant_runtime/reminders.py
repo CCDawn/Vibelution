@@ -3,6 +3,9 @@
 The caller owns a single dedicated thread for this object's entire lifetime.
 Only a committed reservation is returned to Electron main; an uncertain result
 is never retried. Daily ledgers retain deduplication records across restarts.
+An unopened system toast is requeued once per day through the attention
+fallback after a bounded delay, because a do-not-disturb shell suppresses the
+toast without any suppression callback.
 """
 from __future__ import annotations
 
@@ -17,6 +20,10 @@ from .reminder_receipts import ReminderReceiptError, ReminderReceiptStore
 _EVENT = re.compile(r"reminder:([0-9]{8}):[a-f0-9]{64}\Z")
 _ITEM = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,159}\Z")
 _DAILY_CAPACITY = 4096
+# A do-not-disturb shell suppresses the toast without any callback, so the
+# submitted system receipt is requeued once through the always visible
+# attention fallback after this delay instead of being lost for the day.
+_SYSTEM_REDELIVERY_AFTER_SECONDS = 600
 
 
 class LauncherReminders:
@@ -27,6 +34,7 @@ class LauncherReminders:
         self.stores = {}
         self.outstanding = {}
         self.claimed = set()
+        self.unread_system = {}
 
     def _no_import(self):
         # Import creates this directory before publishing any ledger change.
@@ -72,6 +80,10 @@ class LauncherReminders:
             items = service.list_items(self.agent_id).get("items", [])
             day = datetime.now(timezone.utc).strftime("%Y%m%d")
             self._retire_old(day)
+            # Unread system toasts are only requeued inside their own day;
+            # a later day derives a fresh event id and a fresh reservation.
+            self.unread_system = {event_id: seen for event_id, seen in self.unread_system.items()
+                                  if _EVENT.fullmatch(event_id) is not None and event_id.split(":")[1] == day}
             for item in items:
                 if item.get("status") != "open" or item.get("dueState") not in {"today", "overdue"}:
                     continue
@@ -94,13 +106,29 @@ class LauncherReminders:
                 reservation = store.reserve(event_id)
                 recovered = False
                 if not reservation["created"]:
-                    if (reservation["state"] != "submitted"
-                            or reservation["channel"] != "attention_fallback"):
+                    if reservation["state"] != "submitted":
                         continue
-                    # The production host owns host-owner.lock. Electron must
-                    # also drain any prior dialog before polling a new host.
-                    reservation = store.recover_fallback(event_id)
-                    recovered = True
+                    if reservation["channel"] == "attention_fallback":
+                        # The production host owns host-owner.lock. Electron must
+                        # also drain any prior dialog before polling a new host.
+                        reservation = store.recover_fallback(event_id)
+                        recovered = True
+                    elif reservation["channel"] == "system_notification":
+                        # "show" fired but nobody interacted: the toast may have
+                        # been swallowed by do-not-disturb. Wait a bounded delay,
+                        # then requeue once through the attention fallback.
+                        seen = self.unread_system.get(event_id)
+                        now = datetime.now(timezone.utc)
+                        if seen is None:
+                            self.unread_system[event_id] = now
+                            continue
+                        if (now - seen).total_seconds() < _SYSTEM_REDELIVERY_AFTER_SECONDS:
+                            continue
+                        reservation = store.requeue_system_notification(event_id)
+                        self.unread_system.pop(event_id, None)
+                        recovered = True
+                    else:
+                        continue
                 self.claimed.add(event_id)
                 self.outstanding.setdefault(day, set()).add(event_id)
                 return {"schemaVersion": 1, "event": {
@@ -128,6 +156,11 @@ class LauncherReminders:
         if not opened:
             result = store.record_submitted(event_id, token, channel=channel)
             self.outstanding.get(match.group(1), set()).discard(event_id)
+            if channel == "system_notification":
+                # A shown toast display stays unconfirmed; stop claiming this
+                # event so a later poll can requeue it through the attention
+                # fallback while it remains unopened for the day.
+                self.claimed.discard(event_id)
             self._retire_old(datetime.now(timezone.utc).strftime("%Y%m%d"))
             return result
         try:
@@ -136,17 +169,23 @@ class LauncherReminders:
             if str(error) != "receipt_attempt_owner_required":
                 raise
             result = store.record_recovered_opened(event_id, token, channel=channel)
+        self.unread_system.pop(event_id, None)
         self._retire_old(datetime.now(timezone.utc).strftime("%Y%m%d"))
         return result
 
     def fallback(self, event_id: str, token: str):
         # A late system failure only updates its existing receipt; next() stays
         # blocked for imported profiles and cannot initiate another delivery.
+        # Re-claiming the event keeps next() away from recover_fallback while
+        # this owner's own queued dialog is still being settled; a restart
+        # reopens the queued fallback through the ordinary recovery path.
         match = _EVENT.fullmatch(event_id) if isinstance(event_id, str) else None
         if not match:
             raise ReminderReceiptError("reminder_event_invalid")
         store = self._store(match.group(1), create=False)
         result = store.record_notification_fallback(event_id, token)
+        self.claimed.add(event_id)
+        self.unread_system.pop(event_id, None)
         self._retire_old(datetime.now(timezone.utc).strftime("%Y%m%d"))
         return result
 

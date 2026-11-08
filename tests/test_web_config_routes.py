@@ -4885,3 +4885,247 @@ def test_provider_merge_preview_rejects_unknown_fields() -> None:
 
     assert response.status_code == 422
     assert "must-not-be-accepted" not in response.text
+
+
+# ---------------------------------------------------------------------------
+# B 线回归：cleared 名单跨重启有界信任、apply 单 env 写失败不中断、验证摘要
+# 只认结构化状态码、LLM 探测异常 scene 事件脱敏。
+# ---------------------------------------------------------------------------
+
+
+def test_config_workspace_apply_trusts_cleared_env_names_across_restart(monkeypatch):
+    # 后端在 UI 清除与 apply 之间重启后，_PENDING_CLEAR_ENVS 进程注册已丢失；
+    # draft_meta 携带的 cleared 名单经黑名单/格式/前缀校验后仍须执行 HKCU 删除。
+    public_config = copy.deepcopy(load_public_config())
+    _ensure_preset_model(public_config, "deepseek_v4_pro")
+    cleared_env = "VIBELUTION_LLM_MODEL_DEEPSEEK_V4_PRO_API_KEY"
+    writes = []
+    deletes = []
+    scene_events = []
+
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+    monkeypatch.setattr(config_service, "save_public_config", lambda updated: None)
+    monkeypatch.setattr(
+        config_service,
+        "reload_config",
+        lambda config_path=None: config_service.build_effective_config(public_config),
+    )
+    monkeypatch.setattr(config_service, "_set_user_env_var", lambda name, value: writes.append(name))
+    monkeypatch.setattr(config_service, "_delete_user_env_var", lambda name: deletes.append(name))
+    monkeypatch.setattr(
+        config_service,
+        "_record_config_scene_event",
+        lambda *args, **kwargs: scene_events.append((args, kwargs)),
+    )
+    # 模拟进程重启：进程内注册清空，draft_meta 仍携带 cleared 名单。
+    config_service._PENDING_CLEAR_ENVS.clear()
+
+    normalized = config_service._normalize_draft_meta({"pending_cleared_api_keys": [cleared_env]})
+    assert normalized["pending_cleared_api_keys"] == [cleared_env]
+
+    response = client.put(
+        "/api/config/apply",
+        json={
+            "publicConfig": public_config,
+            "draftMeta": {"pending_cleared_api_keys": [cleared_env]},
+            "baseHash": public_config_hash(public_config),
+        },
+    )
+
+    assert response.status_code == 200
+    assert deletes == [cleared_env]
+    assert writes == []
+    assert response.json()["envWriteFailureCount"] == 0
+
+
+def test_config_workspace_apply_drops_forged_cleared_env_names(monkeypatch):
+    # 有界信任边界：黑名单（PATH）、未认可前缀（RANDOM_ENV）与小写格式名被
+    # validate_llm_api_key_env 丢弃；认可前缀名单最多保留 32 个。
+    public_config = copy.deepcopy(load_public_config())
+    deletes = []
+
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+    monkeypatch.setattr(config_service, "save_public_config", lambda updated: None)
+    monkeypatch.setattr(
+        config_service,
+        "reload_config",
+        lambda config_path=None: config_service.build_effective_config(public_config),
+    )
+    monkeypatch.setattr(config_service, "_delete_user_env_var", lambda name: deletes.append(name))
+
+    valid_names = [f"VIBELUTION_LLM_FORGED_{index}_API_KEY" for index in range(40)]
+    response = client.put(
+        "/api/config/apply",
+        json={
+            "publicConfig": public_config,
+            "draftMeta": {
+                "pending_cleared_api_keys": ["PATH", "lowercase_key", "RANDOM_ENV"] + valid_names,
+            },
+            "baseHash": public_config_hash(public_config),
+        },
+    )
+
+    assert response.status_code == 200
+    assert deletes == valid_names[:32]
+
+
+def test_config_workspace_apply_reports_env_write_failures_without_aborting(monkeypatch):
+    # 单个 env 写失败不中断整个 apply（config.toml 已保存的事实保持）：失败
+    # 清单进 apply 响应，scene 事件只记 env 名与错误类别，其余 env 正常写入，
+    # 失败条目的 pending token 保留等待下次 apply 重试。
+    public_config = copy.deepcopy(load_public_config())
+    _ensure_preset_model(public_config, "deepseek_v4_pro")
+    failing_env = "VIBELUTION_LLM_MODEL_DEEPSEEK_V4_PRO_API_KEY"
+    healthy_env = "VIBELUTION_LLM_MODEL_RELAY_GPT_5_6_LUNA_API_KEY"
+    cleared_env = "VIBELUTION_LLM_APPLY_FAIL_CLEAR_API_KEY"
+    writes = []
+    deletes = []
+    scene_events = []
+
+    def fake_set_user_env_var(name, value):
+        if name == failing_env:
+            raise OSError("registry write denied")
+        writes.append(name)
+
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+    monkeypatch.setattr(config_service, "save_public_config", lambda updated: None)
+    monkeypatch.setattr(
+        config_service,
+        "reload_config",
+        lambda config_path=None: config_service.build_effective_config(public_config),
+    )
+    monkeypatch.setattr(config_service, "_set_user_env_var", fake_set_user_env_var)
+    monkeypatch.setattr(config_service, "_delete_user_env_var", lambda name: deletes.append(name))
+    monkeypatch.setattr(
+        config_service,
+        "_record_config_scene_event",
+        lambda *args, **kwargs: scene_events.append((args, kwargs)),
+    )
+
+    draft_meta = config_service._with_pending_api_key({}, failing_env, "failing-secret-value")
+    draft_meta = config_service._with_pending_api_key(draft_meta, healthy_env, "healthy-secret-value")
+    draft_meta = config_service._with_cleared_api_key(draft_meta, cleared_env)
+
+    response = client.put(
+        "/api/config/apply",
+        json={
+            "publicConfig": public_config,
+            "draftMeta": draft_meta,
+            "baseHash": public_config_hash(public_config),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert writes == [healthy_env]
+    assert deletes == [cleared_env]
+    assert payload["envWriteFailureCount"] == 1
+    assert payload["envWriteFailures"] == [
+        {"env": failing_env, "operation": "write", "errorType": "OSError"}
+    ]
+
+    failure_events = [
+        (args, kwargs)
+        for args, kwargs in scene_events
+        if len(args) >= 2 and args[1] == "config.workspace.apply_env_write_failed"
+    ]
+    assert len(failure_events) == 1
+    fields = failure_events[0][1]["fields"]
+    assert fields == {"envName": failing_env, "operation": "write", "errorType": "OSError"}
+    # 失败条目的 pending token 未被丢弃：下次 apply 可重试同一写入。
+    assert (
+        config_service._resolve_pending_api_key(
+            failing_env, draft_meta["pending_api_keys"][failing_env]
+        )
+        is not None
+    )
+    assert "failing-secret-value" not in json.dumps(scene_events)
+
+
+def test_model_verification_does_not_treat_model_name_digits_as_http_status() -> None:
+    verification = config_service._model_verification_summary(
+        {"ok": False, "message": "model gpt-403-turbo is unknown"}
+    )
+    assert verification["status"] == "failed"
+    assert verification["http_status"] is None
+    assert verification["error_type"] != "auth_failed"
+
+
+def test_model_verification_reads_structured_http_status_only() -> None:
+    structured = config_service._model_verification_summary(
+        {"ok": False, "message": "provider request failed with HTTP 401"}
+    )
+    assert structured["http_status"] == 401
+    assert structured["error_type"] == "auth_failed"
+
+    request_id = config_service._model_verification_summary(
+        {"ok": False, "message": "upstream rejected request id 4013"}
+    )
+    assert request_id["http_status"] is None
+    assert request_id["error_type"] != "auth_failed"
+
+
+def test_config_llm_test_failure_scene_event_redacts_api_key(monkeypatch):
+    # 探测异常路径的 scene 事件不得携带密钥值：str(exc) 必须经
+    # redact_llm_probe_error（api_key 精确替换 + Bearer 形态兜底）。
+    public_config = copy.deepcopy(load_public_config())
+    _ensure_preset_model(public_config, "deepseek_v4_pro")
+    deepseek_env = public_config["llm"]["model_library"]["deepseek_v4_pro"]["api_key_env"]
+    public_config["llm"]["profiles"]["subagent_explorer"] = {
+        "model_ref": "deepseek_v4_pro",
+        "overrides": {},
+    }
+    secret_value = "sk-draft-secret-123456"
+    monkeypatch.delenv(deepseek_env, raising=False)
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+
+    def exploding_probe(provider, profile, api_key=None):
+        raise RuntimeError(f"upstream refused Authorization: Bearer {api_key}")
+
+    monkeypatch.setattr("config.public_config._probe_llm_runtime", exploding_probe)
+
+    draft_response = client.post(
+        "/api/config/draft/update-model",
+        json={
+            "publicConfig": public_config,
+            "draftMeta": {},
+            "baseHash": public_config_hash(public_config),
+            "modelId": "deepseek_v4_pro",
+            "provider": public_config["llm"]["model_library"]["deepseek_v4_pro"]["provider"],
+            "model": "deepseek-v4-pro",
+            "label": "DeepSeek V4 Pro",
+            "details": public_config["llm"]["model_library"]["deepseek_v4_pro"],
+            "apiKeyEnv": deepseek_env,
+            "apiKey": secret_value,
+        },
+    )
+    assert draft_response.status_code == 200
+    draft_payload = draft_response.json()
+
+    scene_events = []
+    monkeypatch.setattr(
+        config_service,
+        "_record_config_scene_event",
+        lambda *args, **kwargs: scene_events.append((args, kwargs)),
+    )
+
+    response = client.post(
+        "/api/config/test-llm",
+        json={
+            "publicConfig": draft_payload["publicConfig"],
+            "draftMeta": draft_payload["draftMeta"],
+            "profileId": "subagent_explorer",
+        },
+    )
+    assert response.status_code == 422
+
+    failed_events = [
+        (args, kwargs)
+        for args, kwargs in scene_events
+        if len(args) >= 2 and args[1] == "config.llm_test.failed"
+    ]
+    assert len(failed_events) == 1
+    fields = failed_events[0][1]["fields"]
+    assert secret_value not in json.dumps(scene_events)
+    assert secret_value not in fields["error"]
+    assert "[redacted]" in fields["error"]

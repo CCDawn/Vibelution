@@ -1670,7 +1670,40 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
             }).catch(() => console.warn("ASSISTANT_REMINDER_WARNING_FAILED"));
           },
         });
-        stopLauncherAssistantReminders = startAssistantReminderPump({
+        // A fail-closed reminder owner stops the pump; one dialog per episode
+        // names the cause and its fix, and the recovery button re-probes the
+        // owner immediately. The latch re-arms only after a successful reminder
+        // RPC, so a still-blocked probe never spams dialogs.
+        const reminderBlockedGuidance = (reason: string): { title: string; message: string; detail: string } => {
+          if (reason === "reminder_imported_profile_blocked") {
+            return { title: "个人助理提醒已暂停", message: "事务提醒已暂停：该助理档案已导入事务。",
+              detail: "请先在事务页完成该档案的归属处理，然后点击「恢复提醒」继续。已有事务和发送记录仍会保留。" };
+          }
+          if (reason === "receipt_capacity_exceeded") {
+            return { title: "个人助理提醒已暂停", message: "事务提醒已暂停：当日提醒回执已达容量上限。",
+              detail: "暂停的提醒会在次日自动恢复；也可以稍后点击「恢复提醒」立即重试。已有事务和发送记录仍会保留。" };
+          }
+          if (reason.startsWith("receipt_")) {
+            return { title: "个人助理提醒已暂停", message: "事务提醒已暂停：提醒回执账本损坏或已关闭。",
+              detail: "回执损坏时重启不会自动恢复：请停止个人助理后清理该助理 reminder_receipts 下对应日期的回执账本再重建，或点击「恢复提醒」重试。已有事务和发送记录仍会保留。" };
+          }
+          return { title: "个人助理提醒已暂停", message: "事务提醒已暂停，需要处理后才能继续。",
+            detail: "请点击「恢复提醒」重试；若反复出现，请停止并重新启动个人助理。已有事务和发送记录仍会保留。" };
+        };
+        let reminderBlockedNoticeShown = false;
+        const showReminderBlockedNotice = (reason: string) => {
+          console.warn(`ASSISTANT_REMINDER_BLOCKED reason=${reason || "unknown"}`);
+          if (reminderBlockedNoticeShown || shutdownApproved || launcherAssistantStopping) return;
+          reminderBlockedNoticeShown = true;
+          const guidance = reminderBlockedGuidance(reason);
+          void dialog.showMessageBox({
+            type: "warning", title: guidance.title, message: guidance.message, detail: guidance.detail,
+            buttons: ["恢复提醒", "稍后"], noLink: true,
+          }).then(result => {
+            if (result.response === 0) reminderPump.resumeFromBlocked();
+          }).catch(() => console.warn("ASSISTANT_REMINDER_WARNING_FAILED"));
+        };
+        const reminderPump = startAssistantReminderPump({
           host,
           available: () => !shutdownApproved,
           notify: (notice, recoveredFallback, onClick, onFailure, onFallback, onLateFallback, signal) => new Promise((resolve, reject) => {
@@ -1745,8 +1778,13 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
               buttons: ["确定"], noLink: true,
             }).catch(() => console.warn("ASSISTANT_REMINDER_WARNING_FAILED"));
           },
-          onSuccess: () => reminderTransportGate.transportSuccess(),
+          onBlocked: showReminderBlockedNotice,
+          onSuccess: () => {
+            reminderTransportGate.transportSuccess();
+            reminderBlockedNoticeShown = false;
+          },
         });
+        stopLauncherAssistantReminders = reminderPump;
         // The character can show starting/error state while native readiness
         // remains queued ahead of every authorization update.
         const show = !desktopCliArgs.hiddenPresentation || pendingAssistantOpen?.show === true;

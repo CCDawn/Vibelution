@@ -178,8 +178,9 @@ type Generation = {
   exitHandled?: boolean;
 };
 
-class HostError extends Error {
-  constructor(readonly code: string) { super(code); }
+export class HostError extends Error {
+  /** detail carries the backend's structured failure code when one was read. */
+  constructor(readonly code: string, readonly detail?: string) { super(code); }
 }
 function object(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -2094,8 +2095,13 @@ export class AssistantHost {
           if (response.status === 422) throw new HostError("ASSISTANT_MODEL_INVALID");
           if (response.status === 503) throw new HostError("ASSISTANT_MODEL_UNAVAILABLE");
         }
-        throw new HostError(path === "/api/assistant/reminders/next" && response.status === 409
-          ? "ASSISTANT_REMINDER_BLOCKED" : "ASSISTANT_HTTP_FAILED");
+        if (path === "/api/assistant/reminders/next" && response.status === 409) {
+          // host.py answers fail-closed reminder owners with 409 and a stable
+          // code; the pump stops polling and the shell picks the matching
+          // blocked-reminder guidance from this detail code.
+          throw new HostError("ASSISTANT_REMINDER_BLOCKED", failureCode ?? undefined);
+        }
+        throw new HostError("ASSISTANT_HTTP_FAILED");
       }
       const length = Number(response.headers.get("content-length"));
       if (Number.isFinite(length) && length > maxResponseBytes) {

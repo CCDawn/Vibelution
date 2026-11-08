@@ -1,4 +1,4 @@
-import type { AssistantHost, AssistantReminder, AssistantReminderChannel } from "./assistantHost.js";
+import { HostError, type AssistantHost, type AssistantReminder, type AssistantReminderChannel } from "./assistantHost.js";
 
 type ReminderHost = Pick<AssistantHost, "snapshot" | "nextReminder" | "settleReminder" | "fallbackReminder">;
 type ReminderNotice = Pick<AssistantReminder, "title" | "body">;
@@ -9,7 +9,12 @@ export type AssistantReminderPump = (() => Promise<void>) & {
   resumeAfterMigration(): void;
   /** Automatic shutdown may pause only an already idle sender. */
   tryDrainForLifecycle(): Promise<void> | null;
+  /** Resume polling after a fail-closed blocked stop; no-op unless blocked. */
+  resumeFromBlocked(): void;
 };
+
+/** How long a fail-closed blocked pump waits before it probes the owner again. */
+export const REMINDER_BLOCKED_RETRY_MS = 900_000;
 
 /** One main-process sender. Unknown outcomes pause it rather than replaying. */
 export function startAssistantReminderPump(options: {
@@ -21,11 +26,16 @@ export function startAssistantReminderPump(options: {
   onError(reason: "notification" | "transport"): void;
   /** Any successful reminder RPC clears the transport warning streak. */
   onSuccess?: () => void;
+  /** A fail-closed owner stops polling; this receives its stable backend code. */
+  onBlocked?: (reason: string) => void;
+  blockedRetryMs?: number;
   intervalMs?: number;
 }): AssistantReminderPump {
   let stopped = false;
   let retired = false;
   let permanentStop = false;
+  let blockedStop = false;
+  let blockedTimer: ReturnType<typeof setTimeout> | undefined;
   const notificationStop = new AbortController();
   let epoch = 0;
   let migrationDrain: Promise<void> | undefined;
@@ -40,6 +50,24 @@ export function startAssistantReminderPump(options: {
   const pendingClicks = new Set<Promise<void>>();
   const pendingDialogs = new Set<Promise<boolean>>();
   const delay = options.intervalMs ?? 30_000;
+  const clearBlockedProbe = () => {
+    if (blockedTimer !== undefined) {
+      clearTimeout(blockedTimer);
+      blockedTimer = undefined;
+    }
+  };
+  const scheduleBlockedProbe = (ms: number) => {
+    clearBlockedProbe();
+    blockedTimer = setTimeout(() => {
+      blockedTimer = undefined;
+      // A migration drain owns admission; its resume restarts the poll and
+      // re-detects the block instead of sneaking past the paused owner.
+      if (!stopped || !blockedStop) return;
+      blockedStop = false;
+      stopped = false;
+      schedule(0);
+    }, ms);
+  };
   const schedule = (ms: number) => {
     if (!stopped) timer = setTimeout(() => {
       active = tick();
@@ -143,20 +171,33 @@ export function startAssistantReminderPump(options: {
       schedule(0);
     } catch (error) {
       if (stopped) return;
+      if (error instanceof HostError && error.code === "ASSISTANT_REMINDER_BLOCKED") {
+        // A fail-closed owner (corrupt receipt ledger, exhausted daily
+        // capacity, imported profile) stops the fast poll but must never
+        // disappear silently or stay dead until a shell restart: report the
+        // stable backend code once per episode and keep probing slowly so a
+        // resolved cause resumes on its own.
+        stopped = true;
+        blockedStop = true;
+        options.onBlocked?.(error.detail ?? "");
+        scheduleBlockedProbe(options.blockedRetryMs ?? REMINDER_BLOCKED_RETRY_MS);
+        return;
+      }
       // The owner never returns an already reserved event. Continue scanning
       // later for other reminders, without replaying an uncertain submission.
       // Every failed tick reports once so the shell-side warning gate can
       // count a consecutive transport streak; success on any RPC clears it.
       const notificationFailure = error instanceof Error && error.message.startsWith("ASSISTANT_REMINDER_NOTIFICATION_");
       options.onError(notificationFailure ? "notification" : "transport");
-      if (error instanceof Error && error.message === "ASSISTANT_REMINDER_BLOCKED") stopped = true;
-      else schedule(delay);
+      schedule(delay);
     }
   }
   schedule(0);
   const stop = async () => {
     permanentStop = true;
     stopped = true;
+    blockedStop = false;
+    clearBlockedProbe();
     notificationStop.abort();
     if (timer) clearTimeout(timer);
     if (active) await active;
@@ -172,6 +213,8 @@ export function startAssistantReminderPump(options: {
   const drainForMigration = (): Promise<void> => {
     if (migrationDrain) return migrationDrain;
     stopped = true;
+    blockedStop = false;
+    clearBlockedProbe();
     if (timer) clearTimeout(timer);
     migrationDrained = false;
     migrationDrain = (async () => {
@@ -191,14 +234,23 @@ export function startAssistantReminderPump(options: {
     migrationDrained = false;
     retired = false;
     stopped = false;
+    blockedStop = false;
+    clearBlockedProbe();
     for (const callback of deferredCallbacks.splice(0)) callback();
+    schedule(0);
+  };
+  const resumeFromBlocked = () => {
+    if (permanentStop || retired || !blockedStop) return;
+    clearBlockedProbe();
+    blockedStop = false;
+    stopped = false;
     schedule(0);
   };
   const tryDrainForLifecycle = () => {
     if (stopped || migrationDrain || active || claiming || pendingDialogs.size || pendingClicks.size) return null;
     return drainForMigration();
   };
-  return Object.assign(stop, { drainForMigration, resumeAfterMigration, tryDrainForLifecycle });
+  return Object.assign(stop, { drainForMigration, resumeAfterMigration, resumeFromBlocked, tryDrainForLifecycle });
 }
 
 /** Mirror of the assistant host control-failure guard for the shell-side
