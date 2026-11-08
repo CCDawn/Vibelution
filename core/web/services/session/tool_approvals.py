@@ -54,15 +54,6 @@ _WORKSPACE_PATH_TOOLS = {"apply_diff_edit_tool", "apply_patch_tool", "write_file
 # research-stage fetch of many pages on one site must not re-prompt (and then
 # fail-closed after the approval timeout) for every new URL path.
 _HOST_SCOPED_URL_TOOLS = {"web_fetch_tool"}
-# Computer-use / CUA desktop-control tools are pinned to per-call approval by
-# product red line: no session, tool-level, or durable grant may widen them,
-# even if a future policy edit relaxed their catalog approval mode.
-_CUA_ALWAYS_APPROVAL_TOOLS = frozenset(
-    {
-        "personal_assistant_desktop_action_tool",
-        "personal_assistant_computer_action_tool",
-    }
-)
 # Irreversible / destructive / external-facing risk classes never receive the
 # tool-level session grant; they keep per-call approval. Network covers
 # outbound publish; destructive covers irreversible cleanup.
@@ -2159,14 +2150,12 @@ TOOL_LEVEL_SESSION_GRANT_KEY = _session_grant_key(_TOOL_LEVEL_SESSION_GRANT_SCOP
 def _tool_level_session_grant_ineligibility(request: _ApprovalRequest) -> str:
     """Empty string when the tool-level session grant may be offered, else the reason.
 
-    Red lines: always-approval pins (computer-use / CUA) and destructive or
-    network-risk tools keep per-call approval regardless of policy drift.
+    Destructive or network-risk tools keep per-call approval regardless of
+    policy drift; always-approval catalog modes stay per-call too.
     """
 
     if request.approval == "always":
         return "always_approval_pin"
-    if request.tool_name in _CUA_ALWAYS_APPROVAL_TOOLS:
-        return "computer_control_tool"
     if request.risk in _TOOL_GRANT_BLOCKED_RISKS:
         return f"risk_{request.risk}"
     return ""

@@ -1,8 +1,10 @@
-"""Launcher-private operator transport for the existing single-window owner.
+"""Launcher-private operator transport for window-control state.
 
 Mount only in the Launcher assistant host, with its main-owned bearer token.
-The model tools are deliberately absent here: selection and confirmation are
-operator operations and must pass through the owned Electron main frame.
+Model tools resolve target windows themselves and run under the session's
+default approval policy; these endpoints cover the operator's optional
+preference flow only: enumerating windows, pre-authorizing a default target
+window, and pause/takeover/end control. They never dispatch model input.
 """
 from __future__ import annotations
 
