@@ -43,6 +43,7 @@ import {
   type DesktopPetDragPoint, type DesktopPetDragState, type DesktopPetWindowDragBridge
 } from "./desktopPetWindowDrag";
 import { DEFAULT_PET_PREFERENCES } from "./desktopPetPreferences";
+import { usePetCompletion } from "./usePetCompletion";
 import { ChatToolApprovalDialog } from "../chat/ChatToolApprovalDialog";
 import { toolApprovalRiskLabel } from "../chat/toolApprovalLabels";
 import { agentArchivePreviewIsValid, agentPurgePreviewIsValid, autonomyActionIsKnown, autonomyApprovalPreviewIsValid, authorizationUpgradePreviewIsValid, browserInteractPreviewIsValid, dispatchWritePreviewIsValid, launcherAgentCreatePreviewIsValid, operatorImageUploadPreviewIsValid, preferenceProposalPreviewIsValid, projectLifecyclePreviewIsValid, recoveryPreviewIsValid, managementApprovalActionIsKnown, platformManagementActionIsKnown, platformManagementPreviewIsValid, toolApprovalActionPreview, toolApprovalDisplayName } from "../chat/toolApprovalPreview";
@@ -597,9 +598,10 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       signal.throwIfAborted();
       return result;
     },
-    enabled: reading, retry: false,
-    refetchInterval: query => query.state.data?.some(request => request.status === "pending") && reading
-      ? 2_000 : launcherAssistantPollInterval(reading, detail.data, acceptedTurnId, queuedAcceptance),
+    // The visible collapsed character must notice its own native approvals too.
+    enabled: observingOwnSession, retry: false,
+    refetchInterval: query => query.state.data?.some(request => request.status === "pending") && observingOwnSession
+      ? 2_000 : launcherAssistantPollInterval(observingOwnSession, detail.data, acceptedTurnId, queuedAcceptance),
     refetchIntervalInBackground: false,
   });
   const approval = approvals.data?.find(request => request.status === "pending"
@@ -1388,7 +1390,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     : undefined;
   const preferences = status.data?.settings?.preferences || DEFAULT_PET_PREFERENCES;
   const displayName = status.data?.settings?.displayName || identity?.displayName || copy.title;
-  const { tone, animationState } = launcherAssistantActivity(detail.data);
+  const celebrating = usePetCompletion(sessionId, detail.data, preferences.showCompletion);
   const activity = resolveSessionActivity(detail.data || {});
   const busy = hasExecutionOwnership(activity.execution);
   const stopping = Boolean(detail.data?.stopRequested);
@@ -1483,6 +1485,11 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     now: Date.now(), sseHealthy: launcherAssistantSseHealthy(sseAliveAt.current, Date.now()),
   });
   const statusHardDown = statusDegradeTone === "error";
+  const petUnavailable = waitingForBackend || statusHardDown || detail.isError;
+  const { tone, animationState } = launcherAssistantActivity(detail.data, {
+    celebrating, needsAttention: Boolean(approval || pendingQuestion),
+    unavailable: petUnavailable,
+  });
   const notificationsHosted = usePublishLauncherNotices(expanded ? launcherAssistantPageNotices({
     lang,
     reads: [
@@ -1510,7 +1517,9 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   // The header keeps the normal session status line for a weakly degraded poll;
   // "unavailable" is reserved for the hard-down case (persistent failure AND a
   // dead push channel), and the cold-boot wait keeps its own wording.
-  const statusText = feedback || queueStatusText || (waitingForBackend ? lifecycleClosing ? copy.lifecycleClosing : copy.waitingBackend : statusHardDown ? copy.unavailable
+  const attentionStatusText = petUnavailable ? "" : approval ? (lang === "zh" ? "待你确认" : "Awaiting your approval")
+    : pendingQuestion ? (lang === "zh" ? "待你回答" : "Awaiting your answer") : "";
+  const statusText = feedback || attentionStatusText || queueStatusText || (waitingForBackend ? lifecycleClosing ? copy.lifecycleClosing : copy.waitingBackend : petUnavailable ? copy.unavailable
     : status.isPending ? copy.checking
     : detail.data ? !detail.isError && !approval && !stopping && !acceptedTurnId && !sendPending && !sendUnconfirmed && preferences.idleMessage
         && (activity.execution === "idle" || (activity.execution === "settled" && activity.outcome === "completed"))
