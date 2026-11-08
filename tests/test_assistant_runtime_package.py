@@ -1083,3 +1083,48 @@ def test_ordinary_build_copy_has_the_same_growth_bound(package_fixture, monkeypa
     assert observed["changed"]
     assert observed["bytes"] <= initial_size + 1
     assert not (package_fixture[-1] / "manifest.json").exists()
+
+
+def test_manifest_seals_the_build_commit_of_the_packaged_checkout(package_fixture):
+    from scripts.build_assistant_runtime import manifest_build_commit
+
+    sha = "b" * 40
+    (package_fixture[0] / ".git").mkdir()
+    (package_fixture[0] / ".git" / "HEAD").write_text(sha + "\n", encoding="utf-8")
+    manifest = _build(package_fixture)["manifest"]
+    assert manifest["buildCommit"] == sha
+    assert manifest_build_commit(manifest) == sha
+
+
+def test_manifest_build_commit_is_empty_without_git_and_helper_rejects_garbage(package_fixture):
+    from scripts.build_assistant_runtime import manifest_build_commit
+
+    manifest = _build(package_fixture)["manifest"]
+    assert manifest["buildCommit"] == "" and manifest_build_commit(manifest) == ""
+    assert manifest_build_commit({"buildCommit": "not-a-sha"}) == ""
+    assert manifest_build_commit({"buildCommit": "c" * 64}) == "c" * 64
+    assert manifest_build_commit({}) == "" and manifest_build_commit(None) == ""
+
+
+def test_manifest_seals_a_worktree_style_gitdir_pointer_head(package_fixture):
+    from scripts.build_assistant_runtime import manifest_build_commit
+
+    sha = "a" * 64
+    linked = package_fixture[3].parent / "linked-git"
+    linked.mkdir(parents=True, exist_ok=True)
+    (linked / "HEAD").write_text(sha + "\n", encoding="utf-8")
+    (package_fixture[0] / ".git").write_text(f"gitdir: {linked}\n", encoding="utf-8")
+    manifest = _build(package_fixture)["manifest"]
+    assert manifest["buildCommit"] == sha
+    assert manifest_build_commit(manifest) == sha
+
+
+def test_manifest_seals_a_ref_style_head(package_fixture):
+    sha = "c" * 40
+    git_dir = package_fixture[3].parent / "ref-git"
+    (git_dir / "refs" / "heads").mkdir(parents=True, exist_ok=True)
+    (git_dir / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (git_dir / "refs" / "heads" / "main").write_text(sha + "\n", encoding="utf-8")
+    (package_fixture[0] / ".git").write_text(f"gitdir: {git_dir}\n", encoding="utf-8")
+    manifest = _build(package_fixture)["manifest"]
+    assert manifest["buildCommit"] == sha

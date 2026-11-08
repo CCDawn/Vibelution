@@ -1446,6 +1446,28 @@ async def test_client_rejects_runtime_from_another_source_revision(tmp_path) -> 
 
     assert mismatch.value.reason == "runtime_revision_mismatch"
 
+    # The drift error is self-diagnosing: it names all three observed revisions
+    # (client checkout / backend info / Launcher descriptor), truncated and
+    # filtered, so the operator can see which side moved.
+    message = str(mismatch.value)
+    assert "checkout=rev-2" in message and "info=rev-1" in message and "launcher=rev-1" in message
+    assert mismatch.value.detail == "checkout=rev-2 info=rev-1 launcher=rev-1"
+
+
+@pytest.mark.anyio
+async def test_revision_mismatch_names_missing_values_when_a_side_has_no_revision(tmp_path) -> None:
+    _runtime_state(tmp_path)
+    (tmp_path / ".git" / "HEAD").unlink()
+    client = ManagedAgentBackendClient(
+        tmp_path,
+        state_path=tmp_path / "adapter-state.json",
+        transport=_transport(tmp_path, []),
+    )
+    with pytest.raises(BackendClientError, match="source revision") as mismatch:
+        await client.list_agents()
+    message = str(mismatch.value)
+    assert "checkout=(missing)" in message and "info=rev-1" in message and "launcher=rev-1" in message
+
 
 @pytest.mark.anyio
 async def test_missing_runtime_descriptor_has_a_local_diagnostic_reason(tmp_path):
@@ -1508,6 +1530,9 @@ async def test_shared_files_or_invalid_process_proof_cannot_admit_other_revision
     with pytest.raises(BackendClientError) as mismatch:
         await client.list_agents()
     assert mismatch.value.code == "RUNTIME_IDENTITY_MISMATCH"
+    assert mismatch.value.reason == "runtime_revision_mismatch"
+    message = str(mismatch.value)
+    assert "checkout=other-checko" in message and "info=rev-1" in message and "launcher=rev-1" in message
 
 
 @pytest.mark.anyio

@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
+import subprocess
+import threading
 from copy import deepcopy
 from concurrent.futures import TimeoutError
 from contextvars import ContextVar
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model, model_validator
@@ -250,7 +254,7 @@ _MAIN_SCHEMAS = {"project_status": MainControlProject, "project_lifecycle": Proj
                  "project_lifecycle_receipt": ProjectLifecycle}
 _MAIN_HELP = {
     "project_status": "只读查询 Launcher 当前已登记项目的状态，主项目与分支 instance 均按注册表 projectId 寻址；不返回活跃任务数，不能据此判断任务是否空闲。",
-    "project_lifecycle": "经原生审批控制当前已登记项目（主项目与分支 instance，均按注册表 projectId 寻址）的 start/stop/restart；不支持 force/interrupt，也不提供分支 cleanup（删工作区/删分支）。unknown 时保留同一 request_id 查询 project_lifecycle_receipt，不能换 ID 重放；主项目 queued 表示等待执行，不等于完成；分支 instance 同动作同审批同幂等，无 queued 中间态（只有 completed/rejected/unknown），忙时被拒不产生原生回执，原 ID 查询只得 unknown。该动作经 Launcher 主进程执行、不经过项目后端：主项目后端返回 RUNTIME_IDENTITY_MISMATCH（项目代码已更新、版本或项目身份校验失败）时，用 operation=restart 重启该项目是唯一自助恢复入口，重启确认后以原 ID 重试原操作。",
+    "project_lifecycle": "经原生审批控制当前已登记项目（主项目与分支 instance，均按注册表 projectId 寻址）的 start/stop/restart；不支持 force/interrupt，也不提供分支 cleanup（删工作区/删分支）。unknown 时保留同一 request_id 查询 project_lifecycle_receipt，不能换 ID 重放；主项目 queued 表示等待执行，不等于完成；分支 instance 同动作同审批同幂等，无 queued 中间态（只有 completed/rejected/unknown），忙时被拒不产生原生回执，原 ID 查询只得 unknown。该动作经 Launcher 主进程执行、不经过项目后端：主项目后端返回 RUNTIME_IDENTITY_MISMATCH（项目代码已更新、版本或项目身份校验失败）时，用 operation=restart 重启该项目是唯一自助恢复入口，重启确认后以原 ID 重试原操作。若原生通道无法确认（state=unknown）且本会话已出现该项目身份漂移证据，同一审批会自动降级为进程外调用 Launcher 重启一次，回执 code=launcher_restart_fallback（degraded=true，同时携带原生失败与 Launcher 退码或错误摘要），确认仍以 project_lifecycle_receipt 与 project_status 为准。",
     "project_lifecycle_receipt": "只读查询同一 project_id、operation、request_id 的原生回执，主项目与分支 instance 通用；unknown 时继续查询原 ID，不换 ID 重放，queued 不等于完成；分支 instance 无 queued 态，忙时被拒不产生原生回执，原 ID 只查得 unknown；不支持 force/interrupt。",
     "history_import": "按本轮 history_source_preview 结果，经当前工具审批策略导入所选旧助理的只读历史；不得提供路径或批准标志。rejected/busy 表示本次未导入，应重新预览并按原生策略审批；unknown 时用原 project_id 和 preview_id 查询 history_import_receipt，不得更换 ID 重派。成功不表示旧源已冻结、任务已交接或旧助理可退役。",
     "history_import_receipt": "只读查询原 project_id 和 preview_id 的历史导入回执；unknown 不代表未导入，不得更换预览重派。published 证明过去的导入结果，不表示旧源已冻结。",
@@ -546,6 +550,17 @@ _HELP = {
 }
 _binding = None
 
+# Out-of-process escape hatch for ``project_lifecycle`` restart. The Electron
+# main claim queue is the only native restart channel; when it cannot admit the
+# delivery (state unknown / claim timeout) while this session has already seen
+# identity-drift evidence, the same approved action degrades to one windowless
+# Launcher executable invocation. State is session-scoped and cleared on unbind.
+_RESTART_FALLBACK_TIMEOUT_SECONDS = 240.0
+_drift_lock = threading.Lock()
+_drift_armed_projects: set[str] = set()
+_fallback_attempted_requests: set[str] = set()
+_fallback_in_flight = threading.Lock()
+
 
 def _schema_without_titles(schema):
     """Remove display annotations only at JSON Schema nodes, never data maps."""
@@ -619,6 +634,9 @@ def unbind_actions(service):
         _binding = None
         from .action_contract_projection import clear_action_contracts
         clear_action_contracts()
+        with _drift_lock:
+            _drift_armed_projects.clear()
+            _fallback_attempted_requests.clear()
 
 
 def history_import_approval_summary(project_id: str, preview_id: str) -> dict:
@@ -751,6 +769,110 @@ def _knowledge_sync_receipt(service, project_id, operation_id):
         return unknown
 
 
+def _arm_identity_drift(project_id) -> None:
+    """Record a session-visible identity-drift signal for one registered project.
+
+    Only RUNTIME_IDENTITY_MISMATCH evidence arms the out-of-process restart
+    escape (a skipped-project recovery entry from ``projects``, or the same
+    error surfaced by any backend-bound action); a plain claim failure alone
+    must never trigger a heavyweight duplicate restart.
+    """
+    if isinstance(project_id, str) and project_id:
+        with _drift_lock:
+            _drift_armed_projects.add(project_id)
+
+
+def _launcher_executable() -> Path:
+    return Path(os.environ.get("LOCALAPPDATA", "")) / "Vibelution" / "Launcher" / "VibelutionLauncher.exe"
+
+
+def _launcher_fallback_receipt(project_id, request_id, native_state, native_code, *, exit_code=None, error=""):
+    """Degraded but honest receipt for one out-of-process Launcher restart.
+
+    Minted here rather than in main_control: the fallback bypasses the
+    Electron-main transport entirely, so main_control's result vocabulary
+    (which validates only native receipts) stays unchanged and this shape is
+    the single authority for the degraded path. The receipt always carries the
+    unclaimed native outcome next to the Launcher-side one.
+    """
+    outcome = ""
+    if error:
+        outcome = "降级执行未确认成功：" + str(error)[:160] + "。"
+    elif exit_code is not None:
+        outcome = f"Launcher 进程退码 {exit_code}。"
+    receipt = {
+        "schemaVersion": 1, "projectId": project_id, "operation": "restart", "requestId": request_id,
+        "state": "unknown", "code": "launcher_restart_fallback", "fallback": "launcher", "degraded": True,
+        "nativeState": native_state, "nativeCode": native_code,
+        "message": ("原生通道未确认（state=" + str(native_state) + ", code=" + str(native_code) + "），"
+            "同一原生审批下降级为进程外调用 Launcher restart，同一 request_id 只降级一次；"
+            "请用原 request_id（" + str(request_id) + "）查询 project_lifecycle_receipt，"
+            "并用 project_status 确认项目实际状态，不要更换 ID 重放。" + outcome),
+    }
+    if exit_code is not None:
+        receipt["launcherExitCode"] = int(exit_code)
+    if error:
+        receipt["launcherError"] = str(error)[:160]
+    return receipt
+
+
+def _maybe_launcher_restart_fallback(service, args, native_receipt):
+    """Escape hatch when the Electron-main claim queue cannot admit a restart.
+
+    Gate is deliberately narrow: the action must be ``operation=restart``, the
+    native invoke must have ended unclaimed (``state=unknown`` or the
+    actions-layer wait timeout), and this session must previously have recorded
+    an identity-drift signal for the project. The native approval already
+    covered this exact action, so the fallback changes only the execution
+    means; the subprocess is windowless and never a shell or taskkill. Returns
+    ``(fallback_receipt_or_None, skip_hint)``; ``None`` keeps the original
+    outcome authoritative.
+    """
+    project_id = args.get("project_id") if isinstance(args, dict) else None
+    request_id = args.get("request_id") if isinstance(args, dict) else None
+    if (not isinstance(project_id, str) or not project_id
+            or not isinstance(request_id, str) or not request_id
+            or not isinstance(args, dict) or args.get("operation") != "restart"):
+        return None, ""
+    native_state = str((native_receipt or {}).get("state") or "unknown")
+    native_code = str((native_receipt or {}).get("code") or "unknown")
+    with _drift_lock:
+        armed = project_id in _drift_armed_projects
+        attempted = project_id + "\x00" + request_id in _fallback_attempted_requests
+    if not armed or attempted:
+        return None, ""
+    if not _fallback_in_flight.acquire(blocking=False):
+        return _launcher_fallback_receipt(project_id, request_id, native_state, native_code,
+            error="另一个进程外重启正在执行，本次未叠加"), ""
+    try:
+        try:
+            project_root = str(service._project(project_id, require_available=False))
+        except Exception:  # noqa: BLE001 - registry failure keeps the original error authoritative.
+            return None, ""
+        exe = _launcher_executable()
+        if not exe.is_file():
+            return None, ("进程外逃生门未执行：找不到 Launcher 可执行文件（" + str(exe)
+                + "）；请通过桌面 Launcher 界面重启该项目后再试。")
+        with _drift_lock:
+            _fallback_attempted_requests.add(project_id + "\x00" + request_id)
+        argv = [str(exe), "--project", project_root, "restart"]
+        from scripts.windowless_subprocess import no_window_subprocess_kwargs
+        try:
+            completed = subprocess.run(argv, shell=False, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, timeout=_RESTART_FALLBACK_TIMEOUT_SECONDS,
+                **no_window_subprocess_kwargs())
+        except subprocess.TimeoutExpired:
+            return _launcher_fallback_receipt(project_id, request_id, native_state, native_code,
+                error=f"Launcher restart 超过 {_RESTART_FALLBACK_TIMEOUT_SECONDS:.0f}s 未退出"), ""
+        except OSError as exc:
+            return _launcher_fallback_receipt(project_id, request_id, native_state, native_code,
+                error=f"{type(exc).__name__}: {exc}"), ""
+        return _launcher_fallback_receipt(project_id, request_id, native_state, native_code,
+            exit_code=completed.returncode), ""
+    finally:
+        _fallback_in_flight.release()
+
+
 def execute_action(action: str, parameters: dict, *, runtime: dict | None = None, governed: bool = False) -> dict:
     """Called only after the canonical tool's native Agent/Session identity gate.
 
@@ -843,6 +965,9 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
     projects = service.project_ids()
     if "project_id" in args and args["project_id"] not in projects:
         raise ValueError("Project is not authorized by Launcher")
+    # Captured before any branch pops it, so a backend-bound action that fails
+    # with identity drift can still arm the restart escape for this project.
+    request_project_id = args.get("project_id")
     if action in main_contracts:
         if action in {"browser_interact", "project_lifecycle", "operator_image_upload", "history_import", "affairs_sync", "episodic_sync", "initial_migration_queue", "knowledge_sync_queue", "knowledge_sync_recover", "reminder_handoff_queue", "reminder_handoff_recover"} and governed is not True:
             return {"ok": False, "status": "approval_required", "action": action, "tool": "personal_assistant_manage_tool"}
@@ -1061,6 +1186,18 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
         if action == "knowledge_sync_recover":
             return {"schemaVersion": 1, "projectId": args["project_id"], "operationId": args["operation_id"],
                     "recoveryId": value["operationId"], "state": value["state"], "code": value["code"], "readyForCutover": False}
+        if action == "projects" and isinstance(value, dict):
+            # A skipped project carrying the backend-free restart recovery is a
+            # session-visible identity-drift signal; it arms the restart escape.
+            for row in value.get("skippedProjects") or []:
+                if isinstance(row, dict) and isinstance(row.get("recovery"), dict):
+                    _arm_identity_drift(row.get("projectId"))
+        if action == "project_lifecycle" and isinstance(value, dict) and value.get("state") == "unknown":
+            receipt, hint = _maybe_launcher_restart_fallback(service, args, value)
+            if receipt is not None:
+                return receipt
+            if hint:
+                value = {**value, "launcherFallbackHint": hint}
         return value
     except TimeoutError as exc:
         if action in managed:
@@ -1072,9 +1209,17 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
                     "state": "unknown", "code": "unknown", "readyForCutover": False}
         if action in _APPEARANCE_SCHEMAS:
             raise ValueError("Launcher外观操作尚未确认，请读取当前外观；不要自动重复上传或重新打开选择框。") from exc
-        raise ValueError("原生请求尚未确认，请用原 dispatch_id 或 action/request_id 查询回执；不要更换 ID 重建对象。") from exc
+        message = "原生请求尚未确认，请用原 dispatch_id 或 action/request_id 查询回执；不要更换 ID 重建对象。"
+        if action == "project_lifecycle" and isinstance(args, dict) and args.get("operation") == "restart":
+            receipt, hint = _maybe_launcher_restart_fallback(service, args, {"state": "unknown", "code": "timeout"})
+            if receipt is not None:
+                return receipt
+            message += hint
+        raise ValueError(message) from exc
     except DispatchError as exc:
         # ``recovery`` names a registered Launcher action that bypasses the
         # project backend (identity drift); plain failures carry no such key.
+        if exc.code == "RUNTIME_IDENTITY_MISMATCH":
+            _arm_identity_drift(request_project_id)
         return {"ok": False, "code": exc.code, "message": str(exc),
                 **({"recovery": exc.recovery} if getattr(exc, "recovery", None) else {})}

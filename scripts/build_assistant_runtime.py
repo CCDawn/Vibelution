@@ -414,6 +414,64 @@ def _coalesced_records(rows: list[list[str]], owner: str) -> tuple[list[list[str
     return list(merged.values()), duplicates
 
 
+def _build_commit(project: Path) -> str:
+    """Best-effort HEAD of the checkout being packaged; '' when unknown.
+
+    The packaged snapshot carries no .git, so the commit must be sealed into
+    the manifest here; the packed assistant never reads or shells out to git.
+    Mirrors the client-side checkout-HEAD reader (gitdir/commondir aware).
+    """
+    def head_of(path: Path) -> str:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace").strip().lower()
+        except OSError:
+            return ""
+        return text if re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", text) else ""
+
+    try:
+        git_entry = project / ".git"
+        if git_entry.is_file():
+            text = git_entry.read_text(encoding="utf-8", errors="replace").strip()
+            if not text.lower().startswith("gitdir:"):
+                return ""
+            git_dir = Path(text.split(":", 1)[1].strip())
+            if not git_dir.is_absolute():
+                git_dir = (project / git_dir).resolve()
+        else:
+            git_dir = git_entry
+        head = git_dir / "HEAD"
+        if not head.is_file():
+            return ""
+        content = head.read_text(encoding="utf-8", errors="replace").strip()
+        if not content.startswith("ref:"):
+            return head_of(head)
+        ref = content.split(":", 1)[1].strip()
+        candidates = [git_dir / ref]
+        commondir = git_dir / "commondir"
+        if commondir.is_file():
+            common = Path(commondir.read_text(encoding="utf-8").strip())
+            if not common.is_absolute():
+                common = (git_dir / common).resolve()
+            candidates.append(common / ref)
+        for candidate in candidates:
+            value = head_of(candidate)
+            if value:
+                return value
+        return ""
+    except OSError:
+        return ""
+
+
+def manifest_build_commit(manifest: dict) -> str:
+    """Read the build-time HEAD sealed into a payload manifest; '' when absent.
+
+    Packaged snapshots have no .git at runtime, so this helper is the only
+    sanctioned read path for the manifest's ``buildCommit``.
+    """
+    value = manifest.get("buildCommit") if isinstance(manifest, dict) else None
+    return value if type(value) is str and re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", value) else ""
+
+
 def build_launcher_assistant_payload(
     project_root: Path | str,
     output_root: Path | str,
@@ -591,7 +649,7 @@ def build_launcher_assistant_payload(
         "sourceContentSha256": _content_hash(files, "source/"),
         "runtimeContentSha256": _content_hash(files, "python/"),
         "payloadContentSha256": _content_hash(files),
-        "contractsSha256": contracts_entry["sha256"], "files": files,
+        "contractsSha256": contracts_entry["sha256"], "buildCommit": _build_commit(project), "files": files,
     }
     _verify_files(output, manifest, resolved_root=output)
     content = _json_bytes(manifest)

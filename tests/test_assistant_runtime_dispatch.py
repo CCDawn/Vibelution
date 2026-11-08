@@ -145,6 +145,24 @@ async def test_project_discovery_bounds_slow_checks_and_keeps_healthy_projects(t
     assert result["skippedProjects"][0]["code"] == "PROJECT_CHECK_TIMEOUT"
 
 
+def test_revision_drift_message_carries_sanitized_three_party_values():
+    from core.assistant_runtime.dispatch import _backend_error_message
+
+    detailed = BackendClientError(
+        "managed backend runtime source revision mismatch: checkout=abc123 info=rev-1 launcher=rev-1",
+        code="RUNTIME_IDENTITY_MISMATCH", reason="runtime_revision_mismatch",
+        detail="checkout=abc123 info=rev-1 launcher=rev-1")
+    message = _backend_error_message(detailed)
+    assert "项目代码已更新" in message and "project_lifecycle" in message
+    assert "checkout=abc123" in message and "launcher=rev-1" in message
+    # A manually-constructed error without the client-composed detail keeps the
+    # canned message; raw backend or caller text never enters diagnostics.
+    bare = BackendClientError("private token and path", code="RUNTIME_IDENTITY_MISMATCH",
+                              reason="runtime_revision_mismatch")
+    assert "checkout=" not in _backend_error_message(bare)
+    assert "private" not in _backend_error_message(bare)
+
+
 @pytest.mark.anyio
 async def test_untrusted_backend_message_does_not_become_a_diagnostic_reason(tmp_path):
     def factory(*_args, **_kwargs):

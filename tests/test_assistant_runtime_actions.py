@@ -2,6 +2,9 @@
 
 import asyncio
 import json
+import os
+import subprocess
+from types import SimpleNamespace
 
 import pytest
 
@@ -603,3 +606,322 @@ async def test_api_describe_exposes_only_local_pointer_view_fields_within_native
         assert json.loads(rendered.split("\nResult:\n", 1)[1]) == json.loads(raw)
     finally:
         unbind_actions(dispatch)
+
+
+# --- project_lifecycle restart out-of-process escape hatch ------------------
+
+_RESTART_PARAMS = {"project_id": "p:main", "operation": "restart", "request_id": "request-1"}
+
+
+class Registry:
+    """Minimal dispatch-side surface: registry membership plus root lookup."""
+
+    def __init__(self, tmp_path):
+        self.root = tmp_path / "project"
+        self.root.mkdir(exist_ok=True)
+        self.skipped = []
+        self.discover_error = None
+
+    def project_ids(self):
+        return ("p:main",)
+
+    def _project(self, project_id, require_available=True):
+        if project_id != "p:main":
+            raise DispatchError("Project is not in the host-authorized registry.", code="PROJECT_NOT_AUTHORIZED")
+        return self.root
+
+    async def available_projects(self, **_kwargs):
+        return {"projects": [{"projectId": "p:main"}], "skippedProjects": list(self.skipped),
+                "total": 1, "offset": 0, "registryRevision": 1, "nextOffset": None, "message": "本页可调用 1 个项目。"}
+
+    async def discover(self, project_id):
+        if self.discover_error is not None:
+            raise self.discover_error
+        return {"agents": [{"agentId": "agent-1"}], "projectId": project_id}
+
+
+class UnknownBroker:
+    """Electron-main claim queue that never admits a delivery."""
+
+    def __init__(self):
+        self.calls = []
+
+    async def invoke(self, action, request, **kwargs):
+        self.calls.append((action, request))
+        return {"schemaVersion": 1, **request, "state": "unknown", "code": "control_unavailable"}
+
+
+def _drift_skip(project_id="p:main"):
+    return {"projectId": project_id, "code": "RUNTIME_IDENTITY_MISMATCH", "message": "项目后端的版本或项目身份校验失败。",
+            "recovery": {"action": "project_lifecycle", "operation": "restart", "projectId": project_id,
+                         "tool": "personal_assistant_manage_tool", "receiptAction": "project_lifecycle_receipt",
+                         "bypassesProjectBackend": True}}
+
+
+def _mock_launcher_spawn(monkeypatch, calls, *, returncode=0):
+    from scripts.windowless_subprocess import no_window_subprocess_kwargs
+
+    def fake_run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return SimpleNamespace(returncode=returncode)
+
+    monkeypatch.setattr("core.assistant_runtime.actions.subprocess.run", fake_run)
+    return {"shell": False, "stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL, "timeout": 240.0, **no_window_subprocess_kwargs()}
+
+
+def _armed_registry(tmp_path):
+    registry = Registry(tmp_path)
+    registry.skipped = [_drift_skip()]
+    return registry
+
+
+@pytest.mark.anyio
+async def test_plain_claim_failure_without_drift_evidence_never_spawns_a_restart(tmp_path, monkeypatch):
+    spawn_calls = []
+    expected_kwargs = _mock_launcher_spawn(monkeypatch, spawn_calls)
+    monkeypatch.setattr("core.assistant_runtime.actions._launcher_executable",
+                        lambda: tmp_path / "VibelutionLauncher.exe")
+    (tmp_path / "VibelutionLauncher.exe").write_bytes(b"")
+    registry, broker = Registry(tmp_path), UnknownBroker()
+    bind_actions(registry, asyncio.get_running_loop(), main_control=broker)
+    try:
+        result = await asyncio.to_thread(execute_action, "project_lifecycle", dict(_RESTART_PARAMS), governed=True)
+    finally:
+        unbind_actions(registry)
+    # The native unknown stays verbatim: no degraded marker, no subprocess.
+    assert result == {"schemaVersion": 1, "projectId": "p:main", "operation": "restart",
+                      "requestId": "request-1", "state": "unknown", "code": "control_unavailable"}
+    assert "degraded" not in result and "launcherFallbackHint" not in result
+    assert spawn_calls == []
+
+
+@pytest.mark.anyio
+async def test_skipped_project_recovery_arms_the_restart_escape(tmp_path, monkeypatch):
+    spawn_calls = []
+    expected_kwargs = _mock_launcher_spawn(monkeypatch, spawn_calls)
+    exe = tmp_path / "VibelutionLauncher.exe"
+    exe.write_bytes(b"")
+    monkeypatch.setattr("core.assistant_runtime.actions._launcher_executable", lambda: exe)
+    registry = _armed_registry(tmp_path)
+    broker = UnknownBroker()
+    bind_actions(registry, asyncio.get_running_loop(), main_control=broker)
+    try:
+        # The recovery-carrying skip arms this session for the escape hatch.
+        projects = await asyncio.to_thread(execute_action, "projects", {})
+        assert projects["skippedProjects"][0]["recovery"]["operation"] == "restart"
+        result = await asyncio.to_thread(execute_action, "project_lifecycle", dict(_RESTART_PARAMS), governed=True)
+    finally:
+        unbind_actions(registry)
+    assert broker.calls == [("project_lifecycle", {"projectId": "p:main", "operation": "restart",
+                                                   "requestId": "request-1"})]
+    assert len(spawn_calls) == 1
+    argv, kwargs = spawn_calls[0]
+    assert argv == [str(exe), "--project", str(registry.root), "restart"]
+    # STARTUPINFO objects compare by identity; assert the rest exactly and the
+    # window-hiding flags by value.
+    assert ({key: value for key, value in kwargs.items() if key != "startupinfo"}
+            == {key: value for key, value in expected_kwargs.items() if key != "startupinfo"})
+    if os.name == "nt":
+        # 无控制台红线：CREATE_NO_WINDOW + 隐藏窗口 STARTUPINFO，且绝不走 shell。
+        assert kwargs["creationflags"] & subprocess.CREATE_NO_WINDOW
+        assert kwargs["startupinfo"].dwFlags & subprocess.STARTF_USESHOWWINDOW
+        assert kwargs["startupinfo"].wShowWindow == subprocess.SW_HIDE
+    else:
+        assert "startupinfo" not in kwargs and "creationflags" not in kwargs
+    assert result["code"] == "launcher_restart_fallback" and result["degraded"] is True
+    assert result["fallback"] == "launcher" and result["state"] == "unknown"
+    assert result["nativeState"] == "unknown" and result["nativeCode"] == "control_unavailable"
+    assert result["launcherExitCode"] == 0
+    assert "request-1" in result["message"] and "project_lifecycle_receipt" in result["message"]
+
+
+@pytest.mark.anyio
+async def test_identity_mismatch_from_a_popped_project_action_arms_the_escape(tmp_path, monkeypatch):
+    spawn_calls = []
+    _mock_launcher_spawn(monkeypatch, spawn_calls)
+    exe = tmp_path / "VibelutionLauncher.exe"
+    exe.write_bytes(b"")
+    monkeypatch.setattr("core.assistant_runtime.actions._launcher_executable", lambda: exe)
+    registry = Registry(tmp_path)
+    # ``task_list`` pops project_id from args before the coroutine runs, so the
+    # arm must survive on the pre-pop capture.
+    async def drift(*_args, **_kwargs):
+        raise DispatchError("项目后端的版本或项目身份校验失败。", code="RUNTIME_IDENTITY_MISMATCH")
+    registry.management = SimpleNamespace(active_tasks=drift)
+    broker = UnknownBroker()
+    bind_actions(registry, asyncio.get_running_loop(), main_control=broker)
+    try:
+        denied = await asyncio.to_thread(execute_action, "task_list", {"project_id": "p:main"})
+        assert denied["code"] == "RUNTIME_IDENTITY_MISMATCH"
+        result = await asyncio.to_thread(execute_action, "project_lifecycle", dict(_RESTART_PARAMS), governed=True)
+    finally:
+        unbind_actions(registry)
+    assert result["code"] == "launcher_restart_fallback" and len(spawn_calls) == 1
+
+
+@pytest.mark.anyio
+async def test_escape_ignores_plain_skips_stop_operations_and_repeat_request_ids(tmp_path, monkeypatch):
+    spawn_calls = []
+    _mock_launcher_spawn(monkeypatch, spawn_calls)
+    exe = tmp_path / "VibelutionLauncher.exe"
+    exe.write_bytes(b"")
+    monkeypatch.setattr("core.assistant_runtime.actions._launcher_executable", lambda: exe)
+    registry = Registry(tmp_path)
+    registry.skipped = [{"projectId": "p:main", "code": "BACKEND_UNAVAILABLE", "message": "无法连接该项目后端。"}]
+    broker = UnknownBroker()
+    bind_actions(registry, asyncio.get_running_loop(), main_control=broker)
+    try:
+        # A plain offline skip (no recovery) must not arm the escape.
+        await asyncio.to_thread(execute_action, "projects", {})
+        stop_params = {**_RESTART_PARAMS, "operation": "stop"}
+        plain = await asyncio.to_thread(execute_action, "project_lifecycle", dict(stop_params), governed=True)
+        assert "degraded" not in plain
+        # Arming now covers the restart operation; stop stays native even armed.
+        registry.skipped = [_drift_skip()]
+        await asyncio.to_thread(execute_action, "projects", {})
+        stopped = await asyncio.to_thread(execute_action, "project_lifecycle", dict(stop_params), governed=True)
+        assert "degraded" not in stopped
+        first = await asyncio.to_thread(execute_action, "project_lifecycle", dict(_RESTART_PARAMS), governed=True)
+        assert first["code"] == "launcher_restart_fallback" and len(spawn_calls) == 1
+        # The same requestId never falls back twice.
+        second = await asyncio.to_thread(execute_action, "project_lifecycle", dict(_RESTART_PARAMS), governed=True)
+        assert second["code"] == "control_unavailable" and "degraded" not in second
+    finally:
+        unbind_actions(registry)
+    assert len(spawn_calls) == 1
+
+
+@pytest.mark.anyio
+async def test_escape_never_stacks_while_a_restart_is_in_flight(tmp_path, monkeypatch):
+    from core.assistant_runtime import actions
+    spawn_calls = []
+    _mock_launcher_spawn(monkeypatch, spawn_calls)
+    exe = tmp_path / "VibelutionLauncher.exe"
+    exe.write_bytes(b"")
+    monkeypatch.setattr("core.assistant_runtime.actions._launcher_executable", lambda: exe)
+    registry = _armed_registry(tmp_path)
+    broker = UnknownBroker()
+    bind_actions(registry, asyncio.get_running_loop(), main_control=broker)
+    try:
+        await asyncio.to_thread(execute_action, "projects", {})
+        assert actions._fallback_in_flight.acquire(blocking=False)
+        try:
+            result = await asyncio.to_thread(execute_action, "project_lifecycle", dict(_RESTART_PARAMS), governed=True)
+        finally:
+            actions._fallback_in_flight.release()
+    finally:
+        unbind_actions(registry)
+    assert spawn_calls == []
+    assert result["code"] == "launcher_restart_fallback" and result["degraded"] is True
+    assert result["launcherError"] == "另一个进程外重启正在执行，本次未叠加"
+
+
+@pytest.mark.anyio
+async def test_missing_launcher_executable_keeps_the_native_outcome_with_a_hint(tmp_path, monkeypatch):
+    spawn_calls = []
+    _mock_launcher_spawn(monkeypatch, spawn_calls)
+    monkeypatch.setattr("core.assistant_runtime.actions._launcher_executable",
+                        lambda: tmp_path / "absent" / "VibelutionLauncher.exe")
+    registry = _armed_registry(tmp_path)
+    broker = UnknownBroker()
+    bind_actions(registry, asyncio.get_running_loop(), main_control=broker)
+    try:
+        await asyncio.to_thread(execute_action, "projects", {})
+        result = await asyncio.to_thread(execute_action, "project_lifecycle", dict(_RESTART_PARAMS), governed=True)
+    finally:
+        unbind_actions(registry)
+    assert spawn_calls == []
+    assert result["code"] == "control_unavailable" and "degraded" not in result
+    assert "VibelutionLauncher.exe" in result["launcherFallbackHint"]
+
+
+@pytest.mark.anyio
+async def test_registry_resolution_failure_keeps_the_original_error(tmp_path, monkeypatch):
+    spawn_calls = []
+    _mock_launcher_spawn(monkeypatch, spawn_calls)
+    exe = tmp_path / "VibelutionLauncher.exe"
+    exe.write_bytes(b"")
+    monkeypatch.setattr("core.assistant_runtime.actions._launcher_executable", lambda: exe)
+    registry = _armed_registry(tmp_path)
+    broker = UnknownBroker()
+    bind_actions(registry, asyncio.get_running_loop(), main_control=broker)
+    try:
+        await asyncio.to_thread(execute_action, "projects", {})
+        registry.skipped = []
+
+        def broken(project_id, require_available=True):
+            raise DispatchError("Project is not in the host-authorized registry.", code="PROJECT_NOT_AUTHORIZED")
+
+        registry._project = broken
+        result = await asyncio.to_thread(execute_action, "project_lifecycle", dict(_RESTART_PARAMS), governed=True)
+    finally:
+        unbind_actions(registry)
+    assert spawn_calls == []
+    assert result == {"schemaVersion": 1, "projectId": "p:main", "operation": "restart",
+                      "requestId": "request-1", "state": "unknown", "code": "control_unavailable"}
+
+
+@pytest.mark.anyio
+async def test_unclaimed_restart_wait_timeout_degrades_instead_of_raising(tmp_path, monkeypatch):
+    from core.assistant_runtime import actions
+    spawn_calls = []
+    _mock_launcher_spawn(monkeypatch, spawn_calls)
+    exe = tmp_path / "VibelutionLauncher.exe"
+    exe.write_bytes(b"")
+    monkeypatch.setattr("core.assistant_runtime.actions._launcher_executable", lambda: exe)
+    registry = _armed_registry(tmp_path)
+    broker = UnknownBroker()
+    bind_actions(registry, asyncio.get_running_loop(), main_control=broker)
+
+    def expire(coroutine, loop):
+        class Future:
+            def result(self, timeout):
+                raise TimeoutError()
+
+            def cancel(self):
+                return False
+        return Future()
+
+    monkeypatch.setattr(actions.asyncio, "run_coroutine_threadsafe", expire)
+    try:
+        # Arming hooks have their own tests; arm directly so the expire wrapper
+        # (which fails every submitted coroutine) only serves the restart call.
+        actions._arm_identity_drift("p:main")
+        result = await asyncio.to_thread(execute_action, "project_lifecycle", dict(_RESTART_PARAMS), governed=True)
+    finally:
+        unbind_actions(registry)
+    assert len(spawn_calls) == 1
+    assert result["code"] == "launcher_restart_fallback" and result["degraded"] is True
+    assert result["nativeState"] == "unknown" and result["nativeCode"] == "timeout"
+
+
+@pytest.mark.anyio
+async def test_timeout_with_missing_executable_raises_the_original_error_plus_hint(tmp_path, monkeypatch):
+    from core.assistant_runtime import actions
+    spawn_calls = []
+    _mock_launcher_spawn(monkeypatch, spawn_calls)
+    monkeypatch.setattr("core.assistant_runtime.actions._launcher_executable",
+                        lambda: tmp_path / "absent" / "VibelutionLauncher.exe")
+    registry = _armed_registry(tmp_path)
+    broker = UnknownBroker()
+    bind_actions(registry, asyncio.get_running_loop(), main_control=broker)
+
+    def expire(coroutine, loop):
+        class Future:
+            def result(self, timeout):
+                raise TimeoutError()
+
+            def cancel(self):
+                return False
+        return Future()
+
+    monkeypatch.setattr(actions.asyncio, "run_coroutine_threadsafe", expire)
+    try:
+        actions._arm_identity_drift("p:main")
+        with pytest.raises(ValueError, match="原生请求尚未确认") as excinfo:
+            await asyncio.to_thread(execute_action, "project_lifecycle", dict(_RESTART_PARAMS), governed=True)
+    finally:
+        unbind_actions(registry)
+    assert spawn_calls == []
+    assert "VibelutionLauncher.exe" in str(excinfo.value)

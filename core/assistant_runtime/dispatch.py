@@ -55,8 +55,14 @@ _BACKEND_CODE_MESSAGES = {
 
 
 def _backend_error_message(exc: BackendClientError) -> str:
-    return (_BACKEND_ERROR_MESSAGES.get(exc.reason) or _BACKEND_CODE_MESSAGES.get(exc.code)
-            or "项目后端操作失败；已有任务引用已保留。")
+    canned = (_BACKEND_ERROR_MESSAGES.get(exc.reason) or _BACKEND_CODE_MESSAGES.get(exc.code)
+              or "项目后端操作失败；已有任务引用已保留。")
+    if exc.reason == "runtime_revision_mismatch" and getattr(exc, "detail", ""):
+        # ``detail`` is client-composed from truncated local revision values
+        # (checkout / backend info / Launcher descriptor); raw backend response
+        # text never enters this message.
+        return f"{canned}（{exc.detail[:200]}）"
+    return canned
 
 
 def _identity_recovery(exc: BackendClientError, project_id: str) -> dict[str, Any] | None:

@@ -57,11 +57,15 @@ def _supported_management_scopes():
 class BackendClientError(RuntimeError):
     """Fail-closed runtime discovery, identity, auth, or API error."""
 
-    def __init__(self, message: str, *, code: str = "BACKEND_ERROR", reason: str = "") -> None:
+    def __init__(self, message: str, *, code: str = "BACKEND_ERROR", reason: str = "",
+                 detail: str = "") -> None:
         super().__init__(str(message or code))
         self.code = str(code or "BACKEND_ERROR")
         # Only local discovery sets this marker; backend response text is untrusted.
         self.reason = reason
+        # Optional client-composed diagnostic values, already sanitized and
+        # bounded before construction; never raw backend response text.
+        self.detail = str(detail or "")
 
 
 class _StaleControlTokenError(BackendClientError):
@@ -140,6 +144,12 @@ def _checkout_revision(project_root: Path) -> str:
         if candidate.is_file():
             return candidate.read_text(encoding="utf-8", errors="replace").strip()
     return ""
+
+
+def _short_revision(value) -> str:
+    """Bounded path-safe revision fragment (12 chars) for drift diagnostics."""
+    cleaned = re.sub(r"[^A-Za-z0-9._:/-]", "", str(value or "").strip())
+    return cleaned[:12] or "(missing)"
 
 
 def _running_code_fingerprint_payload(project_root: Path) -> dict[str, Any]:
@@ -1616,10 +1626,18 @@ class ManagedAgentBackendClient:
             or actual_revision != expected_revision
             or (actual_revision != checkout_revision and not equivalent_runtime)
         ):
+            # Three-party values make the drift self-diagnosing: which checkout
+            # the client read, which revision the backend reports, and which
+            # revision the Launcher descriptor pins. All are truncated and
+            # character-filtered before they reach any message.
+            values = (f"checkout={_short_revision(checkout_revision)} "
+                      f"info={_short_revision(actual_revision)} "
+                      f"launcher={_short_revision(expected_revision)}")
             raise BackendClientError(
-                "managed backend runtime source revision mismatch",
+                "managed backend runtime source revision mismatch: " + values,
                 code="RUNTIME_IDENTITY_MISMATCH",
                 reason="runtime_revision_mismatch",
+                detail=values,
             )
         self._runtime_info = dict(info)
         self._verified = True
