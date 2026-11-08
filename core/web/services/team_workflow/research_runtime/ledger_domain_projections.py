@@ -39,7 +39,9 @@ def _invalid_counter_keys(value: Any) -> list[str]:
     aliases = {"wallClockSeconds": "seconds", "maxRetries": "retries"}
     invalid: list[str] = []
     for key in _BUDGET_COUNTER_KEYS:
-        counter = raw.get(key) if key in raw else raw.get(aliases.get(key, ""))
+        counter = raw.get(key)
+        if key not in raw and key in aliases:
+            counter = raw.get(aliases[key])
         if counter is not None and (isinstance(counter, bool) or not isinstance(counter, int) or counter < 0):
             invalid.append(key)
     return invalid

@@ -149,6 +149,8 @@ def test_budget_records_report_invalid_usage_counters(scene_events) -> None:
         ({"seconds": 7}, "wallClockSeconds", 7, False),
         ({"wallClockSeconds": 7, "seconds": "ignored"}, "wallClockSeconds", 7, False),
         ({"tokens": 5}, "tokens", 5, False),
+        ({"": -1}, "tokens", 0, False),
+        ({"": -1, "tokens": 5}, "tokens", 5, False),
     ],
 )
 def test_budget_usage_invalid_values_are_observable(scene_events, usage, counter, expected, degraded):
