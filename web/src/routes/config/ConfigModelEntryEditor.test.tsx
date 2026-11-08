@@ -77,10 +77,19 @@ describe("controlled model entry editor", () => {
       expect(container.querySelector(`[data-model-edit-field="${field}"]`)).toBeNull();
     }
     expect(container.querySelector('[data-model-action="save-edit"]')).toBeNull();
-    expect(container.textContent).toContain(CONFIG_COPY.zh.modelEditPendingSave);
-    expect(container.querySelector('[data-model-resolved-route="responses"]')).not.toBeNull();
+    expect(container.querySelector('[data-model-edit-pending-save]')).toBeNull();
+    expect(container.textContent).not.toContain(CONFIG_COPY.zh.modelEditPendingSave);
+    expect(container.querySelector('[data-model-edit-generation-empty]')?.textContent).toBe(CONFIG_COPY.zh.modelEditGenerationEmpty);
+    expect(container.querySelector('[data-model-resolved-route]')).toBeNull();
     expect(container.querySelector('[data-model-edit-field="wire_protocol"]')).toBeNull();
+    expect(container.textContent).not.toContain(CONFIG_COPY.zh.modelEditGenerationHint);
+    expect(container.textContent).not.toContain(CONFIG_COPY.zh.modelEditProtocolNote);
+    const heading = container.querySelector("h3")!;
+    expect(heading.textContent).toBe(CONFIG_COPY.zh.modelEditGenerationTitle);
+    expect(heading.parentElement?.querySelector("select")?.getAttribute("aria-label")).toBe(CONFIG_COPY.zh.modelEditAddParameter);
     expect(props.onEditsChange).not.toHaveBeenCalled();
+    await type("label", "Renamed");
+    expect(container.querySelector('[data-model-edit-pending-save]')).toBeNull();
   });
 
   it("adds only the requested override, preserves incomplete and empty numbers, and emits changed whitelist fields", async () => {
@@ -91,6 +100,7 @@ describe("controlled model entry editor", () => {
       add.dispatchEvent(new Event("change", { bubbles: true }));
     });
     expect(input("temperature").value).toBe("");
+    expect(container.querySelector('[data-model-edit-generation-empty]')).toBeNull();
     expect(props.onEditsChange).not.toHaveBeenCalled();
     await type("temperature", "1e");
     expect(input("temperature").value).toBe("1e");
@@ -133,5 +143,52 @@ describe("controlled model entry editor", () => {
     expect(saveButton().disabled).toBe(true);
     expect(input("label").disabled).toBe(true);
     expect(input("enabled").disabled).toBe(true);
+    expect(container.querySelector<HTMLSelectElement>("select")?.disabled).toBe(true);
+  });
+
+  it("shows stored defaults without changing unknown or protocol fields and saves only explicit whitelist edits", async () => {
+    const model = catalogModel({
+      context_window: 200000,
+      enabled: false,
+      custom_entry: { future: "preserve" },
+      interaction_contract: "tool-loop",
+      defaults: {
+        temperature: 0, max_output_tokens: 4096, timeout: 30, streaming: false,
+        default_reasoning_effort: "custom", unknown_parameter: { nested: true },
+      },
+    });
+    const original = structuredClone(model);
+    const save = vi.fn();
+    await render({ model, onSave: save });
+    expect(input("temperature").value).toBe("0");
+    expect(input("max_output_tokens").value).toBe("4096");
+    expect(input("timeout").value).toBe("30");
+    expect(input("streaming").checked).toBe(false);
+    expect(input("enabled").checked).toBe(false);
+    expect(container.querySelector<HTMLSelectElement>(`select[aria-label="${CONFIG_COPY.zh.modelEditFieldReasoningEffort}"]`)?.value).toBe("custom");
+    expect(container.querySelector(`select[aria-label="${CONFIG_COPY.zh.modelEditAddParameter}"]`)).toBeNull();
+    expect(container.querySelector<HTMLButtonElement>('[data-model-action="save-edit"]')?.disabled).toBe(true);
+    expect(props.onEditsChange).not.toHaveBeenCalled();
+    await type("label", "Renamed");
+    expect(props.edits).toEqual({ label: "Renamed" });
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-model-action="save-edit"]')!.click());
+    expect(save).toHaveBeenCalledWith("stable-id", { label: "Renamed" });
+    expect(model).toEqual(original);
+  });
+
+  it("expands a parameter without creating a save and locks all controls when disabled", async () => {
+    const save = vi.fn();
+    await render({ onSave: save });
+    const add = container.querySelector<HTMLSelectElement>(`select[aria-label="${CONFIG_COPY.zh.modelEditAddParameter}"]`)!;
+    await act(async () => {
+      add.value = "streaming";
+      add.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(input("streaming").checked).toBe(true);
+    expect(props.onEditsChange).not.toHaveBeenCalled();
+    expect(container.querySelector<HTMLButtonElement>('[data-model-action="save-edit"]')?.disabled).toBe(true);
+    expect(save).not.toHaveBeenCalled();
+    await render({ disabled: true });
+    expect([...container.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input, select")].every((control) => control.disabled)).toBe(true);
   });
 });

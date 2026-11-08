@@ -73,9 +73,11 @@ async function mount(overrides: Partial<PanelProps> = {}) {
     onSelectHandoff: vi.fn(async () => true),
     ...overrides,
   };
-  async function rerender(next: Partial<PanelProps> = {}) {
+  let generation = 0;
+  async function rerender(next: Partial<PanelProps> = {}, discard = false) {
     props = { ...props, ...next };
-    await act(async () => root.render(<VuiProvider><ConfigDecisionModelsPanel {...props} /></VuiProvider>));
+    if (discard) generation += 1;
+    await act(async () => root.render(<VuiProvider><ConfigDecisionModelsPanel key={generation} {...props} /></VuiProvider>));
   }
   await rerender();
   return { container, rerender };
@@ -98,18 +100,25 @@ async function edit(input: HTMLInputElement, value: string) {
 
 async function openEditor(container: HTMLElement, id = "d1-3b") {
   const row = container.querySelector(`[data-decision-model-id="${id}"]`)!;
-  const button = [...row.querySelectorAll<HTMLButtonElement>("button")]
-    .find((item) => item.textContent === "编辑")!;
+  const button = row.querySelector<HTMLButtonElement>("button")!;
   await act(async () => button.click());
-  const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
-  if (!dialog) throw new Error("Missing decision model editor");
-  return dialog;
+  const editor = container.querySelector<HTMLElement>('[data-testid="decision-model-editor"]');
+  if (!editor) throw new Error("Missing decision model editor");
+  return editor;
 }
 
 async function closeEditor() {
-  const button = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
-    .find((item) => item.textContent === "完成")!;
+  const button = document.querySelector<HTMLButtonElement>('button[aria-label="返回用途"]')!;
   await act(async () => button.click());
+}
+
+async function addEntry(container: HTMLElement, label = "自定义") {
+  const button = [...container.querySelectorAll<HTMLButtonElement>("button")]
+    .find((item) => item.textContent === "添加")!;
+  await act(async () => button.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+    .find((item) => item.textContent === label)!;
+  await act(async () => item.click());
 }
 
 async function openHandoff(container: HTMLElement) {
@@ -142,10 +151,10 @@ describe("ConfigDecisionModelsPanel", () => {
       </VuiProvider>,
     );
     expect(markup).toContain("决策模型");
-    expect(markup).toContain("OpenJev");
+    expect(markup).toContain("添加");
     expect(markup).toContain("不绑定");
-    expect(markup).toContain("检查连通");
-    expect(markup).toContain("不进入对话槽");
+    expect(markup).not.toContain("检查连通");
+    expect(markup).not.toContain("不进入对话槽");
     expect(markup).not.toContain("renderers/shadcn");
   });
 
@@ -157,12 +166,57 @@ describe("ConfigDecisionModelsPanel", () => {
     expect(route).toContain("decision_handoff_model_id");
     expect(panel).not.toContain("renderers/shadcn");
     expect(panel).not.toContain("@heroui/react");
+    expect(panel).not.toContain("VDialog");
+  });
+
+  it("preserves unknown saved fields when reading and editing an entry", async () => {
+    const extension = { route: "custom", options: ["a", "b"] };
+    const models = readDecisionModelMap({
+      "d1-3b": { ...savedModels["d1-3b"], custom_option: extension },
+    });
+    expect(models["d1-3b"].custom_option).toEqual(extension);
+    const onCommit = vi.fn();
+    const { container } = await mount({ models, savedModels: models, onCommit });
+    await edit(field(await openEditor(container), "名称"), "Renamed");
+    await closeEditor();
+    expect(onCommit).toHaveBeenCalledExactlyOnceWith({
+      "d1-3b": { ...models["d1-3b"], label: "Renamed", custom_option: extension },
+    }, "d1-3b");
+  });
+
+  it("accepts refreshed extension fields before starting a new edit", async () => {
+    const models = readDecisionModelMap({ "d1-3b": { ...savedModels["d1-3b"], custom_option: "old" } });
+    const onCommit = vi.fn();
+    const { container, rerender } = await mount({ models, savedModels: models, onCommit });
+    const refreshed = { "d1-3b": { ...models["d1-3b"], custom_option: "new" } };
+    await rerender({ models: refreshed, savedModels: refreshed });
+    await edit(field(await openEditor(container), "名称"), "Renamed");
+    await closeEditor();
+    expect(onCommit).toHaveBeenCalledExactlyOnceWith({
+      "d1-3b": { ...refreshed["d1-3b"], label: "Renamed" },
+    }, "d1-3b");
+  });
+
+  it("discards retained incomplete values only when the parent remounts after explicit discard", async () => {
+    const onPendingChange = vi.fn();
+    const { container, rerender } = await mount({ onPendingChange });
+    const editor = await openEditor(container);
+    await edit(field(editor, "模型名"), "");
+    await closeEditor();
+    expect(document.activeElement).toBe(container.querySelector('[data-decision-model-id="d1-3b"] button'));
+    await rerender({ models: { ...savedModels } });
+    expect(field(await openEditor(container), "模型名").value).toBe("");
+    await rerender({}, true);
+    expect(container.querySelector('[data-testid="decision-model-editor"]')).toBeNull();
+    expect(field(await openEditor(container), "模型名").value).toBe(savedModels["d1-3b"].model_id);
+    expect(onPendingChange.mock.calls).toEqual([[false], [true], [false]]);
   });
 
   it("saves only the requested enabled value and waits for saved props", async () => {
     const onCommit = vi.fn();
     const onToggleEnabled = vi.fn(async () => true);
     const { container } = await mount({ onCommit, onToggleEnabled });
+    await openEditor(container);
     const checkbox = container.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
 
     await act(async () => checkbox.click());
@@ -241,16 +295,13 @@ describe("ConfigDecisionModelsPanel", () => {
   it("disables immediate controls for a new unsaved model and excludes it from handoff", async () => {
     const onToggleEnabled = vi.fn(async () => true);
     const { container } = await mount({ onToggleEnabled });
-    const add = [...container.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.textContent === "OpenJev")!;
-    await act(async () => add.click());
-    await closeEditor();
-    const checkboxes = container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+    await addEntry(container, "OpenJev");
+    const checkbox = container.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
 
-    expect(checkboxes).toHaveLength(2);
-    expect(checkboxes[1].disabled).toBe(true);
-    await act(async () => checkboxes[1].click());
+    expect(checkbox.disabled).toBe(true);
+    await act(async () => checkbox.click());
     expect(onToggleEnabled).not.toHaveBeenCalled();
+    await closeEditor();
     const options = await openHandoff(container);
     expect(options.map((option) => option.textContent)).toEqual(["不绑定", "d1-3B"]);
   });
@@ -258,6 +309,7 @@ describe("ConfigDecisionModelsPanel", () => {
   it("retains draft-only enabled behavior when immediate callbacks are absent", async () => {
     const onCommit = vi.fn();
     const { container } = await mount({ onCommit, onToggleEnabled: undefined, onSelectHandoff: undefined });
+    await openEditor(container);
 
     await act(async () => container.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());
 
@@ -277,10 +329,12 @@ describe("ConfigDecisionModelsPanel", () => {
     expect(container.querySelector('input[type="text"]')).toBeNull();
     expect(container.textContent).toContain("local/model-23");
     expect(container.querySelector('[data-decision-model-id="model-0"]')!.textContent).toContain("用于交接");
-    expect([...container.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent === "自定义")!.disabled).toBe(true);
+    expect([...container.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent === "添加")!.disabled).toBe(true);
     const editor = await openEditor(container, "model-23");
     expect(field(editor, "名称").value).toBe("Decision 23");
-    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(0);
+    expect(container.querySelector("li[data-decision-model-id]")).toBeNull();
+    expect(container.querySelector('button[aria-label="返回用途"]')).not.toBeNull();
     expect(editor.querySelectorAll('input[type="text"]')).toHaveLength(3);
   });
 
@@ -304,8 +358,7 @@ describe("ConfigDecisionModelsPanel", () => {
     const onPendingChange = vi.fn();
     const { container, rerender } = await mount({ models: {}, savedModels: {}, handoffModelId: "", savedHandoffModelId: "", onCommit, onPendingChange });
     expect(onPendingChange.mock.calls).toEqual([[false]]);
-    const add = [...container.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent === "自定义")!;
-    await act(async () => add.click());
+    await addEntry(container);
     expect(onPendingChange.mock.calls).toEqual([[false], [true]]);
     expect(onCommit).not.toHaveBeenCalled();
     await closeEditor();
@@ -355,9 +408,8 @@ describe("ConfigDecisionModelsPanel", () => {
     await edit(field(editor, "名称"), savedModels["d1-3b"].label);
     expect(onPendingChange.mock.calls).toEqual([[false], [true], [false]]);
     await closeEditor();
-    const add = [...container.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent === "自定义")!;
-    await act(async () => add.click());
-    const remove = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((item) => item.textContent === "删除")!;
+    await addEntry(container);
+    const remove = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="decision-model-editor"] button')].find((item) => item.textContent === "删除")!;
     await act(async () => remove.click());
     expect(onPendingChange.mock.calls).toEqual([[false], [true], [false], [true], [false]]);
   });
@@ -424,9 +476,8 @@ describe("ConfigDecisionModelsPanel", () => {
   it("opens a new custom entry and commits it only after its required fields are ready", async () => {
     const onCommit = vi.fn();
     const { container } = await mount({ onCommit });
-    const add = [...container.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent === "自定义")!;
-    await act(async () => add.click());
-    const editor = document.querySelector<HTMLElement>('[role="dialog"]')!;
+    await addEntry(container);
+    const editor = container.querySelector<HTMLElement>('[data-testid="decision-model-editor"]')!;
     expect(field(editor, "名称").value).toBe("自定义决策模型");
     expect(onCommit).not.toHaveBeenCalled();
     await edit(field(editor, "模型名"), "local/custom");
@@ -480,8 +531,10 @@ describe("ConfigDecisionModelsPanel", () => {
   it("reports failed probes on the summary row", async () => {
     vi.mocked(testDecisionModel).mockRejectedValue(new Error("unavailable"));
     const { container } = await mount();
-    const check = container.querySelector<HTMLButtonElement>('button[aria-label="检查连通 d1-3B"]')!;
+    const editor = await openEditor(container);
+    const check = [...editor.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent === "检查连通")!;
     await act(async () => check.click());
+    await closeEditor();
     expect(container.textContent).toContain("连通检查失败");
   });
 

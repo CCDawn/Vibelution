@@ -1,14 +1,12 @@
 import { useMemo, useState } from "react";
 
 import type { ConfigCatalogModel } from "../../api/types";
-import { VActionGroup, VButton, VInput, VStatusChip, VStringSelect, VSwitch } from "../../components/vui";
+import { VActionGroup, VButton, VInput, VStringSelect, VSwitch } from "../../components/vui";
 import styles from "./ConfigModelEntryEditor.styles";
-import { canonicalProviderRoute } from "../configProviderLogic";
-import { resolvedRouteText, type ConfigCopy } from "./configCopy";
+import type { ConfigCopy } from "./configCopy";
 import {
   buildModelFieldValues,
   EDITABLE_MODEL_FIELDS,
-  extractProtocolFacts,
   type EditableModelField,
   type ModelFieldEdits,
   type ModelFieldValues,
@@ -83,6 +81,7 @@ export function ConfigModelEntryEditor({
     <label className={styles.modelEditField} data-model-edit-field={field} key={field}>
       <span>{label}</span>
       <VInput
+        className={styles.modelEditInput}
         type="text"
         inputMode={field === "temperature" ? "decimal" : "numeric"}
         value={values[field]}
@@ -93,41 +92,60 @@ export function ConfigModelEntryEditor({
       />
     </label>
   );
-  const wire = extractProtocolFacts(model.draftEntry).find((fact) => fact.field === "wire_protocol")?.value ?? "";
-  const route = canonicalProviderRoute(wire) || wire.trim();
-
   return (
     <div className={styles.modelEditForm} data-model-edit-form={model.modelRef}>
       <div className={styles.modelEditGrid} aria-label={copy.modelEditFieldsAria}>
         <label className={styles.modelEditField} data-model-edit-field="label">
           <span>{copy.modelEditFieldLabel}</span>
-          <VInput value={values.label} disabled={locked} aria-invalid={!values.label.trim() || undefined}
+          <VInput className={styles.modelEditInput} value={values.label} disabled={locked} aria-invalid={!values.label.trim() || undefined}
             onChange={(event) => update("label", event.target.value)} />
         </label>
         <label className={styles.modelEditField} data-model-edit-field="model">
           <span>{copy.modelEditFieldModel}</span>
-          <VInput value={values.model} disabled={locked} title={copy.modelEditModelHint}
+          <VInput className={styles.modelEditInput} value={values.model} disabled={locked} title={copy.modelEditModelHint}
             aria-invalid={!values.model.trim() || undefined}
             onChange={(event) => update("model", event.target.value)} />
         </label>
         {numericInput("context_window", copy.modelEditFieldContextWindow)}
         <div className={styles.modelEditField} data-model-edit-field="enabled">
           <span>{copy.modelEditFieldEnabled}</span>
-          <VSwitch isSelected={values.enabled === true} isDisabled={locked} aria-label={copy.modelEditFieldEnabled}
-            onChange={(value) => update("enabled", value)} />
+          <div className={styles.modelEditSwitch}>
+            <VSwitch isSelected={values.enabled === true} isDisabled={locked} aria-label={copy.modelEditFieldEnabled}
+              onChange={(value) => update("enabled", value)} />
+          </div>
         </div>
       </div>
 
-      <div className={styles.modelEditProtocol} role="group" aria-label={copy.modelEditGenerationTitle}>
-        <span className={styles.modelEditProtocolHeading}>{copy.modelEditGenerationTitle}</span>
-        <p className={styles.modelEditHint}>{copy.modelEditGenerationHint}</p>
+      <div className={styles.modelEditParameters} role="group" aria-label={copy.modelEditGenerationTitle}>
+        <div className={styles.modelEditParameterHeading}>
+          <h3 className={styles.modelEditParameterTitle}>{copy.modelEditGenerationTitle}</h3>
+          {availableGeneration.length > 0 ? <VStringSelect
+            className={styles.modelEditAddParameter}
+            ariaLabel={copy.modelEditAddParameter}
+            value=""
+            isDisabled={locked}
+            options={[
+              { value: "", label: copy.modelEditAddParameter },
+              ...availableGeneration.map((field) => ({ value: field, label: labels[field] })),
+            ]}
+            onValueChange={(value) => {
+              const field = availableGeneration.find((candidate) => candidate === value);
+              if (field) setAdded((current) => ({
+                modelRef: model.modelRef,
+                fields: [...(current.modelRef === model.modelRef ? current.fields : []), field],
+              }));
+            }}
+          /> : null}
+        </div>
         {visibleGeneration.length > 0 ? <div className={styles.modelEditGrid}>
           {visibleGeneration.map((field) => {
             if (field === "streaming") return (
               <div className={styles.modelEditField} data-model-edit-field={field} key={field}>
                 <span>{labels[field]}</span>
-                <VSwitch isSelected={values.streaming === true} isDisabled={locked} aria-label={labels[field]}
-                  onChange={(value) => update(field, value)} />
+                <div className={styles.modelEditSwitch}>
+                  <VSwitch isSelected={values.streaming === true} isDisabled={locked} aria-label={labels[field]}
+                    onChange={(value) => update(field, value)} />
+                </div>
               </div>
             );
             if (field === "default_reasoning_effort") return (
@@ -140,30 +158,9 @@ export function ConfigModelEntryEditor({
             );
             return numericInput(field, labels[field]);
           })}
-        </div> : null}
-        {availableGeneration.length > 0 ? <VStringSelect
-          ariaLabel={copy.modelEditAddParameter}
-          value=""
-          isDisabled={locked}
-          options={[
-            { value: "", label: copy.modelEditAddParameter },
-            ...availableGeneration.map((field) => ({ value: field, label: labels[field] })),
-          ]}
-          onValueChange={(value) => {
-            const field = availableGeneration.find((candidate) => candidate === value);
-            if (field) setAdded((current) => ({
-              modelRef: model.modelRef,
-              fields: [...(current.modelRef === model.modelRef ? current.fields : []), field],
-            }));
-          }}
-        /> : null}
+        </div> : <p className={styles.modelEditHint} data-model-edit-generation-empty>{copy.modelEditGenerationEmpty}</p>}
       </div>
 
-      {route ? <div className={styles.modelEditProtocol} data-model-resolved-route={route}>
-        <span className={styles.modelEditProtocolHeading}>{copy.modelEditProtocolHeading}</span>
-        <span className={styles.modelEditProtocolValue}>{resolvedRouteText(copy, route)}</span>
-        <VStatusChip tone="neutral">{copy.modelEditProtocolNote}</VStatusChip>
-      </div> : null}
       {!valid ? <p className={styles.modelEditHint} role="alert">{copy.saveBlockedInvalid}</p> : null}
       {onSave ? <VActionGroup ariaLabel={`${model.modelRef}${copy.modelActionsAriaSuffix}`}>
         <VButton variant="primary" data-model-action="save-edit" isDisabled={locked || !dirty || !valid}
@@ -173,7 +170,7 @@ export function ConfigModelEntryEditor({
         <VButton data-model-action="cancel-edit" isDisabled={locked || !dirty} onPress={() => onEditsChange({})}>
           {copy.modelEditCancelAction}
         </VButton>
-      </VActionGroup> : <p className={styles.modelEditHint} data-model-edit-pending-save>{copy.modelEditPendingSave}</p>}
+      </VActionGroup> : null}
     </div>
   );
 }

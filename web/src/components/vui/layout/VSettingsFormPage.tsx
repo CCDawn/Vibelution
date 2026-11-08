@@ -51,7 +51,7 @@ export function VSettingsFormPage({
       ariaLabel={ariaLabel}
       data-vui-recipe="settings-form-page"
       className={[
-        "flex min-h-0 min-w-0 h-full flex-col gap-0 overflow-hidden",
+        "!flex min-h-0 min-w-0 h-full flex-col gap-0 overflow-hidden",
         className,
       ]
         .filter(Boolean)

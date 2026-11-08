@@ -1,11 +1,20 @@
 const styles = {
-  mobileList: "vui-routes-configproviderregistrypanel mobileList h-full min-h-0 max-[720px]:[&_[data-vui=split-main]]:hidden",
-  mobileDetail: "vui-routes-configproviderregistrypanel mobileDetail h-full min-h-0 max-[720px]:[&_[data-vui=split-sidebar]]:hidden max-[720px]:[&_[role=separator]]:hidden",
-  backProviders: "vui-routes-configproviderregistrypanel backProviders min-[721px]:!hidden max-[720px]:!inline-flex self-start",
-  backAction: "vui-routes-configproviderregistrypanel backAction self-start !min-h-10",
-  modelsDrilldown: "vui-routes-configproviderregistrypanel modelsDrilldown grid min-h-0 min-w-0 content-start gap-4 [&_[hidden]]:!hidden",
-  modelDrilldownDetail: "vui-routes-configproviderregistrypanel modelDrilldownDetail min-w-0 [&[hidden]]:!hidden",
-  modelEvidence: "vui-routes-configproviderregistrypanel modelEvidence grid gap-3 border-t border-vui-border-subtle pt-4 [&>summary]:cursor-pointer [&>summary]:py-2 [&>summary]:text-vui-xs [&>summary]:text-vui-fg-secondary",
+  providerTabList: "vui-routes-configproviderregistrypanel providerTabList !w-fit !flex-nowrap !gap-5 !rounded-none !border-0 !bg-transparent !p-0",
+  providerTabTrigger: "vui-routes-configproviderregistrypanel providerTabTrigger !min-h-10 !rounded-none !border-0 !border-b-2 !border-transparent !bg-transparent !px-0 !shadow-none data-[state=active]:!border-b-[var(--accent-cool)]",
+  subscriptionWorkspace: "vui-routes-configproviderregistrypanel subscriptionWorkspace flex h-full min-h-0 min-w-0 flex-col overflow-hidden",
+  subscriptionBack: "vui-routes-configproviderregistrypanel subscriptionBack !min-h-10 shrink-0 self-start mx-4 my-2",
+  subscriptionScroll: "vui-routes-configproviderregistrypanel subscriptionScroll min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-6 pb-6 [scrollbar-gutter:stable] max-[720px]:px-4",
+  providerHeader: "vui-routes-configproviderregistrypanel providerHeader flex min-h-16 shrink-0 items-center gap-3 border-b border-vui-border-subtle px-6 py-2 [&>h2]:min-w-0 [&>h2]:flex-1 [&>h2]:truncate [&>h2]:text-vui-base [&>h2]:font-medium [&>[data-vui=tabs]]:shrink-0 max-[720px]:px-4",
+  modelEditorHeader: "vui-routes-configproviderregistrypanel modelEditorHeader flex min-h-16 shrink-0 items-center gap-2 px-6 py-2 [&>h2]:min-w-0 [&>h2]:flex-1 [&>h2]:truncate [&>h2]:text-vui-base [&>h2]:font-medium max-[720px]:px-4",
+  modelContext: "vui-routes-configproviderregistrypanel modelContext shrink-0 text-vui-xs font-normal text-vui-fg-tertiary",
+  modelFacts: "vui-routes-configproviderregistrypanel modelFacts grid grid-cols-[auto_minmax(0,1fr)] gap-x-6 gap-y-3 text-vui-xs text-vui-fg-secondary [&>span:nth-child(even)]:text-right [&>span:nth-child(even)]:[overflow-wrap:anywhere]",
+  mobileList: "vui-routes-configproviderregistrypanel mobileList h-full min-h-0 max-[720px]:[&_[data-vui=split-main]]:!hidden",
+  mobileDetail: "vui-routes-configproviderregistrypanel mobileDetail h-full min-h-0 max-[720px]:[&_[data-vui=split-sidebar]]:!hidden max-[720px]:[&_[role=separator]]:!hidden",
+  backProviders: "vui-routes-configproviderregistrypanel backProviders min-[721px]:!hidden max-[720px]:!inline-flex !h-10 !min-h-10 !w-10 !min-w-10 !p-0 shrink-0",
+  backAction: "vui-routes-configproviderregistrypanel backAction !h-10 !min-h-10 !w-10 !min-w-10 !p-0 shrink-0",
+  modelsDrilldown: "vui-routes-configproviderregistrypanel modelsDrilldown flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden [&_[hidden]]:!hidden",
+  modelDrilldownDetail: "vui-routes-configproviderregistrypanel modelDrilldownDetail min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-6 pb-6 [scrollbar-gutter:stable] [&[hidden]]:!hidden max-[720px]:px-4",
+  modelEvidence: "vui-routes-configproviderregistrypanel modelEvidence grid gap-4 border-t border-vui-border-subtle pt-3 [&>summary]:cursor-pointer [&>summary]:py-3 [&>summary]:text-vui-xs [&>summary]:text-vui-fg-secondary",
   filterNotice: "vui-routes-configproviderregistrypanel filterNotice flex min-w-0 flex-wrap items-center gap-2 rounded-md border border-vui-border-subtle bg-vui-surface-row p-3 text-vui-xs text-vui-fg-secondary",
   compactHome: "vui-routes-configproviderregistrypanel compactHome grid min-h-0 min-w-0 content-start gap-3 !border-0 !rounded-none !bg-transparent !shadow-none",
   homeList: "vui-routes-configproviderregistrypanel homeList grid min-w-0 divide-y divide-vui-border-subtle",
@@ -22,21 +31,21 @@ const styles = {
   savePromptCopy:
     "vui-routes-configproviderregistrypanel savePromptCopy grid min-w-0 gap-0.5 [&_strong]:[font-size:var(--vui-font-sm)] [&_strong]:text-[var(--state-warning)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:leading-snug [&_span]:text-vui-fg-secondary [&_span]:[overflow-wrap:anywhere]",
   providerListSection:
-    "vui-routes-configproviderregistrypanel providerListSection grid min-h-0 min-w-0 [grid-template-rows:auto_minmax(0,1fr)] gap-1.5",
+    "vui-routes-configproviderregistrypanel providerListSection flex min-h-0 min-w-0 flex-1 items-start overflow-hidden py-2 [--config-list-row-height:44px] max-[720px]:[--config-list-row-height:48px]",
   providerListHeading:
     "vui-routes-configproviderregistrypanel providerListHeading m-0 px-0.5 [font-size:var(--vui-font-xs)] font-bold uppercase tracking-wide text-vui-fg-tertiary",
   providerAddRow:
     "vui-routes-configproviderregistrypanel providerAddRow !flex !h-auto !min-h-9 !w-full !items-center !justify-start gap-1.5 !border-0 !bg-transparent !shadow-none rounded-md border-t border-dashed border-vui-border-subtle px-2 py-1.5 text-vui-fg-tertiary [&_span]:[font-size:var(--vui-font-xs)] hover:!bg-vui-control-muted hover:!text-vui-fg-secondary",
   registryWorkspace:
-    "vui-routes-configproviderregistrypanel registryWorkspace max-[720px]:[&>[data-vui=split-sidebar]]:!w-full max-[720px]:[&>[data-vui=split-sidebar]]:!max-w-none max-[720px]:[&>[data-vui=split-sidebar]]:!basis-auto max-[720px]:[&>[data-vui=split-sidebar]]:!h-auto max-[720px]:[&>[role=separator]]:hidden max-[720px]:[&>[data-vui=split-main]]:!h-auto max-[720px]:[&>[data-vui=split-main]]:!overflow-visible h-full min-h-0 min-w-0 gap-4 overflow-hidden max-[720px]:!flex-col",
+    "vui-routes-configproviderregistrypanel registryWorkspace h-full min-h-0 min-w-0 !gap-0 overflow-hidden max-[720px]:!flex-col max-[720px]:[&>[data-vui=split-sidebar]]:!w-full max-[720px]:[&>[data-vui=split-sidebar]]:!max-w-none max-[720px]:[&>[data-vui=split-sidebar]]:!basis-auto max-[720px]:[&>[data-vui=split-sidebar]]:!h-full max-[720px]:[&>[role=separator]]:!hidden max-[720px]:[&>[data-vui=split-main]]:!h-full max-[720px]:[&>[data-vui=split-main]]:!overflow-hidden",
   registryWorkspaceMedium:
     "vui-routes-configproviderregistrypanel registryWorkspaceMedium min-[721px]:max-[1120px]:[&>[data-vui=split-sidebar]]:!max-w-48",
-  providerRail: "vui-routes-configproviderregistrypanel providerRail grid h-full min-h-0 min-w-0 content-start gap-4 overflow-y-auto border-r border-vui-border-subtle pr-3 max-[720px]:max-h-40",
-  providerList: "vui-routes-configproviderregistrypanel providerList min-h-0 min-w-0 overflow-y-auto !border-0 !bg-transparent !backdrop-blur-none !p-0 [&>[data-vui=entity-list-item]]:!px-1 [&>[data-vui=entity-list-item]]:!py-0.5",
+  providerRail: "vui-routes-configproviderregistrypanel providerRail flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-r border-vui-border-subtle bg-vui-surface-panel px-3 pt-4 [&>input]:shrink-0 [&>input]:mb-2 [&>input]:w-full",
+  providerList: "vui-routes-configproviderregistrypanel providerList !block w-full min-h-0 min-w-0 overflow-y-scroll !gap-0 !rounded-none !border-0 !bg-transparent !backdrop-blur-none !p-0 [scrollbar-gutter:stable] [scroll-snap-type:y_mandatory] [&>[data-vui=entity-list-item]]:!h-[var(--config-list-row-height)] [&>[data-vui=entity-list-item]]:!min-h-[var(--config-list-row-height)] [&>[data-vui=entity-list-item]]:!border-0 [&>[data-vui=entity-list-item]]:!p-0 [&>[data-vui=entity-list-item]]:[scroll-snap-align:start]",
   providerRow:
-    "vui-routes-configproviderregistrypanel providerRow flex min-w-0 items-center gap-1",
+    "vui-routes-configproviderregistrypanel providerRow flex h-full min-h-0 min-w-0 items-center gap-2 pr-2",
   providerButton:
-    "vui-routes-configproviderregistrypanel providerButton !flex !h-auto !min-h-9 !w-auto !flex-1 min-w-0 !flex-row !items-center gap-2 !border-0 !bg-transparent !shadow-none px-2 py-1.5 text-left",
+    "vui-routes-configproviderregistrypanel providerButton !flex !h-full !min-h-0 !w-auto !flex-1 min-w-0 !flex-row !items-center gap-2 !border-0 !bg-transparent !shadow-none !px-2 !py-1 text-left",
   providerDot: "vui-routes-configproviderregistrypanel providerDot h-2 w-2 shrink-0 rounded-full",
   providerDotOk: "vui-routes-configproviderregistrypanel providerDotOk bg-[var(--state-success)]",
   providerDotWarn: "vui-routes-configproviderregistrypanel providerDotWarn bg-[var(--state-warning)]",
@@ -48,16 +57,16 @@ const styles = {
   providerRowIdentity:
     "vui-routes-configproviderregistrypanel providerRowIdentity grid min-w-0 flex-1 gap-0.5",
   providerDisambiguator:
-    "vui-routes-configproviderregistrypanel providerDisambiguator max-w-full [overflow-wrap:anywhere] [font-size:var(--vui-font-micro-10)] leading-tight text-vui-fg-tertiary",
+    "vui-routes-configproviderregistrypanel providerDisambiguator max-w-full truncate text-vui-micro-10 leading-tight text-vui-fg-tertiary",
   providerFreshness:
     "vui-routes-configproviderregistrypanel providerFreshness m-0 min-w-0 [font-size:var(--vui-font-xs)] leading-snug text-vui-fg-tertiary",
   providerIdentity: "vui-routes-configproviderregistrypanel providerIdentity grid min-w-0 gap-0.5",
   providerLabel:
     "vui-routes-configproviderregistrypanel providerLabel min-w-0 flex-1 truncate text-vui-xs font-semibold leading-snug text-vui-fg-primary",
   modelsColumn:
-    "vui-routes-configproviderregistrypanel modelsColumn grid h-full min-h-0 min-w-0 content-start gap-6 overflow-y-auto overflow-x-hidden pr-1 min-[721px]:max-[1120px]:gap-3",
+    "vui-routes-configproviderregistrypanel modelsColumn flex h-full min-h-0 min-w-0 flex-col gap-0 overflow-hidden bg-vui-surface-panel [&:has([data-model-editing=true])>_.providerHeader]:hidden [&_[hidden]]:!hidden",
   providerSettings:
-    "vui-routes-configproviderregistrypanel providerSettings grid min-w-0 gap-4 [&_[data-vui=settings-row]]:[overflow-wrap:anywhere] min-[721px]:max-[1120px]:grid-cols-2 min-[721px]:max-[1120px]:gap-2 min-[721px]:max-[1120px]:[&>*:nth-child(-n+2)]:col-span-full min-[721px]:max-[1120px]:[&>*:nth-child(n+3)]:min-w-0 min-[721px]:max-[1120px]:[&_[data-vui=settings-row]]:!px-2 min-[721px]:max-[1120px]:[&_[data-vui=settings-row]]:!py-2 min-[721px]:max-[1120px]:[&_[data-vui=settings-row]>div]:!grid-cols-[minmax(0,1fr)_auto] min-[721px]:max-[1120px]:[&_[data-vui=settings-row]>div]:!items-start min-[721px]:max-[1120px]:[&_[data-vui=settings-row]>div]:!gap-x-2 min-[721px]:max-[1120px]:[&_[data-vui=settings-row]>div]:!gap-y-1",
+    "vui-routes-configproviderregistrypanel providerSettings grid min-h-0 min-w-0 flex-1 content-start gap-4 overflow-y-auto px-6 py-5 [scrollbar-gutter:stable] [&[hidden]]:!hidden [&_[data-vui=settings-row]]:[overflow-wrap:anywhere] max-[720px]:px-4",
   settingsRowLabel:
     "vui-routes-configproviderregistrypanel settingsRowLabel inline-flex min-w-0 items-center gap-1 [&_[data-vui=button]]:align-middle",
   inspectorPanel:
@@ -79,7 +88,7 @@ const styles = {
   tabs: "vui-routes-configproviderregistrypanel tabs flex min-w-0 flex-wrap items-center gap-1",
   tabButton: "vui-routes-configproviderregistrypanel tabButton",
   detailBody:
-    "vui-routes-configproviderregistrypanel detailBody min-h-80 min-w-0",
+    "vui-routes-configproviderregistrypanel detailBody min-h-0 min-w-0 flex-1 overflow-hidden [&[hidden]]:!hidden",
   tabSurface: "vui-routes-configproviderregistrypanel tabSurface grid h-full min-h-0 min-w-0 content-start gap-2 overflow-auto",
   connectionWorkspace:
     "vui-routes-configproviderregistrypanel connectionWorkspace relative isolate z-[1] grid min-h-0 min-w-0 content-start gap-3",
@@ -104,19 +113,19 @@ const styles = {
   factValue: "vui-routes-configproviderregistrypanel factValue min-w-0 truncate [font-size:var(--vui-font-sm)] font-semibold text-vui-fg-primary",
   deployment:
     "vui-routes-configproviderregistrypanel deployment grid min-w-0 gap-2 rounded-md border border-vui-border-subtle bg-vui-surface-glass p-2",
-  modelsWorkspace: "vui-routes-configproviderregistrypanel modelsWorkspace grid min-h-0 min-w-0 content-start gap-3",
+  modelsWorkspace: "vui-routes-configproviderregistrypanel modelsWorkspace flex h-full min-h-0 min-w-0 flex-col overflow-hidden [&_[hidden]]:!hidden",
   modelsSplit:
     "vui-routes-configproviderregistrypanel modelsSplit grid min-h-0 min-w-0 items-start gap-3 [grid-template-columns:minmax(13rem,17rem)_minmax(0,1fr)] max-[960px]:[grid-template-columns:minmax(0,1fr)]",
   modelListPane:
-    "vui-routes-configproviderregistrypanel modelListPane grid min-h-0 min-w-0 content-start gap-1.5",
+    "vui-routes-configproviderregistrypanel modelListPane flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-6 pb-4 [&[hidden]]:!hidden max-[720px]:px-4",
   modelListHeading:
     "vui-routes-configproviderregistrypanel modelListHeading m-0 px-0.5 [font-size:var(--vui-font-xs)] font-bold uppercase tracking-wide text-vui-fg-tertiary",
   modelList:
-    "vui-routes-configproviderregistrypanel modelList max-h-[26rem] min-h-0 min-w-0 overflow-y-auto !border-0 !bg-transparent !backdrop-blur-none !p-0 [&>[data-vui=entity-list-item]]:!px-1 [&>[data-vui=entity-list-item]]:!py-0.5",
+    "vui-routes-configproviderregistrypanel modelList !block w-full min-h-0 min-w-0 overflow-y-scroll !gap-0 !rounded-none !border-0 !bg-transparent !backdrop-blur-none !p-0 [scrollbar-gutter:stable] [scroll-snap-type:y_mandatory] [&>[data-vui=entity-list-item]]:!h-14 [&>[data-vui=entity-list-item]]:!min-h-14 [&>[data-vui=entity-list-item]]:!rounded-none [&>[data-vui=entity-list-item]]:!border-0 [&>[data-vui=entity-list-item]]:!p-0 [&>[data-vui=entity-list-item]]:[scroll-snap-align:start]",
   modelRow:
-    "vui-routes-configproviderregistrypanel modelRow flex min-w-0 items-center gap-1",
+    "vui-routes-configproviderregistrypanel modelRow flex h-14 min-w-0 items-center gap-3 border-b border-vui-border-subtle pr-2",
   modelRowButton:
-    "vui-routes-configproviderregistrypanel modelRowButton !flex !h-auto !min-h-8 !w-auto !flex-1 min-w-0 !flex-row !items-center gap-2 !border-0 !bg-transparent !shadow-none px-2 py-1 text-left",
+    "vui-routes-configproviderregistrypanel modelRowButton !flex !h-14 !min-h-14 !w-auto !flex-1 min-w-0 !flex-row !items-center gap-3 !rounded-none !border-0 !bg-transparent !shadow-none !px-1 !py-2 text-left [&>svg]:shrink-0",
   modelDot: "vui-routes-configproviderregistrypanel modelDot h-2 w-2 shrink-0 rounded-full",
   modelDotOk: "vui-routes-configproviderregistrypanel modelDotOk bg-[var(--state-success)]",
   modelDotWarn: "vui-routes-configproviderregistrypanel modelDotWarn bg-[var(--state-warning)]",
@@ -129,7 +138,7 @@ const styles = {
     "vui-routes-configproviderregistrypanel modelRowName min-w-0 flex-1 truncate text-vui-xs font-semibold leading-snug text-vui-fg-primary",
   modelDetailPane:
     "vui-routes-configproviderregistrypanel modelDetailPane grid min-h-0 min-w-0 content-start gap-3 overflow-y-auto rounded-md border border-vui-border-subtle bg-vui-surface-panel p-3 max-[960px]:max-h-none",
-  modelDetailBody: "vui-routes-configproviderregistrypanel modelDetailBody grid min-w-0 content-start gap-3",
+  modelDetailBody: "vui-routes-configproviderregistrypanel modelDetailBody grid max-w-[720px] min-w-0 content-start gap-6",
   modelDetailAvailability:
     "vui-routes-configproviderregistrypanel modelDetailAvailability inline-flex min-w-0",
   modelDetailSectionHead:
@@ -138,17 +147,17 @@ const styles = {
     "vui-routes-configproviderregistrypanel modelFilterButton shrink-0 data-[active=true]:bg-vui-control-muted data-[active=true]:text-vui-fg-primary",
   termHelpButton:
     "vui-routes-configproviderregistrypanel termHelpButton !h-auto !min-h-5 !w-5 !flex-none !px-0 align-middle text-vui-fg-tertiary hover:!text-vui-fg-secondary [&_svg]:shrink-0",
-  modelChrome: "vui-routes-configproviderregistrypanel modelChrome grid min-w-0 gap-2",
+  modelChrome: "vui-routes-configproviderregistrypanel modelChrome shrink-0 min-w-0 px-6 pt-5 pb-2 [&[hidden]]:!hidden max-[720px]:px-4",
   modelToolbar:
-    "vui-routes-configproviderregistrypanel modelToolbar flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 pb-2 border-b border-vui-border-subtle",
-  modelSearch: "vui-routes-configproviderregistrypanel modelSearch min-w-0 w-full max-w-64 flex-[1_1_10rem]",
-  modelFilters: "vui-routes-configproviderregistrypanel modelFilters flex min-w-0 flex-wrap items-center justify-end gap-1",
+    "vui-routes-configproviderregistrypanel modelToolbar flex min-w-0 flex-wrap items-center gap-3 [&>select]:w-auto [&>select]:min-w-28 [&>select]:max-w-40 max-[720px]:gap-2",
+  modelSearch: "vui-routes-configproviderregistrypanel modelSearch min-w-0 max-w-80 flex-[1_1_10rem] max-[720px]:basis-full max-[720px]:max-w-none",
+  modelFilters: "vui-routes-configproviderregistrypanel modelFilters !inline-flex !w-32 min-w-0 !flex-none shrink-0",
   pinBanner:
     "vui-routes-configproviderregistrypanel pinBanner flex min-w-0 flex-wrap items-center justify-end gap-1.5",
   pinBannerActions:
     "vui-routes-configproviderregistrypanel pinBannerActions flex min-w-0 flex-wrap items-center justify-end gap-1.5",
   tableScroll:
-    "vui-routes-configproviderregistrypanel tableScroll min-h-0 min-w-0 overflow-auto",
+    "vui-routes-configproviderregistrypanel tableScroll flex min-h-0 min-w-0 flex-1 items-start overflow-hidden py-2 [--config-list-row-height:56px]",
   verification: "grid min-w-0 gap-1 justify-items-start",
   verificationError: "text-vui-xs text-[var(--state-error)]",
   verificationDetails: "cursor-pointer text-vui-xs font-medium text-vui-fg-secondary",
