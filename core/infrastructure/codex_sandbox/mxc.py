@@ -875,10 +875,17 @@ def _verify_uncached(
     telemetry_policy = read_telemetry_policy()
     executor = executor_path(environ)
     if executor is None:
+        # Follow the cua-driver convention (human installs, product only
+        # discovers and locks versions): never auto-download here. Point the
+        # operator at the pinned provisioning CLI instead of leaving the
+        # sandbox silently unavailable.
         return MxcAvailability(
             ok=False,
             code=REASON_UNAVAILABLE,
-            detail="executor_binary_missing",
+            detail=(
+                "executor_binary_missing; install via: "
+                "python -m core.infrastructure.codex_sandbox.executor_provision --install"
+            ),
             telemetry_policy=telemetry_policy,
             network_profile=network_profile,
         )

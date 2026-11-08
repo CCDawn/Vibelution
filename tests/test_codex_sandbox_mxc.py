@@ -880,7 +880,10 @@ def test_auto_review_still_prompts_when_mxc_unavailable(
     fake_executor()
     _install_runtime(monkeypatch, permission_preset="auto_review")
     _expect_mxc_verified(
-        monkeypatch, ok=False, code=mxc_backend.REASON_UNAVAILABLE, detail="executor_binary_missing"
+        monkeypatch, ok=False, code=mxc_backend.REASON_UNAVAILABLE, detail=(
+            "executor_binary_missing; install via: "
+            "python -m core.infrastructure.codex_sandbox.executor_provision --install"
+        )
     )
     monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
 
@@ -1379,7 +1382,10 @@ def test_online_terminal_session_blocked_when_mxc_unhandled(
     _install_runtime(monkeypatch, permission_preset="request_approval",
                      sandbox_mode="workspace_write_online")
     _expect_mxc_verified(
-        monkeypatch, ok=False, code=mxc_backend.REASON_UNAVAILABLE, detail="executor_binary_missing"
+        monkeypatch, ok=False, code=mxc_backend.REASON_UNAVAILABLE, detail=(
+            "executor_binary_missing; install via: "
+            "python -m core.infrastructure.codex_sandbox.executor_provision --install"
+        )
     )
     monkeypatch.setattr(
         codex_cli_sandbox, "_resolve_codex_executable", lambda: r"C:\Codex\codex.exe"
