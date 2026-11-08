@@ -214,31 +214,6 @@ def _checked(root: Path, relative: str, *, resolved_root: Path | None = None) ->
     return target
 
 
-def _checked_built_file(root: Path, relative: str, *, resolved_root: Path | None = None) -> Path:
-    """Check an existing file in this builder's new output, without caching I/O.
-
-    Only an exact, strict canonical name proves the ordinary fast case. Case
-    changes, short names, unavailable normalization and all other ambiguity
-    retain the original ancestor checks. Never use this for new destinations
-    or public verification of a package from another owner.
-    """
-    if resolved_root is None or str(root) != str(resolved_root):
-        return _checked(root, relative, resolved_root=resolved_root)
-    relative = _relative(relative)
-    target = root / relative
-    try:
-        _reject_link(root)
-        _reject_link(target)
-        resolved_target = target.resolve(strict=True)
-    except (OSError, RuntimeError):
-        return _checked(root, relative, resolved_root=resolved_root)
-    # Path equality folds Windows case even in a case-sensitive directory.
-    # Any spelling change therefore needs the complete old chain, too.
-    if str(resolved_target) != str(target):
-        return _checked(root, relative, resolved_root=resolved_root)
-    return target
-
-
 def _walk(root: Path, *, skip: set[str] | None = None, skip_bytecode: bool = False):
     _reject_link(root)
     for directory, dirs, files in os.walk(root, followlinks=False):
@@ -618,7 +593,7 @@ def build_launcher_assistant_payload(
         "payloadContentSha256": _content_hash(files),
         "contractsSha256": contracts_entry["sha256"], "files": files,
     }
-    _verify_files(output, manifest, resolved_root=output, owned_build_output=True)
+    _verify_files(output, manifest, resolved_root=output)
     content = _json_bytes(manifest)
     with (output / "manifest.json").open("xb") as handle:
         handle.write(content)
@@ -635,7 +610,7 @@ def _directory_content_prefix(digest, relative: str, size: int) -> None:
 
 
 def _verify_files(root: Path, manifest: dict, *, directory_digest=None,
-                  resolved_root: Path | None = None, owned_build_output: bool = False) -> None:
+                  resolved_root: Path | None = None) -> None:
     if manifest.get("schemaVersion") != 1 or manifest.get("protocolVersion") != 1:
         raise ValueError("unsupported assistant payload manifest")
     python_name, abi = _python_names(manifest.get("pythonVersion", ""))
@@ -660,32 +635,38 @@ def _verify_files(root: Path, manifest: dict, *, directory_digest=None,
         checked_entries.append((relative, entry))
     if directory_digest is not None:
         checked_entries.sort(key=lambda item: item[0].encode("utf-8"))
+    # Directory ownership is shared by its files. Admit each directory once;
+    # the stable reader still checks each leaf and the final walk checks inventory.
+    directories = {}
+    for relative, _ in checked_entries:
+        parent = relative.rpartition("/")[0]
+        if parent not in directories:
+            directories[parent] = _checked(root, parent, resolved_root=resolved_root)
     pth_relative = f"python/{python_name}._pth"
     pth_content = None
     for relative, entry in checked_entries:
-        path = (_checked_built_file(root, relative, resolved_root=resolved_root)
-                if owned_build_output and directory_digest is None
-                else _checked(root, relative, resolved_root=resolved_root))
-        if not path.is_file() or path.stat().st_size != entry["size"]:
-            raise ValueError(f"assistant payload file missing or size mismatch: {relative}")
-        if directory_digest is None:
-            digest = _file_sha256(path, expected_size=entry["size"])
-        else:
-            # Preserve the sealed raw-directory domain without reading the payload
-            # a second time. The existing stable reader pins both digest inputs.
-            _directory_content_prefix(directory_digest, relative, entry["size"])
-            file_digest = hashlib.sha256()
-            capture_pth = relative.casefold() == pth_relative.casefold()
-            _, content = _read_stable_file(
-                path, expected_size=entry["size"], capture=capture_pth,
-                limit=len(_PTH_CONTENT) if capture_pth else None, digests=(file_digest, directory_digest),
-            )
-            if capture_pth:
-                pth_content = content
-            digest = file_digest.hexdigest()
+        parent, _, name = relative.rpartition("/")
+        path = directories[parent] / name
+        try:
+            if directory_digest is None:
+                digest = _file_sha256(path, expected_size=entry["size"])
+            else:
+                # One stable read feeds both the file and sealed-directory digests.
+                _directory_content_prefix(directory_digest, relative, entry["size"])
+                file_digest = hashlib.sha256()
+                capture_pth = relative.casefold() == pth_relative.casefold()
+                _, content = _read_stable_file(
+                    path, expected_size=entry["size"], capture=capture_pth,
+                    limit=len(_PTH_CONTENT) if capture_pth else None, digests=(file_digest, directory_digest),
+                )
+                if capture_pth:
+                    pth_content = content
+                digest = file_digest.hexdigest()
+        except (FileNotFoundError, NotADirectoryError):
+            raise ValueError(f"assistant payload file missing or size mismatch: {relative}") from None
         if digest != entry["sha256"]:
             raise ValueError(f"assistant payload hash mismatch: {relative}")
-    actual = {path.relative_to(root).as_posix() for path in _walk(root)}
+    actual = {os.path.relpath(path, root).replace(os.sep, "/") for path in _walk(root)}
     actual.discard("manifest.json")
     if {relative.casefold() for relative in actual} != seen or (
         directory_digest is not None and actual != {relative for relative, _ in checked_entries}

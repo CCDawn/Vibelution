@@ -232,6 +232,24 @@ def test_packaged_stale_live_falls_back_to_staging_only_if_native_fast_check_all
     assert build_identity.inspect_available_launcher_build(tmp_path, shell_kind="packaged")["availableBuildState"] == "not_built"
 
 
+def test_packaged_staging_identity_survives_an_unrelated_commit(tmp_path, monkeypatch):
+    packaged(tmp_path, staged=True)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda _root, spec: TREE if spec == "HEAD:desktop/electron" else "c" * 40)
+    monkeypatch.setattr(desktop_shell, "_inspect_desktop_shell_package", lambda *_args, **_kwargs: {
+        "stale": False, "currentFrontendDist": str(tmp_path / "active-frontend"),
+        "currentFrontendBuildKey": "e" * 64, "currentFrontendTree": "c" * 40,
+    })
+    before = {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+
+    result = build_identity.inspect_available_launcher_build(tmp_path, shell_kind="packaged")
+
+    assert result["availableBuildState"] == "ready"
+    assert result["availableBuild"]["sourceCommit"] == COMMIT
+    assert {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()} == before
+    monkeypatch.setattr(desktop_shell, "_electron_package_sources_clean", lambda _root: False)
+    assert build_identity.inspect_available_launcher_build(tmp_path, shell_kind="packaged")["availableBuildState"] == "not_built"
+
+
 @pytest.mark.parametrize("field", ["mainBundleSha256", "preloadBundleSha256", "frontendContentSha256", "assistant"])
 @pytest.mark.parametrize("invalid", [None, "not-a-hash"])
 def test_packaged_missing_or_invalid_hash_is_not_a_build(tmp_path, monkeypatch, field, invalid):
