@@ -37,7 +37,9 @@ def test_tool_side_effect_evidence_blocks_report_replay_after_restart(setup, mon
     journal.insert(2, SimpleNamespace(event_type=event_type, turn_id="turn-1", correlation_id="",
                                       payload=MetadataOnly(payload), visible_in_model=False))
     monkeypatch.setattr(journal_bridge, "load_session_conversation_events_cached", lambda *a, **kw: journal)
-    assert runtime.reconcile()["unknown"] == 1
+    # A visible report retires the entry from the banner count even though the
+    # outcome itself stays unknown; an invisible one stays pending attention.
+    assert runtime.reconcile()["unknown"] == (0 if visible else 1)
     assert item["visibleReport"] is visible and item["escalation"] == "delivery_outcome_unknown"
     runtime.close()
     reopened = patrol.LauncherPatrol(root, "pa", "session", dispatch)
@@ -200,3 +202,92 @@ def test_partial_visible_output_also_prevents_automatic_repeat(setup, monkeypatc
     assert runtime.inspect([row], now=20000)["wake"] == "none"
     assert len(calls) == 1
     assert item["visibleReport"] is True and item["escalation"] == "delivery_already_visible"
+
+
+def test_banner_count_excludes_visible_report_and_exhausted_recoveries(setup, monkeypatch):
+    """Entries with a visible result or spent recoveries leave the banner count;
+    the separate escalation surface still lists them for review."""
+    root, row, dispatch = setup
+    runtime = patrol.LauncherPatrol(root, "pa", "session", dispatch)
+    calls, journal = [], []
+    monkeypatch.setattr(proactive, "submit_session_proactive_turn", lambda **kw: calls.append(kw) or {"accepted": True})
+    monkeypatch.setattr(journal_bridge, "load_session_conversation_events_cached", lambda *a, **kw: journal)
+    assert runtime.inspect([row], now=10000)["wake"] == "accepted"
+    for attempt in range(3):
+        item = runtime._state["entries"][0]
+        journal[:] = journal_events(item["token"], item["event"]["eventId"], "turn_failed")
+        runtime.close()
+        runtime = patrol.LauncherPatrol(root, "pa", "session", dispatch)
+        runtime.inspect([row], now=20000 + attempt * 10000)
+    assert runtime._state["entries"][0]["escalation"] == "recovery_exhausted"
+    assert runtime.reconcile()["failed"] == 0
+    assert runtime.delivery_escalations["unresolved"] == 1
+
+    # The same exclusion covers a failed report the user already saw.
+    runtime.close()
+    runtime = patrol.LauncherPatrol(root, "pa", "session", dispatch)
+    assert runtime.inspect([row], now=60000)["wake"] == "none"
+    item = runtime._state["entries"][0]
+    journal[:] = journal_events(item["token"], item["event"]["eventId"], "turn_failed", True)
+    assert runtime.reconcile()["failed"] == 0
+    assert item["visibleReport"] is True and item["escalation"] == "delivery_already_visible"
+    assert runtime.delivery_escalations["unresolved"] == 1
+
+
+def test_acknowledge_retires_pending_banner_entries_and_persists(setup, monkeypatch):
+    root, row, dispatch = setup
+    runtime = patrol.LauncherPatrol(root, "pa", "session", dispatch)
+    calls = []
+
+    def uncertain(**kw):
+        calls.append(kw)
+        raise RuntimeError("acceptance was lost")
+
+    monkeypatch.setattr(proactive, "submit_session_proactive_turn", uncertain)
+    assert runtime.inspect([row], now=10000)["wake"] == "unknown"
+    runtime.close()
+    reopened = patrol.LauncherPatrol(root, "pa", "session", dispatch)
+    assert reopened.reconcile()["unknown"] == 1
+    assert reopened.acknowledge()["unknown"] == 0
+    assert reopened.reconcile()["unknown"] == 0
+    assert reopened.delivery_escalations["unresolved"] == 1
+    reopened.close()
+    again = patrol.LauncherPatrol(root, "pa", "session", dispatch)
+    assert again._state["entries"][0]["acknowledged"] is True
+    assert again.reconcile()["unknown"] == 0
+
+
+def test_acknowledged_failed_entry_counts_again_after_rearmed_recovery(setup, monkeypatch):
+    root, row, dispatch = setup
+    runtime = patrol.LauncherPatrol(root, "pa", "session", dispatch)
+    calls, journal = [], []
+    monkeypatch.setattr(proactive, "submit_session_proactive_turn", lambda **kw: calls.append(kw) or {"accepted": True})
+    monkeypatch.setattr(journal_bridge, "load_session_conversation_events_cached", lambda *a, **kw: journal)
+    assert runtime.inspect([row], now=10000)["wake"] == "accepted"
+    item = runtime._state["entries"][0]
+    journal[:] = journal_events(item["token"], item["event"]["eventId"], "turn_failed")
+    assert runtime.reconcile()["failed"] == 1
+    assert runtime.acknowledge()["failed"] == 0
+    assert item.get("acknowledged") is True
+
+    # A re-armed recovery starts unacknowledged; failing again counts again.
+    assert runtime.inspect([row], now=20000)["wake"] == "accepted"
+    assert "acknowledged" not in item
+    journal[:] = journal_events(item["token"], item["event"]["eventId"], "turn_failed")
+    assert runtime.reconcile()["failed"] == 1
+    assert len(calls) == 2
+
+
+def test_acknowledge_leaves_entries_with_visible_reports_or_recoveries_untouched(setup, monkeypatch):
+    root, row, dispatch = setup
+    runtime = patrol.LauncherPatrol(root, "pa", "session", dispatch)
+    calls, journal = [], []
+    monkeypatch.setattr(proactive, "submit_session_proactive_turn", lambda **kw: calls.append(kw) or {"accepted": True})
+    monkeypatch.setattr(journal_bridge, "load_session_conversation_events_cached", lambda *a, **kw: journal)
+    assert runtime.inspect([row], now=10000)["wake"] == "accepted"
+    item = runtime._state["entries"][0]
+    journal[:] = journal_events(item["token"], item["event"]["eventId"], "turn_failed", True)
+    assert runtime.reconcile()["failed"] == 0
+    assert runtime.acknowledge()["failed"] == 0
+    assert "acknowledged" not in item
+    assert item["escalation"] == "delivery_already_visible"

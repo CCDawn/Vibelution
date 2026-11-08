@@ -14,6 +14,7 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  RefreshCw,
   RotateCcw,
   Save,
   Upload,
@@ -36,8 +37,10 @@ import { type BlockerFunction, useBlocker, useNavigate, useSearchParams } from "
 
 import {
   applyConfigWorkspace,
+  hasAssistantHostRestartBridge,
   openConfigEnvironment,
   previewConfigDraft,
+  restartAssistantHost,
   updateConfigLanguage,
   uploadConfigAvatarImage,
   uploadConfigThemeBackgroundImage,
@@ -256,6 +259,10 @@ export function ConfigRoute() {
   const [notice, setNotice] = useState<{ tone: NoticeTone; text: string }>({ tone: "neutral", text: "" });
   const [configBusyAction, setBusyAction] = useState("");
   const [subscriptionSetupBusy, setSubscriptionSetupBusy] = useState(false);
+  // Desktop-only bridge probe (stable for the page lifetime): the assistant
+  // restart verbs only exist in the Launcher shell.
+  const [assistantBridgeAvailable] = useState(() => hasAssistantHostRestartBridge());
+  const [assistantRestarting, setAssistantRestarting] = useState(false);
   const [providerConnecting, setProviderConnecting] = useState(false);
   const [discardDraftOpen, setDiscardDraftOpen] = useState(false);
   const [providerShowMore, setProviderShowMore] = useState(false);
@@ -923,6 +930,25 @@ export function ConfigRoute() {
     return text;
   }
 
+  /** Shared restart UX for the save chain (B1) and the explicit button (B5):
+   * the host rereads config.toml and refreshes saved API keys at startup, so
+   * one stop+start applies both. The bridge is desktop-only; plain browsers
+   * return null and get neither a restart nor notice noise. */
+  async function restartAssistantHostWithNotice(context: "save" | "manual") {
+    setAssistantRestarting(true);
+    try {
+      const outcome = await restartAssistantHost(context === "save" ? "config_apply" : "user_request");
+      if (!outcome) return;
+      if (outcome.restarted) {
+        setNotice({ tone: "success", text: context === "save" ? copy.saveAssistantRestartDone : copy.restartAssistantDone });
+      } else {
+        setNotice({ tone: "error", text: context === "save" ? copy.saveAssistantRestartFailed : copy.restartAssistantFailed });
+      }
+    } finally {
+      setAssistantRestarting(false);
+    }
+  }
+
   function requireDraft(): PublicConfigShape {
     if (!draftConfig) {
       throw new Error(copy.loadFailed);
@@ -1264,6 +1290,14 @@ export function ConfigRoute() {
       }
       publishConfigDraftPresence(Boolean(draftOverride) && pendingConfigDraftCount > 0);
       await invalidateWorkbenchQueries(payload.publicConfig);
+      // B1: a saved provider config only reaches the resident assistant host
+      // through a restart — the host reads config.toml and refreshes saved
+      // keys when it boots. Desktop shells restart it automatically and say
+      // so; a failed restart never fails the save itself.
+      if (hasAssistantHostRestartBridge()) {
+        setNotice({ tone: "neutral", text: copy.saveAssistantRestarting });
+        void restartAssistantHostWithNotice("save");
+      }
       return true;
     } catch (error) {
       markError(error);
@@ -1438,6 +1472,31 @@ export function ConfigRoute() {
       setProviderActionFeedback({ kind: "enabled", providerId, phase: "error", message });
       return false;
     }
+  }
+
+  async function handleSaveModelEnabled(modelRef: string, enabled: boolean) {
+    if (structuredActionsDisabled || immediateSaveLockRef.current) return false;
+    const slash = modelRef.indexOf("/");
+    const providerId = modelRef.slice(0, slash);
+    const modelKey = modelRef.slice(slash + 1);
+    try {
+      const providers = asRecord(asRecord(editBaselineRef.current.baseConfig?.llm).providers);
+      if (slash <= 0 || !Object.hasOwn(providers, providerId)
+        || !Object.hasOwn(asRecord(asRecord(providers[providerId]).models), modelKey)) {
+        throw new Error(copy.modelNeedsSave);
+      }
+      await persistImmediateValues([{ path: ["llm", "providers", providerId, "models", modelKey, "enabled"], value: enabled }]);
+      setModelEditorDrafts((current) => {
+        if (!Object.hasOwn(current[modelRef] ?? {}, "enabled")) return current;
+        const edits = { ...current[modelRef] };
+        delete edits.enabled;
+        const next = { ...current };
+        if (Object.keys(edits).length) next[modelRef] = edits;
+        else delete next[modelRef];
+        return next;
+      });
+      return true;
+    } catch (error) { markError(error); return false; }
   }
 
   async function handleDecisionModelToggle(id: string, enabled: boolean) {
@@ -1717,6 +1776,9 @@ export function ConfigRoute() {
             ) : null}
             {isSectionVisible("overview") ? <VButton variant="ghost" icon={<RotateCcw size={14} />} isDisabled={Boolean(busyAction)}
               onPress={() => { if (hasLocalConfigChanges) setDiscardDraftOpen(true); else void reloadWorkspace(); }}>{copy.refresh}</VButton> : null}
+            {assistantBridgeAvailable ? <VButton variant="ghost" icon={<RefreshCw size={14} />} isDisabled={Boolean(busyAction) || assistantRestarting}
+              isPending={assistantRestarting} title={copy.restartAssistantHint}
+              onPress={() => { void restartAssistantHostWithNotice("manual"); }}>{copy.restartAssistant}</VButton> : null}
           </div>
         }
         footerClassName={`${styles.saveFooter} ${isSectionVisible("models") ? styles.modelFooter : ""}`}
@@ -2051,6 +2113,7 @@ export function ConfigRoute() {
                   onToggleEnabled={(providerId, enabled) => {
                     void handleSaveProviderEnabled(providerId, enabled);
                   }}
+                  onToggleModelEnabled={(modelRef, enabled) => { void handleSaveModelEnabled(modelRef, enabled); }}
                   onUpdateModel={(providerId, modelKey, edits) => {
                     // Wave 3 governance path B: whitelist-gated entry edit,
                     // draft-only until「保存到外部配置」.

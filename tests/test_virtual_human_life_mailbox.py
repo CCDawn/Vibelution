@@ -365,3 +365,111 @@ def test_plugin_mailbox_cancels_a_stale_claim_without_completing_a_turn() -> Non
     assert cancelled["command"] == {}
     assert cancelled["turnId"] == ""
     assert cancelled["cancelReason"] == "binding_revision_changed"
+
+
+# --- Dispatch pump retry/backoff policy -------------------------------------
+
+
+def _pump_service(tmp_path, *, submit):
+    from core.agent_plugins.virtual_human_life.service import VirtualHumanLifeService
+
+    agent = {"agentId": "agent-a", "status": "active", "directSessionId": "session-a"}
+    service = VirtualHumanLifeService(
+        project_root=tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: (
+            agent if agent_id == "agent-a" else None
+        ),
+        agent_lister=lambda: [agent],
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        conversation_submitter=submit,
+        auto_mailbox_dispatch=False,
+    )
+    service.set_binding(
+        "agent-a",
+        enabled=True,
+        expected_version=0,
+        config={"timezone": "Asia/Shanghai"},
+    )
+    return service
+
+
+def test_mailbox_pump_retry_delay_is_bounded_exponential() -> None:
+    from core.agent_plugins.virtual_human_life.service import (
+        MAILBOX_DISPATCH_RETRY_BACKOFF_SECONDS,
+        mailbox_dispatch_retry_delay,
+    )
+
+    assert mailbox_dispatch_retry_delay(1) == 0.5
+    assert mailbox_dispatch_retry_delay(len(MAILBOX_DISPATCH_RETRY_BACKOFF_SECONDS)) == 8.0
+    assert mailbox_dispatch_retry_delay(0) is None
+    assert mailbox_dispatch_retry_delay(-3) is None
+    assert mailbox_dispatch_retry_delay(len(MAILBOX_DISPATCH_RETRY_BACKOFF_SECONDS) + 1) is None
+
+
+def test_mailbox_pump_retries_through_transient_failures_and_recovers(
+    tmp_path, monkeypatch, caplog
+) -> None:
+    import logging
+
+    service = _pump_service(tmp_path, submit=lambda **payload: {"accepted": True})
+    attempts: list[int] = []
+
+    def flaky(agent_id, *, session_id):
+        attempts.append(1)
+        if len(attempts) <= 2:
+            raise RuntimeError("native facade hiccup")
+        return {"accepted": False, "queued": False, "reason": "empty"}
+
+    monkeypatch.setattr(service, "dispatch_conversation_mailbox_once", flaky)
+    sleeps: list[float] = []
+    service._mailbox_dispatch_sleep = sleeps.append
+    with caplog.at_level(logging.WARNING, logger="core.agent_plugins.virtual_human_life.service"):
+        service._conversation_mailbox_dispatch_loop(
+            agent_id="agent-a",
+            session_id="session-a",
+            dispatch_key="agent-a:session-a",
+        )
+    assert len(attempts) == 3
+    assert sleeps == [0.5, 1.0]
+    retries = [row for row in caplog.records if "retry 1/5" in row.getMessage()]
+    assert len(retries) == 1
+    # A pump that leaves on its own never keeps its registry slot.
+    assert "agent-a:session-a" not in service._mailbox_dispatch_threads
+
+
+def test_mailbox_pump_suspends_after_backoff_budget_and_stays_re_armable(
+    tmp_path, monkeypatch, caplog
+) -> None:
+    import logging
+
+    from core.agent_plugins.virtual_human_life.service import (
+        MAILBOX_DISPATCH_RETRY_BACKOFF_SECONDS,
+    )
+
+    service = _pump_service(tmp_path, submit=lambda **payload: {"accepted": True})
+    attempts: list[int] = []
+
+    def always_failing(agent_id, *, session_id):
+        attempts.append(1)
+        raise RuntimeError("persistent backend outage")
+
+    monkeypatch.setattr(service, "dispatch_conversation_mailbox_once", always_failing)
+    sleeps: list[float] = []
+    service._mailbox_dispatch_sleep = sleeps.append
+    with caplog.at_level(logging.WARNING, logger="core.agent_plugins.virtual_human_life.service"):
+        service._conversation_mailbox_dispatch_loop(
+            agent_id="agent-a",
+            session_id="session-a",
+            dispatch_key="agent-a:session-a",
+        )
+    # Five backoff retries, then the next failure suspends the pump.
+    assert len(attempts) == len(MAILBOX_DISPATCH_RETRY_BACKOFF_SECONDS) + 1
+    assert sleeps == list(MAILBOX_DISPATCH_RETRY_BACKOFF_SECONDS)
+    suspended = [row for row in caplog.records if "mailbox_dispatch_backoff_exhausted" in row.getMessage()]
+    assert len(suspended) == 1
+    assert "agent-a" in suspended[0].getMessage()
+    # Suspension releases the registry slot, so the next enqueue re-arms a
+    # fresh pump through ensure_conversation_mailbox_dispatcher.
+    assert "agent-a:session-a" not in service._mailbox_dispatch_threads

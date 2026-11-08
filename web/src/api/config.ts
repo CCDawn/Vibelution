@@ -261,6 +261,48 @@ export function applyConfigWorkspace(body: ConfigDraftEnvelope): Promise<ConfigW
   return postConfigJson<ConfigWorkspace>("/api/config/apply", body, "PUT");
 }
 
+export type AssistantHostRestartOutcome = {
+  restarted: boolean;
+  /** Bounded host state or ASSISTANT_* failure code; never a raw message. */
+  state: string;
+};
+
+/** Desktop-only probe: whether this page can reach the resident assistant
+ * host through the Launcher bridge. Plain browsers cannot, and there is no
+ * launcher-owned host to restart there. */
+export function hasAssistantHostRestartBridge(): boolean {
+  const bridge = (globalThis as { vibelutionLauncherAssistant?: { invoke?: unknown } }).vibelutionLauncherAssistant;
+  return typeof bridge?.invoke === "function";
+}
+
+/** Best-effort restart of the resident personal-assistant host. This is how a
+ * saved provider config reaches the running host (B1) and the explicit user
+ * exit when the respawn budget is exhausted (B5); the host then re-reads
+ * config.toml and refreshes API keys from the persisted user registry.
+ * Returns null when no assistant bridge exists (plain browser) — nothing to
+ * restart, and the next host start reads the fresh config anyway. Errors are
+ * returned, never thrown: a failed restart must not fail the config save
+ * that triggered it. */
+export async function restartAssistantHost(
+  reason: "config_apply" | "user_request",
+): Promise<AssistantHostRestartOutcome | null> {
+  const bridge = (globalThis as { vibelutionLauncherAssistant?: { invoke?: (payload: unknown) => Promise<unknown> } }).vibelutionLauncherAssistant;
+  if (typeof bridge?.invoke !== "function") return null;
+  try {
+    const result = await bridge.invoke({ operation: "restartHost", reason });
+    if (typeof result !== "object" || result === null) return { restarted: false, state: "unknown" };
+    const row = result as Record<string, unknown>;
+    return {
+      restarted: row.restarted === true,
+      state: typeof row.state === "string" ? row.state : "unknown",
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    const matched = /^.*(?:Error: )?(ASSISTANT_[A-Z_]+)\s*$/.exec(message);
+    return { restarted: false, state: matched ? matched[1] : "failed" };
+  }
+}
+
 export function openConfigEnvironment(): Promise<{ opened: boolean }> {
   return postConfigJson<{ opened: boolean }>("/api/config/open-environment", {});
 }

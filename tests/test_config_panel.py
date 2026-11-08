@@ -1761,9 +1761,12 @@ def test_runtime_llm_probe_uses_real_backend_with_small_payload(monkeypatch):
     assert result["ok"] is True
     assert result["probe"] == "runtime_provider"
     assert result["runtime_route"] == captured["model"]
-    assert result["max_tokens"] == 1
-    assert result["max_output_tokens"] == 1
-    assert captured["max_output_tokens"] == 1
+    # 非 reasoning probe 预算 32：1-token 会让任何正常回复（或未声明
+    # reasoning_state_field 的 thinking 模型开场思考）以 finish_reason=length
+    # 收场，把可用 provider 误报成截断失败。
+    assert result["max_tokens"] == 32
+    assert result["max_output_tokens"] == 32
+    assert captured["max_output_tokens"] == 32
     assert "max_tokens" not in captured
     assert captured["stream"] is False
     assert captured["api_key"] == "relay-secret"
@@ -1807,7 +1810,7 @@ def test_runtime_llm_probe_extends_private_lan_local_timeout(monkeypatch):
     assert captured["timeout"].read == 30.0
     assert captured["timeout"].write == 30.0
     assert captured["timeout"].pool == 30.0
-    assert captured["max_tokens"] == 1
+    assert captured["max_tokens"] == 32
     assert captured["stream"] is False
 
 
@@ -1885,8 +1888,8 @@ def test_runtime_llm_probe_keeps_single_token_budget_without_reasoning_contract(
     result = _probe_llm_runtime(provider, profile, "relay-secret")
 
     assert result["ok"] is True, result
-    assert result["max_tokens"] == 1
-    assert captured["max_tokens"] == 1
+    assert result["max_tokens"] == 32
+    assert captured["max_tokens"] == 32
 
 
 def test_runtime_llm_probe_follows_profile_streaming(monkeypatch):
@@ -1941,7 +1944,7 @@ def test_runtime_llm_probe_follows_profile_streaming(monkeypatch):
     assert result["ok"] is True, result
     assert captured["stream"] is True
     assert result["stream"] is True
-    assert result["max_tokens"] == 1
+    assert result["max_tokens"] == 32
 
 
 def test_runtime_llm_probe_non_local_timeout_cap_is_thirty_seconds(monkeypatch):

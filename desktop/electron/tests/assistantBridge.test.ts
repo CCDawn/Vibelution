@@ -28,6 +28,32 @@ function setup() {
 describe("Launcher assistant private bridge", () => {
   afterEach(() => { vi.useRealTimers(); });
 
+  it("dispatches restartHost to the host restart and folds failures to bounded codes", async () => {
+    const { owner, event } = setup();
+    owner.host.restartForUser = vi.fn(async () => ({ state: "ready" }));
+    await expect(invokeAssistant(event, { operation: "restartHost", reason: "config_apply" }, owner))
+      .resolves.toEqual({ restarted: true, state: "ready" });
+    expect(owner.host.restartForUser).toHaveBeenCalledExactlyOnceWith({ reason: "config_apply" });
+    // Restart owns its own lifecycle: no start recovery and no host request.
+    expect(owner.host.start).not.toHaveBeenCalled();
+    expect(owner.host.request).not.toHaveBeenCalled();
+    // Payload is closed: extra keys, unknown reasons, or missing reasons fail.
+    for (const payload of [{ operation: "restartHost" }, { operation: "restartHost", reason: "config_apply", extra: 1 },
+      { operation: "restartHost", reason: "unbounded" }, { operation: "restartHost", reason: 7 }])
+      await expect(invokeAssistant(event, payload, owner)).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    // Host-reported codes pass through; unknown failures fold.
+    owner.host.restartForUser = vi.fn(async () => { throw new Error("ASSISTANT_LIFECYCLE_CLOSING"); });
+    await expect(invokeAssistant(event, { operation: "restartHost", reason: "user_request" }, owner))
+      .rejects.toThrow("ASSISTANT_LIFECYCLE_CLOSING");
+    owner.host.restartForUser = vi.fn(async () => { throw new Error("socket exploded"); });
+    await expect(invokeAssistant(event, { operation: "restartHost", reason: "user_request" }, owner))
+      .rejects.toThrow("ASSISTANT_HOST_RESTART_FAILED");
+    // A host double without restartForUser fails closed instead of crashing.
+    delete owner.host.restartForUser;
+    await expect(invokeAssistant(event, { operation: "restartHost", reason: "user_request" }, owner))
+      .rejects.toThrow("ASSISTANT_HOST_UNAVAILABLE");
+  });
+
   it("admits only closed queue mutations from the owned frame before starting the host", async () => {
     const { owner, event } = setup();
     const requests = [

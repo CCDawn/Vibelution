@@ -13,6 +13,8 @@ import type { ConfigProviderRegistryPanelProps } from "./ConfigProviderRegistryP
 
 vi.mock("./ConfigProviderRegistryPanel", () => ({ ConfigProviderRegistryPanel: (props: ConfigProviderRegistryPanelProps) => <div>
   <button data-testid="edit-model-input" onClick={() => props.onModelEditorDraftChange?.("relay/model.v1", { label: "Raw model draft", temperature: "0.4" })}>Edit local model</button>
+  <button data-testid="edit-model-enabled-input" onClick={() => props.onModelEditorDraftChange?.("relay/model.v1", { enabled: true, label: "Raw model draft", temperature: "0.4" })}>Retain model fields</button>
+  <button data-testid="edit-only-model-enabled-input" onClick={() => props.onModelEditorDraftChange?.("relay/model.v1", { enabled: true })}>Retain model enabled</button>
   <button data-testid="invalid-model-input" onClick={() => props.onModelEditorDraftChange?.("relay/model.v1", { context_window: "1e" })}>Invalid local model</button>
   <button data-testid="test-model-input" onClick={() => props.onTestModel("relay/model.v1")}>Test model draft</button>
   <button data-testid="pin-extra-model" onClick={() => props.onPin("relay", [{ availability: "observed", label: "Extra model", modelKey: "extra", modelRef: "relay/extra", status: "observed", upstreamId: "extra", capabilities: {} }])}>Pin another model</button>
@@ -23,7 +25,9 @@ vi.mock("./ConfigProviderRegistryPanel", () => ({ ConfigProviderRegistryPanel: (
   ], { label: "ChatGPT", auth_kind: "oauth", credential_ref: "oauth:chatgpt", driver: "openai", service_class: "official_api", base_url: "https://api.openai.com/v1", protocols: { default: "responses", allowed: ["responses"], routes: { responses: "responses" } } })}>Add subscription</button>
   <button data-testid="stage-provider" disabled={props.disabled} onClick={() => props.onUpdateModel?.("relay", "model.v1", { label: "Draft model" })}>Stage label</button>
   <button data-testid="toggle-provider" disabled={props.disabled} onClick={() => props.onToggleEnabled?.("relay", false)}>Disable</button>
+  <button data-testid="toggle-model" disabled={props.disabled} onClick={() => props.onToggleModelEnabled?.("relay/model.v1", false)}>Disable model</button>
   <output data-testid="provider-enabled">{String(props.rows.find((row) => row.providerId === "relay")?.enabled)}</output>
+  <output data-testid="model-enabled">{String(props.rows.find((row) => row.providerId === "relay")?.models.find((model) => model.modelKey === "model.v1")?.draftEntry?.enabled !== false)}</output>
   <output data-testid="provider-draft">{props.rows.find((row) => row.providerId === "relay")?.models.find((model) => model.modelKey === "model.v1")?.label}</output>
   <output data-testid="provider-ids">{props.rows.map((row) => row.providerId).join(",")}</output>
 </div> }));
@@ -43,8 +47,8 @@ function workspace(config: typeof BASE | Record<string, unknown> = BASE, meta = 
     modelCatalog: { schemaVersion: 2, providerCount: Object.keys(providers).length, modelCount: 0, providers: {} }, modelAliasUsage: { aliases: [], totalLiveReferenceCount: 0 },
   };
 }
-function installFetch(options: { failApply?: boolean; failProjectionAfterSave?: boolean; waitForApply?: Promise<void>; waitForPin?: Promise<void>; waitForTest?: Promise<void> } = {}) {
-  let disk = structuredClone(BASE);
+function installFetch(options: { initialConfig?: typeof BASE; failApply?: boolean; failProjectionAfterSave?: boolean; waitForApply?: Promise<void>; waitForPin?: Promise<void>; waitForTest?: Promise<void> } = {}) {
+  let disk = structuredClone(options.initialConfig ?? BASE);
   let hash = "saved-1";
   const applyCalls: Record<string, any>[] = [];
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -162,6 +166,92 @@ describe("provider enable auto-save isolation", () => {
     await act(async () => release()); await wait(() => container.querySelector('[data-testid="provider-enabled"]')?.textContent === "false");
     expect(saveButton().disabled).toBe(true);
   });
+
+  it.each([false, true])("saves only one model enabled field while retaining provider, secret and model text drafts (projection failure %s)", async (failProjectionAfterSave) => {
+    const initialConfig = {
+      ...BASE,
+      llm: { ...BASE.llm, providers: { relay: { ...BASE.llm.providers.relay, models: {
+        ...BASE.llm.providers.relay.models,
+        sibling: { upstream_id: "sibling", label: "Saved sibling", enabled: true },
+      } } } },
+    };
+    const calls = installFetch({ initialConfig, failProjectionAfterSave }); await ready();
+    await click("stage-provider");
+    await wait(() => container.querySelector('[data-testid="provider-draft"]')?.textContent === "Draft model");
+    await click("edit-model-enabled-input");
+    await click("toggle-model");
+    await wait(() => calls.length === 1 && !(container.querySelector('[data-testid="toggle-model"]') as HTMLButtonElement).disabled);
+    expect(calls[0].publicConfig).toEqual({
+      ...initialConfig,
+      llm: { ...initialConfig.llm, providers: { relay: { ...initialConfig.llm.providers.relay, models: {
+        ...initialConfig.llm.providers.relay.models,
+        "model.v1": { ...BASE.llm.providers.relay.models["model.v1"], enabled: false },
+      } } } },
+    });
+    expect(calls[0].draftMeta).toEqual(EMPTY_META);
+    expect(calls[0].baseConfig).toEqual(initialConfig);
+    expect(calls[0].baseHash).toBe("saved-1");
+    expect(container.querySelector('[data-testid="model-enabled"]')?.textContent).toBe("false");
+    expect(container.querySelector('[data-testid="provider-enabled"]')?.textContent).toBe("true");
+    expect(container.querySelector('[data-testid="provider-draft"]')?.textContent).toBe("Draft model");
+    expect(container.querySelector('[data-testid="provider-ids"]')?.textContent).toContain("pending");
+    expect(JSON.parse(container.querySelector('[data-testid="raw-model-draft"]')!.textContent!)).toEqual({
+      "relay/model.v1": { label: "Raw model draft", temperature: "0.4" },
+    });
+    expect(readConfigDraftPresence()).toBe(true);
+    await act(async () => saveButton().click());
+    await wait(() => calls.length === 2);
+    expect(calls[1].publicConfig.llm.providers.relay.enabled).toBe(true);
+    expect(calls[1].publicConfig.llm.providers.relay.models["model.v1"]).toEqual({
+      upstream_id: "test", label: "Raw model draft", enabled: false, defaults: { temperature: 0.4 },
+    });
+    expect(calls[1].publicConfig.llm.providers.relay.models.sibling).toEqual(initialConfig.llm.providers.relay.models.sibling);
+    expect(calls[1].publicConfig.llm.providers.pending.models).toHaveProperty("model.v1");
+    expect(calls[1].draftMeta).toEqual({ pending_api_keys: { TEST: "test-only-token" }, pending_cleared_api_keys: ["OLD_TEST"] });
+    expect(calls[1].baseHash).toBe("saved-2");
+  });
+
+  it("keeps the saved model enabled state and every retained draft when its immediate save fails", async () => {
+    const calls = installFetch({ failApply: true }); await ready();
+    await click("stage-provider");
+    await wait(() => container.querySelector('[data-testid="provider-draft"]')?.textContent === "Draft model");
+    await click("edit-model-enabled-input");
+    await click("toggle-model");
+    await wait(() => calls.length === 1 && !!container.querySelector('[class*="noticeError"]'));
+    expect(calls[0].publicConfig.llm.providers.relay).toEqual({ ...BASE.llm.providers.relay, models: {
+      "model.v1": { ...BASE.llm.providers.relay.models["model.v1"], enabled: false },
+    } });
+    expect(calls[0].draftMeta).toEqual(EMPTY_META);
+    expect(container.querySelector('[data-testid="model-enabled"]')?.textContent).toBe("true");
+    expect(container.querySelector('[data-testid="provider-enabled"]')?.textContent).toBe("true");
+    expect(container.querySelector('[data-testid="provider-draft"]')?.textContent).toBe("Draft model");
+    expect(container.querySelector('[data-testid="provider-ids"]')?.textContent).toContain("pending");
+    expect(JSON.parse(container.querySelector('[data-testid="raw-model-draft"]')!.textContent!)).toEqual({
+      "relay/model.v1": { enabled: true, label: "Raw model draft", temperature: "0.4" },
+    });
+    expect(readConfigDraftPresence()).toBe(true);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("deduplicates model switch events before React disables the control", async () => {
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => { release = resolve; });
+    const calls = installFetch({ waitForApply: waiting }); await ready();
+    await click("edit-only-model-enabled-input");
+    expect(readConfigDraftPresence()).toBe(true);
+    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="toggle-model"]')!;
+    await act(async () => { toggle.click(); toggle.click(); });
+    await wait(() => calls.length === 1);
+    expect(toggle.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="model-enabled"]')?.textContent).toBe("true");
+    await act(async () => release());
+    await wait(() => container.querySelector('[data-testid="model-enabled"]')?.textContent === "false" && !toggle.disabled);
+    expect(calls).toHaveLength(1);
+    expect(saveButton().disabled).toBe(true);
+    expect(container.querySelector('[data-testid="raw-model-draft"]')?.textContent).toBe("{}");
+    expect(readConfigDraftPresence()).toBe(false);
+  });
+
   it("holds the shared settings busy state throughout subscription pinning and releases it after save", async () => {
     let release!: () => void;
     const waiting = new Promise<void>((resolve) => { release = resolve; });

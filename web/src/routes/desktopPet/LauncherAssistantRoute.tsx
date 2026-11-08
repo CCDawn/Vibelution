@@ -6,6 +6,7 @@ import {
   getLauncherAssistantDetail, getLauncherAssistantDispatches, setLauncherAssistantModel,
   hideLauncherAssistant, sendLauncherAssistantMessage, setLauncherAssistantExpanded,
   launcherConversationApi,
+  acknowledgeLauncherPatrolDelivery,
   getLauncherAssistantApprovals, resolveLauncherAssistantApproval,
   previewLauncherDispatchApproval, decideLauncherDispatchApproval, declineLauncherDispatchSummary, launcherDispatchDeclineRevisionIsValid, type LauncherDispatchApprovalPreview,
   stopLauncherAssistantTurn, continueLauncherAssistantTurn, switchLauncherAssistantHead,
@@ -1490,6 +1491,19 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     celebrating, needsAttention: Boolean(approval || pendingQuestion),
     unavailable: petUnavailable,
   });
+  // Ledger-only banner exit: marking pending patrol entries acknowledged stops
+  // the count; a later re-armed recovery counts again if it fails. A failed
+  // acknowledgment leaves the banner as-is after the status refresh.
+  const [deliveryAckPending, setDeliveryAckPending] = useState(false);
+  const acknowledgeDelivery = useCallback(async () => {
+    if (deliveryAckPending) return;
+    setDeliveryAckPending(true);
+    try { await acknowledgeLauncherPatrolDelivery(); }
+    finally {
+      setDeliveryAckPending(false);
+      void client.invalidateQueries({ queryKey: ["launcher-assistant", "status"], exact: true });
+    }
+  }, [client, deliveryAckPending]);
   const notificationsHosted = usePublishLauncherNotices(expanded ? launcherAssistantPageNotices({
     lang,
     reads: [
@@ -1505,6 +1519,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     ],
     history: { missing: historyAttachments.missingGenerated, failed: historyAttachments.failed, pending: historyAttachments.pending, retry: historyAttachments.retry, refresh: detail.refetch },
     deliveryUnreported: status.data?.patrol?.state === "unavailable" || ["unknown", "failed", "interrupted"].some(key => (status.data?.patrol?.deliveryStates[key] || 0) > 0),
+    deliveryAcknowledge: { pending: deliveryAckPending, run: () => acknowledgeDelivery() },
   }) : []);
   // Read-only context-usage ring from the native detail's usage projections.
   // Null before the first usage frame; diagnostics handoff and the auto-compaction
@@ -1774,7 +1789,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       title={lang === "zh" ? "部分外观图片暂不可用，聊天仍可使用" : "Some appearance images are unavailable; chat is ready"}
       actions={<VButton onClick={() => { if (readingAssets && avatar.isError) void avatar.refetch(); if (readingAssets && background.isError) void background.refetch(); if (readingAssistantAvatar && assistantAvatar.isError) void assistantAvatar.refetch(); }}>{copy.retry}</VButton>} /> : null}
     {!notificationsHosted && (status.data?.patrol?.state === "unavailable" || ["unknown", "failed", "interrupted"].some(key => (status.data?.patrol?.deliveryStates[key] || 0) > 0))
-      ? <VStateSurface tone="error" title={lang === "zh" ? "部分任务结果暂未汇报，可在对话中让助理查询" : "Some task results have not been reported. Ask the assistant to check in chat."} /> : null}
+      ? <VStateSurface tone="error" title={lang === "zh" ? "部分任务结果暂未汇报，可在对话中让助理查询" : "Some task results have not been reported. Ask the assistant to check in chat."}
+        actions={<VButton isDisabled={deliveryAckPending} onClick={() => void acknowledgeDelivery()}>{lang === "zh" ? "已知晓" : "Acknowledge"}</VButton>} /> : null}
     {dispatchApproval && activePreviewError ? <VStateSurface tone="error" title={activePreviewError}
       actions={<VButton onClick={() => { setPreviewAttempt(value => value + 1); void dispatches.refetch(); }}>{copy.retry}</VButton>} /> : null}
     {selectedApprovalTarget && !approval ? <VStateSurface tone={dispatchApproval ? "info" : "unavailable"}

@@ -8,6 +8,11 @@
  * holds it in a ref, mirroring launcherAssistantWaitInterval's cold-start
  * backoff (which must not be imported across the route boundary). */
 export const ASSISTANT_TASK_PROBE_INTERVALS_MS: readonly number[] = [3_000, 6_000, 12_000, 12_000, 12_000];
+/** Low-speed keepalive for a feed whose rows degraded (a row-level receipt
+ * observation failed) while the last receipt still asked for polling: polling
+ * slows down instead of stopping, and a source recovery rejoins without a
+ * manual refresh. */
+export const ASSISTANT_TASK_KEEPALIVE_INTERVAL_MS = 15_000;
 /** Cumulative elapsed time at which each probe fires after the first failure. */
 const PROBE_DUE_MS = ASSISTANT_TASK_PROBE_INTERVALS_MS.map((_, index) =>
   ASSISTANT_TASK_PROBE_INTERVALS_MS.slice(0, index + 1).reduce((sum, delay) => sum + delay, 0));

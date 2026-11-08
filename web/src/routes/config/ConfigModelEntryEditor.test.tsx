@@ -146,6 +146,65 @@ describe("controlled model entry editor", () => {
     expect(container.querySelector<HTMLSelectElement>("select")?.disabled).toBe(true);
   });
 
+  it("sends enabled changes through the immediate callback and keeps them out of text edits and compatibility saves", async () => {
+    const onEnabledChange = vi.fn();
+    const save = vi.fn();
+    await render({
+      model: catalogModel({ enabled: true }), onEnabledChange, onSave: save,
+      edits: { enabled: false, label: "Draft name", temperature: "0.4" },
+    });
+    expect(input("enabled").checked).toBe(true);
+    expect(input("enabled").title).toBe("单个模型开关 · 立即保存");
+    await act(async () => input("enabled").click());
+    expect(onEnabledChange).toHaveBeenCalledExactlyOnceWith(false);
+    expect(props.onEditsChange).not.toHaveBeenCalled();
+    expect(input("enabled").checked).toBe(true);
+    expect(input("label").value).toBe("Draft name");
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-model-action="save-edit"]')!.click());
+    expect(save).toHaveBeenCalledExactlyOnceWith("stable-id", { label: "Draft name", temperature: "0.4" });
+    await type("label", "Revised draft");
+    expect(props.edits).toEqual({ label: "Revised draft", temperature: "0.4" });
+    expect(onEnabledChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an enabled-only stale draft out of the manual save and uses the saved switch state", async () => {
+    const onEnabledChange = vi.fn();
+    const save = vi.fn();
+    await render({ model: catalogModel({ enabled: true }), edits: { enabled: false }, onEnabledChange, onSave: save, copy: CONFIG_COPY.en });
+    expect(input("enabled").checked).toBe(true);
+    expect(input("enabled").title).toBe("Single model switch · Saved immediately");
+    expect(input("enabled").title).not.toContain("Save to external config");
+    const saveButton = container.querySelector<HTMLButtonElement>('[data-model-action="save-edit"]')!;
+    expect(saveButton.disabled).toBe(true);
+    await render({ model: catalogModel({ enabled: false }) });
+    expect(input("enabled").checked).toBe(false);
+    expect(props.onEditsChange).not.toHaveBeenCalled();
+    expect(onEnabledChange).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it.each([{ disabled: true, busy: false }, { disabled: false, busy: true }])(
+    "blocks immediate enabled callbacks while disabled or busy ($disabled, $busy)",
+    async ({ disabled, busy }) => {
+      const onEnabledChange = vi.fn();
+      await render({ disabled, busy, onEnabledChange });
+      expect(input("enabled").disabled).toBe(true);
+      await act(async () => input("enabled").click());
+      expect(onEnabledChange).not.toHaveBeenCalled();
+      expect(props.onEditsChange).not.toHaveBeenCalled();
+    },
+  );
+
+  it("retains draft-only enabled changes and compatibility saves when the immediate callback is absent", async () => {
+    const save = vi.fn();
+    await render({ model: catalogModel({ enabled: true }), onSave: save });
+    await act(async () => input("enabled").click());
+    expect(props.edits).toEqual({ enabled: false });
+    expect(input("enabled").checked).toBe(false);
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-model-action="save-edit"]')!.click());
+    expect(save).toHaveBeenCalledExactlyOnceWith("stable-id", { enabled: false });
+  });
+
   it("shows stored defaults without changing unknown or protocol fields and saves only explicit whitelist edits", async () => {
     const model = catalogModel({
       context_window: 200000,

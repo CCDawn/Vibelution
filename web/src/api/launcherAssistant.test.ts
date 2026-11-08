@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getLauncherAssistantDetail, getLauncherAssistantDispatches, getLauncherAssistantStatus, getLauncherAssistantTeamRuns,
+  acknowledgeLauncherPatrolDelivery,
   hideLauncherAssistant, launcherAssistantBridge, launcherConversationApi,
   sendLauncherAssistantMessage, setLauncherAssistantExpanded, setLauncherAssistantModel,
   getLauncherAssistantApprovals, resolveLauncherAssistantApproval,
@@ -266,6 +267,29 @@ describe("Launcher assistant budget contract", () => {
     expect(invoke).toHaveBeenCalledTimes(calls + 1);
     invoke.mockResolvedValueOnce({ revision: 4, maxCallsPerTurn: 16 });
     await expect(setLauncherAssistantBudget({ revision: 3, maxCallsPerTurn: 0 })).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
+  });
+});
+
+describe("Launcher patrol-delivery acknowledgment contract", () => {
+  it("sends the fixed ledger-only operation once and keeps only safe delivery counts", async () => {
+    const states = { unknown: 0, observed: 1, failed: 0, interrupted: 0, completed: 2, cancelled_pre_admission: 0 };
+    const invoke = vi.fn().mockResolvedValueOnce({ deliveryStates: states });
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    await expect(acknowledgeLauncherPatrolDelivery()).resolves.toEqual({ deliveryStates: states });
+    expect(invoke).toHaveBeenCalledExactlyOnceWith({ operation: "acknowledgePatrolDelivery" });
+    const calls = invoke.mock.calls.length;
+    for (const reply of [{}, { deliveryStates: {} }, { deliveryStates: { unknown: -1 } },
+      { deliveryStates: { unknown: true } }, { deliveryStates: { unknown: 1.5 } },
+      { deliveryStates: { unknown: 0, mystery: 1 } }, { deliveryStates: { unknown: 0 }, extra: 1 },
+      { unknown: 0 }, { deliveryStates: null },
+      { deliveryStates: { unknown: 0, observed: 0, failed: 0, interrupted: 0, completed: 0 } }]) {
+      invoke.mockResolvedValueOnce(reply);
+      await expect(acknowledgeLauncherPatrolDelivery()).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
+    }
+    expect(invoke.mock.calls.length).toBe(calls + 10);
+    invoke.mockRejectedValueOnce(new Error("ASSISTANT_PATROL_UNAVAILABLE"));
+    await expect(acknowledgeLauncherPatrolDelivery()).rejects.toThrow("ASSISTANT_PATROL_UNAVAILABLE");
+    expect(invoke.mock.calls.length).toBe(calls + 11);
   });
 });
 

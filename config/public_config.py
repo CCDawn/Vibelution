@@ -1618,6 +1618,109 @@ def read_persisted_user_env_var(name: str) -> str:
     return _read_windows_user_env_var(env_name)
 
 
+def collect_llm_api_key_env_names(public_config: dict | None = None) -> list[str]:
+    """Collect every API-key env var name the current config can reference.
+
+    Covers providers, model-library entries and profiles — their explicit
+    ``api_key_env`` field, their ``credential_ref = "env:NAME"`` declaration
+    (the schema v2 spelling, from which the runtime projection derives
+    ``api_key_env``), and any nested provider override — plus the per-kind
+    default env names and aliases for every provider kind present. Names the
+    config cannot reference are deliberately left out: the refresh below must
+    never widen what a helper process reads beyond its operator's config.
+    """
+
+    from .llm_identity import canonicalize_credential_ref
+    from .models import PROVIDER_API_KEY_ENV_ALIASES, get_provider_api_key_env
+
+    def _credential_env(source: Any) -> str:
+        if not isinstance(source, dict):
+            return ""
+        declared = str(source.get("api_key_env") or "").strip()
+        if declared:
+            return declared
+        credential_ref = str(source.get("credential_ref") or "").strip()
+        if credential_ref.startswith("env:"):
+            try:
+                return canonicalize_credential_ref(credential_ref).removeprefix("env:")
+            except ValueError:
+                # An externally corrupted credential_ref must not break host
+                # startup; validation rejects it on the write path anyway.
+                return ""
+        return ""
+
+    config = public_config if isinstance(public_config, dict) else load_public_config()
+    llm = config.get("llm", {}) if isinstance(config, dict) and isinstance(config.get("llm", {}), dict) else {}
+    names: set[str] = set()
+    kinds: set[str] = set()
+
+    def _take_provider(source: Any) -> None:
+        if not isinstance(source, dict):
+            return
+        env_name = _credential_env(source)
+        if env_name:
+            names.add(env_name)
+        kind = str(source.get("kind") or "").strip().lower()
+        if kind:
+            kinds.add(kind)
+
+    providers = llm.get("providers", {})
+    if isinstance(providers, dict):
+        for provider in providers.values():
+            _take_provider(provider)
+    for table in ("model_library", "profiles"):
+        entries = llm.get(table, {})
+        if not isinstance(entries, dict):
+            continue
+        for item in entries.values():
+            if not isinstance(item, dict):
+                continue
+            env_name = _credential_env(item)
+            if env_name:
+                names.add(env_name)
+            _take_provider(item.get("provider"))
+
+    for kind in kinds:
+        default_env = get_provider_api_key_env(kind)
+        if default_env:
+            names.add(default_env)
+        for alias in PROVIDER_API_KEY_ENV_ALIASES.get(kind, []):
+            names.add(alias)
+    return sorted(names)
+
+
+def refresh_llm_api_key_envs_from_user_registry(public_config: dict | None = None) -> list[str]:
+    """Refresh LLM API-key env vars in ``os.environ`` from the persisted
+    user-level registry (Windows ``HKCU\\Environment``).
+
+    Launcher-spawned helper processes inherit the parent's environment
+    snapshot, which can carry an API key captured before the operator saved a
+    newer one from the settings page. Every key lookup prefers ``os.environ``
+    over the user-registry fallback, so a restarted assistant host would keep
+    authenticating with the old key forever. For each env name the current
+    config can reference, a non-empty persisted value overwrites the
+    inherited one; an absent persisted value leaves an explicitly provided
+    env untouched. Non-Windows platforms are a no-op. Returns the refreshed
+    names in sorted order.
+    """
+
+    if os.name != "nt":
+        return []
+    refreshed: list[str] = []
+    for name in collect_llm_api_key_env_names(public_config):
+        try:
+            env_name = validate_llm_api_key_env(name, required=False, context="api_key_env")
+        except ValueError:
+            continue
+        if not env_name:
+            continue
+        persisted = _read_windows_user_env_var(env_name)
+        if persisted:
+            os.environ[env_name] = persisted
+            refreshed.append(env_name)
+    return refreshed
+
+
 def _broadcast_windows_environment_change(timeout_ms: int = 5000) -> None:
     try:
         import ctypes
@@ -2542,9 +2645,11 @@ def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
         return _probe_llm_http(provider, profile, api_key)
 
     probe_timeout = coerce_llm_runtime_probe_timeout(provider, profile.connect_timeout, profile.timeout)
-    # Thinking-default models emit reasoning tokens before any visible output, so a
-    # 1-token budget deterministically returns finish_reason=length for them.
-    probe_max_output_tokens = 1
+    # 非最小预算不足以判活即可：1-token 预算下任何多于一个 token 的正常回复
+    # （含未声明 reasoning_state_field 的 thinking 模型的开场思考）都会以
+    # finish_reason=length 收场，把可用 provider 误报成截断失败。32 让正常
+    # ping 回复（"OK"/"pong" 级）稳定落地；显式 reasoning 模型仍走下方 2048。
+    probe_max_output_tokens = 32
     if (
         str(getattr(profile, "contract", "") or "").strip().lower() == "reasoning_chat"
         or str(getattr(profile, "reasoning_state_field", "") or "").strip()

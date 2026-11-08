@@ -1248,7 +1248,13 @@ def test_provider_http_projection_recursively_allowlists_nested_data() -> None:
     assert option["base_url"] == "https://relay.example/v1"
     assert option["runtime_framework"] == "vllm"
     assert option["artifact_path"] == "C:/models/relay-a"
-    assert projected["providerOptions"][1] == {"artifact_path": "x" * 1024}
+    # A query-carrying base_url is stripped to its bare URL and flagged; the
+    # suffix itself (which may hold credentials) is never echoed.
+    assert projected["providerOptions"][1] == {
+        "artifact_path": "x" * 1024,
+        "base_url": "https://relay.example/v1",
+        "base_url_suffix_stripped": True,
+    }
     model = projected["modelCatalog"]["providers"]["relay_a"]["models"]["model"]
     assert model["capabilities"] == {
         "image_input": {
@@ -1549,6 +1555,53 @@ def test_model_catalog_sweep_skips_schema_v1_config(
     # Schema v1 legacy capability records share state["providers"]; never swept.
     after = load_model_catalog_state()
     assert set(after["providers"]) == {"relay_keep", "relay_dead", "relay_legacy"}
+
+
+def test_provider_projection_flags_base_url_without_echoing_fragment() -> None:
+    """B8: a fragment-carrying base_url is stripped and flagged, never dropped
+    silently and never echoed (the suffix may smuggle credentials)."""
+
+    projected = provider_config_service.project_provider_draft_response(
+        {
+            "hash": "draft-hash",
+            "baseHash": "base-hash",
+            "schemaVersion": 2,
+            "providerOptions": [
+                {
+                    "provider_id": "relay_a",
+                    "base_url": "https://relay.example/v1#credentials-here",
+                },
+                {
+                    "provider_id": "relay_b",
+                    "base_url": "https://clean.example/v1",
+                },
+            ],
+        }
+    )
+    first = projected["providerOptions"][0]
+    assert first["base_url"] == "https://relay.example/v1"
+    assert first["base_url_suffix_stripped"] is True
+    second = projected["providerOptions"][1]
+    assert second["base_url"] == "https://clean.example/v1"
+    assert "base_url_suffix_stripped" not in second
+    assert "credentials-here" not in json.dumps(projected)
+
+
+def test_provider_write_paths_reject_base_url_query_and_fragment_explicitly() -> None:
+    """B8 companion: every save path keeps raising the explicit validation
+    error instead of silently storing or dropping a query/fragment base_url."""
+
+    from config.llm_security import validate_llm_provider_target
+
+    for base_url in (
+        "https://relay.example/v1?api_key=secret",
+        "https://relay.example/v1#fragment",
+    ):
+        with pytest.raises(ValueError, match="must not include params, query, or fragment"):
+            validate_llm_provider_target(
+                {"kind": "relay", "base_url": base_url},
+                context="llm.providers.relay_a",
+            )
 
 
 # ---------------------------------------------------------------------------

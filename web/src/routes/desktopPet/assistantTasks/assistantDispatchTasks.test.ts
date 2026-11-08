@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LauncherAssistantDispatch } from "../../../api/launcherAssistant";
-import { projectAssistantDispatchTasks } from "./assistantDispatchTasks";
+import { assistantDispatchKeepalivePending, projectAssistantDispatchTasks } from "./assistantDispatchTasks";
 
 function dispatch(overrides: Partial<LauncherAssistantDispatch> = {}): LauncherAssistantDispatch {
   return { dispatchId: "dispatch-1", projectId: "project-1", agentId: "agent-1", nativeTaskId: "native-1",
@@ -171,5 +171,23 @@ describe("assistant task projection from native dispatch receipts", () => {
       expect(projectAssistantDispatchTasks([row]).tasks[0].shouldPoll).toBe(false);
     }
     expect(projectAssistantDispatchTasks([dispatch()], { sourceAvailable: false }).tasks[0].shouldPoll).toBe(false);
+  });
+
+  it("keeps the degraded-row keepalive aligned with the main route's raw receipt gate", () => {
+    // A row-level observation failure over an already-polling receipt keeps a
+    // low-speed keepalive here, mirroring the main route's raw gate.
+    expect(assistantDispatchKeepalivePending([dispatch({ lastError: { code: "BACKEND_UNAVAILABLE", message: "x" } })])).toBe(true);
+    // Without the receipt's own polling request there is nothing to keep alive.
+    for (const row of [dispatch({ receipt: { taskId: "native-1", status: "succeeded", shouldPoll: false },
+      lastError: { code: "BACKEND_UNAVAILABLE", message: "x" } }),
+      dispatch({ receipt: { taskId: "native-1", status: "running", shouldPoll: true } }),
+      dispatch()]) {
+      expect(assistantDispatchKeepalivePending([row])).toBe(false);
+    }
+    expect(assistantDispatchKeepalivePending([])).toBe(false);
+    expect(assistantDispatchKeepalivePending([
+      dispatch({ receipt: { taskId: "native-1", status: "succeeded", shouldPoll: false } }),
+      dispatch({ lastError: { code: "BACKEND_UNAVAILABLE", message: "x" } }),
+    ])).toBe(true);
   });
 });

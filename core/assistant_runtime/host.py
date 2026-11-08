@@ -1958,6 +1958,17 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
             except DispatchError as exc:
                 raise HTTPException(409, detail={"code": exc.code}) from None
 
+        @app.post("/api/assistant/patrol/acknowledge")
+        async def acknowledge_patrol_delivery():
+            # The user acknowledged the unreported-delivery banner: pending
+            # patrol ledger entries stop counting until a later recovery
+            # attempt fails again. Ledger-only; the native Session is untouched.
+            patrol = getattr(app.state, "patrol", None)
+            if patrol is None:
+                raise HTTPException(409, detail={"code": "ASSISTANT_PATROL_UNAVAILABLE"})
+            state = await patrol_call(patrol.acknowledge)
+            return JSONResponse({"deliveryStates": state}, headers={"Cache-Control": "no-store"})
+
     # Operator-only single-window controls retain the host bearer boundary;
     # the model only sees the separate scoped computer tools.
     from .computer_control import create_router as create_computer_router

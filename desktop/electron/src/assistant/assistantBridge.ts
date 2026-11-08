@@ -14,7 +14,11 @@ export type WorkbenchSenderGate = (sender: unknown) => boolean;
 export type AssistantBridgeOwner = {
   contents?: Contents;
   host: { start(): Promise<unknown>; request(payload: AssistantHostRequest): Promise<unknown>;
-    snapshot?(): { state: string } };
+    snapshot?(): { state: string };
+    /** Main-only user restart (budget refill + config apply). Optional so
+     * existing test doubles keep compiling; a missing implementation fails
+     * closed with ASSISTANT_HOST_UNAVAILABLE. */
+    restartForUser?(input: { reason: "config_apply" | "user_request" }): Promise<{ state: string }>; };
   setExpanded(expanded: boolean): unknown;
   hide(): void;
   openLauncher?(): Promise<{ opened: boolean }>;
@@ -76,6 +80,27 @@ export async function invokeAssistant(event: Sender, payload: unknown, owner: As
     if (!owner.openLauncher) throw new Error("ASSISTANT_LAUNCHER_UNAVAILABLE");
     try { return await owner.openLauncher(); }
     catch { throw new Error("ASSISTANT_LAUNCHER_UNAVAILABLE"); }
+  }
+  if (request.operation === "restartHost") {
+    // Bridge-local main-only verb, like openLauncher: it never reaches
+    // host.request and needs no host.start() recovery — it restarts the host
+    // itself. This is the only path that revives a host whose respawn budget
+    // is exhausted (explicit user consent) and how a saved provider config
+    // reaches a resident host. `reason` is bounded forensics, never a payload.
+    const reason = request.reason;
+    if (Object.keys(request).length !== 2 || typeof reason !== "string"
+      || (reason !== "config_apply" && reason !== "user_request")) {
+      throw new Error("ASSISTANT_REQUEST_INVALID");
+    }
+    const restart = owner.host.restartForUser;
+    if (!restart) throw new Error("ASSISTANT_HOST_UNAVAILABLE");
+    try {
+      const snapshot = await restart.call(owner.host, { reason });
+      return { restarted: snapshot.state === "ready", state: snapshot.state };
+    } catch (error) {
+      throw new Error(error instanceof Error && /^ASSISTANT_[A-Z_]+$/.test(error.message)
+        ? error.message : "ASSISTANT_HOST_RESTART_FAILED");
+    }
   }
   if (request.operation === "hide") {
     if (Object.keys(request).length !== 1) throw new Error("ASSISTANT_REQUEST_INVALID");
