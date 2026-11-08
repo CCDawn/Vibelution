@@ -52,6 +52,14 @@ async function renderConversation(onGranted = vi.fn(), authorizationRequestId?: 
 function button(label: string) { const found = [...container.querySelectorAll("button")].find(row => row.textContent === label || row.getAttribute("aria-label") === label); if (!found) throw new Error(`Missing button ${label}`); return found; }
 async function click(label: string) { await act(async () => button(label).click()); await settle(); }
 describe("single-window personal assistant controls", () => {
+  it("presents an unauthorized state as an optional preference, not a blocking gate", async () => {
+    await render();
+    expect(container.textContent).toContain("助理现在无需授权即可操作电脑");
+    expect(container.textContent).toContain("未选择默认窗口");
+    expect(container.textContent).not.toContain("未授权");
+    expect(button("授权这个窗口")).toBeDefined();
+    expect(container.textContent).toContain("可选择一个默认操作窗口");
+  });
   it("freezes the continuation before grant and calls it only after the exact window succeeds", async () => {
     const finish = vi.fn(); const prepare = vi.fn(() => finish);
     let resolve!: (state: ComputerState) => void;
@@ -81,7 +89,7 @@ describe("single-window personal assistant controls", () => {
     expect(container.querySelector('input[type="checkbox"]')).toBeNull();
     expect(onGranted).not.toHaveBeenCalled();
     await act(async () => (container.querySelector('[aria-pressed="false"]') as HTMLButtonElement).click());
-    expect(container.textContent).toContain("允许助理读取并操作「今天的计划.txt」");
+    expect(container.textContent).toContain("将「今天的计划.txt」设为默认操作窗口");
     expect(container.textContent).toContain("窗口画面将提供给当前助理模型");
     await click("更换窗口");
     expect(button("允许读取并操作").disabled).toBe(true);
@@ -201,7 +209,7 @@ describe("single-window personal assistant controls", () => {
     vi.mocked(fetchPersonalAssistantComputer).mockResolvedValue(ready);
     await click("授权这个窗口");
     expect(grantPersonalAssistantComputer).toHaveBeenCalledWith({ selectionId: "selection", allowVision: true });
-    expect(container.textContent).toContain("本次授权 · 仅此窗口");
+    expect(container.textContent).toContain("默认目标 · 仅此窗口");
     expect(fetchPersonalAssistantComputerWindows).toHaveBeenCalledTimes(1);
     await act(async () => client.setQueryData(queryKeys.personalAssistantComputer(), { ...idle, status: "ended", message: "窗口已关闭" }));
     await settle();

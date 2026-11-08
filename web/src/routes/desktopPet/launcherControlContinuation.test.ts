@@ -55,4 +55,18 @@ describe("explicit operator continuation", () => {
     tool.output = JSON.stringify({ ok: false, status: "blocked", reason: "authorization_required" });
     expect(launcherControlSubmission(captured, source).state).toBe("ready");
   });
+  it("keeps the one continuation retry eligible for a blocked receipt offering window candidates", () => {
+    const tool = { id: "observe.rev2", itemId: "observe", type: "tool_call", toolName: "personal_assistant_computer_observe_tool",
+      sessionId: "s", turnId: "t", status: "completed", output: "" };
+    const source = context({ messages: [detail().messages[0], { ...detail().messages[1], turnItems: [tool as never] }] });
+    const captured = { ...intent(), toolIds: ["observe"], pendingToolIds: ["observe"] };
+    tool.output = JSON.stringify({ ok: false, status: "blocked", candidates: ["记事本", "浏览器"] });
+    expect(launcherControlSubmission(captured, source).state).toBe("ready");
+    // A malformed candidate list is an uncertain result: it succeeds the tool
+    // and consumes the intent instead of replaying it.
+    tool.output = JSON.stringify({ ok: false, status: "blocked", candidates: [""] });
+    expect(launcherControlSubmission(captured, source).state).toBe("stale");
+    tool.output = JSON.stringify({ ok: false, status: "failed", candidates: ["记事本"] });
+    expect(launcherControlSubmission(captured, source).state).toBe("stale");
+  });
 });

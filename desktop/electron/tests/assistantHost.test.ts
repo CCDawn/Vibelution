@@ -972,6 +972,23 @@ describe("AssistantHost", () => {
     await host.stop();
   });
 
+  it("passes unknown computer actions through and keeps the mirrored bounds", async () => {
+    // The open contract owns the action set (launch, click_at, hotkey, ...);
+    // the shell mirrors only the shape and never rejects a known-bounded
+    // action the service decided to emit.
+    const { host, fetchImpl } = fixture({ graceful: true }); await host.start();
+    const withPending = (action: string) => ({ available: true, status: "waiting_confirmation", message: "",
+      grantId: "grant", window: { selectionId: "sel", title: "Title", appName: "App" },
+      pending: { id: "p", action, targetLabel: "Button", text: null } });
+    for (const action of ["launch", "click_at", "hotkey", "set_value"]) {
+      fetchImpl.mockResolvedValueOnce(Response.json(withPending(action)));
+      expect(await host.request({ operation: "computerState" })).toEqual(withPending(action));
+    }
+    fetchImpl.mockResolvedValueOnce(Response.json(withPending("x".repeat(41))));
+    await expect(host.request({ operation: "computerState" })).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
+    await host.stop();
+  });
+
   it("passes the computer router's root-cause codes through to the renderer", async () => {
     // computer_control.py splits driver outage (503), moved operator state
     // (409) and a request that can never bind (422); the structured codes must

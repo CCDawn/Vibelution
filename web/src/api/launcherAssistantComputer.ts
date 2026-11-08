@@ -4,7 +4,6 @@ import type { ComputerControlAction, ComputerState, ComputerWindow } from "./typ
 
 const statuses = ["idle", "ready", "working", "waiting_confirmation", "paused", "manual", "ended", "error"];
 const controls: ComputerControlAction[] = ["pause", "resume", "takeover", "return", "end"];
-const actions = ["click", "set_value", "type_text", "scroll"];
 const invalid = () => new Error("Launcher 电脑操作状态不可用，请重试。");
 const exact = (value: unknown, keys: string[]): value is Record<string, unknown> =>
   !!value && typeof value === "object" && !Array.isArray(value)
@@ -24,7 +23,7 @@ function stateValue(value: unknown): ComputerState {
     || !(value.window === null || windowValue(value.window))
     || (value.grantId === null) !== (value.window === null)) throw invalid();
   if (value.pending !== null && (!exact(value.pending, ["id", "action", "targetLabel", "text"])
-    || !token(value.pending.id) || typeof value.pending.action !== "string" || !actions.includes(value.pending.action)
+    || !token(value.pending.id) || !bounded(value.pending.action, 40)
     || !bounded(value.pending.targetLabel, 400) || !(value.pending.text === null || bounded(value.pending.text, 2000))
     || value.grantId === null || value.status !== "waiting_confirmation")) throw invalid();
   if (value.authorizationRequest !== undefined && value.authorizationRequest !== null

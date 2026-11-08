@@ -1256,9 +1256,11 @@ export class AssistantHost {
             || !token(result.authorizationRequest.sessionId) || !token(result.authorizationRequest.turnId)
             || result.grantId !== null || result.pending !== null || !["idle", "ended"].includes(result.status)))
           throw new HostError("ASSISTANT_RESPONSE_INVALID");
+        // The action set is owned by the host service and grows over time
+        // (launch, click_at, hotkey, ...). Unknown actions pass through for
+        // the service to judge; the shell only bounds the mirrored shape.
         if (result.pending !== null && (!object(result.pending) || !exact(result.pending, ["id", "action", "targetLabel", "text"])
-          || !token(result.pending.id) || typeof result.pending.action !== "string"
-          || !["click", "set_value", "type_text", "scroll"].includes(result.pending.action)
+          || !token(result.pending.id) || !bounded(result.pending.action, 40)
           || !bounded(result.pending.targetLabel, 400) || !(result.pending.text === null || bounded(result.pending.text, 2000))
           || result.grantId === null || result.status !== "waiting_confirmation")) throw new HostError("ASSISTANT_RESPONSE_INVALID");
         return result;

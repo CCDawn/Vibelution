@@ -88,7 +88,21 @@ describe("native computer authorization", () => {
     expect(state.request).toBeNull();
     finish?.(granted);
     expect(continuation.complete).toHaveBeenCalledWith(intent, expect.any(Function));
-    expect(state.prepareContinuation("grant")).toBeUndefined();
+  });
+  it("continues a bound task from a preference grant without any live authorization request", async () => {
+    vi.mocked(launcherAssistantComputer.state).mockResolvedValue(
+      { available: true, status: "idle", message: "", grantId: null, window: null, pending: null });
+    const intent = { origin: { agentId: "assistant", sessionId: "session", turnId: "turn", userMessageId: "user", branchId: "" }, requestId: "same-request", toolIds: [], pendingToolIds: [] };
+    const continuation = { capture: vi.fn(() => intent), complete: vi.fn(), cancel: vi.fn() };
+    props.continuation = continuation;
+    await render();
+    expect(state.request).toBeNull();
+    const finish = state.prepareContinuation("grant");
+    expect(continuation.capture).toHaveBeenCalledOnce();
+    expect(finish).toBeDefined();
+    await act(async () => state.onGranted(granted));
+    finish?.(granted);
+    expect(continuation.complete).toHaveBeenCalledWith(intent, expect.any(Function));
   });
   it("keeps existing grant controls visible during a state read failure", async () => {
     vi.mocked(launcherAssistantComputer.state).mockResolvedValue(granted);

@@ -135,6 +135,7 @@ export function PersonalAssistantComputerPanel({ active = true, onCollapse, tran
           {!conversation ? <p className={styles.muted}>{copy.sessionTip}</p> : null}
         </> : <>
           {state.message ? <p className={styles.status} role="status">{state.message}</p> : null}
+          <p className={styles.muted}>{copy.openAccessTip}</p>
           {conversation && selected && !choosing ? <div className={styles.section}>
             <p className={styles.muted}>{copy.authorizeWindow(selected.title || selected.appName)}</p>
             <VButton variant="ghost" isDisabled={busy} onClick={() => { setSelectionId(""); setChoosing(true); }}>{copy.changeWindow}</VButton>

@@ -58,9 +58,12 @@ export function useLauncherComputerAccess(options: Options) {
   };
   const prepareContinuation = useCallback((action: "grant" | "return" | "resume") => {
     const { request, options } = latest.current;
-    if (action === "grant" && (!request || !computerAccessMatches(request, options.detail, options.agentId))) return;
+    // Authorization is now an optional default-target preference: a grant can
+    // continue a bound task without a live request. A legacy request, when the
+    // service still emits one, keeps its exact turn binding.
+    if (action === "grant" && request && !computerAccessMatches(request, options.detail, options.agentId)) return;
     const intent = options.continuation?.capture();
-    if (!intent || action === "grant" && intent.origin.turnId !== request?.turnId) return;
+    if (!intent || action === "grant" && request && intent.origin.turnId !== request.turnId) return;
     const targetKey = ["launcher-assistant", "computer-access", options.agentId, options.detail?.id || ""] as const;
     return (state: ComputerState) => {
       void client.cancelQueries({ queryKey: targetKey, exact: true });

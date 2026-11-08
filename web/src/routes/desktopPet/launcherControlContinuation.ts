@@ -24,16 +24,26 @@ export function launcherControlToolWatermark(context: LauncherControlContext) {
   return { toolIds: tools.map(item => item.itemId || item.id).sort(),
     pendingToolIds: tools.filter(item => ["pending", "running"].includes(item.status)).map(item => item.itemId || item.id) };
 }
+function observeCandidates(value: Record<string, unknown>): boolean {
+  return Array.isArray(value.candidates) && value.candidates.length > 0 && value.candidates.length <= 8
+    && value.candidates.every(item => typeof item === "string" && item.length > 0 && item.length <= 240);
+}
 function originalToolSucceeded(context: LauncherControlContext, pendingToolIds: string[]): boolean {
   return launcherControlTools(context).some(item => {
     if (!pendingToolIds.includes(item.itemId || item.id) || item.status !== "completed" || item.error) return false;
     // An authorization request can finish as a denied tool receipt after the
-    // click. Only its exact structured native denial remains eligible.
+    // click. Only its exact structured native denial remains eligible. The
+    // open contract no longer emits denials: a blocked receipt that instead
+    // offers window candidates also stays eligible, so the one continuation
+    // retry can observe again with the tool's own optional window parameter.
     if (item.toolName === "personal_assistant_computer_observe_tool" && item.output && item.output.length <= 16_000) {
       try {
         const value: unknown = JSON.parse(item.output);
-        if (value && typeof value === "object" && "ok" in value && value.ok === false
-          && "reason" in value && value.reason === "authorization_required" && "status" in value && value.status === "blocked") return false;
+        if (value && typeof value === "object" && !Array.isArray(value)) {
+          const receipt = value as Record<string, unknown>;
+          if (receipt.ok === false && receipt.status === "blocked"
+            && (receipt.reason === "authorization_required" || observeCandidates(receipt))) return false;
+        }
       } catch { /* An uncertain result consumes the intent; never replay it. */ }
     }
     return true;
