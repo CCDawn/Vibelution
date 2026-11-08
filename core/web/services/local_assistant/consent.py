@@ -1,7 +1,7 @@
 """Apply task-level local consent at the existing final execution gate."""
 from pathlib import Path
 
-from .policy import LOCAL_RUNTIME_SOURCE_PREFIX, normal_development_call
+from .policy import _FORBIDDEN_TAGS, LOCAL_RUNTIME_SOURCE_PREFIX, normal_development_call
 
 
 def _ordinary_read(tool_name, args, workspace):
@@ -67,14 +67,25 @@ def local_approval_policy(runtime, tool_name, args, requirement, permission_pres
     risk = requirement[1] if requirement else "execute"
     from core.web.services.tool_catalog import TOOL_CATALOG
     metadata = TOOL_CATALOG.get(tool_name) or {}
+    red_line = bool(_FORBIDDEN_TAGS.intersection(metadata.get("riskTags") or ()))
     if task and "read_only" in (metadata.get("capabilityTags") or ()):
-        if _ordinary_read(tool_name, args, task["workspace"]):
+        if red_line:
+            return ("always", "read"), "request_approval"
+        # 已验证任务的非红线只读发现跟随任务权限档：full_access 静默放行；
+        # 其他档位保持询问，但降为普通审批卡（信任按钮可用，不再 always 钉死）。
+        if permission_preset == "full_access" or _ordinary_read(tool_name, args, task["workspace"]):
             return None, permission_preset
-        return ("always", "read"), "request_approval"
+        return ("on_request", "read"), permission_preset
     if (task and risk not in {"network", "destructive"}
             and normal_development_call(tool_name, args, task["workspace"])):
         return None, permission_preset
-    # This includes revoked tasks and shell calls outside normal development.
-    # Even collaboration modes or an Agent full_access preset cannot silently
-    # authorize a publish, delete, arbitrary shell script or privilege change.
+    if task and not red_line and permission_preset == "full_access":
+        # 已验证任务的 full_access 档与普通会话 full_access 短路同语义：非红线
+        # 调用免卡放行；红线标签在上方各分支保持钉死。
+        return None, permission_preset
+    # This includes revoked tasks, forged sources and calls outside normal
+    # development for non-full_access presets. Red-line tagged tools stay
+    # pinned for every preset: no collaboration mode or Agent preset can
+    # silently authorize a publish, delete, arbitrary shell script or
+    # privilege change.
     return ("always", risk), "request_approval"

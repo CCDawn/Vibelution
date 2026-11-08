@@ -1256,7 +1256,9 @@ def _runtime_permission_preset(
     runtime_tool_source: str = "",
 ) -> str:
     if str(runtime_tool_source or "").strip().startswith("launcher_assistant_task:"):
-        return "auto_review"
+        # 本地 Launcher 任务跟随 Agent 自己配置的权限档；外部委派任务仍钉死
+        # request_approval，防止外部任务扩散本地信任。
+        return normalize_permission_preset(value)
     if str(runtime_tool_source or "").strip().startswith("external_agent_task:"):
         return "request_approval"
     return normalize_permission_preset(value) if str(value or "").strip() else ""
