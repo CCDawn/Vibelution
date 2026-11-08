@@ -75,9 +75,14 @@ EXECUTOR_RELATIVE_PARTS = ("Vibelution", "sandbox", "wxc-exec.exe")
 TELEMETRY_POLICY_REG_KEY = r"SOFTWARE\Policies\Mxc"
 TELEMETRY_POLICY_REG_VALUE = "AllowTelemetry"
 
+# The full tier is reported by wxc-exec --probe as "base-container" (hyphenated)
+# on hosts with the 26200.9278+ servicing stack; early 1.0.x builds and the docs
+# also spell it "basecontainer". Accept both spellings and normalize to the
+# canonical constant so a probe-naming drift cannot silently disable the backend.
 TIER_BASECONTAINER = "basecontainer"
+_TIER_BASECONTAINER_PROBE_ALIASES = ("base-container", "basecontainer")
 TIER_APPCONTAINER_DACL = "appcontainer-dacl"
-_SUPPORTED_TIERS = {TIER_BASECONTAINER, TIER_APPCONTAINER_DACL}
+_SUPPORTED_TIERS = {*_TIER_BASECONTAINER_PROBE_ALIASES, TIER_APPCONTAINER_DACL}
 
 VERIFY_TTL_SUCCESS_SECONDS = 300.0
 VERIFY_TTL_FAILURE_SECONDS = 30.0
@@ -373,6 +378,10 @@ def _probe_tier(executor: Path, invoke: ExecutorInvoker) -> tuple[str, str]:
     tier = str(payload.get("tier") or "").strip()
     if tier not in _SUPPORTED_TIERS:
         return "", f"probe_tier_unknown:{tier or 'empty'}"
+    # Normalize probe spellings to the canonical constants so downstream
+    # ``tier == TIER_BASECONTAINER`` capability checks are spelling-stable.
+    if tier in _TIER_BASECONTAINER_PROBE_ALIASES:
+        tier = TIER_BASECONTAINER
     return tier, ""
 
 

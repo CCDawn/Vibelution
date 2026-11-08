@@ -271,6 +271,15 @@ def test_unknown_probe_tier_refused(fake_executor, tmp_path):
     assert availability.detail.startswith("probe_tier_unknown")
 
 
+def test_hyphenated_full_tier_normalized(fake_executor, tmp_path):
+    # wxc-exec on the 26200.9278+ servicing stack reports "base-container";
+    # downstream capability checks compare against the canonical constant.
+    fake_executor(probe_tier="base-container")
+    availability = mxc_backend.ensure_verified(tmp_path)
+    assert availability.ok is True
+    assert availability.tier == mxc_backend.TIER_BASECONTAINER
+
+
 def test_telemetry_policy_observed_not_gating(fake_executor, tmp_path):
     fake_executor(telemetry_policy="blocked")
     availability = mxc_backend.ensure_verified(tmp_path)
