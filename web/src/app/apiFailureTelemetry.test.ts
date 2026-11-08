@@ -229,7 +229,8 @@ describe("api failure telemetry", () => {
         source: "app_shell",
       },
     });
-    expect(restartRequestUnconfirmedBody("zh")).toContain("重启流程已经开始");
+    expect(restartRequestUnconfirmedBody("zh")).toContain("没有收到重启的最终确认");
+    expect(restartRequestUnconfirmedBody("zh")).not.toContain("继续检查");
     expect(buildRestartRequestUnconfirmedTelemetry("Failed to fetch")).toMatchObject({
       phase: "restart",
       eventCode: "browser.user_action.restart_request_unconfirmed",

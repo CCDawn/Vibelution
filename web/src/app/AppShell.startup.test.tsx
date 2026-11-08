@@ -258,6 +258,50 @@ describe("Workbench initial route priority", () => {
     router.dispose();
   });
 
+  it.each(["MAIN_LINE_EXCLUSIVE_BUSY", "Restart confirmation timed out", "restart_queued"])("keeps restart feedback dismissible after %s", async outcome => {
+    seedControlTokenForTests();
+    const freshness = { current: false, updateAvailable: true, headShort: "bbbb", activeWorkState: "idle" };
+    const queued = outcome === "restart_queued";
+    const cancellations: unknown[] = [];
+    const replaceShell = vi.fn(async () => {
+      if (queued) return { ok: true, payload: { accepted: true, code: outcome, operation: "restart", commandId: "queued-restart" } };
+      throw new Error(outcome);
+    });
+    vi.stubGlobal("vibelutionLauncher", {
+      showLauncherWindow: vi.fn(async () => {}),
+      getLauncherFreshness: vi.fn(async () => freshness),
+      requestWorkbenchShellUpdate: replaceShell,
+    });
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const path = new URL(String(url), window.location.origin).pathname;
+      if (path === "/api/runtime/lifecycle-command/cancel") cancellations.push(JSON.parse(String(init?.body)));
+      const payload = path === "/api/health" ? { status: "ok", routesReady: true }
+        : path.includes("companion-activity") ? []
+          : path === "/api/runtime-tasks" ? { running: [], ended: [] } : {};
+      return new Response(JSON.stringify(payload), { headers: { "Content-Type": "application/json" } });
+    }));
+    const router = createMemoryRouter([{ element: <AppShell />, children: [{ path: "/teams", element: <div>teams homepage</div> }] }], { initialEntries: ["/teams"] });
+    client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 30_000, gcTime: 0 } } });
+    client.setQueryData(queryKeys.launcherFreshness(), freshness);
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => root!.render(<VuiProvider><QueryClientProvider client={client!}><RouterProvider router={router} /></QueryClientProvider></VuiProvider>));
+    const button = (label: string) => [...document.querySelectorAll("button")].find(node => node.textContent?.trim() === label)!;
+    await waitForRouteCommit(() => expect(container!.querySelector('button[aria-label="更新通知"]')).not.toBeNull());
+    await act(async () => (container!.querySelector('button[aria-label="更新通知"]') as HTMLButtonElement).click());
+    await waitForRouteCommit(() => expect(button("重启更新")).toBeTruthy());
+    await act(async () => button("重启更新").click());
+    expect(replaceShell).toHaveBeenCalledOnce();
+    expect(document.querySelector(".shutdownOverlay")?.getAttribute("aria-busy")).toBe(String(queued));
+    const dismiss = button(queued ? "取消重启" : "关闭提示");
+    expect(dismiss).toBeTruthy();
+    await act(async () => dismiss.click());
+    expect(document.querySelector(".shutdownOverlay")).toBeNull();
+    expect(cancellations).toEqual(queued ? [{ commandId: "queued-restart", operation: "restart", source: "app_shell" }] : []);
+    router.dispose();
+  });
+
   it("ignores a cancelled update check after a newer update attempt starts", async () => {
     seedControlTokenForTests();
     const freshness = { current: false, updateAvailable: true, headShort: "bbbb", activeWorkState: "idle" };

@@ -850,7 +850,7 @@ export function buildRestartRequestUnconfirmedTelemetry(
   return {
     phase: "restart",
     eventCode: "browser.user_action.restart_request_unconfirmed",
-    message: "Restart confirmation was not received; keeping pending restart feedback.",
+    message: "Restart confirmation was not received; the local wait has ended.",
     level: "warning",
     fields: {
       action: "restart",
@@ -905,8 +905,8 @@ export function shutdownRequestUnconfirmedBody(lang: string): string {
 
 export function restartRequestUnconfirmedBody(lang: string): string {
   return lang === "en"
-    ? "The restart flow has started, but this window did not receive a final confirmation yet. The workbench is still checking the runtime state."
-    : "重启流程已经开始，但这个窗口还没有收到最终确认。工作台正在继续检查运行状态。";
+    ? "No final restart confirmation was received. Close this notice to check the workbench status."
+    : "没有收到重启的最终确认。可关闭此提示查看工作台当前状态。";
 }
 
 export function restartRequestNotDeliveredBody(lang: string): string {
@@ -1419,6 +1419,7 @@ export function AppShell() {
   const shutdownLocallyCompleteTitle = lang === "en" ? "Workbench backend stopped" : "工作台后端已停止";
   const shutdownLocallyCompleteDetail = shutdownLocallyCompleteBody(lang);
   const restartHeading = lang === "en" ? "Restarting workbench" : "正在重启工作台";
+  const restartUnconfirmedTitle = lang === "en" ? "Restart not confirmed" : "重启未确认";
   const restartBody = lang === "en"
     ? "Please keep this window open. The runtime manager is stopping the old backend and starting a fresh workbench."
     : "请先保持这个窗口打开。运行时管理器正在停稳旧后端并重新拉起工作台。";
@@ -1964,15 +1965,16 @@ export function AppShell() {
         return;
       }
       if (!updateBannerRestartReloadsDocument(payload.code, payload.accepted, payload.operation)) {
+        const queued = payload.accepted !== false && payload.code === "restart_queued";
         restartWaitsForDocumentReloadRef.current = false;
         setRestartRequested(false);
         setShutdownRequested(false);
         setShutdownOpen(true);
-        setShutdownSettled(false);
+        setShutdownSettled(!queued);
         setLifecycleAction("restart");
         setLifecycleCommandId(payload.commandId ?? "");
         setLifecycleCancelPending(false);
-        setShutdownTitle(restartHeading);
+        setShutdownTitle(queued ? restartHeading : restartUnconfirmedTitle);
         const taskPauseFailed = payload.code === "user_restart_pause_failed";
         setShutdownDetail(taskPauseFailed
           ? (lang === "en"
@@ -2002,11 +2004,11 @@ export function AppShell() {
         setRestartRequested(false);
         setShutdownRequested(false);
         setShutdownOpen(true);
-        setShutdownSettled(false);
+        setShutdownSettled(true);
         setLifecycleAction("restart");
         setLifecycleCommandId("");
         setLifecycleCancelPending(false);
-        setShutdownTitle(restartHeading);
+        setShutdownTitle(restartUnconfirmedTitle);
         setShutdownDetail(restartActiveWorkBlockedMessage(lang, blockedLabels));
         emitBrowserTelemetry(
           {
@@ -2033,9 +2035,9 @@ export function AppShell() {
       setRestartRequested(false);
       setShutdownRequested(false);
       setShutdownOpen(true);
-      setShutdownSettled(false);
+      setShutdownSettled(true);
       setLifecycleAction("restart");
-      setShutdownTitle(restartHeading);
+      setShutdownTitle(restartUnconfirmedTitle);
       const taskCleanupFailed = /explicit user restart.*not confirmed|user_restart_pause_failed/i.test(errorMessage);
       setShutdownDetail(updateCheckFailed
         ? (lang === "en" ? "The update version could not be confirmed. Nothing was restarted; close this notice and retry." : "暂时无法确认更新版本，尚未重启。关闭提示后重试。")
@@ -2045,6 +2047,10 @@ export function AppShell() {
           : "重启前未能保存任务状态，已有记录仍保留。关闭此提示后可以重试。")
         : restartNotDelivered
           ? restartNotDeliveredBody
+          : errorMessage.includes("MAIN_LINE_EXCLUSIVE_BUSY")
+            ? (lang === "en"
+              ? "Another update or start/stop operation is already running. This request was not submitted; close this notice to view the workbench."
+              : "已有更新或启停操作正在进行，本次请求未提交。可关闭此提示查看工作台。")
           : restartUnconfirmedBody);
       emitBrowserTelemetry(
         buildRestartRequestUnconfirmedTelemetry(
@@ -2069,6 +2075,7 @@ export function AppShell() {
     requestLifecycle,
     restartBody,
     restartHeading,
+    restartUnconfirmedTitle,
     restartNotDeliveredBody,
     restartUnconfirmedBody,
     shutdownRequested,
@@ -2717,7 +2724,7 @@ export function AppShell() {
       setRestartRequested(false);
       setShutdownOpen(true);
       setShutdownSettled(true);
-      setShutdownTitle(restartHeading);
+      setShutdownTitle(restartUnconfirmedTitle);
       setShutdownDetail(workbench.failureMessage || restartErrorBody);
       return;
     }
@@ -2763,6 +2770,7 @@ export function AppShell() {
     restartCompleteTitle,
     restartErrorBody,
     restartHeading,
+    restartUnconfirmedTitle,
     restartRequested,
     workbench,
   ]);
@@ -2910,15 +2918,17 @@ export function AppShell() {
             <div className={styles.shutdownCopy}>
               <strong>{shutdownTitle}</strong>
               <p>{shutdownDetail}</p>
-              {!shutdownSettled ? (
+              {!shutdownSettled || lifecycleAction === "restart" ? (
                 <VButton
                   type="button"
                   variant="secondary"
                   className={styles.shutdownCancelButton}
-                  onPress={cancelLifecycleWait}
+                  onPress={shutdownSettled ? () => setShutdownOpen(false) : cancelLifecycleWait}
                   isDisabled={lifecycleCancelPending}
                 >
-                  {lifecycleCancelPending
+                  {shutdownSettled
+                    ? closeLifecycleNoticeLabel
+                    : lifecycleCancelPending
                     ? cancellingLifecycleLabel
                     : lifecycleAction === "restart"
                       ? !restartRequested && !lifecycleCommandId.trim()

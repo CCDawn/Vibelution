@@ -411,6 +411,39 @@ def test_owned_file_guard_preserves_hardlink_inputs(tmp_path):
 
 
 @pytest.mark.parametrize("verify_content", [False, True])
+def test_public_verifier_does_not_repeat_canonical_ancestor_link_checks(package_fixture, monkeypatch, verify_content):
+    from scripts import build_assistant_runtime as builder
+
+    result = _build(package_fixture)
+    output = package_fixture[-1]
+    kwargs = _content_verification_kwargs(output, verify_content)
+    shared_directory = builder._io_path(output) / "source/core"
+    original = builder._reject_link
+    original_relative_to = Path.relative_to
+    relative_reads = Counter()
+    observations = 0
+
+    def reject(path, **kwargs):
+        nonlocal observations
+        if path == shared_directory:
+            observations += 1
+        return original(path, **kwargs)
+
+    def relative_to(path, other, *args, **kwargs):
+        if other == builder._io_path(output):
+            relative_reads[path] += 1
+        return original_relative_to(path, other, *args, **kwargs)
+
+    monkeypatch.setattr(builder, "_reject_link", reject)
+    monkeypatch.setattr(Path, "relative_to", relative_to)
+    verify_launcher_assistant_payload(output, expected_manifest_sha256=result["manifestSha256"], **kwargs)
+    # The package walk already inspects the directory; each child must not
+    # repeat the same check after canonical resolution proved its full path.
+    assert observations == 1
+    assert max(relative_reads.values()) == 1
+
+
+@pytest.mark.parametrize("verify_content", [False, True])
 def test_public_verifier_retains_the_full_path_guard(package_fixture, monkeypatch, verify_content):
     from scripts import build_assistant_runtime as builder
 

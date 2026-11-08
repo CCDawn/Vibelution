@@ -190,6 +190,17 @@ def _trusted_root(value: Path | str) -> Path:
 def _checked(root: Path, relative: str, *, resolved_root: Path | None = None) -> Path:
     relative = _relative(relative)
     _reject_link(root)
+    target = root / relative
+    try:
+        resolved_target = target.resolve()
+    except (OSError, RuntimeError):
+        resolved_target = None
+    # A canonical target built from the admitted root and a validated relative
+    # name is already inside that boundary. Do not walk/check it a second time.
+    if (resolved_root is not None and str(root) == str(resolved_root)
+            and resolved_target is not None and str(resolved_target) == str(target)):
+        _reject_link(target)
+        return target
     target = root
     for part in PurePosixPath(relative).parts:
         target = target / part
@@ -674,8 +685,8 @@ def _verify_files(root: Path, manifest: dict, *, directory_digest=None,
             digest = file_digest.hexdigest()
         if digest != entry["sha256"]:
             raise ValueError(f"assistant payload hash mismatch: {relative}")
-    actual = {path.relative_to(root).as_posix() for path in _walk(root)
-              if path.relative_to(root).as_posix() != "manifest.json"}
+    actual = {path.relative_to(root).as_posix() for path in _walk(root)}
+    actual.discard("manifest.json")
     if {relative.casefold() for relative in actual} != seen or (
         directory_digest is not None and actual != {relative for relative, _ in checked_entries}
     ):
