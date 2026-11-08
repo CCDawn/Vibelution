@@ -4,6 +4,8 @@ instead of silently reporting zero usage."""
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from core.research.workflow.contracts.workflow_snapshot import (
@@ -133,3 +135,40 @@ def test_budget_records_report_invalid_usage_counters(scene_events) -> None:
     assert len(degraded) == 1
     assert degraded[0]["fields"]["receiptId"] == "res-9"
     assert degraded[0]["fields"]["droppedKeys"] == ["tokens"]
+
+
+@pytest.mark.parametrize(
+    ("usage", "counter", "expected", "degraded"),
+    [
+        ({"tokens": -5}, "tokens", 0, True),
+        ({"tokens": True}, "tokens", 0, True),
+        ({"seconds": "broken"}, "wallClockSeconds", 0, True),
+        ({"seconds": float("nan")}, "wallClockSeconds", 0, True),
+        ({"seconds": -1}, "wallClockSeconds", 0, True),
+        ({"retries": -1}, "maxRetries", 0, True),
+        ({"seconds": 7}, "wallClockSeconds", 7, False),
+        ({"wallClockSeconds": 7, "seconds": "ignored"}, "wallClockSeconds", 7, False),
+        ({"tokens": 5}, "tokens", 5, False),
+    ],
+)
+def test_budget_usage_invalid_values_are_observable(scene_events, usage, counter, expected, degraded):
+    ref = SimpleNamespace(
+        reserved_payload={"reserved": {"tokens": 10}, "limits": {"tokens": 100}},
+        settled_payload={"usage": usage}, stage_id="collection", status="settled",
+        reservation_id="res-1", receipt_id="receipt-1", node_run_id="node-1",
+        policy_hash="policy", created_at_ms=1, updated_at_ms=2,
+    )
+    snapshot = SimpleNamespace(
+        run=SimpleNamespace(run_id="run-1"),
+        budget_summary=SimpleNamespace(receipt_refs=(ref,)),
+    )
+
+    ledgers, reservations = ledger_domain_projections._budget_records(snapshot)
+
+    assert ledgers[0]["consumed"][counter] == expected
+    events = [event for event in scene_events if event["eventCode"] == "budget_usage_counters_invalid"]
+    assert bool(events) is degraded
+    if degraded:
+        assert events[0]["fields"]["droppedKeys"] == [counter]
+        expected_actual = 0 if "seconds" in usage or "retries" in usage else next(iter(usage.values()))
+        assert reservations[0]["actual"][counter] == expected_actual
