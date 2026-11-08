@@ -4158,16 +4158,23 @@ def apply_config_workspace(
         _save_public_config_and_invalidate(merged)
 
     normalized_meta = _normalize_draft_meta(draft_meta)
-    cleared_envs = [str(env_name) for env_name in normalized_meta.get("pending_cleared_api_keys", [])]
+    cleared_envs: list[str] = []
     updated_envs: list[str] = []
     failed_env_writes: list[dict[str, str]] = []
+    remaining_api_keys: dict[str, str] = {}
+    remaining_cleared_api_keys: list[str] = []
     for env_name in normalized_meta.get("pending_cleared_api_keys", []):
+        # Match _with_pending_api_key: a valid replacement supersedes a clear
+        # for the same env, including contradictory client-submitted metadata.
+        if env_name in normalized_meta.get("pending_api_keys", {}):
+            continue
         try:
             _delete_user_env_var(str(env_name))
         except Exception as exc:
             # 单个 env 写失败不中断整个 apply（config.toml 已保存的事实保持）；
             # 失败条目保留在 draft_meta/进程注册里，等待下次 apply 重试。
             error_type = type(exc).__name__
+            remaining_cleared_api_keys.append(str(env_name))
             failed_env_writes.append({"env": str(env_name), "operation": "delete", "errorType": error_type})
             _record_config_scene_event(
                 "persist",
@@ -4179,6 +4186,7 @@ def apply_config_workspace(
                 lifecycle=True,
             )
             continue
+        cleared_envs.append(str(env_name))
         _PENDING_CLEAR_ENVS.discard(str(env_name))
     for env_name, api_key in normalized_meta.get("pending_api_keys", {}).items():
         secret = _resolve_pending_api_key(str(env_name), api_key)
@@ -4188,6 +4196,7 @@ def apply_config_workspace(
             _set_user_env_var(str(env_name), secret)
         except Exception as exc:
             error_type = type(exc).__name__
+            remaining_api_keys[str(env_name)] = str(api_key)
             failed_env_writes.append({"env": str(env_name), "operation": "write", "errorType": error_type})
             _record_config_scene_event(
                 "persist",
@@ -4216,18 +4225,28 @@ def apply_config_workspace(
     primary_provider = effective_config.llm.get_provider(primary_profile.provider_id)
     workspace = _build_workspace(
         persisted,
+        draft_meta={
+            "pending_api_keys": remaining_api_keys,
+            "pending_cleared_api_keys": remaining_cleared_api_keys,
+        },
         message=text_for(
             _resolve_workspace_language(persisted),
-            zh="配置已保存到外部 operator config.toml。",
-            en="Config saved to external operator config.toml.",
+            zh=(
+                "配置已保存到外部 operator config.toml，但部分 API Key 修改失败。请重试保存。"
+                if failed_env_writes else "配置已保存到外部 operator config.toml。"
+            ),
+            en=(
+                "Config saved to external operator config.toml, but some API key changes failed. Retry saving."
+                if failed_env_writes else "Config saved to external operator config.toml."
+            ),
         ),
         env_write_failures=failed_env_writes,
     )
     _record_config_scene_event(
         "persist",
         "config.workspace.applied",
-        message="Config workspace applied.",
-        outcome="succeeded",
+        message="Config workspace saved with API key failures." if failed_env_writes else "Config workspace applied.",
+        outcome="partial" if failed_env_writes else "succeeded",
         fields={
             "configPath": str(CONFIG_PATH),
             "baseHash": str(base_hash or "").strip(),

@@ -60,7 +60,7 @@ from .config_service import (
     _resolve_workspace_language,
     _with_pending_api_key,
 )
-from .model_reference_service import ModelReferenceConflictError, scan_model_references
+from .model_reference_service import ModelReferenceConflictError, scan_model_references, scan_provider_live_references
 from .runtime_scene_service import record_runtime_scene_event
 
 
@@ -420,6 +420,9 @@ def _owned_provider_model_refs(
     git_ref = str(git.get("commit_message_model_ref") or "").strip() if isinstance(git, dict) else ""
     if git_ref.startswith(f"{provider_id}/"):
         refs.add(git_ref)
+
+    # Workspace bindings can name models absent from both pins and catalog.
+    refs.update(scan_provider_live_references(provider_id)["modelIds"])
 
     try:
         state = load_model_catalog_state()
