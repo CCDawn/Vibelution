@@ -11,6 +11,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   ChevronRight,
   Image as ImageIcon,
+  MoreHorizontal,
   Pencil,
   Plus,
   RotateCcw,
@@ -1571,7 +1572,7 @@ export function ConfigRoute() {
 
   return (
     <div
-      className={styles.page}
+      className={`${styles.page} ${isSectionVisible("models") ? styles.modelPage : ""}`}
       data-vui-recipe="config-settings-workbench"
       data-vui-layout-id={CONFIG_SETTINGS_LAYOUT_ID}
       data-vui-domain-recipe="config-settings"
@@ -1656,7 +1657,7 @@ export function ConfigRoute() {
         onConfirm={() => { void reloadWorkspace().then(() => setDiscardDraftOpen(false)); }} />
       <VSplitWorkspace
         chrome="workbench"
-        className={styles.settingsSplit}
+        className={`${styles.settingsSplit} ${isSectionVisible("models") ? styles.modelSettingsSplit : ""}`}
         data-vui-region="config-settings-split"
         columnsClassName=""
         resize={false}
@@ -1688,55 +1689,56 @@ export function ConfigRoute() {
         main={(
       <VSettingsFormPage
         ariaLabel={activePage?.title ?? copy.pageTitle}
-        className={styles.content}
+        className={`${styles.content} ${isSectionVisible("models") ? styles.modelContent : ""}`}
         data-vui-region="config-settings-main"
-        headerClassName={styles.configHeader}
+        headerClassName={`${styles.configHeader} ${isSectionVisible("models") ? styles.modelHeader : ""}`}
         bodyClassName="!gap-0 !overflow-hidden !content-stretch"
-        title={showingSettingsIndex ? copy.pageTitle : activePage?.title ?? copy.pageTitle}
-        meta={showingSettingsIndex ? undefined : configSettingsPageDescription(activePage, currentLanguage)}
+        title={isSectionVisible("models") ? MODEL_SETTINGS_COPY[currentLanguage === "en" ? "en" : "zh"].title : showingSettingsIndex ? copy.pageTitle : activePage?.title ?? copy.pageTitle}
+        meta={showingSettingsIndex || isSectionVisible("models") ? undefined : configSettingsPageDescription(activePage, currentLanguage)}
         actions={
           <div className={styles.configStatusActions}>
             {isSectionVisible("models") && workspace.schemaVersion === 2 && !providerConnecting ? (
                 <VActionGroup ariaLabel={copy.modelsActionsAria}>
                   <VButton
                     title={copy.advancedSettingsHint}
+                    aria-label={copy.advancedSettings}
+                    icon={<MoreHorizontal size={16} />}
                     className={styles.providerModeButton}
                     aria-pressed={providerShowMore}
                     variant={providerShowMore ? "primary" : "ghost"}
                     onPress={() => { setProviderConnecting(false); setProviderShowMore((open) => !open); }}
                   >
-                    {providerShowMore ? copy.collapseAdvancedSettings : copy.advancedSettings}
                   </VButton>
                 </VActionGroup>
             ) : null}
             {isSectionVisible("models") && workspace.schemaVersion === 2 && !providerConnecting ? (
               <VButton variant="primary" icon={<Plus size={14} />} isDisabled={structuredActionsDisabled || Boolean(busyAction)}
-                onPress={() => setProviderConnecting(true)}>{copy.addModelService}</VButton>
+                onPress={() => setProviderConnecting(true)}>{MODEL_SETTINGS_COPY[currentLanguage === "en" ? "en" : "zh"].addService}</VButton>
             ) : null}
             {isSectionVisible("overview") ? <VButton variant="ghost" icon={<RotateCcw size={14} />} isDisabled={Boolean(busyAction)}
               onPress={() => { if (hasLocalConfigChanges) setDiscardDraftOpen(true); else void reloadWorkspace(); }}>{copy.refresh}</VButton> : null}
           </div>
         }
-        footerClassName={styles.saveFooter}
+        footerClassName={`${styles.saveFooter} ${isSectionVisible("models") ? styles.modelFooter : ""}`}
         footer={hasLocalConfigChanges || isSectionVisible("models") ? <>
           <span className={hasInvalidConfigDraft ? styles.inlineError : styles.helperText} role="status">
             {hasPendingDecisionInput ? MODEL_SETTINGS_COPY[currentLanguage === "en" ? "en" : "zh"].pendingDecision : hasInvalidConfigDraft ? copy.saveBlockedInvalid : hasLocalConfigChanges ? copy.unsavedChanges : copy.statusSaved}
           </span>
-          {pendingConfigDraftCount > 0 ? <VChip tone={hasInvalidConfigDraft ? "danger" : "neutral"} data-testid="config-pending-save-count">
+          {pendingConfigDraftCount > 0 && !isSectionVisible("models") ? <VChip tone={hasInvalidConfigDraft ? "danger" : "neutral"} data-testid="config-pending-save-count">
             {pendingConfigDraftCount}{copy.settingsPendingCountUnit}
           </VChip> : null}
           <div className={styles.configStatusActions}>
-            <VButton variant="ghost" isDisabled={Boolean(busyAction)} onPress={() => setDiscardDraftOpen(true)}>
+            {hasLocalConfigChanges ? <VButton variant="ghost" isDisabled={Boolean(busyAction)} onPress={() => setDiscardDraftOpen(true)}>
               {copy.discardChanges}
-            </VButton>
+            </VButton> : null}
             <VButton variant="primary" isDisabled={!canApplyConfigWorkspace || providerSetupVisible} isPending={Boolean(busyAction)}
               title={hasInvalidConfigDraft ? copy.saveBlockedInvalid : undefined} onPress={() => { void handleApply(); }} icon={<Save size={14} />}>
-              {saveButtonLabel}
+              {isSectionVisible("models") && !busyAction ? MODEL_SETTINGS_COPY[currentLanguage === "en" ? "en" : "zh"].save : saveButtonLabel}
             </VButton>
           </div>
         </> : undefined}
       >
-        <div ref={contentViewportRef} className={styles.pageViewport} data-vui-region="config-settings-body">
+        <div ref={contentViewportRef} className={`${styles.pageViewport} ${isSectionVisible("models") ? styles.modelViewport : ""}`} data-vui-region="config-settings-body">
 
         {showingSettingsIndex ? <ConfigSettingsIndex
           showUsage={!requestedSectionId}
@@ -1793,11 +1795,15 @@ export function ConfigRoute() {
 
         {isSectionVisible("models") ? (
           <div className={styles.providerModelsLayout}>
-            <VTabs aria-label={currentLanguage === "en" ? "Model settings" : "模型设置"} value={modelSettingsView} onValueChange={setModelSettingsView} items={[
+            <VTabs aria-label={currentLanguage === "en" ? "Model settings" : "模型设置"}
+              className="!pb-0 border-b border-vui-border-subtle"
+              listClassName="!w-fit !flex-nowrap !gap-5 !rounded-none !border-0 !bg-transparent !p-0"
+              triggerClassName="!min-h-10 !rounded-none !border-0 !border-b-2 !border-transparent !bg-transparent !px-0 !shadow-none data-[state=active]:!border-b-[var(--accent-cool)]"
+              value={modelSettingsView} onValueChange={setModelSettingsView} items={[
               { id: "services", label: MODEL_SETTINGS_COPY[currentLanguage === "en" ? "en" : "zh"].services },
               { id: "usage", label: MODEL_SETTINGS_COPY[currentLanguage === "en" ? "en" : "zh"].usage },
             ]} />
-            <div className={styles.modelServicesView} hidden={modelSettingsView !== "services"}>
+            <div className={`${styles.modelServicesView} ${providerShowMore || providerConnecting ? styles.modelSetupView : ""}`} hidden={modelSettingsView !== "services"}>
             {workspace.schemaVersion === 2 ? (
               <>
 
@@ -2102,7 +2108,6 @@ export function ConfigRoute() {
             {providerActionError && !providerConnecting ? <p className={styles.noticeError} role="alert">{providerActionError}</p> : null}
             </div>
             <div className={styles.modelUsageView} hidden={modelSettingsView !== "usage"}>
-            <p className={styles.helperText}>{MODEL_SETTINGS_COPY[currentLanguage === "en" ? "en" : "zh"].usageHint}</p>
             {workspace.schemaVersion === 2 ? <ConfigDecisionModelsPanel
               key={decisionEditorGeneration}
               onPendingChange={setHasPendingDecisionInput}

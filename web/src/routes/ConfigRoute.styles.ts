@@ -19,6 +19,13 @@ const sectionHeaderSurface =
   "[border-bottom:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_96%,var(--fg-primary)_4%)] [background:var(--vui-surface-toolbar)]";
 
 const styles = {
+  modelPage: "vui-routes-configroute modelPage !h-full !overflow-hidden",
+  modelSettingsSplit: "vui-routes-configroute modelSettingsSplit !overflow-hidden max-[720px]:[&>[data-vui=split-sidebar]]:shrink-0 max-[720px]:[&>[data-vui=split-main]]:!min-h-0 max-[720px]:[&>[data-vui=split-main]]:!flex-1 max-[720px]:[&>[data-vui=split-main]]:!overflow-hidden",
+  modelContent: "vui-routes-configroute modelContent !h-full !overflow-hidden",
+  modelSetupView: "vui-routes-configroute modelSetupView overflow-y-auto px-6 pb-6 max-[720px]:px-4",
+  modelHeader: "vui-routes-configroute modelHeader !max-w-none !px-6 !pt-4 !pb-3 max-[720px]:!px-4 max-[720px]:[&>[data-vui=route-header]]:!flex-row max-[720px]:[&>[data-vui=route-header]]:!items-center max-[720px]:[&>[data-vui=route-header]]:!gap-2",
+  modelViewport: "vui-routes-configroute modelViewport !flex !h-full !max-w-none !flex-col !gap-0 !overflow-hidden !px-0 !pb-0 !mx-0 [&>_.notice]:shrink-0",
+  modelFooter: "vui-routes-configroute modelFooter !static !z-auto !min-h-15 !flex-nowrap !px-6 !py-3 [&>span]:min-w-0 [&>span]:text-vui-xs max-[720px]:!px-4 max-[720px]:[&>span]:max-w-[45%]",
   actionButton:
     "vui-routes-configroute actionButton",
   avatarCropFrame:
@@ -106,7 +113,7 @@ const styles = {
   contentModels:
     "vui-routes-configroute contentModels [align-content:stretch] [grid-template-rows:minmax(0,1fr)_auto] [height:100%] [max-height:calc(100dvh_-_76px)] [min-width:0] [&:has(>_.notice)]:[grid-template-rows:auto_minmax(0,1fr)_auto] max-[720px]:[max-height:none] max-[720px]:[height:auto] max-[720px]:[overflow:visible]",
   providerModelsLayout:
-    "vui-routes-configroute providerModelsLayout flex h-full min-h-0 min-w-0 flex-col gap-4 [&>div[data-vui=tabs]]:shrink-0",
+    "vui-routes-configroute providerModelsLayout flex h-full min-h-0 min-w-0 flex-1 flex-col gap-0 overflow-hidden [&>div[data-vui=tabs]]:shrink-0 [&>div[data-vui=tabs]]:px-6 [&>div[data-vui=tabs]]:pb-3 max-[720px]:[&>div[data-vui=tabs]]:px-4",
   modelServicesView: "vui-routes-configroute modelServicesView min-h-0 min-w-0 flex-1 [&[hidden]]:!hidden",
   modelUsageView: "vui-routes-configroute modelUsageView min-h-0 min-w-0 flex-1 overflow-y-auto [&[hidden]]:!hidden",
   providerModeButton:

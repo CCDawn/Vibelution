@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowLeft, CircleHelp, Database, Image as ImageIcon, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ChevronRight, CircleHelp, Database, Image as ImageIcon, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
@@ -36,6 +36,7 @@ import { type ModelFieldEdits } from "./config/modelEditableFields";
 import { ConfigModelEntryEditor as ModelEntryEditor } from "./config/ConfigModelEntryEditor";
 import type { ModelEditorDrafts } from "./config/modelEditorDrafts";
 import { MODEL_SETTINGS_COPY } from "./config/modelSettingsCopy";
+import { useWholeRowViewport } from "./config/useWholeRowViewport";
 import {
   buildProviderSetupChecklist,
   canonicalProviderRoute,
@@ -620,12 +621,18 @@ function ModelListRowItem({
   liveReferenceCount,
   copy,
   onSelect,
+  enabled,
+  disabled,
+  onToggle,
 }: {
   model: ConfigCatalogModel;
   selected: boolean;
   liveReferenceCount: number;
   copy: ConfigCopy;
   onSelect: () => void;
+  enabled?: boolean;
+  disabled?: boolean;
+  onToggle?: (enabled: boolean) => void;
 }) {
   const dot = deriveModelDotClass(model);
   return (
@@ -652,7 +659,10 @@ function ModelListRowItem({
         {liveReferenceCount > 0 ? (
           <span className={styles.modelInUseBadge} data-model-inuse="true">{copy.inUseBadge}</span>
         ) : null}
+        {typeof model.draftEntry?.context_window === "number" ? <span className={styles.modelContext}>{Math.round(model.draftEntry.context_window / 1000)}K</span> : null}
+        <ChevronRight size={14} aria-hidden="true" />
       </VButton>
+      {onToggle ? <VSwitch aria-label={`${model.label || model.modelKey} · ${copy.modelEditFieldEnabled}`} isSelected={enabled} isDisabled={disabled} onChange={onToggle} /> : null}
     </div>
   );
 }
@@ -681,6 +691,7 @@ function ModelDetailBody({
   modelEdits = {},
   onModelEditsChange,
   stageModelEdits = false,
+  drilldown = false,
 }: {
   provider: ProviderRegistryRow;
   model: ConfigCatalogModel;
@@ -702,6 +713,7 @@ function ModelDetailBody({
   onProbeReasoning?: (modelRef: string) => void;
   onUpdateModel?: (providerId: string, modelKey: string, edits: ModelFieldEdits) => void;
   stageModelEdits?: boolean;
+  drilldown?: boolean;
   modelEdits?: ModelFieldEdits;
   onModelEditsChange?: (edits: ModelFieldEdits) => void;
 }) {
@@ -734,25 +746,27 @@ function ModelDetailBody({
     && !reasoningHasContract
     && !provider.refreshDue
   );
+  const modelRoute = canonicalProviderRoute(String(model.draftEntry?.wire_protocol ?? provider.defaultProtocol));
+  const text = MODEL_SETTINGS_COPY[copy.modelEditFieldLabel === CONFIG_COPY.zh.modelEditFieldLabel ? "zh" : "en"];
   return (
     <div className={styles.modelDetailBody} data-model-detail={model.modelRef} data-model-availability={model.availability}>
-      <div className={styles.modelIdentity}>
+      {!drilldown ? <div className={styles.modelIdentity}>
         <strong className={styles.modelName} title={model.modelRef}>{model.label || model.modelKey}</strong>
         <small className={styles.muted} title={model.modelRef}>{model.modelRef}</small>
         <small className={styles.muted}>{copy.columnUpstreamId}: {model.upstreamId}</small>
         <span className={styles.modelDetailAvailability}>
           <VStatusChip tone={model.availability === "disabled" ? "danger" : "neutral"}>{providerStatusLabel(model.availability, copy)}</VStatusChip>
         </span>
-      </div>
+      </div> : null}
       {onUpdateModel && ["pinned", "missing_remote"].includes(model.availability) ? (
       <section className={styles.modelDetailSection} data-model-section="edit">
-          <div className={styles.modelDetailSectionHead}>
+          {!drilldown ? <div className={styles.modelDetailSectionHead}>
             <h3>{copy.modelEditSectionTitle}</h3>
             <TermHelp
               ariaLabel={`${copy.modelEditSectionTitle}${copy.termHelpAriaSuffix}`}
               help={copy.modelEditSectionHint}
             />
-          </div>
+          </div> : null}
           <ModelEntryEditor
             key={model.modelRef}
             model={model}
@@ -765,8 +779,12 @@ function ModelDetailBody({
           />
         </section>
       ) : null}
-      {hasModelEdits ? <p className={styles.muted}>{copy.modelEditPendingSave}</p> : null}
-      <details className={styles.modelEvidence}><summary>{copy.verificationHeader} · {copy.columnCapabilities}</summary>      <section className={styles.modelDetailSection} data-model-section="verification">
+      <details className={styles.modelEvidence}><summary>{copy.advancedSettings}</summary>
+      <div className={styles.modelFacts}>
+        <span>{copy.protocolRowLabel}</span><span data-model-resolved-route={modelRoute || undefined}>{resolvedRouteText(copy, modelRoute, copy.notConfigured)}</span>
+        <span>{text.modelIdentifier}</span><span>{model.modelRef}</span>
+      </div>
+      <section className={styles.modelDetailSection} data-model-section="verification">
         <div className={styles.modelDetailSectionHead}>
           <h3>{copy.verificationHeader}</h3>
           <TermHelp
@@ -786,14 +804,13 @@ function ModelDetailBody({
         </div>
         <CapabilityList model={model} copy={copy} termReasoningHelp={copy.termReasoningHelp} termReasoningLabel={copy.reasoningTermLabel} termHelpAriaSuffix={copy.termHelpAriaSuffix} />
       </section>
-      </details>
 
       <section className={styles.modelDetailSection} data-model-section="actions">
         <div className={styles.modelDetailSectionHead}>
           <h3>{copy.columnActions}</h3>
         </div>
         <VActionGroup ariaLabel={`${model.modelRef}${copy.modelActionsAriaSuffix}`}>
-          {action.kind === "pin" ? (
+          {action.kind === "pin" && !drilldown ? (
             <VButton
               variant="primary"
               data-model-action="pin"
@@ -804,7 +821,7 @@ function ModelDetailBody({
               {pinBusy ? copy.pinAdding : copy.pinToAdd}
             </VButton>
           ) : null}
-          {testAvailable ? (
+          {testAvailable && !drilldown ? (
             <VButton
               variant="secondary"
               isDisabled={disabled}
@@ -873,6 +890,7 @@ function ModelDetailBody({
           ) : null}
         </VActionGroup>
       </section>
+      </details>
     </div>
   );
 }
@@ -928,6 +946,7 @@ export function ProviderModelsTab({
 
   // P1 list/detail split: rows scan, the pane carries everything else.
   const [detailModelRef, setDetailModelRef] = useState("");
+  const modelViewport = useWholeRowViewport();
   const detailModel = provider.models.find((model) => model.modelRef === detailModelRef) ?? null;
 
   // Detail selection follows the provider: switching providers clears the pane.
@@ -936,8 +955,8 @@ export function ProviderModelsTab({
   }, [provider.providerId]);
 
   return (
-    <div className={styles.modelsWorkspace}>
-      <div className={styles.modelChrome}>
+    <div className={styles.modelsWorkspace} data-model-editing={drilldown && detailModel ? "true" : undefined}>
+      <div className={styles.modelChrome} hidden={drilldown && Boolean(detailModel)}>
       <div className={styles.modelToolbar}>
         {toolbarIdentity}
         <VInput
@@ -947,23 +966,9 @@ export function ProviderModelsTab({
           value={modelQuery}
           onChange={(event) => onQueryChange(event.currentTarget.value)}
         />
-        <VActionGroup ariaLabel={copy.modelFiltersAria} className={styles.modelFilters}>
-          {MODEL_FILTERS.map((filter) => (
-            <VButton
-              key={filter.id}
-              className={styles.modelFilterButton}
-              density="compact"
-              // P1 convergence: filters stay ghost (weak, aria-pressed), so the
-              // domain keeps a single primary weight = 添加.
-              variant="ghost"
-              data-active={modelFilter === filter.id ? "true" : "false"}
-              aria-pressed={modelFilter === filter.id}
-              onPress={() => onFilterChange(filter.id)}
-            >
-              {copy[filter.copyKey]} {summary[filter.countKey]}
-            </VButton>
-          ))}
-        </VActionGroup>
+        <VStringSelect className={styles.modelFilters} ariaLabel={copy.modelFiltersAria} value={modelFilter}
+          options={MODEL_FILTERS.map((filter) => ({ value: filter.id, label: `${filter.id === "discovered" ? text.availableModels : filter.id === "pinned" ? text.addedModels : copy[filter.copyKey]} · ${summary[filter.countKey]}` }))}
+          onValueChange={(value) => onFilterChange(value as ProviderModelFilter)} />
         {toolbarActions}
       </div>
       {modelFilter === "discovered" && pinnableModels.length > 0 ? (
@@ -993,14 +998,20 @@ export function ProviderModelsTab({
       ) : null}
       </div>
       <div className={drilldown ? styles.modelsDrilldown : styles.modelsSplit} data-vui-region="config-models-split" data-model-drilldown={drilldown ? "true" : undefined}>
-        {drilldown && detailModel ? <VButton variant="ghost" className={styles.backAction} icon={<ArrowLeft size={14} />} onPress={() => setDetailModelRef("")}>{text.backModels}</VButton> : null}
-        {detailModel && !visibleModels.some((model) => model.modelRef === detailModel.modelRef) ? <p className={styles.filterNotice} role="status">{text.outsideFilter} <VButton variant="ghost" onPress={() => { onQueryChange(""); onFilterChange("all"); }}>{text.clearFilter}</VButton></p> : null}
+        {drilldown && detailModel ? <header className={styles.modelEditorHeader}>
+          <VButton variant="ghost" className={styles.backAction} aria-label={text.backModels} icon={<ArrowLeft size={16} />} onPress={() => setDetailModelRef("")} />
+          <h2>{String(drafts[detailModel.modelRef]?.label ?? detailModel.label ?? detailModel.modelKey)}</h2>
+          <VActionGroup ariaLabel={copy.modelActionsAriaSuffix}>
+            {canTestProviderModel(detailModel) ? <VButton variant="secondary" isDisabled={disabled} onPress={() => onTestModel(detailModel.modelRef)}>{copy.testCall}</VButton> : null}
+            {deriveProviderModelActionState(provider, detailModel, liveReferenceCountByModelRef[detailModel.modelRef] ?? 0, disabled, copy).kind === "pin" ? <VButton variant="primary" isDisabled={disabled || pinBusy} onPress={() => onPin(provider.providerId, [detailModel])}>{copy.pinToAdd}</VButton> : null}
+          </VActionGroup>
+        </header> : null}
         <div className={styles.modelListPane} hidden={drilldown && Boolean(detailModel)}>
-          <p className={styles.modelListHeading}>{copy.modelListHeading} · {visibleModels.length}</p>
-          <div className={styles.tableScroll}>
+          <div className={styles.tableScroll} ref={modelViewport.ref}>
             <VEntityList
               ariaLabel={`${provider.label}${copy.modelListAria}`}
               className={styles.modelList}
+              style={{ height: modelViewport.height }}
               activeId={detailModelRef || undefined}
               items={visibleModels.map((model) => ({ ...model, id: model.modelRef }))}
               empty={<span className={styles.muted}>{emptyText}</span>}
@@ -1010,6 +1021,14 @@ export function ProviderModelsTab({
                   selected={detailModelRef === model.modelRef}
                   liveReferenceCount={liveReferenceCountByModelRef[model.modelRef] ?? 0}
                   copy={copy}
+                  enabled={Boolean(drafts[model.modelRef]?.enabled ?? model.draftEntry?.enabled ?? model.availability !== "disabled")}
+                  disabled={disabled || modelUpdateBusy}
+                  onToggle={model.draftEntry && onModelEditorDraftChange ? (enabled) => {
+                    const edits = { ...drafts[model.modelRef] };
+                    if (enabled === (model.draftEntry?.enabled !== false)) delete edits.enabled;
+                    else edits.enabled = enabled;
+                    changeDraft(model.modelRef, edits);
+                  } : undefined}
                   onSelect={() => setDetailModelRef(model.modelRef)}
                 />
               )}
@@ -1035,6 +1054,7 @@ export function ProviderModelsTab({
               onProbeReasoning={onProbeReasoning}
               onUpdateModel={onUpdateModel}
               stageModelEdits={!onModelEditorDraftChange}
+              drilldown={drilldown}
               modelEdits={drafts[detailModel.modelRef] ?? {}}
               onModelEditsChange={(edits) => changeDraft(detailModel.modelRef, edits)}
             />
@@ -1181,7 +1201,7 @@ export function ConfigProviderRegistryPanel({
   );
   const text = MODEL_SETTINGS_COPY[language === "en" ? "en" : "zh"];
   const [providerQuery, setProviderQuery] = useState("");
-  const [showDisabled, setShowDisabled] = useState(false);
+  const providerViewport = useWholeRowViewport();
   const [mobileDetail, setMobileDetail] = useState(false);
   const [subscriptionOpen, setSubscriptionOpen] = useState(false);
   const [managedDisabledOnly, setManagedDisabledOnly] = useState(false);
@@ -1189,12 +1209,11 @@ export function ConfigProviderRegistryPanel({
     () => listRows.filter((row) => {
       const full = rows.find((item) => item.providerId === row.providerId);
       const matches = [row.name, row.providerId, ...(full?.models.map((model) => `${model.label} ${model.upstreamId}`) ?? [])].join(" ").toLowerCase().includes(providerQuery.toLowerCase());
-      return matches && (showDisabled || Boolean(providerQuery) || row.enabled);
+      return matches;
     }),
-    [listRows, rows, providerQuery, showDisabled],
+    [listRows, rows, providerQuery],
   );
   const workspaceListItems = listItems.filter((item) => workspaceListRows.some((row) => row.providerId === item.providerId));
-  const disabledProviderCount = listItems.filter((item) => !item.enabled).length;
   const provider =
     rows.find((row) => row.providerId === selectedProviderId)
     ?? (listRows[0]
@@ -1397,12 +1416,12 @@ export function ConfigProviderRegistryPanel({
         list={(
           <div className={styles.providerRail}>
             <VInput aria-label={text.searchProviders} placeholder={text.searchProviders} value={providerQuery} onChange={(event) => setProviderQuery(event.target.value)} />
-            <div className={styles.providerListSection}>
-              <p className={styles.providerListHeading}>{copy.configuredProvidersHeading} · {workspaceListRows.length}</p>
+            <div className={styles.providerListSection} ref={providerViewport.ref}>
               <VEntityList
                 ariaLabel={copy.configuredListAria}
                 activeId={provider?.providerId}
                 className={styles.providerList}
+                style={{ height: providerViewport.height }}
                 items={workspaceListItems}
                 empty={managedDisabledOnly ? (
                   <VStateSurface tone="empty" title={copy.homeNoDisabledServicesTitle}>
@@ -1432,30 +1451,21 @@ export function ConfigProviderRegistryPanel({
                 )}
               />
             </div>
-            {disabledProviderCount ? <VButton variant="ghost" aria-pressed={showDisabled} onPress={() => setShowDisabled((value) => !value)}>{text.hiddenProviders} ({disabledProviderCount})</VButton> : null}
-            {onAddSubscriptionModels ? <VButton variant="ghost" data-provider-action="subscription" onPress={() => { setSubscriptionOpen(true); setMobileDetail(true); }}>{text.subscription}</VButton> : null}
-            {onAddConnection ? (
-              <VButton
-                className={styles.providerAddRow}
-                variant="ghost"
-                contentLayout="plain"
-                data-provider-action="add-provider"
-                isDisabled={disabled}
-                tooltip={copy.addProviderHint}
-                onPress={onAddConnection}
-              >
-                <Plus size={14} />
-                <span>{copy.addProvider}</span>
-              </VButton>
-            ) : null}
           </div>
         )}
-        detail={subscriptionOpen && onAddSubscriptionModels ? <div className={styles.modelsColumn}><VButton variant="ghost" className={styles.backAction} icon={<ArrowLeft size={14} />} onPress={() => { setSubscriptionOpen(false); setMobileDetail(false); }}>{text.backProviders}</VButton><ChatGPTSubscriptionPanel language={language} disabled={disabled || saveBusy} setupBlockedReason={subscriptionSetupBlockedReason} onAddModels={onAddSubscriptionModels} /></div> : provider ? (
+        detail={subscriptionOpen && onAddSubscriptionModels ? <div className={styles.subscriptionWorkspace}>
+          <VButton variant="ghost" className={styles.subscriptionBack} icon={<ArrowLeft size={14} />} onPress={() => { setSubscriptionOpen(false); setMobileDetail(false); }}>{text.backProviders}</VButton>
+          <div className={styles.subscriptionScroll}><ChatGPTSubscriptionPanel language={language} disabled={disabled || saveBusy} setupBlockedReason={subscriptionSetupBlockedReason} onAddModels={onAddSubscriptionModels} /></div>
+        </div> : provider ? (
           <div className={styles.modelsColumn} data-provider-status={provider.status} data-vui-region="config-models-main">
-            <VButton className={styles.backProviders} variant="ghost" icon={<ArrowLeft size={14} />} onPress={() => setMobileDetail(false)}>{text.backProviders}</VButton>
-            {!workspaceListRows.some((row) => row.providerId === provider.providerId) ? <p className={styles.filterNotice} role="status">{text.outsideFilter} <VButton variant="ghost" onPress={() => { setProviderQuery(""); setShowDisabled(true); }}>{text.clearFilter}</VButton></p> : null}
-            <VPanelHeader title={<span title={provider.providerId}>{provider.label || provider.providerId}</span>} headingLevel={2} />
-            <VTabs aria-label={provider.label || provider.providerId} value={selectedTab === "models" ? "models" : "connection"} onValueChange={(tab) => onSelectTab(tab as ConfigProviderRegistryTab)} items={[{ id: "models", label: text.models }, { id: "connection", label: text.connection }]} />
+            <header className={styles.providerHeader} data-provider-freshness={!provider.lastSuccessAt ? "unchecked" : provider.refreshDue ? "stale" : "fresh"}>
+            <VButton className={styles.backProviders} variant="ghost" aria-label={text.backProviders} icon={<ArrowLeft size={16} />} onPress={() => setMobileDetail(false)} />
+            <h2 title={provider.providerId}>{provider.label || provider.providerId}</h2>
+            <VTabs aria-label={provider.label || provider.providerId}
+              listClassName="!w-fit !flex-nowrap !gap-5 !rounded-none !border-0 !bg-transparent !p-0"
+              triggerClassName="!min-h-10 !rounded-none !border-0 !border-b-2 !border-transparent !bg-transparent !px-0 !shadow-none data-[state=active]:!border-b-[var(--accent-cool)]"
+              value={selectedTab === "models" ? "models" : "connection"} onValueChange={(tab) => onSelectTab(tab as ConfigProviderRegistryTab)} items={[{ id: "models", label: text.models }, { id: "connection", label: text.connection }]} />
+            </header>
             {visibleFeedback ? (
               <p
                 className={
@@ -1487,6 +1497,7 @@ export function ConfigProviderRegistryPanel({
               <VPanelHeader title={text.connection} headingLevel={3}
                 actions={(
                   <VActionGroup ariaLabel={copy.providerHeaderActionsAria} className={styles.actions}>
+                    {onAddSubscriptionModels ? <VButton variant="secondary" data-provider-action="subscription" onPress={() => { setSubscriptionOpen(true); setMobileDetail(true); }}>{text.subscription}</VButton> : null}
                     <VButton
                       data-provider-action="detect"
                       variant="secondary"
@@ -1501,18 +1512,12 @@ export function ConfigProviderRegistryPanel({
                       onPress={() => openInspector(provider.providerId)}>{copy.advancedManage}</VButton>
                   </VActionGroup>
                 )} />
-              <p
-                className={styles.providerFreshness}
-                data-provider-freshness={!provider.lastSuccessAt ? "unchecked" : provider.refreshDue ? "stale" : "fresh"}
-              >
-                {!provider.lastSuccessAt ? copy.catalogNotCheckedLine : provider.refreshDue ? copy.catalogStaleLine : copy.catalogFreshLine}
-              </p>
               <VSettingsGroupCard>
                 <VSettingsRow label={copy.baseUrlRowLabel} description={provider.baseUrl || copy.notConfigured}
                   control={<VButton data-provider-action="route" variant="secondary" isDisabled={disabled}
                     onPress={() => onEditRoute(provider.providerId)}>{copy.editRouteAction}</VButton>}
                   footer={routeActive ? routeEditor : undefined} />
-                <VSettingsRow label={copy.protocolRowLabel} description={copy.protocolRowHint}
+                <VSettingsRow label={copy.protocolRowLabel}
                   control={<span className={styles.muted} data-provider-resolved-route={canonicalProviderRoute(provider.defaultProtocol) || undefined}>{resolvedRouteText(copy, provider.defaultProtocol, copy.notConfigured)}</span>} />
               </VSettingsGroupCard>
               <ConnectionTab key={provider.providerId}
@@ -1527,7 +1532,7 @@ export function ConfigProviderRegistryPanel({
             </div>
             <div className={styles.detailBody} hidden={selectedTab !== "models"} data-provider-tab="models">
               <ProviderModelsTab
-                toolbarActions={<VButton variant="secondary" data-provider-action="discover-models" isDisabled={disabled || discoverBusy} icon={<Plus size={14} />} onPress={() => { onDiscover(provider.providerId); setModelFilter("discovered"); }}>{copy.registryFilterDiscovered}</VButton>}
+                toolbarActions={<VButton variant="secondary" data-provider-action="discover-models" isDisabled={disabled || discoverBusy} icon={<Plus size={14} />} onPress={() => { onDiscover(provider.providerId); setModelFilter("discovered"); }}>{text.discoverModels}</VButton>}
                 copy={copy}
                 provider={provider}
                 disabled={disabled || visibleFeedback?.phase === "busy"}
@@ -1553,7 +1558,13 @@ export function ConfigProviderRegistryPanel({
             </div>
           </div>
         ) : (
-          <VStateSurface tone="empty" icon={<Database size={16} />} title={copy.pickProviderTitle}>{copy.pickProviderBody}</VStateSurface>
+          <VStateSurface tone="empty" icon={<Database size={16} />} title={copy.pickProviderTitle}>
+            {copy.pickProviderBody}
+            <VActionGroup ariaLabel={copy.providerHeaderActionsAria}>
+              {onAddConnection ? <VButton variant="secondary" onPress={onAddConnection}>{copy.addProvider}</VButton> : null}
+              {onAddSubscriptionModels ? <VButton variant="secondary" data-provider-action="subscription" onPress={() => { setSubscriptionOpen(true); setMobileDetail(true); }}>{text.subscription}</VButton> : null}
+            </VActionGroup>
+          </VStateSurface>
         )}
       />
       <VDialog

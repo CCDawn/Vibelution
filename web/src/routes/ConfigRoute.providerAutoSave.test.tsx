@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { seedControlTokenForTests } from "../api/client";
 import { readConfigDraftPresence } from "./configDraftPresence";
 import { CONFIG_COPY } from "./config/configCopy";
+import { MODEL_SETTINGS_COPY } from "./config/modelSettingsCopy";
 import { ConfigRoute } from "./ConfigRoute";
 import type { ConfigProviderRegistryPanelProps } from "./ConfigProviderRegistryPanel";
 
@@ -110,6 +111,20 @@ describe("provider enable auto-save isolation", () => {
   }
   async function wait(predicate: () => boolean) { const end = Date.now() + 4000; while (!predicate()) { if (Date.now() > end) throw new Error("condition timed out"); await act(async () => new Promise((resolve) => setTimeout(resolve, 20))); } }
   async function click(id: string) { await act(async () => (container.querySelector(`[data-testid="${id}"]`) as HTMLButtonElement).click()); }
+  function saveButton() {
+    const button = [...container.querySelectorAll<HTMLButtonElement>('[data-vui="settings-form-footer"] button')]
+      .find((item) => item.textContent?.trim() === MODEL_SETTINGS_COPY.zh.save);
+    if (!button) throw new Error("Missing model settings save action");
+    return button;
+  }
+  async function openUsage() {
+    const tab = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
+      .find((item) => item.textContent === MODEL_SETTINGS_COPY.zh.usage)!;
+    await act(async () => tab.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    const panel = container.querySelector<HTMLElement>('[data-testid="config-decision-models"]')!;
+    expect(panel.closest("[hidden]")).toBeNull();
+    return panel;
+  }
 
   it.each([false, true])("saves only enabled and preserves all unrelated drafts, including projection failure %s", async (failProjectionAfterSave) => {
     const calls = installFetch({ failProjectionAfterSave }); await ready();
@@ -121,7 +136,7 @@ describe("provider enable auto-save isolation", () => {
     expect(calls[0].baseConfig).toEqual(BASE);
     expect(container.querySelector('[data-testid="provider-draft"]')?.textContent).toBe("Draft model");
     expect(container.querySelector('[data-testid="provider-ids"]')?.textContent).toContain("pending");
-    const save = [...container.querySelectorAll('button')].find((button) => button.textContent?.trim() === "保存更改");
+    const save = saveButton();
     expect(save).toBeTruthy(); await act(async () => save!.click()); await wait(() => calls.length === 2);
     expect(calls[1].publicConfig.llm.providers.relay.enabled).toBe(false);
     expect(calls[1].publicConfig.llm.providers.relay.models["model.v1"].label).toBe("Draft model");
@@ -145,7 +160,7 @@ describe("provider enable auto-save isolation", () => {
     await act(async () => { const button = container.querySelector('[data-testid="toggle-provider"]') as HTMLButtonElement; button.click(); button.click(); });
     await wait(() => calls.length === 1); expect(calls).toHaveLength(1);
     await act(async () => release()); await wait(() => container.querySelector('[data-testid="provider-enabled"]')?.textContent === "false");
-    expect(([...container.querySelectorAll('button')].find((button) => button.textContent?.trim() === "保存更改") as HTMLButtonElement).disabled).toBe(true);
+    expect(saveButton().disabled).toBe(true);
   });
   it("holds the shared settings busy state throughout subscription pinning and releases it after save", async () => {
     let release!: () => void;
@@ -164,18 +179,19 @@ describe("provider enable auto-save isolation", () => {
   });
   it("saves a decision toggle and unbinds handoff atomically without publishing its text draft", async () => {
     const calls = installFetch(); await ready();
-    const panel = container.querySelector('[data-testid="config-decision-models"]')!;
+    const panel = await openUsage();
     await act(async () => (panel.querySelector('[aria-label="编辑 Local decision"]') as HTMLButtonElement).click());
-    const label = document.querySelector('[role="dialog"] input[type="text"]') as HTMLInputElement;
+    const editor = panel.querySelector('[data-testid="decision-model-editor"]')!;
+    const label = editor.querySelector('input[type="text"]') as HTMLInputElement;
     expect(label.value).toBe("Local decision");
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(label, "Draft decision name"); label.dispatchEvent(new Event("input", { bubbles: true })); });
-    await act(async () => (panel.querySelector('input[type="checkbox"]') as HTMLInputElement).click());
-    await wait(() => calls.length === 1 && !(panel.querySelector('input[type="checkbox"]') as HTMLInputElement).checked);
+    await act(async () => (editor.querySelector('input[type="checkbox"]') as HTMLInputElement).click());
+    await wait(() => calls.length === 1 && !(editor.querySelector('input[type="checkbox"]') as HTMLInputElement).checked);
     expect(calls[0].publicConfig.llm.decision_models["local.v1"]).toEqual({ ...BASE.llm.decision_models["local.v1"], enabled: false });
     expect(calls[0].publicConfig.llm.decision_handoff_model_id).toBe("");
     expect(label.value).toBe("Draft decision name");
     await act(async () => label.dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
-    await wait(() => [...container.querySelectorAll('button')].some((button) => button.textContent?.trim() === "保存更改"));
+    await wait(() => !saveButton().disabled);
     expect(calls).toHaveLength(1);
   });
 
@@ -187,7 +203,7 @@ describe("provider enable auto-save isolation", () => {
     await wait(() => calls.length === 1);
     expect(calls[0].publicConfig.llm.providers.relay.models["model.v1"].label).toBe("Saved model");
     expect(container.querySelector('[data-testid="raw-model-draft"]')?.textContent).toContain("Raw model draft");
-    const save = [...container.querySelectorAll('button')].find((button) => button.textContent?.trim() === "保存更改") as HTMLButtonElement;
+    const save = saveButton();
     await wait(() => !save.disabled);
     await act(async () => save.click());
     await wait(() => calls.length === 2);
@@ -199,7 +215,7 @@ describe("provider enable auto-save isolation", () => {
   it("retains model inputs after failed save and blocks invalid numeric drafts", async () => {
     const calls = installFetch({ failApply: true }); await ready();
     await click("edit-model-input");
-    const save = [...container.querySelectorAll('button')].find((button) => button.textContent?.trim() === "保存更改") as HTMLButtonElement;
+    const save = saveButton();
     await act(async () => save.click());
     await wait(() => calls.length === 1 && !save.disabled);
     expect(container.querySelector('[data-testid="raw-model-draft"]')?.textContent).toContain("Raw model draft");
@@ -256,16 +272,18 @@ describe("provider enable auto-save isolation", () => {
 
   it("reports unfinished decision input to the page and clears it only after explicit discard", async () => {
     const calls = installFetch(); const router = await ready();
-    const panel = container.querySelector('[data-testid="config-decision-models"]')!;
-    const add = [...panel.querySelectorAll('button')].find((button) => button.textContent?.trim() === "自定义")!;
-    await act(async () => add.click());
-    const editor = document.querySelector('[role="dialog"]')!;
+    const panel = await openUsage();
+    const add = [...panel.querySelectorAll('button')].find((button) => button.textContent?.trim() === "添加")!;
+    await act(async () => add.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+    const custom = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) => item.textContent === "自定义")!;
+    await act(async () => custom.click());
+    const editor = panel.querySelector('[data-testid="decision-model-editor"]')!;
     const input = editor.querySelector('input[type="text"]') as HTMLInputElement;
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "Unfinished decision"); input.dispatchEvent(new Event("input", { bubbles: true })); });
-    const done = [...editor.querySelectorAll('button')].find((button) => button.textContent?.trim() === "完成")!;
-    await act(async () => done.click());
+    const back = panel.querySelector<HTMLButtonElement>('button[aria-label="返回用途"]')!;
+    await act(async () => back.click());
     expect(readConfigDraftPresence()).toBe(true);
-    const save = [...container.querySelectorAll('button')].find((button) => button.textContent?.trim() === "保存更改") as HTMLButtonElement;
+    const save = saveButton();
     expect(save.disabled).toBe(true);
     expect(container.textContent).toContain("有尚未完成的模型编辑");
     await act(async () => { void router.navigate("/elsewhere"); });

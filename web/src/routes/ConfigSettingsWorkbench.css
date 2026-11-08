@@ -1,24 +1,4 @@
 @layer utilities {
-/* The model workspace owns the available height; only the current detail scrolls. */
-[data-vui-recipe="config-settings-workbench"] .pageViewport:has(.providerModelsLayout) {
-  max-width: none;
-  align-content: stretch;
-  grid-template-rows: minmax(0, 1fr);
-  overflow: hidden;
-}
-[data-vui-recipe="config-settings-workbench"] .providerModelsLayout [hidden] { display: none !important; }
-[data-vui-recipe="config-settings-workbench"] .registryWorkspace { gap: 0; }
-[data-vui-recipe="config-settings-workbench"] .providerRail { padding: 16px; gap: 12px; max-height: none; overflow: hidden; }
-[data-vui-recipe="config-settings-workbench"] .providerListSection { flex: 1; overflow: hidden; }
-[data-vui-recipe="config-settings-workbench"] .providerRail { display: flex; flex-direction: column; }
-[data-vui-recipe="config-settings-workbench"] .modelsColumn { padding: 20px 24px; gap: 20px; }
-[data-vui-recipe="config-settings-workbench"] .modelsDrilldown .modelList { max-height: none; overflow: visible; }
-[data-vui-recipe="config-settings-workbench"] .modelsDrilldown .tableScroll { overflow: visible; }
-@media (max-width: 720px) {
-  [data-vui-recipe="config-settings-workbench"] .pageViewport:has(.providerModelsLayout) { overflow: visible; }
-  [data-vui-recipe="config-settings-workbench"] .modelsColumn { padding: 16px 0; }
-  [data-vui-recipe="config-settings-workbench"] .providerRail { min-height: 320px; padding: 12px 0; }
-}
 /* Scope settings layout so eager route utility sheets cannot override its media rules. */
 [data-vui-recipe="config-settings-workbench"] .settingsSplit[data-vui="split-workspace"] {
   display: grid !important;
@@ -58,8 +38,8 @@
 @media (max-width: 720px) {
   [data-vui-recipe="config-settings-workbench"].page { height: auto; overflow: visible; }
   [data-vui-recipe="config-settings-workbench"] .settingsSplit[data-vui="split-workspace"] { display: flex !important; flex-direction: column !important; overflow: visible; }
-  [data-vui-recipe="config-settings-workbench"] .settingsSplit > [data-vui="split-sidebar"],
-  [data-vui-recipe="config-settings-workbench"] .settingsSplit > [data-vui="split-main"] { width: 100% !important; max-width: none !important; flex-basis: auto !important; height: auto !important; overflow: visible !important; }
+  [data-vui-recipe="config-settings-workbench"]:not(.modelPage) .settingsSplit > [data-vui="split-sidebar"],
+  [data-vui-recipe="config-settings-workbench"]:not(.modelPage) .settingsSplit > [data-vui="split-main"] { width: 100% !important; max-width: none !important; flex-basis: auto !important; height: auto !important; overflow: visible !important; }
   [data-vui-recipe="config-settings-workbench"] .vui-routes-configsettingsnavigation.sidebar { height: auto; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto auto; gap: 12px; padding: 16px 20px; border-right: 0; border-bottom: 1px solid var(--vui-border-subtle); }
   [data-vui-recipe="config-settings-workbench"] .vui-routes-configsettingsnavigation.groupNav,
   [data-vui-recipe="config-settings-workbench"] .vui-routes-configsettingsnavigation.status { display: none; }
@@ -68,9 +48,9 @@
   [data-vui-recipe="config-settings-workbench"] .searchStack { grid-column: 1 / -1; grid-row: 2; }
   [data-vui-recipe="config-settings-workbench"] .searchStack input,
   [data-vui-recipe="config-settings-workbench"] .mobileCategory select { min-height: 44px; font-size: 16px; }
-  [data-vui-recipe="config-settings-workbench"] .content { height: auto !important; overflow: visible !important; }
-  [data-vui-recipe="config-settings-workbench"] [data-vui="settings-form-body"],
-  [data-vui-recipe="config-settings-workbench"] .pageViewport { overflow: visible !important; }
+  [data-vui-recipe="config-settings-workbench"]:not(.modelPage) .content { height: auto !important; overflow: visible !important; }
+  [data-vui-recipe="config-settings-workbench"]:not(.modelPage) [data-vui="settings-form-body"],
+  [data-vui-recipe="config-settings-workbench"]:not(.modelPage) .pageViewport { overflow: visible !important; }
   [data-vui-recipe="config-settings-workbench"] .configHeader { padding: 24px 20px; }
   [data-vui-recipe="config-settings-workbench"] .configHeader [data-vui="route-header"] { display: flex; flex-direction: column; align-items: flex-start; gap: 16px; }
   [data-vui-recipe="config-settings-workbench"] .pageViewport { padding-inline: 20px; }

@@ -15,10 +15,13 @@ import panelSourceRaw from "./ConfigProviderRegistryPanel.tsx?raw";
 import configCopyRaw from "./config/configCopy.ts?raw";
 import { CONFIG_COPY } from "./config/configCopy";
 
+vi.mock("./config/ChatGPTSubscriptionPanel", () => ({
+  ChatGPTSubscriptionPanel: () => <div data-testid="chatgpt-subscription-panel">Mock ChatGPT subscription setup</div>,
+}));
+
 /** Panel source + shared bilingual copy table (wave 4): UI strings live in configCopy. */
 const panelSource = `${panelSourceRaw}
 ${configCopyRaw}`;
-import panelStyles from "./ConfigProviderRegistryPanel.styles";
 import type { ProviderModelFilter, ProviderRegistryRow } from "./configProviderLogic";
 
 function model(
@@ -153,6 +156,13 @@ function buttonByText(container: ParentNode, text: string): HTMLButtonElement {
   return button;
 }
 
+function buttonByLabel(container: ParentNode, label: string): HTMLButtonElement {
+  const button = [...container.querySelectorAll<HTMLButtonElement>("button")]
+    .find((item) => item.getAttribute("aria-label") === label);
+  if (!button) throw new Error(`Missing button label: ${label}`);
+  return button;
+}
+
 async function changeInput(input: HTMLInputElement, value: string) {
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
@@ -218,16 +228,14 @@ describe("direct model services workspace", () => {
     expect(onSelectProvider).not.toHaveBeenCalled();
   });
 
-  it("keeps enabled failures visible and expands disabled services without changing selection", async () => {
+  it("shows enabled failures and disabled services together without changing selection", async () => {
     const onSelectProvider = vi.fn();
     const enabledError = { ...provider([]), providerId: "relay_broken", label: "Broken Relay", status: "auth_failed" };
     const disabled = { ...provider([]), providerId: "relay_off", label: "Off Relay", enabled: false };
     const container = await mount(panelProps([], { rows: [disabled, enabledError], selectedProviderId: "relay_broken", onSelectProvider }));
     expect(container.querySelector('[data-provider-status="auth_failed"] [data-provider-dot="warn"]')).not.toBeNull();
-    expect(container.querySelector('[data-provider-enabled="false"]')).toBeNull();
-    const expand = buttonByText(container, "未启用的服务 (1)");
-    expect(expand.getAttribute("aria-pressed")).toBe("false");
-    await act(async () => expand.click());
+    expect(container.querySelectorAll('[data-provider-enabled]')).toHaveLength(2);
+    expect(container.textContent).not.toContain("未启用的服务 (");
     expect(providerButton(container, "relay_off")).toBeDefined();
     expect(providerButton(container, "relay_broken").getAttribute("aria-pressed")).toBe("true");
     expect(onSelectProvider).not.toHaveBeenCalled();
@@ -242,7 +250,6 @@ describe("direct model services workspace", () => {
     const remaining = { ...provider([]), providerId: "relay_off_b", label: "Off Relay B", enabled: false };
     const props = panelProps([], { rows: [active, restored, remaining], selectedProviderId: "relay_on", onSelectProvider, onToggleEnabled });
     const { container, rerender } = await mountWorkspace(props);
-    await act(async () => buttonByText(container, "未启用的服务 (2)").click());
     await act(async () => providerButton(container, "relay_off_a").click());
     const selectedRow = providerButton(container, "relay_off_a").closest('[data-provider-enabled]')!;
     const toggle = selectedRow.querySelector<HTMLInputElement>('[role="switch"]')!;
@@ -252,7 +259,7 @@ describe("direct model services workspace", () => {
     await rerender({ ...props, rows: [active, { ...restored, enabled: true }, remaining] });
     expect(providerButton(container, "relay_off_a").getAttribute("aria-pressed")).toBe("true");
     expect(providerButton(container, "relay_off_a").closest('[data-provider-enabled]')?.getAttribute("data-provider-enabled")).toBe("true");
-    expect(buttonByText(container, "未启用的服务 (1)")).toBeDefined();
+    expect(providerButton(container, "relay_off_b").closest('[data-provider-enabled]')?.getAttribute("data-provider-enabled")).toBe("false");
     expect(onSelectProvider).toHaveBeenCalledExactlyOnceWith("relay_off_a");
   });
 
@@ -261,8 +268,6 @@ describe("direct model services workspace", () => {
     const disabledB = { ...provider([]), providerId: "relay_off_b", label: "Off Relay B", enabled: false };
     const props = panelProps([], { rows: [disabledA, disabledB], selectedProviderId: "relay_off_a" });
     const { container, rerender } = await mountWorkspace(props);
-    expect(container.querySelectorAll('[data-provider-enabled]')).toHaveLength(0);
-    await act(async () => buttonByText(container, "未启用的服务 (2)").click());
     expect(container.querySelectorAll('[data-provider-enabled="false"]')).toHaveLength(2);
     await rerender({ ...props, rows: [{ ...disabledA, enabled: true }, { ...disabledB, enabled: true }] });
     expect(container.querySelectorAll('[data-provider-enabled="true"]')).toHaveLength(2);
@@ -280,7 +285,7 @@ describe("direct model services workspace", () => {
     await act(async () => container.querySelector<HTMLButtonElement>('[data-model-row="relay_a/luna"] button')!.click());
     const input = container.querySelector<HTMLInputElement>('[data-model-edit-field="label"] input')!;
     await changeInput(input, "Unsaved Luna");
-    const search = container.querySelector<HTMLInputElement>('input[aria-label="搜索厂商或模型"]')!;
+    const search = container.querySelector<HTMLInputElement>('input[aria-label="搜索服务商"]')!;
     await changeInput(search, "Relay B");
     expect(container.querySelectorAll('[data-provider-enabled]')).toHaveLength(1);
     expect(providerButton(container, "relay_b")).toBeDefined();
@@ -327,14 +332,69 @@ describe("direct model services workspace", () => {
     await act(async () => container.querySelector<HTMLButtonElement>('[data-model-row="relay_a/first"] button')!.click());
     const input = container.querySelector<HTMLInputElement>('[data-model-edit-field="label"] input')!;
     await changeInput(input, "First draft");
-    await act(async () => buttonByText(container, "返回模型列表").click());
+    await act(async () => buttonByLabel(container, "返回模型列表").click());
     expect(container.querySelector<HTMLElement>('[data-vui-region="config-models-detail"]')!.hidden).toBe(true);
     await act(async () => container.querySelector<HTMLButtonElement>('[data-model-row="relay_a/second"] button')!.click());
     expect(container.querySelector<HTMLInputElement>('[data-model-edit-field="label"] input')!.value).toBe("second");
-    await act(async () => buttonByText(container, "返回模型列表").click());
+    await act(async () => buttonByLabel(container, "返回模型列表").click());
     await act(async () => container.querySelector<HTMLButtonElement>('[data-model-row="relay_a/first"] button')!.click());
     expect(container.querySelector<HTMLInputElement>('[data-model-edit-field="label"] input')!.value).toBe("First draft");
   });
+
+  it("hides model search and status filters while editing and restores them on return", async () => {
+    const { container } = await mountWorkspace(panelProps([model("luna", "pinned")], { onUpdateModel: vi.fn() }));
+    const search = container.querySelector<HTMLInputElement>(`input[aria-label="${CONFIG_COPY.zh.searchModelsAria}"]`)!;
+    const filter = container.querySelector<HTMLButtonElement>(`[role="combobox"][aria-label="${CONFIG_COPY.zh.modelFiltersAria}"]`)!;
+    expect(search.closest<HTMLElement>("[hidden]")).toBeNull();
+    expect(filter.closest<HTMLElement>("[hidden]")).toBeNull();
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-model-row="relay_a/luna"] button')!.click());
+    expect(search.closest<HTMLElement>("[hidden]")?.hidden).toBe(true);
+    expect(filter.closest<HTMLElement>("[hidden]")?.hidden).toBe(true);
+    const back = buttonByLabel(container, "返回模型列表");
+    expect(back.textContent?.trim()).toBe("");
+    const details = container.querySelector<HTMLDetailsElement>('[data-model-detail] > details')!;
+    expect(details.open).toBe(false);
+    expect(details.querySelector('[data-model-resolved-route]')).not.toBeNull();
+    expect(details.querySelector('[data-model-section="verification"]')).not.toBeNull();
+    expect(details.querySelector('[data-model-section="capabilities"]')).not.toBeNull();
+    expect(buttonByText(details, CONFIG_COPY.zh.unpinAction)).toBeDefined();
+    expect(buttonByText(container, CONFIG_COPY.zh.testCall).closest("details")).toBeNull();
+    expect(details.textContent).toContain("relay_a/luna");
+    expect(container.querySelector('[data-model-detail]')!.textContent!.split("relay_a/luna")).toHaveLength(2);
+    await act(async () => back.click());
+    expect(search.closest<HTMLElement>("[hidden]")).toBeNull();
+    expect(filter.closest<HTMLElement>("[hidden]")).toBeNull();
+  });
+
+  it.each([true, false])("stages only the model enabled whitelist field from the list switch without saving or selecting it (%s)", async (enabled) => {
+    const onModelEditorDraftChange = vi.fn();
+    const onUpdateModel = vi.fn();
+    const current = { ...model("luna", "pinned"), draftEntry: { enabled, wire_protocol: "responses", label: "Luna" } };
+    const { container } = await mountWorkspace(panelProps([current], { onModelEditorDraftChange, onUpdateModel }));
+    const toggle = container.querySelector<HTMLInputElement>('[data-model-row="relay_a/luna"] [role="switch"]')!;
+    expect(toggle.checked).toBe(enabled);
+    await act(async () => toggle.click());
+    expect(onModelEditorDraftChange).toHaveBeenCalledExactlyOnceWith("relay_a/luna", { enabled: !enabled });
+    expect(toggle.checked).toBe(!enabled);
+    expect(container.querySelector('[data-model-detail]')).toBeNull();
+    expect(onUpdateModel).not.toHaveBeenCalled();
+    await act(async () => toggle.click());
+    expect(onModelEditorDraftChange).toHaveBeenLastCalledWith("relay_a/luna", {});
+    expect(onUpdateModel).not.toHaveBeenCalled();
+  });
+
+  it.each([{ disabled: true, modelUpdateBusy: false }, { disabled: false, modelUpdateBusy: true }])(
+    "prevents model switch draft changes while disabled or saving ($disabled, $modelUpdateBusy)",
+    async ({ disabled, modelUpdateBusy }) => {
+      const onModelEditorDraftChange = vi.fn();
+      const current = { ...model("luna", "pinned"), draftEntry: { enabled: true } };
+      const { container } = await mountWorkspace(panelProps([current], { disabled, modelUpdateBusy, onModelEditorDraftChange }));
+      const toggle = container.querySelector<HTMLInputElement>('[data-model-row="relay_a/luna"] [role="switch"]')!;
+      expect(toggle.disabled).toBe(true);
+      await act(async () => toggle.click());
+      expect(onModelEditorDraftChange).not.toHaveBeenCalled();
+    },
+  );
 
   it("tests the exact selected model ref and keeps other providers out of the call", async () => {
     const onTestModel = vi.fn();
@@ -347,6 +407,9 @@ describe("direct model services workspace", () => {
     await act(async () => providerButton(container, "relay_b").click());
     await act(async () => container.querySelector<HTMLButtonElement>('[data-model-row="relay_b/actual"] button')!.click());
     await act(async () => buttonByText(container, CONFIG_COPY.zh.testCall).click());
+    const advanced = container.querySelector<HTMLDetailsElement>('[data-model-detail] > details')!;
+    await act(async () => advanced.querySelector<HTMLElement>("summary")!.click());
+    expect(advanced.open).toBe(true);
     await act(async () => container.querySelector<HTMLButtonElement>('[data-model-capability-action="image_input"]')!.click());
     expect(onTestModel).toHaveBeenCalledExactlyOnceWith("relay_b/actual");
     expect(onProbeImageInput).toHaveBeenCalledExactlyOnceWith("relay_b/actual");
@@ -357,7 +420,7 @@ describe("direct model services workspace", () => {
     const onDiscover = vi.fn();
     const onTestModel = vi.fn();
     const container = await mount(panelProps([model("seen", "observed"), model("missing", "missing_remote")], { onDiscover, onTestModel }));
-    await activateTab(container, "连接设置");
+    await activateTab(container, "连接");
     await act(async () => container.querySelector<HTMLButtonElement>('[data-provider-action="detect"]')!.click());
     expect(onDiscover).toHaveBeenCalledExactlyOnceWith("relay_a");
     expect(onTestModel).not.toHaveBeenCalled();
@@ -467,7 +530,7 @@ describe("direct model services workspace", () => {
     const container = await mount(panelProps([model("pinned", "pinned")], { onEditRoute, onEditCredential, onSaveContextWindow }));
     const connection = container.querySelector<HTMLElement>('[data-vui-region="config-provider-connection"]')!;
     expect(connection.hidden).toBe(true);
-    await activateTab(container, "连接设置");
+    await activateTab(container, "连接");
     expect(connection.hidden).toBe(false);
     expect(container.querySelector<HTMLElement>('[data-provider-tab="models"]')!.hidden).toBe(true);
     await act(async () => container.querySelector<HTMLButtonElement>('[data-provider-action="route"]')!.click());
@@ -513,7 +576,7 @@ describe("ConfigProviderRegistryPanel", () => {
     const onSaveContextWindow = vi.fn();
     const onEditRoute = vi.fn();
     const { container } = await mountWorkspace(panelProps([], { onSaveContextWindow, onEditRoute }));
-    await activateTab(container, "连接设置");
+    await activateTab(container, "连接");
     expect(document.body.querySelector('[role="dialog"]')).toBeNull();
     const connection = container.querySelector('[data-vui-region="config-provider-connection"]');
     expect(connection?.textContent).toContain("https://relay.example/v1");
@@ -528,22 +591,26 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(document.body.querySelector('[role="dialog"]')?.textContent).toContain("高级管理 · Relay A");
   });
 
-  it("renders a searchable model toolbar with status counts", () => {
+  it("filters models through one searchable status select with added and available counts", async () => {
     const models = [
       model("pinned", "pinned"),
       model("observed", "observed"),
       model("disabled", "disabled"),
     ];
 
-    const markup = renderToStaticMarkup(<ConfigProviderRegistryPanel {...panelProps(models)} />);
-
-    expect(markup).toContain('aria-label="搜索模型"');
-    expect(markup).toContain("搜索模型名称或 ID");
-    expect(markup).toContain("全部 3");
-    expect(markup).toContain("已添加 1");
-    expect(markup).toContain("添加模型 1");
-    expect(markup).not.toContain("不可用 1");
-    expect(markup).toContain('aria-pressed="true"');
+    const { container } = await mountWorkspace(panelProps(models));
+    expect(container.querySelector<HTMLInputElement>('input[aria-label="搜索模型"]')?.placeholder).toBe("搜索模型名称或 ID");
+    const filters = container.querySelectorAll<HTMLButtonElement>(`[role="combobox"][aria-label="${CONFIG_COPY.zh.modelFiltersAria}"]`);
+    expect(filters).toHaveLength(1);
+    expect(filters[0].textContent).toContain("已添加 · 1");
+    await act(async () => filters[0].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+    const options = [...document.querySelectorAll<HTMLElement>('[role="option"]')];
+    expect(options.map((option) => option.textContent)).toEqual(["全部 · 3", "已添加 · 1", "可添加 · 1"]);
+    await act(async () => options.find((option) => option.textContent === "可添加 · 1")!.click());
+    expect(container.querySelector('[data-model-row="relay_a/observed"]')).not.toBeNull();
+    expect(container.querySelector('[data-model-row="relay_a/pinned"]')).toBeNull();
+    expect(container.querySelector('[data-model-row="relay_a/disabled"]')).toBeNull();
+    expect(container.querySelector('[data-provider-action="discover-models"]')?.textContent).toBe("发现模型");
   });
 
   it("renders pin controls for discovered models and bulk pin banner", async () => {
@@ -677,10 +744,9 @@ describe("ConfigProviderRegistryPanel", () => {
       "default_reasoning_effort",
     ]);
     expect(markup).toContain(`aria-label="${CONFIG_COPY.zh.modelEditAddParameter}"`);
-    // One resolved route is visible. Raw protocol fields stay out of the form.
+    // The resolved route remains a read-only fact in advanced details.
     expect(markup).toContain('data-model-resolved-route="responses"');
     expect(markup).toContain("OpenAI Responses");
-    expect(markup).toContain("由协议规则供给");
     expect(markup).not.toContain('data-model-protocol-field=');
     expect(markup).not.toContain(">wire_protocol<");
     expect(markup).not.toContain(">interaction_contract<");
@@ -757,9 +823,9 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(onUpdateModel).toHaveBeenCalledExactlyOnceWith("relay_a", "luna", { temperature: "0.25" });
   });
 
-  it("converges model-domain buttons to one primary weight, ghost filters, and a single danger", async () => {
+  it("reserves primary weight for add actions and danger weight for model removal", async () => {
     // Discovered model: the only primary weight is 添加 (banner bulk + detail pin),
-    // probes/test are secondary, filters stay ghost even when pressed.
+    // probes/test are secondary; selecting a model does not become primary.
     const observed = model("observed", "observed");
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -774,7 +840,7 @@ describe("ConfigProviderRegistryPanel", () => {
     const html = container.innerHTML;
 
     const pressedButtons = html.match(/<button[^>]*aria-pressed="true"[^>]*>/g) ?? [];
-    expect(pressedButtons.length).toBeGreaterThanOrEqual(2);
+    expect(pressedButtons.length).toBe(1);
     for (const tag of pressedButtons) {
       // P1: selection states never borrow the primary weight.
       expect(tag).toContain('data-variant="ghost"');
@@ -886,7 +952,7 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(renderModels([model("alpha", "observed")], { query: "missing" })).toContain("没有匹配的模型");
   });
 
-  it("uses low-emphasis copy for unobserved capabilities and a sticky internal scroll region", () => {
+  it("uses low-emphasis copy for unobserved capabilities and invites model selection", () => {
     const markup = renderModels([model("observed", "observed")]);
 
     // Observed (not pinned) must not spam "thinking not declared" warnings.
@@ -897,10 +963,6 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(markup).toContain('data-vui-region="config-models-detail"');
     expect(markup).toContain("选择模型");
     expect(markup).not.toContain("unknown · 未观测");
-    expect(panelStyles.tableScroll).toContain("min-h-0");
-    expect(panelStyles.tableScroll).not.toContain("max-h-[calc(100dvh-33rem)]");
-    expect(panelStyles.tableScroll).toContain("overflow-auto");
-    expect(panelStyles.modelList).toContain("overflow-y-auto");
     const heroUiImportToken = ["@heroui", "react"].join("/");
     expect(panelSource).not.toContain(heroUiImportToken);
   });
@@ -914,23 +976,13 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(markup).toContain("思考深度: 未配置");
   });
 
-  it("fills the desktop workspace with compact Provider rows and a bottom danger zone", () => {
-    expect(panelStyles.sectionSurface).toContain("h-full");
+  it("uses shared provider panes and keeps destructive provider controls in advanced management", async () => {
     expect(panelSource).toContain("layoutId={WORKBENCH_LAYOUT_IDS.configModelAssets}");
-    expect(panelStyles.providerList).toContain("min-h-0");
-    expect(panelStyles.providerButton).toContain("!min-h-9");
-    expect(panelStyles.providerButton).toContain("!flex-row");
-    expect(panelStyles.providerDot).toContain("h-2 w-2");
-    expect(panelStyles.providerDotOk).toContain("state-success");
-    expect(panelStyles.providerDotWarn).toContain("state-warning");
-    expect(panelStyles.providerLabel).toContain("truncate");
-    expect(panelStyles.providerInUseBadge).toContain("rounded-full");
-    expect(panelStyles.providerAddRow).toContain("border-dashed");
-    expect(panelStyles.inspectorPanel).toContain("max-h-[72vh]");
-    expect(panelStyles.modelsColumn).toContain("overflow-y-auto");
-    expect(panelSource).toContain('data-provider-action="edit-asset"');
-    expect(panelSource).toContain('data-provider-danger-zone="true"');
-    expect(panelSource).toContain("openInspector");
+    const { container } = await mountWorkspace(panelProps([]));
+    expect(container.querySelector('[data-provider-danger-zone]')).toBeNull();
+    await activateTab(container, "连接");
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-provider-action="edit-asset"]')!.click());
+    expect(document.querySelector('[data-vui-region="config-asset-inspector"] [data-provider-danger-zone="true"]')).not.toBeNull();
     expect(panelSource).not.toContain("mobileActionGroup");
   });
 
@@ -973,19 +1025,11 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(markup).toContain("更新 API Key");
     expect(markup).toContain('data-vui="settings-row"');
     expect(markup).toContain('role="tablist"');
-    expect(markup).toContain("连接设置");
+    expect(markup).toContain("连接");
     expect(markup).toContain("已配置服务");
   });
 
-  it("compacts provider settings at medium widths without hiding existing controls or errors", () => {
-    expect(panelStyles.providerSettings).toContain("min-[721px]:max-[1120px]:grid-cols-2");
-    expect(panelStyles.providerSettings).toContain("min-[721px]:max-[1120px]:[&>*:nth-child(-n+2)]:col-span-full");
-    expect(panelStyles.providerSettings).toContain("min-[721px]:max-[1120px]:[&_[data-vui=settings-row]]:!py-2");
-    expect(panelStyles.providerSettings).toContain("min-[721px]:max-[1120px]:[&_[data-vui=settings-row]>div]:!grid-cols-[minmax(0,1fr)_auto]");
-    expect(panelStyles.providerSettings).toContain("min-w-0");
-    expect(panelStyles.providerSettings).toContain("[overflow-wrap:anywhere]");
-    expect(panelStyles.modelsColumn).toContain("min-[721px]:max-[1120px]:gap-3");
-
+  it("retains connection controls, resolved route facts, and errors in the compact workspace", () => {
     const markup = renderToStaticMarkup(<ConfigProviderRegistryPanel {...panelProps([], {
       actionFeedback: {
         kind: "credential",
@@ -1054,21 +1098,20 @@ describe("ConfigProviderRegistryPanel", () => {
       <ConfigProviderRegistryPanel {...panelProps([], { rows: [stale] })} />,
     );
     expect(markup).toContain('data-provider-dot="ok"');
-    // Freshness moved into one detail line, not the row.
+    // Freshness remains machine-readable without adding a permanent status sentence.
     expect(markup).toContain('data-provider-freshness="stale"');
-    expect(markup).toContain("模型目录已过期");
+    expect(markup).not.toContain("模型目录已过期");
     const freshMarkup = renderToStaticMarkup(
       <ConfigProviderRegistryPanel {...panelProps([])} />,
     );
     expect(freshMarkup).toContain('data-provider-freshness="fresh"');
-    expect(freshMarkup).toContain("模型目录已同步");
+    expect(freshMarkup).not.toContain("模型目录已同步");
   });
 
   it("does not call an untested provider catalog synchronized", () => {
     const untested = { ...provider([model("manual", "pinned")]), status: "not_discovered" as const, lastSuccessAt: "", lastAttemptAt: "" };
     const markup = renderToStaticMarkup(<ConfigProviderRegistryPanel {...panelProps([], { rows: [untested] })} />);
     expect(markup).toContain('data-provider-freshness="unchecked"');
-    expect(markup).toContain("模型目录尚未检测");
     expect(markup).not.toContain("模型目录已同步");
     expect(markup).toContain("manual");
   });
@@ -1157,50 +1200,67 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(markup).not.toContain('data-provider-switch="true"');
   });
 
-  it("marks disabled providers with an off dot and saved switch state after expanding the group", async () => {
+  it("shows disabled providers directly with an off dot and their saved switch state", async () => {
     const off = { ...provider([]), providerId: "relay_off", label: "Off Relay", enabled: false };
     const ok = { ...provider([]), providerId: "relay_ok", label: "Ok Relay", enabled: true };
     const { container } = await mountWorkspace(panelProps([], { rows: [off, ok], selectedProviderId: "relay_ok", onToggleEnabled: () => undefined }));
-    expect(container.querySelector('[data-provider-enabled="false"]')).toBeNull();
-    await act(async () => buttonByText(container, "未启用的服务 (1)").click());
     const markup = container.innerHTML;
     expect(markup).toContain('data-provider-dot="off"');
     expect(markup).toContain('data-provider-enabled="false"');
     expect(markup).toContain('data-provider-switch="true"');
     // Off tooltip comes from the shared providerDotOff copy.
     expect(markup).toContain("已停用");
+    expect(container.querySelector<HTMLInputElement>('[data-provider-enabled="false"] [role="switch"]')!.checked).toBe(false);
     const offIndex = markup.indexOf("Off Relay");
     const okIndex = markup.indexOf("Ok Relay");
     expect(okIndex).toBeGreaterThan(-1);
     expect(offIndex).toBeGreaterThan(okIndex);
   });
 
-  it("adds providers from a bottom light row that opens the existing quick setup", async () => {
+  it("keeps the provider rail to search and service rows with no action dock", async () => {
     const onAddConnection = vi.fn();
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    mountedRoots.push(root);
-    await act(async () => root.render(
-      <ConfigProviderRegistryPanel {...panelProps([], { onAddConnection })} />,
-    ));
-    const addRow = container.querySelector<HTMLButtonElement>('[data-provider-action="add-provider"]');
-    expect(addRow?.textContent).toContain("添加供应商");
-    await act(async () => addRow!.click());
-    expect(onAddConnection).toHaveBeenCalledTimes(1);
+    const onAddSubscriptionModels = vi.fn();
+    const { container } = await mountWorkspace(panelProps([], { onAddConnection, onAddSubscriptionModels }));
+    const rail = container.querySelector('[data-vui="split-sidebar"]')!;
+    expect(rail.querySelector('input[aria-label="搜索服务商"]')).not.toBeNull();
+    expect(rail.querySelector('[data-vui="entity-list"]')).not.toBeNull();
+    expect(rail.querySelector('[data-provider-action]')).toBeNull();
+    expect(rail.textContent).not.toContain("未启用的服务");
+    expect(rail.textContent).not.toContain("ChatGPT");
+    expect(container.querySelector('[data-provider-action="add-provider"]')).toBeNull();
+    expect(onAddConnection).not.toHaveBeenCalled();
+    await activateTab(container, "连接");
+    const subscription = container.querySelector<HTMLButtonElement>('[data-provider-action="subscription"]')!;
+    expect(subscription.closest<HTMLElement>('[hidden]')).toBeNull();
+    expect(subscription.closest('[data-vui-region="config-provider-connection"]')).not.toBeNull();
     expect(panelSource).not.toContain("批量停用");
   });
 
-  it("runs one-shot health detection from the detail header", async () => {
+  it("opens subscription setup from the empty provider workspace without making API calls", async () => {
+    const onAddConnection = vi.fn();
+    const onAddSubscriptionModels = vi.fn();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { container } = await mountWorkspace(panelProps([], { rows: [], selectedProviderId: "", onAddConnection, onAddSubscriptionModels }));
+    expect(container.querySelector('[data-testid="chatgpt-subscription-panel"]')).toBeNull();
+    const subscription = container.querySelector<HTMLButtonElement>('[data-provider-action="subscription"]')!;
+    expect(subscription.closest("[hidden]")).toBeNull();
+    expect(subscription.closest('[data-vui="split-main"]')).not.toBeNull();
+    await act(async () => subscription.click());
+    const setup = container.querySelector('[data-testid="chatgpt-subscription-panel"]')!;
+    expect(setup.textContent).toBe("Mock ChatGPT subscription setup");
+    expect(setup.closest("[hidden]")).toBeNull();
+    expect(onAddConnection).not.toHaveBeenCalled();
+    expect(onAddSubscriptionModels).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("runs service detection from the connection tab and shows busy feedback", async () => {
     const onDiscover = vi.fn();
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    mountedRoots.push(root);
-    await act(async () => root.render(
-      <ConfigProviderRegistryPanel {...panelProps([], { onDiscover })} />,
-    ));
+    const { container } = await mountWorkspace(panelProps([], { onDiscover }));
+    await activateTab(container, "连接");
     const detect = container.querySelector<HTMLButtonElement>('[data-provider-action="detect"]');
+    expect(detect!.closest("[hidden]")).toBeNull();
     expect(detect?.textContent).toContain("检测");
     await act(async () => detect!.click());
     expect(onDiscover).toHaveBeenCalledWith("relay_a");
