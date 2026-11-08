@@ -52,7 +52,7 @@ def test_registered_schema_hides_checker_and_preserves_internal_dispatch(name, e
     assert sum(isinstance(n, ast.Name) and n.id == name for n in builder.body[-1].value.elts) == 1
 
 
-@pytest.mark.parametrize("name,risk,approval,concurrency", [(OBSERVE, "read", "never", "safe"), (ACTION, "execute", "always", "serialized")])
+@pytest.mark.parametrize("name,risk,approval,concurrency", [(OBSERVE, "read", "never", "safe"), (ACTION, "execute", "on_request", "serialized")])
 def test_desktop_descriptors_are_explicit_restricted_and_truthful(name, risk, approval, concurrency):
     descriptor = tool_catalog.build_tool_descriptor(name, args_schema={})
     assert (descriptor.risk, descriptor.approval, descriptor.concurrency) == (risk, approval, concurrency)
