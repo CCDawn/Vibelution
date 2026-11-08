@@ -21,6 +21,16 @@ from tests.test_personal_assistant_service import (
 finance_env = _finance_env
 personal_env = _personal_env
 
+@pytest.fixture(autouse=True)
+def _enable_patrol_for_assertions(monkeypatch):
+    """测试自带启用语义：宿主环境里的急停开关不得改变断言结果。"""
+
+    from core.web.services import personal_assistant_patrol_service as patrol
+
+    monkeypatch.delenv(patrol.PA_PATROL_ENABLED_ENV, raising=False)
+    monkeypatch.delenv(patrol.PA_PATROL_WAKE_ENABLED_ENV, raising=False)
+
+
 ASSISTANT_ID = "assistant-agent"
 TARGET_ID = "target-agent"
 OTHER_ID = "other-agent"
