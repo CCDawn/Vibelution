@@ -31,10 +31,21 @@ Hard facts carried over from the PoC (Windows 11 26200.8875, MXC SDK 1.0.1):
   would loosen containment and is not an acceptable trade.
 - Every executor spawn uses window-less subprocess kwargs (PoC verified zero
   visible windows for both spawn forms).
+- Sandbox-side TLS is dead on every tier (``import ssl`` DLL init failure,
+  ``curl https`` rc=35), so the online tier (``loopback_relay`` network
+  profile, basecontainer only) routes traffic as plaintext HTTP to a
+  host-side loopback relay (``loopback_relay.py``) whose host process
+  terminates upstream TLS. Egress deny stays on for every non-relay target.
+  Measured boundary (26200.9711): ``ingress.hostLoopback: allow`` opens the
+  whole host address family (the sandbox reaches the host's LAN IP), while
+  non-host egress stays denied (external curl refused immediately) — the
+  online deny proof therefore targets an external destination where rc==0 is
+  the hard failure signal.
 
 All availability answers are fail-closed: any probe/version/verification
 failure reports ``ok=False`` with a distinguishable reason code and the
-caller must fall back to the pre-MXC chain.
+caller must fall back to the pre-MXC chain. Offline and online verdicts are
+cached separately (per ``network_profile``) and never cross.
 """
 
 from __future__ import annotations
@@ -58,6 +69,10 @@ from core.infrastructure.codex_sandbox.environment import (
     VIBELUTION_CONFIG_PATH_ENV,
     VIBELUTION_DATA_HOME_ENV,
     VIBELUTION_SANDBOX_TEMP_ENV,
+)
+from core.infrastructure.codex_sandbox.loopback_relay import (
+    RELAY_PROBE_PATH,
+    get_or_start_relay,
 )
 from core.infrastructure.codex_sandbox.shell import (
     DANGER_FULL_ACCESS_SANDBOX_MODE,
@@ -84,6 +99,16 @@ _TIER_BASECONTAINER_PROBE_ALIASES = ("base-container", "basecontainer")
 TIER_APPCONTAINER_DACL = "appcontainer-dacl"
 _SUPPORTED_TIERS = {*_TIER_BASECONTAINER_PROBE_ALIASES, TIER_APPCONTAINER_DACL}
 
+# Network profiles. "offline" is the historical two-state policy. The online
+# profile ("loopback_relay") keeps egress deny but flips ingress hostLoopback
+# to allow so the sandbox can reach the host-side plaintext relay (TLS
+# terminates in the host process; sandbox TLS is measured-dead: DLL init
+# failure on ``import ssl``, curl https rc=35 — basecontainer tier).
+NETWORK_PROFILE_OFFLINE = "offline"
+NETWORK_PROFILE_LOOPBACK_RELAY = "loopback_relay"
+_NETWORK_PROFILES = (NETWORK_PROFILE_OFFLINE, NETWORK_PROFILE_LOOPBACK_RELAY)
+RELAY_BASE_ENV_NAME = "VIBELUTION_RELAY_BASE"
+
 VERIFY_TTL_SUCCESS_SECONDS = 300.0
 VERIFY_TTL_FAILURE_SECONDS = 30.0
 PROBE_TIMEOUT_SECONDS = 15.0
@@ -93,6 +118,13 @@ VERIFY_CURL_CONNECT_TIMEOUT_SECONDS = 2
 VERIFY_CURL_MAX_TIME_SECONDS = 8
 VERIFY_POLICY_FILENAME = "mxc-verify-policy.json"
 COMMAND_POLICY_FILENAME = "policy.json"
+# Online-profile deny-proof target: a real external destination. Under egress
+# deny the sandbox curl must fail (measured: immediate refusal, rc=7); rc==0
+# would mean traffic actually reached the internet and containment is broken.
+# A documentation-reserved IP cannot give that positive signal (it would also
+# time out on a broken deny), so a stable public name is used — no traffic
+# leaves the sandbox while deny is enforced.
+VERIFY_ONLINE_DENY_TARGET = "http://example.com/"
 
 # Reason codes (structured event payload). Any code here means "MXC refused,
 # caller must fall back to the pre-MXC chain".
@@ -108,6 +140,12 @@ REASON_NON_ASCII_ARGV = "mxc_non_ascii_argv"
 # would loosen containment, so bash-shaped commands are refused and fall back
 # to the pre-MXC chain instead.
 REASON_BASH_UNAVAILABLE = "mxc_bash_unavailable"
+# Online profile refusals (never silently degrade an online request to the
+# offline policy: the caller asked for network and must get a distinguishable
+# refusal instead).
+REASON_ONLINE_REQUIRES_BASECONTAINER = "online_profile_requires_basecontainer"
+REASON_ONLINE_REQUIRES_RELAY_PORT = "online_profile_requires_relay_port"
+REASON_NETWORK_PROFILE_UNKNOWN = "mxc_network_profile_unknown"
 
 
 class MxcPlanRefused(Exception):
@@ -124,9 +162,24 @@ class MxcPlanRefused(Exception):
 
 
 class MxcAvailability:
-    """One availability verdict for the MXC executor on this host."""
+    """One availability verdict for the MXC executor on this host.
 
-    __slots__ = ("ok", "code", "detail", "tier", "telemetry_policy", "from_cache")
+    ``network_profile`` is the profile the verdict was proven for ("offline"
+    or "loopback_relay"); conclusions never cross profiles. ``relay_port`` is
+    the host-side loopback relay port used by the online verification (None
+    for offline).
+    """
+
+    __slots__ = (
+        "ok",
+        "code",
+        "detail",
+        "tier",
+        "telemetry_policy",
+        "network_profile",
+        "relay_port",
+        "from_cache",
+    )
 
     def __init__(
         self,
@@ -136,6 +189,8 @@ class MxcAvailability:
         detail: str = "",
         tier: str = "",
         telemetry_policy: str = "",
+        network_profile: str = NETWORK_PROFILE_OFFLINE,
+        relay_port: int | None = None,
         from_cache: bool = False,
     ) -> None:
         self.ok = bool(ok)
@@ -143,6 +198,8 @@ class MxcAvailability:
         self.detail = str(detail)
         self.tier = str(tier)
         self.telemetry_policy = str(telemetry_policy)
+        self.network_profile = str(network_profile)
+        self.relay_port = int(relay_port) if relay_port is not None else None
         self.from_cache = bool(from_cache)
 
 
@@ -175,7 +232,7 @@ class _VerifyState:
         self.expires_at = expires_at
 
 
-_VERIFY_STATE: _VerifyState | None = None
+_VERIFY_STATE: dict[str, _VerifyState] = {}
 _VERIFY_STATE_LOCK = threading.Lock()
 
 ExecutorInvoker = Callable[..., subprocess.CompletedProcess]
@@ -300,6 +357,8 @@ def build_workspace_write_policy(
     tier: str,
     env_entries: list[str],
     denied_paths: list[Path] | None = None,
+    network_profile: str = NETWORK_PROFILE_OFFLINE,
+    relay_port: int | None = None,
 ) -> dict:
     """Build the MXC 1.0.0 ``workspace_write`` policy document.
 
@@ -311,12 +370,40 @@ def build_workspace_write_policy(
     Windows >= 26200.9278. ``env`` is explicit (``inheritDefaultEnv: false``)
     so the child cannot inherit credential-ish entries even if the executor
     process environment changes.
+
+    ``network_profile="offline"`` (default) keeps the historical network
+    block byte-for-byte. ``network_profile="loopback_relay"`` keeps egress
+    deny but allows ingress hostLoopback so the sandbox can reach the
+    host-side plaintext relay; it is refused on any tier other than
+    ``basecontainer`` (measured: the online network JSON shape is
+    typed-rejected on ``appcontainer-dacl``) and requires ``relay_port``.
+    Unknown profiles and missing online preconditions raise ``MxcPlanRefused``
+    — an online request is never silently downgraded to the offline policy.
     """
+    if network_profile not in _NETWORK_PROFILES:
+        raise MxcPlanRefused(REASON_NETWORK_PROFILE_UNKNOWN, f"profile={network_profile}")
+    if network_profile == NETWORK_PROFILE_LOOPBACK_RELAY:
+        if tier != TIER_BASECONTAINER:
+            raise MxcPlanRefused(
+                REASON_ONLINE_REQUIRES_BASECONTAINER, f"tier={tier}"
+            )
+        if relay_port is None:
+            raise MxcPlanRefused(REASON_ONLINE_REQUIRES_RELAY_PORT, "relay_port_missing")
     filesystem: dict = {
         "readwritePaths": [str(workspace), str(child_temp)],
     }
     if tier == TIER_BASECONTAINER and denied_paths:
         filesystem["deniedPaths"] = [str(path) for path in denied_paths]
+    if network_profile == NETWORK_PROFILE_LOOPBACK_RELAY:
+        network = {
+            "egress": {"default": "deny"},
+            "ingress": {"default": "allow", "hostLoopback": "allow"},
+        }
+    else:
+        network = {
+            "egress": {"default": "deny"},
+            "ingress": {"default": "deny", "hostLoopback": "deny"},
+        }
     return {
         "version": MXC_POLICY_SCHEMA_VERSION,
         "containment": "processcontainer",
@@ -328,10 +415,7 @@ def build_workspace_write_policy(
             "env": list(env_entries),
         },
         "filesystem": filesystem,
-        "network": {
-            "egress": {"default": "deny"},
-            "ingress": {"default": "deny", "hostLoopback": "deny"},
-        },
+        "network": network,
     }
 
 
@@ -339,12 +423,16 @@ def child_env_entries(
     *,
     child_temp: Path,
     base_environment: dict[str, str] | None = None,
+    relay_port: int | None = None,
 ) -> list[str]:
     """Explicit child env list: credential-scrubbed, TEMP inside the grant.
 
     PoC hard requirement: SystemRoot etc. must be given explicitly. Built from
     the credential-scrubbed environment with host-only Vibelution sandbox
     pointers removed and TMP/TEMP redirected into the granted child temp dir.
+    ``relay_port`` (online profile only) adds the ASCII-only
+    ``VIBELUTION_RELAY_BASE=http://127.0.0.1:{port}`` pointer to the host-side
+    loopback relay.
     """
     source = dict(base_environment) if base_environment is not None else dict(os.environ)
     environment = scrub_credential_environment(source)
@@ -362,6 +450,8 @@ def child_env_entries(
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
     environment["PYTHONIOENCODING"] = "utf-8"
     environment["PYTHONUTF8"] = "1"
+    if relay_port is not None:
+        environment[RELAY_BASE_ENV_NAME] = f"http://127.0.0.1:{int(relay_port)}"
     return [f"{name}={value}" for name, value in sorted(environment.items())]
 
 
@@ -386,11 +476,13 @@ def _probe_tier(executor: Path, invoke: ExecutorInvoker) -> tuple[str, str]:
 
 
 class _LoopbackListener:
-    """Host-side loopback listener that proves outbound deny is enforced.
+    """Host-side loopback listener that proves offline outbound deny.
 
-    If any sandbox-side connection reaches this listener, egress deny is
-    broken and verification must fail. Silence plus a participating non-zero
-    curl exit means deny held.
+    Used by the offline profile only: if any sandbox-side connection reaches
+    this listener, egress deny is broken and verification must fail. Silence
+    plus a participating non-zero curl exit means deny held. (The online
+    profile allows the whole host address family by design, so its deny proof
+    targets an external destination instead — see ``_self_verify``.)
     """
 
     def __init__(self) -> None:
@@ -429,13 +521,28 @@ def _self_verify(
     workdir: Path,
     tier: str,
     invoke: ExecutorInvoker,
+    network_profile: str = NETWORK_PROFILE_OFFLINE,
+    relay_port: int | None = None,
 ) -> tuple[bool, str]:
-    """Prove the two-state containment at runtime (fail closed).
+    """Prove the containment claims at runtime (fail closed).
 
     Phase W: a minimal sandbox must write the marker file into its granted
-    workspace. Phase N: a sandbox curl must NOT reach a host loopback
-    listener. Any arrival, a successful request, or an absent curl is a
-    failure — deny enforcement must be proven, not assumed.
+    workspace. Phase N: a sandbox curl must NOT reach the deny-proof target.
+    Any arrival, a successful request, or an absent curl is a failure — deny
+    enforcement must be proven, not assumed.
+
+    Online profile (``loopback_relay``) adds Phase L before the deny proof: a
+    sandbox curl to the host relay's ``/__relay_probe`` endpoint MUST
+    succeed, proving the ingress hostLoopback grant actually reaches the
+    relay. The deny proof then targets an external destination
+    (``VERIFY_ONLINE_DENY_TARGET``): the online profile allows the whole host
+    address family via ``ingress.hostLoopback`` (measured: the sandbox
+    reaches the host's LAN IP), so a host-side listener cannot prove deny.
+    Under egress deny the external request must fail (measured: immediate
+    refusal); ``rc==0`` — traffic actually reaching the internet — is a
+    hard verification failure. On hosts with no internet the request also
+    fails, so the positive-signal property (rc==0 breaks verification) holds
+    wherever the host has connectivity.
     """
     verify_root = (
         _sandbox_temp_root(workdir) / f"mxc-verify-{uuid.uuid4().hex[:12]}"
@@ -451,7 +558,9 @@ def _self_verify(
             child_temp=child_temp,
             timeout_ms=int(VERIFY_RUN_TIMEOUT_SECONDS * 1000),
             tier=tier,
-            env_entries=child_env_entries(child_temp=child_temp),
+            env_entries=child_env_entries(child_temp=child_temp, relay_port=relay_port),
+            network_profile=network_profile,
+            relay_port=relay_port,
         )
         policy_path = _write_policy_file(policy, child_temp / VERIFY_POLICY_FILENAME)
         marker = verify_root / VERIFY_MARKER_FILENAME
@@ -478,7 +587,40 @@ def _self_verify(
         ):
             return False, "verify_write_marker_missing"
 
-        listener = _LoopbackListener()
+        if network_profile == NETWORK_PROFILE_LOOPBACK_RELAY:
+            if relay_port is None:  # defensive; builder refuses this earlier
+                return False, "verify_online_missing_relay_port"
+            probe_argv = [
+                str(executor),
+                str(policy_path),
+                "--",
+                "curl.exe",
+                "-s",
+                "-o",
+                "NUL",
+                "--connect-timeout",
+                str(VERIFY_CURL_CONNECT_TIMEOUT_SECONDS),
+                "--max-time",
+                str(VERIFY_CURL_MAX_TIME_SECONDS),
+                f"http://127.0.0.1:{int(relay_port)}{RELAY_PROBE_PATH}",
+            ]
+            try:
+                completed = invoke(probe_argv, timeout_s=VERIFY_RUN_TIMEOUT_SECONDS)
+                probe_rc = int(completed.returncode)
+            except Exception as exc:
+                return False, f"verify_probe_spawn_{type(exc).__name__}"
+            if probe_rc in {9009, 127}:
+                # curl absent: loopback reachability unproven — fail closed.
+                return False, f"verify_curl_missing_{probe_rc}"
+            if probe_rc != 0:
+                return False, f"verify_loopback_probe_rc_{probe_rc}"
+
+        if network_profile == NETWORK_PROFILE_LOOPBACK_RELAY:
+            deny_target = VERIFY_ONLINE_DENY_TARGET
+            listener = None
+        else:
+            listener = _LoopbackListener()
+            deny_target = f"http://127.0.0.1:{listener.port}/{VERIFY_MARKER_FILENAME}"
         try:
             net_argv = [
                 str(executor),
@@ -492,16 +634,17 @@ def _self_verify(
                 str(VERIFY_CURL_CONNECT_TIMEOUT_SECONDS),
                 "--max-time",
                 str(VERIFY_CURL_MAX_TIME_SECONDS),
-                f"http://127.0.0.1:{listener.port}/{VERIFY_MARKER_FILENAME}",
+                deny_target,
             ]
             try:
                 completed = invoke(net_argv, timeout_s=VERIFY_RUN_TIMEOUT_SECONDS)
                 curl_rc = int(completed.returncode)
             except Exception as exc:
                 return False, f"verify_net_spawn_{type(exc).__name__}"
-            listener.poll_pending()
-            if listener.received:
-                return False, "verify_egress_not_denied"
+            if listener is not None:
+                listener.poll_pending()
+                if listener.received:
+                    return False, "verify_egress_not_denied"
             if curl_rc == 0:
                 return False, "verify_egress_request_succeeded"
             if curl_rc in {9009, 127}:
@@ -509,7 +652,8 @@ def _self_verify(
                 # deny enforcement is unproven — fail closed.
                 return False, f"verify_curl_missing_{curl_rc}"
         finally:
-            listener.close()
+            if listener is not None:
+                listener.close()
         return True, ""
     finally:
         shutil.rmtree(verify_root, ignore_errors=True)
@@ -525,6 +669,8 @@ def build_command_plan(
     tier: str,
     base_environment: dict[str, str] | None = None,
     git_bash_executable: str = "",
+    network_profile: str = NETWORK_PROFILE_OFFLINE,
+    relay_port: int | None = None,
 ) -> MxcCommandPlan | None:
     """Build the full spawn plan for one command; ``None`` = refuse (fallback).
 
@@ -585,9 +731,13 @@ def build_command_plan(
         timeout_ms=timeout_ms,
         tier=tier,
         env_entries=child_env_entries(
-            child_temp=child_temp, base_environment=base_environment
+            child_temp=child_temp,
+            base_environment=base_environment,
+            relay_port=relay_port,
         ),
         denied_paths=[workdir / ".git"] if tier == TIER_BASECONTAINER else None,
+        network_profile=network_profile,
+        relay_port=relay_port,
     )
     policy_path = _write_policy_file(policy, child_temp / COMMAND_POLICY_FILENAME)
     return MxcCommandPlan(
@@ -672,23 +822,28 @@ def ensure_verified(
     environ: dict[str, str] | None = None,
     invoke: ExecutorInvoker | None = None,
     now: Callable[[], float] | None = None,
+    network_profile: str = NETWORK_PROFILE_OFFLINE,
 ) -> MxcAvailability:
     """One TTL-cached, fail-closed availability verdict (version+probe+verify).
 
-    The verification spawns a minimal real sandbox (workspace write + loopback
-    egress deny) before any agent command may use MXC — declared support is
-    not evidence. Degraded-tier hosts (``appcontainer-dacl``) are allowed but
-    restricted to the two-state policy. Success is cached for
-    ``VERIFY_TTL_SUCCESS_SECONDS``; failure for the shorter
-    ``VERIFY_TTL_FAILURE_SECONDS`` so a broken executor is retried without
-    hammering it on every command.
+    The verification spawns a minimal real sandbox (workspace write + egress
+    deny, plus the loopback relay probe for the online profile) before any
+    agent command may use MXC — declared support is not evidence.
+    Degraded-tier hosts (``appcontainer-dacl``) are allowed but restricted to
+    the two-state policy; an online-profile request on a degraded tier is
+    refused with a distinguishable reason (never downgraded silently).
+    Success is cached for ``VERIFY_TTL_SUCCESS_SECONDS``; failure for the
+    shorter ``VERIFY_TTL_FAILURE_SECONDS`` so a broken executor is retried
+    without hammering it on every command. Cache entries are keyed by
+    ``network_profile`` — offline and online conclusions never cross.
     """
-    global _VERIFY_STATE
+    if network_profile not in _NETWORK_PROFILES:
+        raise ValueError(f"unknown network profile: {network_profile}")
     source = environ if environ is not None else os.environ
     clock = now if now is not None else time.monotonic
     runner = invoke if invoke is not None else _run_executor
     with _VERIFY_STATE_LOCK:
-        state = _VERIFY_STATE
+        state = _VERIFY_STATE.get(network_profile)
         if state is not None and state.expires_at > clock():
             cached = state.availability
             return MxcAvailability(
@@ -697,12 +852,16 @@ def ensure_verified(
                 detail=cached.detail,
                 tier=cached.tier,
                 telemetry_policy=cached.telemetry_policy,
+                network_profile=cached.network_profile,
+                relay_port=cached.relay_port,
                 from_cache=True,
             )
-    availability = _verify_uncached(workdir, environ=source, invoke=runner)
+    availability = _verify_uncached(
+        workdir, environ=source, invoke=runner, network_profile=network_profile
+    )
     ttl = VERIFY_TTL_SUCCESS_SECONDS if availability.ok else VERIFY_TTL_FAILURE_SECONDS
     with _VERIFY_STATE_LOCK:
-        _VERIFY_STATE = _VerifyState(availability, clock() + ttl)
+        _VERIFY_STATE[network_profile] = _VerifyState(availability, clock() + ttl)
     return availability
 
 
@@ -711,6 +870,7 @@ def _verify_uncached(
     *,
     environ: dict[str, str],
     invoke: ExecutorInvoker,
+    network_profile: str = NETWORK_PROFILE_OFFLINE,
 ) -> MxcAvailability:
     telemetry_policy = read_telemetry_policy()
     executor = executor_path(environ)
@@ -720,6 +880,7 @@ def _verify_uncached(
             code=REASON_UNAVAILABLE,
             detail="executor_binary_missing",
             telemetry_policy=telemetry_policy,
+            network_profile=network_profile,
         )
     version_text = executor_version_string(executor)
     if not _version_is_allowed(version_text):
@@ -728,6 +889,7 @@ def _verify_uncached(
             code=REASON_VERSION_UNSUPPORTED,
             detail=f"version={version_text or 'unreadable'}; allowed=1.0.x",
             telemetry_policy=telemetry_policy,
+            network_profile=network_profile,
         )
     tier, probe_detail = _probe_tier(executor, invoke)
     if not tier:
@@ -736,10 +898,46 @@ def _verify_uncached(
             code=REASON_PROBE_FAILED,
             detail=probe_detail,
             telemetry_policy=telemetry_policy,
+            network_profile=network_profile,
         )
+    relay_port: int | None = None
+    if network_profile == NETWORK_PROFILE_LOOPBACK_RELAY:
+        if tier != TIER_BASECONTAINER:
+            # Online needs the typed network shape (ingress hostLoopback
+            # allow) that only the basecontainer tier accepts; the degraded
+            # tier typed-rejects it. Refuse with a distinguishable reason
+            # instead of silently degrading to the offline policy.
+            return MxcAvailability(
+                ok=False,
+                code=REASON_ONLINE_REQUIRES_BASECONTAINER,
+                detail=f"tier={tier}",
+                tier=tier,
+                telemetry_policy=telemetry_policy,
+                network_profile=network_profile,
+            )
+        try:
+            # Empty service map is enough for verification: only the probe
+            # endpoint is exercised; execution entries merge their services
+            # into the same singleton afterwards.
+            handle = get_or_start_relay({})
+            relay_port = int(handle.port)
+        except Exception as exc:
+            return MxcAvailability(
+                ok=False,
+                code=REASON_UNAVAILABLE,
+                detail=f"relay_start_{type(exc).__name__}",
+                tier=tier,
+                telemetry_policy=telemetry_policy,
+                network_profile=network_profile,
+            )
     verify_workdir = Path(workdir).resolve() if workdir else _default_verify_workdir()
     verify_ok, verify_detail = _self_verify(
-        executor, workdir=verify_workdir, tier=tier, invoke=invoke
+        executor,
+        workdir=verify_workdir,
+        tier=tier,
+        invoke=invoke,
+        network_profile=network_profile,
+        relay_port=relay_port,
     )
     if not verify_ok:
         return MxcAvailability(
@@ -748,12 +946,16 @@ def _verify_uncached(
             detail=verify_detail,
             tier=tier,
             telemetry_policy=telemetry_policy,
+            network_profile=network_profile,
+            relay_port=relay_port,
         )
     return MxcAvailability(
         ok=True,
         tier=tier,
         telemetry_policy=telemetry_policy,
         detail=f"version={version_text}",
+        network_profile=network_profile,
+        relay_port=relay_port,
     )
 
 
@@ -767,16 +969,17 @@ def _default_verify_workdir() -> Path:
 
 
 def reset_verification_cache() -> None:
-    """Test/ops seam: drop the cached availability verdict."""
-    global _VERIFY_STATE
+    """Test/ops seam: drop the cached availability verdicts (all profiles)."""
     with _VERIFY_STATE_LOCK:
-        _VERIFY_STATE = None
+        _VERIFY_STATE.clear()
 
 
-def cached_availability() -> MxcAvailability | None:
-    """Current cached verdict without triggering a fresh verification."""
+def cached_availability(
+    network_profile: str = NETWORK_PROFILE_OFFLINE,
+) -> MxcAvailability | None:
+    """Current cached verdict for a profile, without fresh verification."""
     with _VERIFY_STATE_LOCK:
-        state = _VERIFY_STATE
+        state = _VERIFY_STATE.get(network_profile)
         if state is None:
             return None
         cached = state.availability
@@ -786,6 +989,8 @@ def cached_availability() -> MxcAvailability | None:
             detail=cached.detail,
             tier=cached.tier,
             telemetry_policy=cached.telemetry_policy,
+            network_profile=cached.network_profile,
+            relay_port=cached.relay_port,
             from_cache=True,
         )
 

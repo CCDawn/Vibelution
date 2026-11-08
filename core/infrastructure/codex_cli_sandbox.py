@@ -50,6 +50,15 @@ Tier matrix (executor ``--probe``, PoC baseline Windows 26200.8875):
 Approval integration: ``windows_offline_shell_unverified()`` returns False for
 ``workspace_write`` when MXC containment is verified, which restores the
 auto_review silent auto-approval premise in the approvals service.
+
+Online tier (``workspace_write_online``, programmatic selection only this
+round): routed through MXC with the ``loopback_relay`` network profile —
+egress deny stays on, ingress hostLoopback allows the sandbox to reach the
+in-process plaintext relay (``loopback_relay.py``) whose host side
+terminates upstream TLS (sandbox TLS is measured-dead). The online verdict
+is verified and cached separately from offline; the online mode refuses with
+``SANDBOX_UNVERIFIED`` whenever MXC does not take the command and never
+falls back to the Codex chain.
 """
 
 from __future__ import annotations
@@ -73,6 +82,9 @@ from core.infrastructure.codex_sandbox.environment import (
     scrub_credential_environment as _adapter_scrub_credential_environment,
 )
 from core.infrastructure.codex_sandbox import mxc as _mxc_backend
+from core.infrastructure.codex_sandbox.loopback_relay import (
+    get_or_start_relay as _get_or_start_relay,
+)
 from core.infrastructure.codex_sandbox.platform import host_platform as _host_platform
 from core.infrastructure.codex_sandbox.process import (
     sandbox_popen_command as _sandbox_popen_command,
@@ -97,11 +109,17 @@ _TERMINAL_SESSION_TTL_SECONDS = 15 * 60
 _TERMINAL_SESSION_MAX_LIFETIME_SECONDS = 15 * 60
 _READ_ONLY_SANDBOX_MODE = "read_only"
 _WORKSPACE_WRITE_SANDBOX_MODE = "workspace_write"
+_WORKSPACE_WRITE_ONLINE_SANDBOX_MODE = "workspace_write_online"
 _DANGER_FULL_ACCESS_SANDBOX_MODE = "danger_full_access"
 _CODEX_SANDBOX_MODES = {
     _READ_ONLY_SANDBOX_MODE,
     _WORKSPACE_WRITE_SANDBOX_MODE,
+    _WORKSPACE_WRITE_ONLINE_SANDBOX_MODE,
 }
+# MXC online tier: the relay service map is a product-level default here (the
+# relay module itself hard-codes no site); only programmatic callers select
+# the online mode — preset mapping stays untouched this round.
+_MXC_RELAY_SERVICES = {"pypi": "pypi.org", "npm": "registry.npmjs.org"}
 _WINDOWS_OFFLINE_SHELL_BLOCK_CODE = "SANDBOX_UNVERIFIED"
 # Public alias: tool layers (e.g. shell 失败冷却) need to recognize the
 # environment-level rejection without importing private names.
@@ -111,6 +129,11 @@ _WINDOWS_OFFLINE_SHELL_BLOCK_MESSAGE = (
     "为避免命令在可访问外网的错误边界中执行，只有携带用户显式批准一次性执行凭据的命令才会放行。"
     "本次调用没有有效凭据（审批即证据）：请在审批卡片显式批准该命令后重试，"
     "或由显式 danger_full_access 权限执行。命令未执行。"
+)
+_MXC_ONLINE_UNHANDLED_BLOCK_MESSAGE = (
+    "在线档（workspace_write_online）只能在已通过运行时验证的 MXC 沙盒边界内执行；"
+    "本次 MXC 未接管（不可用、被禁用或运行时验证未通过），"
+    "命令未执行，也未回退到其他沙盒链路（不静默降级）。"
 )
 
 
@@ -138,21 +161,34 @@ def _sandbox_requires_codex(sandbox_mode: str) -> bool:
     return sandbox_mode != _DANGER_FULL_ACCESS_SANDBOX_MODE
 
 
-def windows_mxc_containment_verified() -> bool:
-    """True when the MXC backend proves real ``workspace_write`` containment.
+def windows_mxc_containment_verified(sandbox_mode: str = _WORKSPACE_WRITE_SANDBOX_MODE) -> bool:
+    """True when the MXC backend proves real containment for the given mode.
 
     审批层的沙箱包含前提：executor 二进制在位（固定安装路径）、版本锁
-    1.0.x、probe 通过、且运行时自验证（workspace 写 + 出站必拒）通过。
-    任何一环失败都返回 False —— 沙箱包含前提不成立，宁可多问一次。
+    1.0.x、probe 通过、且运行时自验证（workspace 写 + 出站必拒；在线档另
+    加回环中继正向探测）通过。任何一环失败都返回 False —— 沙箱包含前提
+    不成立，宁可多问一次。online 档按 ``loopback_relay`` profile 验证，
+    与 offline 结论分开缓存、互不借用。
     """
     if _host_platform() != "windows" or _mxc_backend.sandbox_disabled_by_env():
         return False
-    return _mxc_availability_with_events("approval_premise").ok
+    return _mxc_availability_with_events(
+        "approval_premise", network_profile=_mxc_profile_for_mode(sandbox_mode)
+    ).ok
 
 
-def _mxc_availability_with_events(context: str) -> "_mxc_backend.MxcAvailability":
+def _mxc_profile_for_mode(sandbox_mode: str) -> str:
+    """Map a sandbox mode to its MXC network profile (default offline)."""
+    if sandbox_mode == _WORKSPACE_WRITE_ONLINE_SANDBOX_MODE:
+        return _mxc_backend.NETWORK_PROFILE_LOOPBACK_RELAY
+    return _mxc_backend.NETWORK_PROFILE_OFFLINE
+
+
+def _mxc_availability_with_events(
+    context: str, *, network_profile: str = _mxc_backend.NETWORK_PROFILE_OFFLINE
+) -> "_mxc_backend.MxcAvailability":
     """Availability verdict plus one structured event per fresh verification."""
-    availability = _mxc_backend.ensure_verified()
+    availability = _mxc_backend.ensure_verified(network_profile=network_profile)
     if availability.from_cache:
         return availability
     record_tool_process_event(
@@ -162,6 +198,8 @@ def _mxc_availability_with_events(context: str) -> "_mxc_backend.MxcAvailability
         context=context,
         tier=availability.tier,
         telemetryPolicy=availability.telemetry_policy,
+        networkProfile=availability.network_profile,
+        relayPort=availability.relay_port,
         detail=availability.detail,
         processStatus="verified" if availability.ok else "refused",
     )
@@ -179,11 +217,30 @@ def _mxc_availability_with_events(context: str) -> "_mxc_backend.MxcAvailability
     return availability
 
 
+def _mxc_network_policy_label(sandbox_mode: str) -> str:
+    return "loopback_relay" if sandbox_mode == _WORKSPACE_WRITE_ONLINE_SANDBOX_MODE else "deny"
+
+
+def _block_online_mode_unhandled(command_hash: str) -> dict:
+    """Fail-closed refusal for online mode whenever MXC did not take the command.
+
+    在线档唯一执行边界是 MXC：任何「MXC 未接管」（不可用、被禁用、验证未
+    通过、拒绝或 spawn 失败）都直接拒绝，绝不回退 Codex 链，绝不静默降级
+    成 workspace_write 或更宽的边界放网络。
+    """
+    _log_outcome(command_hash, "blocked", reason="mxc_online_unhandled")
+    return _terminal_error_payload(
+        _WINDOWS_OFFLINE_SHELL_BLOCK_CODE,
+        _MXC_ONLINE_UNHANDLED_BLOCK_MESSAGE,
+    )
+
+
 def _mxc_route_candidate(sandbox_mode: str) -> bool:
-    """MXC handles only Windows ``workspace_write`` commands, when enabled."""
+    """MXC handles Windows ``workspace_write`` / online commands, when enabled."""
     return (
         _host_platform() == "windows"
-        and sandbox_mode == _WORKSPACE_WRITE_SANDBOX_MODE
+        and sandbox_mode
+        in {_WORKSPACE_WRITE_SANDBOX_MODE, _WORKSPACE_WRITE_ONLINE_SANDBOX_MODE}
         and not _mxc_backend.sandbox_disabled_by_env()
     )
 
@@ -218,9 +275,21 @@ def _mxc_build_gate_plan(
     """
     if not _mxc_route_candidate(sandbox_mode):
         return None
-    availability = _mxc_availability_with_events("gate")
+    network_profile = _mxc_profile_for_mode(sandbox_mode)
+    availability = _mxc_availability_with_events("gate", network_profile=network_profile)
     if not availability.ok:
         return None
+    relay_port: int | None = None
+    if network_profile == _mxc_backend.NETWORK_PROFILE_LOOPBACK_RELAY:
+        try:
+            relay_port = int(_get_or_start_relay(_MXC_RELAY_SERVICES).port)
+        except Exception as exc:
+            _record_mxc_event(
+                command_hash,
+                _mxc_backend.REASON_SPAWN_FAILED,
+                detail=f"relay_start_{type(exc).__name__}",
+            )
+            return None
     executor = _mxc_backend.executor_path()
     if executor is None:
         _record_mxc_event(command_hash, _mxc_backend.REASON_UNAVAILABLE, detail="executor_binary_missing")
@@ -246,6 +315,8 @@ def _mxc_build_gate_plan(
             timeout_ms=(int(timeout_seconds) + 5) * 1000,
             tier=availability.tier,
             git_bash_executable=git_bash_executable,
+            network_profile=network_profile,
+            relay_port=relay_port,
         )
     except _mxc_backend.MxcPlanRefused as exc:
         _record_mxc_event(command_hash, exc.code, detail=exc.detail)
@@ -299,12 +370,18 @@ def _windows_offline_shell_is_unverified(sandbox_mode: str) -> bool:
     MXC exception: when the MXC backend proves real containment (executor
     1.0.x in place + runtime self-verification passed), the
     ``workspace_write`` premise holds and this gate no longer claims
-    otherwise. ``read_only`` keeps fail-closed behavior (the MXC two-state
-    policy grants workspace writes, which would widen read-only).
+    otherwise. ``workspace_write_online`` needs its own ``loopback_relay``
+    profile verification (loopback relay probe + external-target egress
+    deny); an offline-only verdict never opens the online mode. ``read_only`` keeps
+    fail-closed behavior (the MXC two-state policy grants workspace writes,
+    which would widen read-only).
     """
     if not (_host_platform() == "windows" and _sandbox_requires_codex(sandbox_mode)):
         return False
-    if sandbox_mode == _WORKSPACE_WRITE_SANDBOX_MODE and windows_mxc_containment_verified():
+    if (
+        sandbox_mode in {_WORKSPACE_WRITE_SANDBOX_MODE, _WORKSPACE_WRITE_ONLINE_SANDBOX_MODE}
+        and windows_mxc_containment_verified(sandbox_mode)
+    ):
         return False
     return True
 
@@ -890,7 +967,8 @@ def _try_start_mxc_terminal_session(
     _debug_logger.info(
         f"[Codex CLI 沙盒] MXC 后端终端会话 terminalSessionId={session_id} "
         f"commandHash={command_hash} route={getattr(route, 'route', '')} tier={tier} "
-        f"networkPolicy=deny cwd={workdir} timeout={timeout_seconds}s"
+        f"networkPolicy={_mxc_network_policy_label(sandbox_mode)} "
+        f"cwd={workdir} timeout={timeout_seconds}s"
     )
     _log_outcome(command_hash, "started", reason="mxc_terminal_session_started", started_at=session.started_at)
     return (
@@ -968,6 +1046,11 @@ def start_codex_sandbox_terminal_session(
                 _WINDOWS_OFFLINE_SHELL_BLOCK_CODE,
                 _WINDOWS_OFFLINE_SHELL_BLOCK_MESSAGE,
             )
+    if sandbox_mode == _WORKSPACE_WRITE_ONLINE_SANDBOX_MODE:
+        # MXC handled online commands earlier (we would have returned); any
+        # arrival here means MXC did not take it — refuse, never fall through
+        # to the Codex chain (that would silently downgrade the online grant).
+        return _block_online_mode_unhandled(command_hash)
     executable = _resolve_codex_executable() if _sandbox_requires_codex(sandbox_mode) else ""
     if _sandbox_requires_codex(sandbox_mode) and not executable:
         _log_outcome(command_hash, "unavailable", reason="codex_executable_missing")
@@ -1248,7 +1331,8 @@ def _try_execute_via_mxc(
     tier = plan.tier
     _debug_logger.info(
         f"[Codex CLI 沙盒] MXC 后端执行 commandHash={command_hash} "
-        f"route={getattr(route, 'route', '')} tier={tier} networkPolicy=deny "
+        f"route={getattr(route, 'route', '')} tier={tier} "
+        f"networkPolicy={_mxc_network_policy_label(sandbox_mode)} "
         f"cwd={workdir} timeout={timeout_seconds}s"
     )
     record_tool_process_event(
@@ -1342,6 +1426,14 @@ def execute_codex_sandbox_command(
                 f"[安全拦截 | {_WINDOWS_OFFLINE_SHELL_BLOCK_CODE}] "
                 f"{_WINDOWS_OFFLINE_SHELL_BLOCK_MESSAGE}\n也未回退到非沙盒模式。"
             )
+    if sandbox_mode == _WORKSPACE_WRITE_ONLINE_SANDBOX_MODE:
+        # MXC handled online commands earlier (we would have returned); any
+        # arrival here means MXC did not take it — refuse, never fall through
+        # to the Codex chain (that would silently downgrade the online grant).
+        return (
+            f"[安全拦截 | {_WINDOWS_OFFLINE_SHELL_BLOCK_CODE}] "
+            f"{_MXC_ONLINE_UNHANDLED_BLOCK_MESSAGE}"
+        )
 
     executable = _resolve_codex_executable() if _sandbox_requires_codex(sandbox_mode) else ""
     if _sandbox_requires_codex(sandbox_mode) and not executable:

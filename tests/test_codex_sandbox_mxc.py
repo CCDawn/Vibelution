@@ -23,7 +23,7 @@ from types import SimpleNamespace
 import pytest
 
 from core.infrastructure import codex_cli_sandbox
-from core.infrastructure.codex_sandbox import mxc as mxc_backend
+from core.infrastructure.codex_sandbox import loopback_relay, mxc as mxc_backend
 from core.web.services import agent_directory_service
 from core.web.services.session import execution_evidence, tool_approvals
 
@@ -120,6 +120,8 @@ class _FakeExecutor:
         curl_rc=28,
         version="1.0.1",
         telemetry_policy="unset",
+        loopback_ok=True,
+        probe_rc=None,
     ):
         self.probe_tier = probe_tier
         self.probe_ok = probe_ok
@@ -128,6 +130,9 @@ class _FakeExecutor:
         self.curl_rc = curl_rc
         self.version = version
         self.telemetry_policy = telemetry_policy
+        # Online profile: sandbox curl to the relay probe endpoint.
+        self.loopback_ok = loopback_ok
+        self.probe_rc = probe_rc
         self.calls: list[list[str]] = []
         self.probes = 0
 
@@ -146,6 +151,11 @@ class _FakeExecutor:
         inner = argv[argv.index("--") + 1 :]
         joined = " ".join(str(item) for item in inner)
         cwd = Path(policy["process"]["cwd"])
+        if "__relay_probe" in joined:
+            rc = self.probe_rc if self.probe_rc is not None else (
+                0 if self.loopback_ok else 7
+            )
+            return subprocess.CompletedProcess(argv, rc, b"", b"")
         if "curl" in joined and self.egress_arrives:
             return subprocess.CompletedProcess(argv, 0, b"arrived", b"")
         if "curl" in joined:
@@ -455,20 +465,34 @@ def windows_gate(monkeypatch, tmp_path):
 
 
 def _expect_mxc_verified(
-    monkeypatch, tier="appcontainer-dacl", code="", ok=True, detail="", from_cache=False
+    monkeypatch,
+    tier="appcontainer-dacl",
+    code="",
+    ok=True,
+    detail="",
+    from_cache=False,
+    network_profile="offline",
+    relay_port=None,
 ):
-    def _fake_ensure(workdir=None, **kwargs):
+    requested_profiles: list[str] = []
+
+    def _fake_ensure(workdir=None, *, network_profile=None, **kwargs):
+        requested_profiles.append(network_profile or "offline")
         return mxc_backend.MxcAvailability(
             ok=ok,
             code=code,
             detail=detail,
             tier=tier,
             telemetry_policy="unset",
+            network_profile=network_profile or "offline",
+            relay_port=relay_port,
             from_cache=from_cache,
         )
 
+    _fake_ensure.requested_profiles = requested_profiles
     monkeypatch.setattr(mxc_backend, "ensure_verified", _fake_ensure)
     monkeypatch.setattr(mxc_backend, "executor_path", lambda: "wxc-exec.exe")
+    return _fake_ensure
 
 
 def test_workspace_write_routes_through_mxc(
@@ -943,3 +967,474 @@ def test_danger_full_access_bypasses_mxc(monkeypatch, tmp_path, fake_executor):
 
     result = codex_cli_sandbox.execute_codex_sandbox_command("echo hi", cwd=str(workdir))
     assert "sandbox ok" in result
+
+
+# ---------------------------------------------------------------- online tier: policy shape
+
+_OFFLINE_POLICY_SNAPSHOT_TEMPLATE = """{
+  "containment": "processcontainer",
+  "filesystem": {
+    "readwritePaths": [
+      "@WS",
+      "@TMP"
+    ]
+  },
+  "lifecycle": {
+    "destroyOnExit": true
+  },
+  "network": {
+    "egress": {
+      "default": "deny"
+    },
+    "ingress": {
+      "default": "deny",
+      "hostLoopback": "deny"
+    }
+  },
+  "process": {
+    "cwd": "@WS",
+    "env": [
+      "A=1",
+      "B=2"
+    ],
+    "inheritDefaultEnv": false,
+    "timeout": 65000
+  },
+  "version": "1.0.0"
+}"""
+
+
+def test_offline_policy_json_is_byte_identical_snapshot():
+    """Default (offline) policy output must stay byte-for-byte unchanged."""
+    workspace = Path("W:/ws")
+    child_temp = Path("W:/ws/tmp")
+    policy = mxc_backend.build_workspace_write_policy(
+        workspace=workspace,
+        child_temp=child_temp,
+        timeout_ms=65000,
+        tier=mxc_backend.TIER_APPCONTAINER_DACL,
+        env_entries=["A=1", "B=2"],
+    )
+    serialized = json.dumps(policy, ensure_ascii=True, sort_keys=True, indent=2)
+    # Path spellings are platform input; everything else (structure, key
+    # order, indentation, network block, env list) is pinned exactly.
+    expected = _OFFLINE_POLICY_SNAPSHOT_TEMPLATE.replace(
+        '"@WS"', json.dumps(str(workspace))
+    ).replace('"@TMP"', json.dumps(str(child_temp)))
+    assert serialized == expected
+
+
+def test_online_policy_json_exact_shape(tmp_path):
+    workdir = tmp_path / "ws"
+    workdir.mkdir()
+    child_temp = workdir / ".tmp" / "mxc" / "online-1"
+    child_temp.mkdir(parents=True)
+    policy = mxc_backend.build_workspace_write_policy(
+        workspace=workdir,
+        child_temp=child_temp,
+        timeout_ms=65000,
+        tier=mxc_backend.TIER_BASECONTAINER,
+        env_entries=["A=1"],
+        denied_paths=[workdir / ".git"],
+        network_profile=mxc_backend.NETWORK_PROFILE_LOOPBACK_RELAY,
+        relay_port=17654,
+    )
+    assert policy["network"] == {
+        "egress": {"default": "deny"},
+        "ingress": {"default": "allow", "hostLoopback": "allow"},
+    }
+    assert policy["filesystem"]["deniedPaths"] == [str(workdir / ".git")]
+
+
+def test_online_command_plan_injects_relay_env(tmp_path):
+    """build_command_plan(online) injects the ASCII relay pointer env entry."""
+    workdir = tmp_path / "ws"
+    workdir.mkdir()
+    child_temp = workdir / ".tmp" / "mxc" / "online-env"
+    child_temp.mkdir(parents=True)
+    plan = mxc_backend.build_command_plan(
+        Path("wxc-exec.exe"),
+        _cmd_route("echo hi"),
+        workdir=workdir,
+        child_temp=child_temp,
+        timeout_ms=65000,
+        tier=mxc_backend.TIER_BASECONTAINER,
+        base_environment={"PATH": r"C:\Windows"},
+        network_profile=mxc_backend.NETWORK_PROFILE_LOOPBACK_RELAY,
+        relay_port=17654,
+    )
+    assert plan is not None
+    policy = json.loads(plan.policy_path.read_text(encoding="ascii"))
+    assert policy["network"]["ingress"] == {"default": "allow", "hostLoopback": "allow"}
+    env_pairs = dict(item.split("=", 1) for item in policy["process"]["env"])
+    assert env_pairs[mxc_backend.RELAY_BASE_ENV_NAME] == "http://127.0.0.1:17654"
+    assert all(item.isascii() for item in policy["process"]["env"])
+    # Offline plans never carry the relay pointer.
+    offline_plan = mxc_backend.build_command_plan(
+        Path("wxc-exec.exe"),
+        _cmd_route("echo hi"),
+        workdir=workdir,
+        child_temp=child_temp,
+        timeout_ms=65000,
+        tier=mxc_backend.TIER_BASECONTAINER,
+        base_environment={"PATH": r"C:\Windows"},
+    )
+    offline_policy = json.loads(offline_plan.policy_path.read_text(encoding="ascii"))
+    assert mxc_backend.RELAY_BASE_ENV_NAME not in dict(
+        item.split("=", 1) for item in offline_policy["process"]["env"]
+    )
+
+
+def test_online_policy_requires_basecontainer(tmp_path):
+    with pytest.raises(mxc_backend.MxcPlanRefused) as direct:
+        mxc_backend.build_workspace_write_policy(
+            workspace=tmp_path,
+            child_temp=tmp_path,
+            timeout_ms=65000,
+            tier=mxc_backend.TIER_APPCONTAINER_DACL,
+            env_entries=["A=1"],
+            network_profile=mxc_backend.NETWORK_PROFILE_LOOPBACK_RELAY,
+            relay_port=17654,
+        )
+    assert direct.value.code == "online_profile_requires_basecontainer"
+
+    workdir = tmp_path / "ws"
+    workdir.mkdir()
+    child_temp = workdir / ".tmp" / "mxc" / "online-2"
+    child_temp.mkdir(parents=True)
+    with pytest.raises(mxc_backend.MxcPlanRefused) as via_plan:
+        mxc_backend.build_command_plan(
+            Path("wxc-exec.exe"),
+            _cmd_route("echo hi"),
+            workdir=workdir,
+            child_temp=child_temp,
+            timeout_ms=65000,
+            tier=mxc_backend.TIER_APPCONTAINER_DACL,
+            base_environment={"PATH": r"C:\Windows"},
+            network_profile=mxc_backend.NETWORK_PROFILE_LOOPBACK_RELAY,
+            relay_port=17654,
+        )
+    assert via_plan.value.code == "online_profile_requires_basecontainer"
+
+
+def test_online_policy_requires_relay_port(tmp_path):
+    with pytest.raises(mxc_backend.MxcPlanRefused) as exc_info:
+        mxc_backend.build_workspace_write_policy(
+            workspace=tmp_path,
+            child_temp=tmp_path,
+            timeout_ms=65000,
+            tier=mxc_backend.TIER_BASECONTAINER,
+            env_entries=["A=1"],
+            network_profile=mxc_backend.NETWORK_PROFILE_LOOPBACK_RELAY,
+            relay_port=None,
+        )
+    assert exc_info.value.code == "online_profile_requires_relay_port"
+
+
+def test_unknown_network_profile_refused(tmp_path):
+    with pytest.raises(mxc_backend.MxcPlanRefused) as exc_info:
+        mxc_backend.build_workspace_write_policy(
+            workspace=tmp_path,
+            child_temp=tmp_path,
+            timeout_ms=65000,
+            tier=mxc_backend.TIER_BASECONTAINER,
+            env_entries=["A=1"],
+            network_profile="offline_plus_tor",
+            relay_port=None,
+        )
+    assert exc_info.value.code == mxc_backend.REASON_NETWORK_PROFILE_UNKNOWN
+
+
+# ---------------------------------------------------------------- online tier: verification
+
+
+def test_online_verify_success_proves_loopback_and_egress(fake_executor, tmp_path, monkeypatch):
+    executor = fake_executor(probe_tier="base-container")
+    monkeypatch.setattr(
+        mxc_backend,
+        "get_or_start_relay",
+        lambda services, **kwargs: SimpleNamespace(port=17654),
+    )
+    availability = mxc_backend.ensure_verified(
+        tmp_path, network_profile=mxc_backend.NETWORK_PROFILE_LOOPBACK_RELAY
+    )
+    assert availability.ok is True
+    assert availability.tier == mxc_backend.TIER_BASECONTAINER
+    assert availability.network_profile == mxc_backend.NETWORK_PROFILE_LOOPBACK_RELAY
+    assert availability.relay_port == 17654
+    assert availability.detail.startswith("version=1.0.")
+
+    joined_calls = [" ".join(str(item) for item in call) for call in executor.calls]
+    probe_calls = [call for call in joined_calls if "__relay_probe" in call]
+    assert probe_calls, "online verify must probe the relay endpoint from the sandbox"
+    assert (
+        f"http://127.0.0.1:17654{loopback_relay.RELAY_PROBE_PATH}" in probe_calls[0]
+    )
+    deny_calls = [
+        call for call in joined_calls if mxc_backend.VERIFY_ONLINE_DENY_TARGET in call
+    ]
+    assert deny_calls, "online verify must re-prove egress deny against an external target"
+    deny_url = [item for item in deny_calls[0].split() if item.startswith("http://")][0]
+    assert "127.0.0.1" not in deny_url, "host-classified targets are allowed online"
+
+
+def test_online_verify_fails_when_loopback_probe_fails(fake_executor, tmp_path, monkeypatch):
+    fake_executor(probe_tier="basecontainer", loopback_ok=False)
+    monkeypatch.setattr(
+        mxc_backend,
+        "get_or_start_relay",
+        lambda services, **kwargs: SimpleNamespace(port=17654),
+    )
+    availability = mxc_backend.ensure_verified(
+        tmp_path, network_profile=mxc_backend.NETWORK_PROFILE_LOOPBACK_RELAY
+    )
+    assert availability.ok is False
+    assert availability.code == mxc_backend.REASON_VERIFY_FAILED
+    assert availability.detail == "verify_loopback_probe_rc_7"
+
+
+def test_online_verify_fails_when_probe_curl_missing(fake_executor, tmp_path, monkeypatch):
+    fake_executor(probe_tier="basecontainer", probe_rc=9009)
+    monkeypatch.setattr(
+        mxc_backend,
+        "get_or_start_relay",
+        lambda services, **kwargs: SimpleNamespace(port=17654),
+    )
+    availability = mxc_backend.ensure_verified(
+        tmp_path, network_profile=mxc_backend.NETWORK_PROFILE_LOOPBACK_RELAY
+    )
+    assert availability.ok is False
+    assert availability.detail == "verify_curl_missing_9009"
+
+
+def test_online_verify_fails_when_egress_request_succeeds(fake_executor, tmp_path, monkeypatch):
+    fake_executor(probe_tier="basecontainer", loopback_ok=True, egress_arrives=True)
+    monkeypatch.setattr(
+        mxc_backend,
+        "get_or_start_relay",
+        lambda services, **kwargs: SimpleNamespace(port=17654),
+    )
+    availability = mxc_backend.ensure_verified(
+        tmp_path, network_profile=mxc_backend.NETWORK_PROFILE_LOOPBACK_RELAY
+    )
+    assert availability.ok is False
+    assert availability.code == mxc_backend.REASON_VERIFY_FAILED
+    assert availability.detail == "verify_egress_request_succeeded"
+
+
+def test_online_verification_refused_on_degraded_tier(fake_executor, tmp_path):
+    executor = fake_executor(probe_tier="appcontainer-dacl")
+    availability = mxc_backend.ensure_verified(
+        tmp_path, network_profile=mxc_backend.NETWORK_PROFILE_LOOPBACK_RELAY
+    )
+    assert availability.ok is False
+    assert availability.code == "online_profile_requires_basecontainer"
+    assert availability.detail == "tier=appcontainer-dacl"
+    assert availability.network_profile == mxc_backend.NETWORK_PROFILE_LOOPBACK_RELAY
+    assert executor.probes == 1  # refused before any verify sandbox ran
+
+
+def test_online_and_offline_verdicts_cache_separately(fake_executor, tmp_path, monkeypatch):
+    executor = fake_executor(probe_tier="base-container")
+    monkeypatch.setattr(
+        mxc_backend,
+        "get_or_start_relay",
+        lambda services, **kwargs: SimpleNamespace(port=17654),
+    )
+    offline = mxc_backend.ensure_verified(tmp_path)
+    online = mxc_backend.ensure_verified(
+        tmp_path, network_profile=mxc_backend.NETWORK_PROFILE_LOOPBACK_RELAY
+    )
+    assert offline.ok is True and online.ok is True
+    assert offline.from_cache is False and online.from_cache is False
+    assert offline.network_profile == "offline" and online.relay_port == 17654
+    assert executor.probes == 2  # one probe per profile, no cross-profile reuse
+    assert mxc_backend.ensure_verified(tmp_path).from_cache is True
+    assert (
+        mxc_backend.ensure_verified(
+            tmp_path, network_profile=mxc_backend.NETWORK_PROFILE_LOOPBACK_RELAY
+        ).from_cache
+        is True
+    )
+
+
+def test_availability_events_carry_profile_and_relay_fields(
+    monkeypatch, fake_executor, mxc_event_capture
+):
+    fake_executor(probe_tier="base-container")
+    monkeypatch.setattr(
+        mxc_backend,
+        "get_or_start_relay",
+        lambda services, **kwargs: SimpleNamespace(port=17654),
+    )
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
+
+    codex_cli_sandbox._mxc_availability_with_events(
+        "test", network_profile=mxc_backend.NETWORK_PROFILE_LOOPBACK_RELAY
+    )
+    codex_cli_sandbox._mxc_availability_with_events("test")
+
+    events = [e for e in mxc_event_capture if e["event"] == "tool.execution.mxc_backend"]
+    online_event = next(e for e in events if e.get("networkProfile") == "loopback_relay")
+    assert online_event["relayPort"] == 17654
+    assert online_event["code"] == "mxc_verified"
+    offline_event = next(e for e in events if e.get("networkProfile") == "offline")
+    assert offline_event["relayPort"] is None
+
+
+# ---------------------------------------------------------------- online tier: gate
+
+
+def test_online_mode_routes_through_mxc_with_relay_policy(
+    monkeypatch, tmp_path, windows_gate, mxc_event_capture, fake_executor
+):
+    fake_executor(probe_tier="base-container")
+    _install_runtime(monkeypatch, permission_preset="request_approval",
+                     sandbox_mode="workspace_write_online")
+    _expect_mxc_verified(
+        monkeypatch, tier="basecontainer",
+        network_profile=mxc_backend.NETWORK_PROFILE_LOOPBACK_RELAY, relay_port=17654,
+    )
+    relay_calls: list[dict] = []
+
+    class _FakeHandle:
+        port = 17654
+
+    def _fake_relay(services):
+        relay_calls.append(dict(services))
+        return _FakeHandle()
+
+    monkeypatch.setattr(codex_cli_sandbox, "_get_or_start_relay", _fake_relay)
+    log_lines: list[str] = []
+    monkeypatch.setattr(
+        codex_cli_sandbox, "_debug_logger", _ListCaptureLogger(log_lines)
+    )
+    workdir = tmp_path / "ws"
+    workdir.mkdir()
+
+    result = codex_cli_sandbox.execute_codex_sandbox_command("echo hi", cwd=str(workdir))
+
+    assert "sandbox ok" in result
+    argv = windows_gate["argv"]
+    assert str(argv[0]).endswith("wxc-exec.exe")
+    policy = windows_gate["policy"]
+    assert policy["network"]["ingress"] == {"default": "allow", "hostLoopback": "allow"}
+    assert policy["network"]["egress"] == {"default": "deny"}
+    env_pairs = dict(item.split("=", 1) for item in policy["process"]["env"])
+    assert env_pairs["VIBELUTION_RELAY_BASE"] == "http://127.0.0.1:17654"
+    assert relay_calls == [{"pypi": "pypi.org", "npm": "registry.npmjs.org"}]
+    assert any("networkPolicy=loopback_relay" in line for line in log_lines)
+    started = [
+        e for e in mxc_event_capture if e["event"] == "tool.execution.process_started"
+    ]
+    assert started and started[0]["route"].startswith("mxc:")
+
+
+def test_online_mode_fail_closed_when_mxc_unavailable(
+    monkeypatch, tmp_path, windows_gate, mxc_event_capture, fake_executor
+):
+    fake_executor()
+    _install_runtime(monkeypatch, permission_preset="request_approval",
+                     sandbox_mode="workspace_write_online")
+    _expect_mxc_verified(
+        monkeypatch, ok=False,
+        code=mxc_backend.REASON_VERIFY_FAILED, detail="verify_loopback_probe_rc_7",
+    )
+    monkeypatch.setattr(
+        codex_cli_sandbox, "_resolve_codex_executable", lambda: r"C:\Codex\codex.exe"
+    )
+    workdir = tmp_path / "ws"
+    workdir.mkdir()
+
+    result = codex_cli_sandbox.execute_codex_sandbox_command("echo hi", cwd=str(workdir))
+
+    assert codex_cli_sandbox.SANDBOX_UNVERIFIED_BLOCK_CODE in result
+    # Online never falls back to the pre-MXC Codex chain (no silent downgrade).
+    assert "argv" not in windows_gate
+
+
+def test_online_mode_fail_closed_when_mxc_disabled_by_env(
+    monkeypatch, tmp_path, windows_gate, fake_executor
+):
+    fake_executor()
+    _install_runtime(monkeypatch, permission_preset="request_approval",
+                     sandbox_mode="workspace_write_online")
+    monkeypatch.setenv(mxc_backend.MXC_DISABLE_ENV, "1")
+    monkeypatch.setattr(
+        codex_cli_sandbox, "_resolve_codex_executable", lambda: r"C:\Codex\codex.exe"
+    )
+    workdir = tmp_path / "ws"
+    workdir.mkdir()
+
+    result = codex_cli_sandbox.execute_codex_sandbox_command("echo hi", cwd=str(workdir))
+
+    assert codex_cli_sandbox.SANDBOX_UNVERIFIED_BLOCK_CODE in result
+    assert "argv" not in windows_gate
+
+
+def test_online_terminal_session_blocked_when_mxc_unhandled(
+    monkeypatch, tmp_path, windows_gate, fake_executor
+):
+    fake_executor()
+    _install_runtime(monkeypatch, permission_preset="request_approval",
+                     sandbox_mode="workspace_write_online")
+    _expect_mxc_verified(
+        monkeypatch, ok=False, code=mxc_backend.REASON_UNAVAILABLE, detail="executor_binary_missing"
+    )
+    monkeypatch.setattr(
+        codex_cli_sandbox, "_resolve_codex_executable", lambda: r"C:\Codex\codex.exe"
+    )
+    workdir = tmp_path / "ws"
+    workdir.mkdir()
+
+    result = codex_cli_sandbox.start_codex_sandbox_terminal_session("echo hi", cwd=str(workdir))
+
+    assert result["status"] == "failed"
+    assert result["code"] == codex_cli_sandbox.SANDBOX_UNVERIFIED_BLOCK_CODE
+    assert "argv" not in windows_gate
+
+
+def test_windows_offline_shell_unverified_for_online_mode(monkeypatch, tmp_path, fake_executor):
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
+    _install_runtime(monkeypatch, permission_preset="auto_review",
+                     sandbox_mode="workspace_write_online")
+    monkeypatch.setattr(
+        mxc_backend,
+        "get_or_start_relay",
+        lambda services, **kwargs: SimpleNamespace(port=17654),
+    )
+
+    # Degraded tier: the offline verdict may hold, but the online verdict is
+    # refused (typed network shape) — the online gate must stay fail-closed.
+    executor = fake_executor(probe_tier="appcontainer-dacl")
+    assert codex_cli_sandbox.windows_mxc_containment_verified("workspace_write_online") is False
+    assert codex_cli_sandbox.windows_offline_shell_unverified() is True
+
+    # With a successful online (loopback_relay) verification, the premise holds.
+    executor.probe_tier = "base-container"
+    mxc_backend.reset_verification_cache()
+    assert codex_cli_sandbox.windows_mxc_containment_verified("workspace_write_online") is True
+    assert codex_cli_sandbox.windows_offline_shell_unverified() is False
+
+
+def test_workspace_write_gate_keeps_default_offline_profile(monkeypatch, fake_executor):
+    fake_executor()
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
+    _install_runtime(monkeypatch, permission_preset="auto_review")
+    captured = _expect_mxc_verified(monkeypatch, tier="appcontainer-dacl")
+
+    assert codex_cli_sandbox.windows_mxc_containment_verified() is True
+    assert captured.requested_profiles == ["offline"]
+
+
+class _ListCaptureLogger:
+    """Minimal logger double capturing info/warning text lines."""
+
+    def __init__(self, sink: list[str]):
+        self._sink = sink
+
+    def info(self, message, *args, **kwargs):
+        self._sink.append(str(message % args if args else message))
+
+    def warning(self, message, *args, **kwargs):
+        self._sink.append(str(message % args if args else message))
