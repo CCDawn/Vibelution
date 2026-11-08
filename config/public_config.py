@@ -67,6 +67,17 @@ HEADER_LINES = [
     "# ============================================================",
 ]
 PUBLIC_PROVIDER_FIELDS = PUBLIC_INLINE_PROVIDER_FIELDS
+_V2_MODEL_OPTION_PROVIDER_FIELDS = (
+    *PUBLIC_INLINE_PROVIDER_FIELDS,
+    "auth_kind",
+    "vendor",
+    "driver",
+)
+_V2_MODEL_OPTION_PROVIDER_OBJECT_FIELDS = {
+    "protocols": ("default", "allowed", "routes"),
+    "discovery": ("mode", "adapter", "models_url_override", "cache_ttl_seconds", "include", "exclude"),
+    "deployment": ("runtime_framework", "artifact_path"),
+}
 PROFILE_OVERRIDE_FIELDS = PROFILE_REFERENCE_OVERRIDE_FIELDS
 SCHEMA_V2_LEGACY_MODEL_WRITE_ERROR = (
     "schema v2 model writes must use provider-scoped configuration; "
@@ -2041,7 +2052,7 @@ def list_llm_model_options(public_config: dict) -> list[dict[str, object]]:
                 provider = {
                     **{
                         field: copy.deepcopy(raw_provider.get(field))
-                        for field in PUBLIC_INLINE_PROVIDER_FIELDS
+                        for field in _V2_MODEL_OPTION_PROVIDER_FIELDS
                         if field in raw_provider
                     },
                     "id": str(provider_id),
@@ -2052,6 +2063,10 @@ def list_llm_model_options(public_config: dict) -> list[dict[str, object]]:
                     "requires_api_key": bool(raw_provider.get("requires_api_key", requires_credential)),
                     "requires_credential": requires_credential,
                 }
+                for field, allowed_fields in _V2_MODEL_OPTION_PROVIDER_OBJECT_FIELDS.items():
+                    value = raw_provider.get(field)
+                    if isinstance(value, dict):
+                        provider[field] = {key: copy.deepcopy(value[key]) for key in allowed_fields if key in value}
                 protocols = raw_provider.get("protocols") if isinstance(raw_provider.get("protocols"), dict) else {}
                 for model_key, raw_model in raw_models.items():
                     if not isinstance(raw_model, dict) or raw_model.get("enabled", True) is False:

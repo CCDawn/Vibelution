@@ -132,3 +132,86 @@ def test_subscription_pins_are_selectable_through_real_agent_model_gate(monkeypa
     assert profile.default_reasoning_effort == ("medium" if "medium" in levels else levels[0] if levels else "")
     route = resolve_model_protocol(profile, runtime.llm.providers["subscription"])
     assert route.adapter_id == "chatgpt_subscription_responses"
+
+
+def _subscription_model_options_fixture():
+    from config.chatgpt_subscription import build_subscription_provider
+    from config.llm_provider_registry import pin_llm_model
+
+    public = {"llm": {"schema_version": 2, "providers": {"subscription": build_subscription_provider()},
+                      "profiles": {"primary": {"model_ref": "subscription/plan-test"}}}}
+    return pin_llm_model(public, "subscription", upstream_id="plan-test", model_key="plan-test", overrides={
+        "wire_protocol": "responses", "model_protocol": "openai_responses", "interaction_contract": "tool_chat",
+        "context_window": 65536,
+        "defaults": {"reasoning_effort_values": ["low"], "reasoning_effort_adapter": "reasoning_object",
+                     "default_reasoning_effort": "low"},
+    })
+
+
+def test_subscription_model_options_preserve_provider_contract_without_secret_fields():
+    import json
+
+    from config.public_config import list_llm_model_options
+
+    public = _subscription_model_options_fixture()
+    source = public["llm"]["providers"]["subscription"]
+    source.update(api_key="synthetic-inline-secret", access_token="synthetic-bearer", refresh_token="synthetic-refresh")
+    source["protocols"]["extra_headers"] = {"Authorization": "Bearer synthetic-protocol-header"}
+    source["discovery"].update(access_token="synthetic-discovery-token", extra_headers={"Authorization": "Bearer synthetic-discovery-header"})
+    source["deployment"] = {"runtime_framework": "", "access_token": "synthetic-deployment-token"}
+    option = list_llm_model_options(public)[0]
+    provider = option["provider"]
+    for field in ("auth_kind", "credential_ref", "driver", "vendor", "service_class"):
+        assert provider[field] == source[field]
+    assert provider["protocols"] == {"default": "responses", "allowed": ["responses"], "routes": {"responses": "responses"}}
+    assert provider["discovery"] == {"adapter": "openai"}
+    assert provider["deployment"] == {"runtime_framework": ""}
+    assert ProviderConfig.model_validate(provider).auth_kind == "oauth"
+    payload = json.dumps(option)
+    for secret in ("synthetic-inline-secret", "synthetic-bearer", "synthetic-refresh", "synthetic-protocol-header",
+                   "synthetic-discovery-token", "synthetic-discovery-header", "synthetic-deployment-token"):
+        assert secret not in payload
+
+
+@pytest.mark.parametrize("connected", [False, True])
+def test_subscription_model_option_decoration_uses_only_oauth_status(monkeypatch, connected):
+    from config.public_config import list_llm_model_options
+    from core.llm import chatgpt_subscription as auth
+    from core.web.services import config_service
+
+    public = _subscription_model_options_fixture()
+    option = list_llm_model_options(public)[0]
+    # Preserve the complete identity here so this regression isolates credential
+    # decoration from the separate public-provider projection regression.
+    source = public["llm"]["providers"]["subscription"]
+    option["provider"].update({field: source[field] for field in ("auth_kind", "driver", "vendor", "protocols", "discovery")})
+    monkeypatch.setattr(config_service, "list_llm_model_options", lambda _: [option])
+    monkeypatch.setattr(config_service, "_read_env_var", lambda _: pytest.fail("subscription metadata must not read API keys"))
+    monkeypatch.setattr(config_service, "invoke_llm", lambda *_args, **_kwargs: pytest.fail("metadata must not run inference"))
+    monkeypatch.setattr(auth, "get_chatgpt_subscription_auth", lambda: SimpleNamespace(
+        status=lambda: {"connected": connected},
+        get_access_token=lambda: pytest.fail("metadata must not refresh or resolve a bearer"),
+    ))
+
+    decorated = config_service._decorate_model_options(public, {})[0]
+    assert decorated["api_key_source"] == "oauth:chatgpt"
+    assert decorated["api_key_state"] == ("configured" if connected else "missing")
+    assert decorated["api_key_configured"] is connected
+
+
+def test_api_key_model_option_decoration_keeps_legacy_credential_metadata(monkeypatch):
+    import json
+
+    from core.web.services import config_service
+
+    public = {"llm": {"schema_version": 1, "model_library": {"api-test": {
+        "model": "synthetic-model", "provider": {
+            "kind": "openai", "base_url": "https://api.openai.com/v1", "api_key_env": "SYNTHETIC_API_KEY",
+        },
+    }}}}
+    monkeypatch.setattr(config_service, "_read_env_var", lambda name: "synthetic-paid-key" if name == "SYNTHETIC_API_KEY" else None)
+    decorated = config_service._decorate_model_options(public, {})[0]
+    assert decorated["api_key_source"] == "provider-env:SYNTHETIC_API_KEY"
+    assert decorated["api_key_state"] == "configured"
+    assert decorated["api_key_configured"] is True
+    assert "synthetic-paid-key" not in json.dumps(decorated)

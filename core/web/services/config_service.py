@@ -23,6 +23,8 @@ import httpx
 
 import config.public_config as public_config_module
 from config import LLMConfig, LLMProfile, ProviderConfig
+from config.chatgpt_subscription import is_subscription_provider
+from config.llm_credentials import resolve_credential_ref
 from config.models import (
     PROFILE_LABELS,
     PROVIDER_API_KEY_ENV_ALIASES,
@@ -622,15 +624,23 @@ def _decorate_model_options(public_config: dict[str, Any], draft_meta: dict | No
                 "api_key_env": api_key_env,
             }
         )
-        resolved_api_key, api_key_source = _resolve_model_option_api_key(option_provider, option_profile, draft_meta)
-        resolved_configured, state = _api_key_display_state(
-            api_key_env,
-            bool(resolved_api_key) or bool(option.get("api_key_configured", False)),
-            draft_meta,
-        )
-        if option_provider.requires_api_key and not resolved_api_key and not str(api_key_source or "").startswith(("pending-clear:", "pending-env:")):
-            state = "missing"
-            resolved_configured = False
+        if is_subscription_provider(option_provider):
+            # Model pickers need connection metadata, never a refreshed bearer
+            # or a fallback to an unrelated paid API credential.
+            credential = resolve_credential_ref(option_provider.credential_ref, resolve_secret=False)
+            api_key_source = credential.source
+            state = credential.state
+            resolved_configured = state == "configured"
+        else:
+            resolved_api_key, api_key_source = _resolve_model_option_api_key(option_provider, option_profile, draft_meta)
+            resolved_configured, state = _api_key_display_state(
+                api_key_env,
+                bool(resolved_api_key) or bool(option.get("api_key_configured", False)),
+                draft_meta,
+            )
+            if option_provider.requires_api_key and not resolved_api_key and not str(api_key_source or "").startswith(("pending-clear:", "pending-env:")):
+                state = "missing"
+                resolved_configured = False
         protocol_route = _model_option_protocol_route_summary(decorated, details)
         decorated["api_key_configured"] = resolved_configured
         decorated["api_key_state"] = state
