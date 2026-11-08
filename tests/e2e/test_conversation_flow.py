@@ -60,6 +60,8 @@ def _thread_message_count(page: Any) -> int:
 
 def test_send_message_stop_mode_then_terminate(page: Any, e2e_instance: Any) -> None:
     """发消息后进入 stop 模式 + turn stage + 消息数增长；终止后回到可输入态。"""
+    from playwright.sync_api import expect
+
     session_id = create_session(e2e_instance.port, title="e2e conversation flow")
     _open_session(page, e2e_instance.base_url, session_id)
 
@@ -99,7 +101,7 @@ def test_send_message_stop_mode_then_terminate(page: Any, e2e_instance: Any) -> 
     while page.locator(STOP_BUTTON).count() > 0 and page.locator(STOP_BUTTON).first.is_visible():
         assert page.evaluate("performance.now()") < deadline, "终止后 stop 模式未退出"
         page.wait_for_timeout(300)
-    assert composer.is_enabled(), "终止后 composer 仍不可输入"
+    expect(composer).to_be_enabled(timeout=30_000)
     composer.fill("停止后的测试草稿")
     page.locator(SEND_BUTTON).first.wait_for(state="visible", timeout=15_000)
 
