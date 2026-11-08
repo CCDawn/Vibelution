@@ -510,11 +510,12 @@ def test_wake_cooldown_then_hourly_cap(monkeypatch):
         pending_inbox=[_receipt_row("r-1", reply_to="m-1")],
     )
     cooldown = patrol.WAKE_COOLDOWN_SECONDS
-    patrol.patrol_once(now=NOW)                     # wake 1
-    patrol.patrol_once(now=NOW + cooldown + 1.0)    # wake 2
-    patrol.patrol_once(now=NOW + 2 * (cooldown + 1.0))  # hourly cap hit → throttled
-    assert len(harness.wake_calls) == 2
-    result = patrol.patrol_once(now=NOW + 2 * (cooldown + 1.0))
+    cap = patrol.MAX_WAKES_PER_HOUR
+    for index in range(cap):
+        patrol.patrol_once(now=NOW + index * (cooldown + 1.0))
+    assert len(harness.wake_calls) == cap
+    # 小时配额用尽 → 下一轮节流。
+    result = patrol.patrol_once(now=NOW + cap * (cooldown + 1.0))
     assert result["wake"]["reason"] == "throttled"
 
 

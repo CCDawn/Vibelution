@@ -20,8 +20,8 @@ PA 派出任务后是纯被动方：``delegationPolicy.allowWakeMessages=False``
    一条一轮。这是刻意绕开 delegation 唤醒策略闸门的唯一例外路径：
    ``allowWakeMessages=False`` 的全局语义（到达不唤醒 PA）原样保留、此处
    不做任何修改——投递失败报告等后台写入仍依赖它静默；例外只发生在「PA
-   自己的派遣已拿到回复、再不消化就永远没人看」这一种情形，并带 15min
-   冷却 + 每小时 2 次上限。一次唤醒就是一轮完整 LLM turn，冷却是成本闸。
+   自己的派遣已拿到回复、再不消化就永远没人看」这一种情形，并带 2min
+   冷却 + 每小时 8 次上限。一次唤醒就是一轮完整 LLM turn，冷却是成本闸。
    唤醒遵循「先预留后提交」（范本 assistant_runtime/patrol）：提交前把
    ``reserved`` 意图落台账，turn 真正起来（started）才把本批 N 条回执在
    一个事务里全部落 ``digested_at``（全有或全无，不留半消化态）并 consume
@@ -110,8 +110,8 @@ MAX_FOLLOWUPS_PER_DISPATCH = 2
 FOLLOWUP_MAX_AGE_SECONDS = 24 * 3600.0
 
 # 唤醒：冷却 + 每小时上限。
-WAKE_COOLDOWN_SECONDS = 15 * 60.0
-MAX_WAKES_PER_HOUR = 2
+WAKE_COOLDOWN_SECONDS = 2 * 60.0
+MAX_WAKES_PER_HOUR = 8
 WAKE_HOUR_WINDOW_SECONDS = 3600.0
 
 # 摘要卡：轮转（=推送一条新通知）间隔 + 行可见新鲜度。
