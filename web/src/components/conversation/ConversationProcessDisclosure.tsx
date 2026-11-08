@@ -389,13 +389,19 @@ export function ConversationProcessDisclosure({
             {content}
           </div>
         </div>
-        <div className={styles.flowStatusRow}>
+        <div className={[
+          styles.flowStatusRow,
+          running ? styles.flowStatusRowRunning : state === "failed" ? styles.flowStatusRowFailed : "",
+        ].filter(Boolean).join(" ")}>
           <VButton
             ref={workTriggerRef}
             type="button"
             variant="ghost"
             contentLayout="plain"
-            className={styles.flowWorkToggle}
+            className={[
+              styles.flowWorkToggle,
+              running ? styles.flowWorkToggleLive : state === "failed" ? styles.flowWorkToggleFailed : "",
+            ].filter(Boolean).join(" ")}
             data-codex-process-work-toggle="true"
             data-codex-process-focus-scope={focusScope}
             aria-controls={`${contentId}-work`}
