@@ -79,6 +79,7 @@ def test_a_share_backtest_fields_blocking_preview_and_trading_day_schedule(
     source = page.get_by_role("combobox", name="AI回测历史行情源", exact=True)
     expect(source).to_be_visible(timeout=30_000)
     expect(source).to_contain_text("腾讯财经")
+    page.get_by_role("button", name="高级设置 · 费用、撮合与预算", exact=True).click()
     volume_cap = page.get_by_role("spinbutton", name="日成交量上限 %", exact=True)
     expect(volume_cap).to_have_value("1")
     research_input = page.get_by_role("combobox", name="AI回测研究输入", exact=True)
