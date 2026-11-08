@@ -6,6 +6,7 @@ import time
 
 import pytest
 
+from core.infrastructure.cua_driver_client import CuaDriverCancelledError
 from core.web.services import personal_assistant_computer_service as service
 
 OWNER = ("assistant", "session", "turn")
@@ -379,6 +380,59 @@ def test_assistant_policy_or_model_change_revokes_only_the_preference(computer, 
     monkeypatch.setattr(service, "_configuration", lambda _: (2, "new-config"))
     assert service.get_state()["grantId"] is None
     assert observe()["ok"]
+
+
+def test_observe_survives_operator_input_while_actions_take_over(computer, monkeypatch):
+    """A read-only observe keeps running while the operator watches the screen;
+    dispatched input still returns control on any real mouse or keyboard use."""
+    tick = computer["tick"]
+    rows, snapshot, calls = computer["rows"], computer["snapshot"], computer["calls"]
+
+    class WatchedConnection:
+        def __init__(self, checker):
+            self.checker = checker
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def windows(self, *, on_screen_only=False):
+            tick[0] += 1  # The operator moves the mouse during enumeration.
+            return copy.deepcopy(rows)
+
+        def snapshot(self, window, **kwargs):
+            tick[0] += 1  # The driver re-enumerates windows inside each snapshot.
+            return copy.deepcopy(snapshot)
+
+        def act(self, window, action, element, text):
+            reason = self.checker()
+            if reason:
+                raise CuaDriverCancelledError(reason)
+            calls.append((action, window["pid"], element, text))
+
+        def click_at(self, window, x, y, capture_id):
+            reason = self.checker()
+            if reason:
+                raise CuaDriverCancelledError(reason)
+            calls.append(("click_at", window["pid"], x, y, capture_id))
+
+        def hotkey(self, window, keys):
+            reason = self.checker()
+            if reason:
+                raise CuaDriverCancelledError(reason)
+            calls.append(("hotkey", window["pid"], keys))
+
+    monkeypatch.setattr(service.adapter, "Connection", WatchedConnection)
+    result = observe()
+    assert result["ok"] and result["visualDescription"]  # Operator input did not cancel the observe.
+    assert service.get_state()["status"] != "manual"
+    # The same live input cancels a dispatched click instead.
+    click = service.execute(OWNER, action="click", observation_id=result["observationId"],
+                            element_id="0", cancel_checker=lambda: "")
+    assert click["ok"] is False and click["status"] == "cancelled"
+    assert calls == []  # No input reached the driver.
 
 
 def test_detected_human_input_retires_old_observation(computer):

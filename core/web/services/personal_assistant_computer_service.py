@@ -473,7 +473,12 @@ def execute(owner, *, action="observe", observation_id="", element_id="", text="
         with _lock:
             epoch = _epoch
             grant_ref = _grant
-        check = _checker(owner, epoch, cancel_checker, adapter.last_input_tick())
+        # Human-takeover detection guards dispatched input only: an observe is
+        # read-only and typically runs while the operator watches the screen,
+        # so cancelling it on idle mouse movement would block every supervised
+        # session. Input actions still take over on any real input.
+        takes_over = action not in {"observe", "launch"}
+        check = _checker(owner, epoch, cancel_checker, adapter.last_input_tick() if takes_over else None)
         _require(check)
         if action in _OBSERVATION_ACTIONS:
             with _lock:
