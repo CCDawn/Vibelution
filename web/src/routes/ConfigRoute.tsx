@@ -1796,9 +1796,9 @@ export function ConfigRoute() {
         {isSectionVisible("models") ? (
           <div className={styles.providerModelsLayout}>
             <VTabs aria-label={currentLanguage === "en" ? "Model settings" : "模型设置"}
-              className="!pb-0 border-b border-vui-border-subtle"
-              listClassName="!w-fit !flex-nowrap !gap-5 !rounded-none !border-0 !bg-transparent !p-0"
-              triggerClassName="!min-h-10 !rounded-none !border-0 !border-b-2 !border-transparent !bg-transparent !px-0 !shadow-none data-[state=active]:!border-b-[var(--accent-cool)]"
+              className={styles.modelTopTabs}
+              listClassName={styles.modelTabList}
+              triggerClassName={styles.modelTabTrigger}
               value={modelSettingsView} onValueChange={setModelSettingsView} items={[
               { id: "services", label: MODEL_SETTINGS_COPY[currentLanguage === "en" ? "en" : "zh"].services },
               { id: "usage", label: MODEL_SETTINGS_COPY[currentLanguage === "en" ? "en" : "zh"].usage },

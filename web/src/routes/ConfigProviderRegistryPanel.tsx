@@ -1462,8 +1462,8 @@ export function ConfigProviderRegistryPanel({
             <VButton className={styles.backProviders} variant="ghost" aria-label={text.backProviders} icon={<ArrowLeft size={16} />} onPress={() => setMobileDetail(false)} />
             <h2 title={provider.providerId}>{provider.label || provider.providerId}</h2>
             <VTabs aria-label={provider.label || provider.providerId}
-              listClassName="!w-fit !flex-nowrap !gap-5 !rounded-none !border-0 !bg-transparent !p-0"
-              triggerClassName="!min-h-10 !rounded-none !border-0 !border-b-2 !border-transparent !bg-transparent !px-0 !shadow-none data-[state=active]:!border-b-[var(--accent-cool)]"
+              listClassName={styles.providerTabList}
+              triggerClassName={styles.providerTabTrigger}
               value={selectedTab === "models" ? "models" : "connection"} onValueChange={(tab) => onSelectTab(tab as ConfigProviderRegistryTab)} items={[{ id: "models", label: text.models }, { id: "connection", label: text.connection }]} />
             </header>
             {visibleFeedback ? (

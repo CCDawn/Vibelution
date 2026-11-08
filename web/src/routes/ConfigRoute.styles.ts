@@ -19,6 +19,9 @@ const sectionHeaderSurface =
   "[border-bottom:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_96%,var(--fg-primary)_4%)] [background:var(--vui-surface-toolbar)]";
 
 const styles = {
+  modelTopTabs: "vui-routes-configroute modelTopTabs !pb-0 border-b border-vui-border-subtle",
+  modelTabList: "vui-routes-configroute modelTabList !w-fit !flex-nowrap !gap-5 !rounded-none !border-0 !bg-transparent !p-0",
+  modelTabTrigger: "vui-routes-configroute modelTabTrigger !min-h-10 !rounded-none !border-0 !border-b-2 !border-transparent !bg-transparent !px-0 !shadow-none data-[state=active]:!border-b-[var(--accent-cool)]",
   modelPage: "vui-routes-configroute modelPage !h-full !overflow-hidden",
   modelSettingsSplit: "vui-routes-configroute modelSettingsSplit !overflow-hidden max-[720px]:[&>[data-vui=split-sidebar]]:shrink-0 max-[720px]:[&>[data-vui=split-main]]:!min-h-0 max-[720px]:[&>[data-vui=split-main]]:!flex-1 max-[720px]:[&>[data-vui=split-main]]:!overflow-hidden",
   modelContent: "vui-routes-configroute modelContent !h-full !overflow-hidden",

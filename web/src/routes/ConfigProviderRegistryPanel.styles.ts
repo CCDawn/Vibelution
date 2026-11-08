@@ -1,4 +1,6 @@
 const styles = {
+  providerTabList: "vui-routes-configproviderregistrypanel providerTabList !w-fit !flex-nowrap !gap-5 !rounded-none !border-0 !bg-transparent !p-0",
+  providerTabTrigger: "vui-routes-configproviderregistrypanel providerTabTrigger !min-h-10 !rounded-none !border-0 !border-b-2 !border-transparent !bg-transparent !px-0 !shadow-none data-[state=active]:!border-b-[var(--accent-cool)]",
   subscriptionWorkspace: "vui-routes-configproviderregistrypanel subscriptionWorkspace flex h-full min-h-0 min-w-0 flex-col overflow-hidden",
   subscriptionBack: "vui-routes-configproviderregistrypanel subscriptionBack !min-h-10 shrink-0 self-start mx-4 my-2",
   subscriptionScroll: "vui-routes-configproviderregistrypanel subscriptionScroll min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-6 pb-6 [scrollbar-gutter:stable] max-[720px]:px-4",
