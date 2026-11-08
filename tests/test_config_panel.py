@@ -2029,6 +2029,82 @@ def test_build_effective_config_prefers_model_user_env_key_on_windows(monkeypatc
     assert effective.get_api_key_for_profile(profile_id="primary") == "model-secret"
 
 
+def test_models_read_env_var_prefers_hkcu_when_user_env_fallback_enabled(monkeypatch):
+    import config.models as config_models
+
+    monkeypatch.setenv("VIBELUTION_ENABLE_USER_ENV_FALLBACK", "1")
+    monkeypatch.setenv("VIBELUTION_LLM_TEST_PRIORITY_KEY", "process-env-fake-value")
+    monkeypatch.setattr(
+        "config.models._read_windows_user_env_var",
+        lambda name: "hkcu-fake-value" if name == "VIBELUTION_LLM_TEST_PRIORITY_KEY" else None,
+    )
+
+    # HKCU 是 UI 保存密钥的权威位置：进程继承的同名旧值不得遮蔽它。
+    assert config_models._read_env_var("VIBELUTION_LLM_TEST_PRIORITY_KEY") == "hkcu-fake-value"
+
+
+def test_models_read_env_var_falls_back_to_process_env_when_hkcu_missing(monkeypatch):
+    import config.models as config_models
+
+    monkeypatch.setenv("VIBELUTION_ENABLE_USER_ENV_FALLBACK", "1")
+    monkeypatch.setenv("VIBELUTION_LLM_TEST_PRIORITY_KEY", "process-env-fake-value")
+    monkeypatch.setattr("config.models._read_windows_user_env_var", lambda name: None)
+
+    assert config_models._read_env_var("VIBELUTION_LLM_TEST_PRIORITY_KEY") == "process-env-fake-value"
+
+
+def test_models_read_env_var_keeps_process_env_only_when_flag_off(monkeypatch):
+    import config.models as config_models
+
+    monkeypatch.delenv("VIBELUTION_ENABLE_USER_ENV_FALLBACK", raising=False)
+    monkeypatch.setenv("VIBELUTION_LLM_TEST_PRIORITY_KEY", "process-env-fake-value")
+    hkcu_reads = []
+
+    def _record_hkcu_read(name):
+        hkcu_reads.append(name)
+        return "hkcu-fake-value"
+
+    monkeypatch.setattr("config.models._read_windows_user_env_var", _record_hkcu_read)
+
+    # flag 关闭时保持现状：只读进程环境，不触碰 HKCU。
+    assert config_models._read_env_var("VIBELUTION_LLM_TEST_PRIORITY_KEY") == "process-env-fake-value"
+    assert hkcu_reads == []
+
+
+def test_public_config_read_env_var_prefers_hkcu_when_user_env_fallback_enabled(monkeypatch):
+    monkeypatch.setenv("VIBELUTION_ENABLE_USER_ENV_FALLBACK", "1")
+    monkeypatch.setenv("VIBELUTION_LLM_TEST_PRIORITY_KEY", "process-env-fake-value")
+    monkeypatch.setattr(
+        "config.public_config._read_windows_user_env_var",
+        lambda name: "hkcu-fake-value" if name == "VIBELUTION_LLM_TEST_PRIORITY_KEY" else "",
+    )
+
+    assert public_config_module._read_env_var("VIBELUTION_LLM_TEST_PRIORITY_KEY") == "hkcu-fake-value"
+
+
+def test_public_config_read_env_var_falls_back_to_process_env_when_hkcu_missing(monkeypatch):
+    monkeypatch.setenv("VIBELUTION_ENABLE_USER_ENV_FALLBACK", "1")
+    monkeypatch.setenv("VIBELUTION_LLM_TEST_PRIORITY_KEY", "process-env-fake-value")
+    monkeypatch.setattr("config.public_config._read_windows_user_env_var", lambda name: "")
+
+    assert public_config_module._read_env_var("VIBELUTION_LLM_TEST_PRIORITY_KEY") == "process-env-fake-value"
+
+
+def test_public_config_read_env_var_keeps_process_env_only_when_flag_off(monkeypatch):
+    monkeypatch.delenv("VIBELUTION_ENABLE_USER_ENV_FALLBACK", raising=False)
+    monkeypatch.setenv("VIBELUTION_LLM_TEST_PRIORITY_KEY", "process-env-fake-value")
+    hkcu_reads = []
+
+    def _record_hkcu_read(name):
+        hkcu_reads.append(name)
+        return "hkcu-fake-value"
+
+    monkeypatch.setattr("config.public_config._read_windows_user_env_var", _record_hkcu_read)
+
+    assert public_config_module._read_env_var("VIBELUTION_LLM_TEST_PRIORITY_KEY") == "process-env-fake-value"
+    assert hkcu_reads == []
+
+
 def test_preserve_secret_blanks_keeps_existing_api_key():
     old_public = {
         "llm": {

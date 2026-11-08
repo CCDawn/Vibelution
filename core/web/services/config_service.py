@@ -786,6 +786,27 @@ def _resolve_model_option_api_key(
     meta = _normalize_draft_meta(draft_meta)
     pending = meta["pending_api_keys"]
     cleared = meta["pending_cleared_api_keys"]
+    # Provider credential_ref resolves before any kind-derived vendor env: chat
+    # (ProviderConfig.resolve_api_key) and discovery (provider_discovery.service)
+    # both honor credential_ref first, so the probe path must too. Without this,
+    # a provider like opencode_go (credential_ref "env:OPENCODE_API_KEY", default
+    # kind "openai") probes with OPENAI_API_KEY and reports a false auth failure.
+    credential_ref = str(provider.credential_ref or "").strip()
+    if credential_ref.startswith("env:"):
+        try:
+            credential = resolve_credential_ref(credential_ref, resolve_secret=True)
+        except ValueError:
+            credential = None
+        if credential is not None and credential.reference.startswith("env:"):
+            credential_env = credential.reference.removeprefix("env:")
+            if isinstance(cleared, list) and credential_env in cleared:
+                return None, f"pending-clear:{credential_env}"
+            if isinstance(pending, dict) and credential_env in pending:
+                pending_secret = _resolve_pending_api_key(credential_env, pending[credential_env])
+                if pending_secret is not None:
+                    return pending_secret, f"pending-env:{credential_env}"
+            if credential.secret:
+                return credential.secret, f"credential-ref:env:{credential_env}"
     env_candidates = [
         str(profile.api_key_env or "").strip(),
         str(provider.api_key_env or "").strip(),

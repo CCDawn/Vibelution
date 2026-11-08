@@ -92,14 +92,22 @@ def _read_windows_user_env_var(name: str) -> Optional[str]:
 
 
 def _read_env_var(name: str) -> Optional[str]:
-    """读取环境变量；Windows 下在进程环境缺失时回退到用户级环境变量。"""
+    """读取环境变量；flag 开启时 HKCU 用户级环境变量优先于进程环境。
+
+    HKCU 是 UI 保存密钥的权威位置；产品进程可能从改值前的旧会话块继承了
+    同名旧值，os.environ 直读会让旧 key 永久遮蔽 UI 新保存的值（重新保存
+    只影响写入那一刻的进程）。HKCU 没有该名字时回退进程环境；flag 关闭时
+    保持 os.environ 直读的现状。
+    """
+    fallback_enabled = str(os.environ.get("VIBELUTION_ENABLE_USER_ENV_FALLBACK", "") or "").strip().lower()
+    if fallback_enabled in {"1", "true", "yes", "on"}:
+        user_value = _read_windows_user_env_var(name)
+        if user_value:
+            return user_value
     value = os.environ.get(name)
     if value:
         return value
-    fallback_enabled = str(os.environ.get("VIBELUTION_ENABLE_USER_ENV_FALLBACK", "") or "").strip().lower()
-    if fallback_enabled not in {"1", "true", "yes", "on"}:
-        return None
-    return _read_windows_user_env_var(name)
+    return None
 
 
 def _is_local_base_url(base_url: str) -> bool:

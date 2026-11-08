@@ -1596,13 +1596,17 @@ def _read_windows_user_env_var(name: str) -> str:
 
 
 def _read_env_var(name: str) -> str:
-    value = os.environ.get(name, "")
-    if value:
-        return value
+    # HKCU-first mirrors config.models._read_env_var: HKCU is the authoritative
+    # location where the UI persists keys; a value inherited into the process
+    # may come from a session block written before the key changed and would
+    # shadow the fresh HKCU value forever. Without the flag, keep reading
+    # os.environ only.
     fallback_enabled = str(os.environ.get("VIBELUTION_ENABLE_USER_ENV_FALLBACK", "") or "").strip().lower()
-    if fallback_enabled not in {"1", "true", "yes", "on"}:
-        return ""
-    return _read_windows_user_env_var(name)
+    if fallback_enabled in {"1", "true", "yes", "on"}:
+        user_value = _read_windows_user_env_var(name)
+        if user_value:
+            return user_value
+    return os.environ.get(name, "")
 
 
 def read_persisted_user_env_var(name: str) -> str:
