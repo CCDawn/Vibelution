@@ -383,6 +383,60 @@ describe("direct model services workspace", () => {
     expect(onUpdateModel).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { language: "zh" as const, providerHint: "服务商总开关 · 立即保存", modelHint: "单个模型开关 · 立即保存" },
+    { language: "en" as const, providerHint: "Provider switch · Saved immediately", modelHint: "Single model switch · Saved immediately" },
+  ])("uses the immediate model list callback with distinct short switch hints ($language)", async ({ language, providerHint, modelHint }) => {
+    const onToggleModelEnabled = vi.fn();
+    const onToggleEnabled = vi.fn();
+    const onModelEditorDraftChange = vi.fn();
+    const onUpdateModel = vi.fn();
+    const current = { ...model("luna", "pinned"), draftEntry: { enabled: true, label: "Luna" } };
+    const props = panelProps([current], {
+      copy: CONFIG_COPY[language], language, onToggleModelEnabled, onToggleEnabled, onModelEditorDraftChange, onUpdateModel,
+      modelEditorDrafts: { "relay_a/luna": { enabled: false, label: "Unsaved Luna" } },
+    });
+    const { container, rerender } = await mountWorkspace(props);
+    const providerToggle = container.querySelector<HTMLInputElement>('[data-provider-switch]')!;
+    const modelToggle = container.querySelector<HTMLInputElement>('[data-model-row="relay_a/luna"] [role="switch"]')!;
+    expect(providerToggle.title).toBe(providerHint);
+    expect(modelToggle.title).toBe(modelHint);
+    expect(providerToggle.title + modelToggle.title).not.toMatch(/Save to external config|保存到外部配置/i);
+    expect(modelToggle.checked).toBe(true);
+    await act(async () => modelToggle.click());
+    expect(onToggleModelEnabled).toHaveBeenCalledExactlyOnceWith("relay_a/luna", false);
+    expect(modelToggle.checked).toBe(true);
+    expect(onToggleEnabled).not.toHaveBeenCalled();
+    expect(onModelEditorDraftChange).not.toHaveBeenCalled();
+    expect(onUpdateModel).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-model-detail]')).toBeNull();
+    await rerender({ ...props, rows: [provider([{ ...current, draftEntry: { ...current.draftEntry, enabled: false } }])] });
+    expect(modelToggle.checked).toBe(false);
+  });
+
+  it("uses the immediate model callback from the editor while preserving its text draft", async () => {
+    const onToggleModelEnabled = vi.fn();
+    const onModelEditorDraftChange = vi.fn();
+    const onUpdateModel = vi.fn();
+    const current = { ...model("luna", "pinned"), draftEntry: { enabled: true, label: "Luna" } };
+    const { container } = await mountWorkspace(panelProps([current], {
+      onToggleModelEnabled, onModelEditorDraftChange, onUpdateModel,
+      modelEditorDrafts: { "relay_a/luna": { enabled: false, label: "Unsaved Luna" } },
+    }));
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-model-row="relay_a/luna"] button')!.click());
+    const toggle = container.querySelector<HTMLInputElement>('[data-model-edit-field="enabled"] [role="switch"]')!;
+    const label = container.querySelector<HTMLInputElement>('[data-model-edit-field="label"] input')!;
+    expect(toggle.checked).toBe(true);
+    expect(toggle.title).toBe("单个模型开关 · 立即保存");
+    expect(label.value).toBe("Unsaved Luna");
+    await act(async () => toggle.click());
+    expect(onToggleModelEnabled).toHaveBeenCalledExactlyOnceWith("relay_a/luna", false);
+    expect(onModelEditorDraftChange).not.toHaveBeenCalled();
+    expect(onUpdateModel).not.toHaveBeenCalled();
+    expect(toggle.checked).toBe(true);
+    expect(label.value).toBe("Unsaved Luna");
+  });
+
   it.each([{ disabled: true, modelUpdateBusy: false }, { disabled: false, modelUpdateBusy: true }])(
     "prevents model switch draft changes while disabled or saving ($disabled, $modelUpdateBusy)",
     async ({ disabled, modelUpdateBusy }) => {
