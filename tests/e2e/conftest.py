@@ -266,7 +266,10 @@ def page(e2e_instance: E2EInstance):
         return
 
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
+        browser = playwright.chromium.launch(
+            headless=True,
+            executable_path=os.environ.get("VIBELUTION_E2E_BROWSER_EXECUTABLE") or None,
+        )
         try:
             context = browser.new_context(viewport={"width": 1440, "height": 900}, locale="zh-CN")
             context.set_default_timeout(30_000)
