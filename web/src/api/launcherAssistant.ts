@@ -103,6 +103,7 @@ export type LauncherAssistantRequest =
   | { operation: "setManagementPermissionPreset"; preset: AgentPermissionPreset; expectedRevision: number }
   | { operation: "detail"; beforeMessageIndex?: number }
   | { operation: "status" | "dispatches" | "hide" | "approvals" | "openLauncher" | "assistantAvatar" }
+  | { operation: "acknowledgePatrolDelivery" }
   | { operation: "resolveApproval"; requestId: string; decision: "accept" | "decline" }
   | { operation: "previewDispatchApproval"; dispatchId: string; taskId: string; approvalId: string }
   | { operation: "declineDispatchApproval"; dispatchId: string; taskId: string; approvalId: string; revision: string }
@@ -428,6 +429,22 @@ export async function getLauncherAssistantStatus(): Promise<LauncherAssistantSta
     }
   }
   return result as LauncherAssistantStatus;
+}
+
+/** The user acknowledged the "unreported delivery" banner: pending patrol
+ * ledger entries stop counting until a later re-armed recovery fails again. */
+const PATROL_DELIVERY_STATES = ["unknown", "observed", "failed", "interrupted", "completed", "cancelled_pre_admission"];
+export async function acknowledgeLauncherPatrolDelivery(): Promise<{ deliveryStates: Record<string, number> }> {
+  const result = await launcherAssistantInvoke({ operation: "acknowledgePatrolDelivery" });
+  if (!record(result) || Object.keys(result).length !== 1 || !record(result.deliveryStates)
+    || Array.isArray(result.deliveryStates))
+    throw new Error("ASSISTANT_RESPONSE_INVALID");
+  const keys = Object.keys(result.deliveryStates);
+  if (keys.length !== PATROL_DELIVERY_STATES.length
+    || PATROL_DELIVERY_STATES.some(state => !keys.includes(state))
+    || Object.values(result.deliveryStates).some(value => !Number.isSafeInteger(value) || (value as number) < 0))
+    throw new Error("ASSISTANT_RESPONSE_INVALID");
+  return result as { deliveryStates: Record<string, number> };
 }
 
 /** A CAS write is sent once. Conflicts require a fresh explicit choice. */

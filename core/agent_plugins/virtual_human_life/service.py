@@ -160,6 +160,20 @@ logger = logging.getLogger(__name__)
 DEFAULT_PROACTIVE_DAILY_LIMIT = 10
 DEFAULT_PROACTIVE_MINIMUM_INTERVAL_MINUTES = 60
 
+# Companion mailbox dispatch pump: one unclassified failure no longer kills the
+# thread. Consecutive failures back off exponentially; once the budget is spent
+# the pump suspends itself (the durable entry stays queued) and the next
+# enqueue re-arms it through ensure_conversation_mailbox_dispatcher.
+MAILBOX_DISPATCH_RETRY_BACKOFF_SECONDS = (0.5, 1.0, 2.0, 4.0, 8.0)
+
+
+def mailbox_dispatch_retry_delay(consecutive_failures: int) -> float | None:
+    """Backoff before the pump's next retry, or None to suspend the pump."""
+    if consecutive_failures < 1 or consecutive_failures > len(MAILBOX_DISPATCH_RETRY_BACKOFF_SECONDS):
+        return None
+    return MAILBOX_DISPATCH_RETRY_BACKOFF_SECONDS[consecutive_failures - 1]
+
+
 class VirtualHumanLifeError(RuntimeError):
     """Base virtual human life error."""
 
@@ -319,6 +333,9 @@ class VirtualHumanLifeService:
         self._current_turn_user_messages: dict[tuple[str, str], str] = {}
         self._mailbox_dispatch_threads_guard = threading.Lock()
         self._mailbox_dispatch_threads: dict[str, threading.Thread] = {}
+        # Instance indirection keeps the pump's backoff sleeps testable without
+        # patching the global time module.
+        self._mailbox_dispatch_sleep = time_module.sleep
         self.self_continuity = SelfContinuity(self)
         self.memory_source_reconciler = LifeMemorySourceReconciler(
             self.store,
@@ -556,6 +573,7 @@ class VirtualHumanLifeService:
         session_id: str,
         dispatch_key: str,
     ) -> None:
+        consecutive_failures = 0
         try:
             while self.runtime_acceptance_provider is None or bool(
                 self.runtime_acceptance_provider()
@@ -568,12 +586,36 @@ class VirtualHumanLifeService:
                 except (AgentUnavailableError, BindingDisabledError):
                     return
                 except Exception as exc:  # noqa: BLE001 - durable entry remains queued
+                    # One unexpected failure no longer kills the pump: back off
+                    # and retry. Once the bounded budget is spent, suspend with
+                    # a structured event; the entry stays queued and the next
+                    # enqueue re-arms the pump via
+                    # ensure_conversation_mailbox_dispatcher.
+                    consecutive_failures += 1
+                    delay = mailbox_dispatch_retry_delay(consecutive_failures)
+                    if delay is None:
+                        logger.warning(
+                            "Virtual human mailbox dispatch suspended for "
+                            "agent=%s session=%s consecutiveFailures=%d "
+                            "lastError=%s reason=mailbox_dispatch_backoff_exhausted.",
+                            agent_id,
+                            session_id,
+                            consecutive_failures - 1,
+                            type(exc).__name__,
+                        )
+                        return
                     logger.warning(
-                        "Virtual human mailbox dispatch paused for agent=%s (%s).",
+                        "Virtual human mailbox dispatch retry %d/%d deferred "
+                        "for agent=%s (%s); retrying in %.1fs.",
+                        consecutive_failures,
+                        len(MAILBOX_DISPATCH_RETRY_BACKOFF_SECONDS),
                         agent_id,
                         type(exc).__name__,
+                        delay,
                     )
-                    return
+                    self._mailbox_dispatch_sleep(delay)
+                    continue
+                consecutive_failures = 0
                 if bool(result.get("retryDeferred")):
                     return
                 if bool(result.get("accepted")):

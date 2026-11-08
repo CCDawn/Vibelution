@@ -107,4 +107,22 @@ describe("Launcher page-level notices", () => {
     expect(notices.map(notice => notice.kind)).toEqual(["appearance"]);
     expect(launcherAssistantPageNotices({ lang: "zh", reads: [], appearance: [] })).toEqual([]);
   });
+
+  it("gives the unreported-delivery notice an acknowledge exit and keeps it silent without one", async () => {
+    const noExit = launcherAssistantPageNotices({ lang: "zh", reads: [], appearance: [], deliveryUnreported: true });
+    expect(noExit).toHaveLength(1);
+    expect(noExit[0]).toMatchObject({ id: "assistant-delivery", kind: "delivery", tone: "warning" });
+    expect(noExit[0].actions).toBeUndefined();
+    const run = vi.fn();
+    const notices = launcherAssistantPageNotices({ lang: "zh", reads: [], appearance: [],
+      deliveryUnreported: true, deliveryAcknowledge: { pending: true, run: () => run() } });
+    expect(notices[0].actions).toHaveLength(1);
+    expect(notices[0].actions?.[0]).toMatchObject({ id: "acknowledge", label: "已知晓", pending: true });
+    await notices[0].actions?.[0].run();
+    expect(run).toHaveBeenCalledOnce();
+    expect(launcherAssistantPageNotices({ lang: "en", reads: [], appearance: [] })).toEqual([]);
+    const english = launcherAssistantPageNotices({ lang: "en", reads: [], appearance: [],
+      deliveryUnreported: true, deliveryAcknowledge: { pending: false, run } });
+    expect(english[0].actions?.[0].label).toBe("Acknowledge");
+  });
 });

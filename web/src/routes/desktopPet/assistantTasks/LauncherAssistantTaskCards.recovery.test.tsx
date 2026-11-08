@@ -374,4 +374,40 @@ describe("task progress recovery", () => {
     expect(notices).toHaveLength(1);
     expectReadOnly();
   });
+
+  it("keeps a degraded receipt row polling at the low-speed keepalive and refreshes it on reopen", async () => {
+    rows = [{ dispatchId: "dispatch-degraded", projectId: "project-1", agentId: "worker-1", nativeTaskId: "native-9",
+      receipt: { taskId: "native-9", status: "running", shouldPoll: true },
+      lastError: { code: "BACKEND_UNAVAILABLE", message: "暂不可用" } }];
+    const dispatchReads = () => operations().filter(operation => operation === "dispatches").length;
+    await render();
+    expect(dispatchReads()).toBe(1);
+    expect(notices).toEqual([]);
+    expect(model!.tasks[0]).toMatchObject({ state: "unknown", shouldPoll: false, sourceAvailable: false });
+    // No fast cadence for a degraded row: it is not a healthy polling task.
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); }); await settle();
+    expect(dispatchReads()).toBe(1);
+    // The keepalive still polls past the single observation failure...
+    await act(async () => { await vi.advanceTimersByTimeAsync(12_100); }); await settle();
+    expect(dispatchReads()).toBe(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_100); }); await settle();
+    expect(dispatchReads()).toBe(3);
+    // ...and one hide/show cycle refreshes the degraded feed immediately.
+    invoke.mockClear();
+    visibility = "hidden";
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    visibility = "visible";
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    await settle();
+    expect(dispatchReads()).toBe(1);
+    // Once the receipt stops asking for polling, the feed goes quiet again.
+    rows = rows.map(row => ({ ...row, receipt: { taskId: "native-9", status: "succeeded", shouldPoll: false } }));
+    invoke.mockClear();
+    // The next keepalive tick observes the settled receipt before it can stop.
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); }); await settle();
+    expect(dispatchReads()).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); }); await settle();
+    expect(dispatchReads()).toBe(1);
+    expectReadOnly();
+  });
 });

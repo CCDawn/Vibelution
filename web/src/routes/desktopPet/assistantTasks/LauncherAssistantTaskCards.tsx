@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { getLauncherAssistantDispatches, getLauncherAssistantStatus, getLauncherAssistantTeamRuns } from "../../../api/launcherAssistant";
-import { projectAssistantDispatchTasks, type AssistantDispatchTask } from "./assistantDispatchTasks";
+import { assistantDispatchKeepalivePending, projectAssistantDispatchTasks, type AssistantDispatchTask } from "./assistantDispatchTasks";
 import { assistantTeamRunPageNeedsRefresh, projectAssistantTeamRunTasks, retainAssistantTeamRunDisplay, type AssistantTask, type AssistantTeamRunObservationPage } from "./assistantTeamRunTasks";
-import { assistantTaskErrorProbeInterval } from "./assistantTaskProbes";
+import { assistantTaskErrorProbeInterval, ASSISTANT_TASK_KEEPALIVE_INTERVAL_MS } from "./assistantTaskProbes";
 import { taskCleanupTargets, taskGroup, taskTime, useAssistantTaskCleanup, type AssistantCleanupCollection, type AssistantCleanupSourceError } from "./assistantTaskCleanup";
 import { LauncherTaskCleanupDialog } from "./LauncherTaskCleanupDialog";
 import { LauncherAssistantTaskDetail } from "./LauncherAssistantTaskDetail";
@@ -112,11 +112,16 @@ export function LauncherAssistantTaskCards({onReview,onApproval,onOpenConversati
     // An error keeps a bounded liveness probe (3s→6s→12s, five attempts) so a
     // recovered source is rejoined without manual refresh; the gate on
     // `reading` stops it the moment the page hides or the identity is lost.
+    // A successful read whose rows degraded (a row-level receipt observation
+    // failed while the last receipt still asked for polling) keeps the same
+    // low-speed keepalive the main route's raw receipt gate implies — polling
+    // slows instead of stopping on one observation failure.
     refetchInterval: query => {
       if (!reading) return false;
       if (query.state.status === "error") return assistantTaskErrorProbeInterval(dispatchProbeStartedAt.current, Date.now());
-      return query.state.status === "success"
-        && projectAssistantDispatchTasks(query.state.data ?? []).tasks.some(task => task.shouldPoll) ? 3_000 : false;
+      if (query.state.status !== "success") return false;
+      if (projectAssistantDispatchTasks(query.state.data ?? []).tasks.some(task => task.shouldPoll)) return 3_000;
+      return assistantDispatchKeepalivePending(query.state.data ?? []) ? ASSISTANT_TASK_KEEPALIVE_INTERVAL_MS : false;
     },
   });
   const teamQueryKey = ["launcher-assistant", "team-task-cards", agentId, sessionId];
@@ -151,6 +156,16 @@ export function LauncherAssistantTaskCards({onReview,onApproval,onOpenConversati
     if (teamRuns.isSuccess) teamProbeStartedAt.current = null;
     else if (teamRuns.isError) teamProbeStartedAt.current = teamProbeStartedAt.current ?? Date.now();
   }, [teamRuns.isSuccess, teamRuns.isError, identity]);
+  // A degraded feed (a row-level receipt observation failed) refreshes once the
+  // moment the view is readable again after a hide, instead of waiting for the
+  // slow keepalive tick. Initial mounts read through the query itself.
+  const wasReading = useRef(false);
+  useEffect(() => {
+    const returning = reading && !wasReading.current;
+    wasReading.current = reading;
+    if (!returning || !assistantDispatchKeepalivePending(dispatches.data ?? [])) return;
+    void dispatches.refetch();
+  }, [reading, dispatches]);
   useEffect(() => setShown(PAGE_SIZE), [identity]);
   const unavailable = status.isError || dispatches.isError;
   const loading = !unavailable && (!identityConfirmed || status.isPending || dispatches.isPending

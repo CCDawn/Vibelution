@@ -73,6 +73,7 @@ export type AssistantHostRequest =
   | { operation: "setManagementPermissionPreset"; preset: "request_approval" | "auto_review" | "full_access"; expectedRevision: number }
   | { operation: "detail"; beforeMessageIndex?: number }
   | { operation: "status" | "dispatches" | "config" | "approvals" | "assistantAvatar" }
+  | { operation: "acknowledgePatrolDelivery" }
   | { operation: "resolveApproval"; requestId: string; decision: "accept" | "decline" }
   | { operation: "previewDispatchApproval"; dispatchId: string; taskId: string; approvalId: string }
   | { operation: "declineDispatchApproval"; dispatchId: string; taskId: string; approvalId: string; revision: string }
@@ -1033,7 +1034,10 @@ export class AssistantHost {
         if (lifecycle.committed) throw new HostError("ASSISTANT_LIFECYCLE_CLOSING");
         lifecycle.arrival = true;
       }
-      const safeWhileWaiting = ["status", "detail", "dispatches", "teamRuns", "config", "approvals", "curation", "operatorAsset", "assistantAvatar", "setManagementPermissionPreset", "budgetParameters", "setBudgetParameters", "usageSummary", "resolveApproval", "previewDispatchApproval", "decideDispatchApproval", "declineDispatchApproval", "stop", "computerState"]
+      // acknowledgePatrolDelivery is a patrol-ledger-only write: it never
+      // reaches the native Session, so the banner exit stays live while a
+      // migration fence holds ordinary writers.
+      const safeWhileWaiting = ["status", "detail", "dispatches", "teamRuns", "config", "approvals", "curation", "operatorAsset", "assistantAvatar", "setManagementPermissionPreset", "budgetParameters", "setBudgetParameters", "usageSummary", "resolveApproval", "previewDispatchApproval", "decideDispatchApproval", "declineDispatchApproval", "acknowledgePatrolDelivery", "stop", "computerState"]
         .includes(captured.operation);
       // Confirmation only settles an existing native waiter; it remains a
       // counted writer in the host barrier even after admission is sealed.
@@ -1166,6 +1170,18 @@ export class AssistantHost {
             || !Number.isSafeInteger(permission.revision) || (permission.revision as number) < 0)
             throw new HostError("ASSISTANT_RESPONSE_INVALID");
         }
+        return result;
+      }
+      case "acknowledgePatrolDelivery": {
+        if (!ownKeys(payload, ["operation"])) throw new HostError("ASSISTANT_REQUEST_INVALID");
+        const result = await this.rpc(generation, "/api/assistant/patrol/acknowledge", "POST", {}, REQUEST_MS, false, 8192);
+        if (!object(result) || Object.keys(result).length !== 1 || !object(result.deliveryStates))
+          throw new HostError("ASSISTANT_RESPONSE_INVALID");
+        const states = Object.keys(result.deliveryStates);
+        if (states.length !== 6 || !["unknown", "observed", "failed", "interrupted", "completed", "cancelled_pre_admission"]
+          .every(state => states.includes(state))
+          || Object.values(result.deliveryStates).some(value => !Number.isSafeInteger(value) || (value as number) < 0))
+          throw new HostError("ASSISTANT_RESPONSE_INVALID");
         return result;
       }
       case "resolveApproval":

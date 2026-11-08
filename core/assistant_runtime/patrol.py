@@ -33,6 +33,9 @@ _MAX_ENTRIES = 4096
 _RECHECK_INTERVAL = 60.0
 _RECHECK_BATCH = 16
 _MAX_REPORT_RECOVERIES = 2
+# States the Launcher "unreported delivery" banner reads. Entries in these
+# states stop counting once they are no longer pending user attention.
+_BANNER_STATES = {"unknown", "failed", "interrupted"}
 _OWNER = None
 _OWNER_LOCK = threading.RLock()
 
@@ -127,7 +130,7 @@ class LauncherPatrol:
         for item in state["entries"]:
             if (not isinstance(item, dict) or not {"event", "token", "state", "createdAt"}.issubset(item)
                     or set(item) - {"event", "token", "state", "createdAt", "attempts", "cancelProof", "priorTurnId",
-                                   "history", "visibleReport", "escalation", "projectBinding"}
+                                   "history", "visibleReport", "escalation", "projectBinding", "acknowledged"}
                     or not isinstance(item["event"], dict) or not isinstance(item["token"], str)
                     or not _TOKEN.fullmatch(item["token"])
                     or item["state"] not in {"reserved", "accepted", "completed", "cancelled", "unknown", "observed",
@@ -139,6 +142,8 @@ class LauncherPatrol:
                     or any(type(stamp) not in (int, float) or not math.isfinite(stamp) for stamp in attempts)):
                 raise RuntimeError("patrol_state_invalid")
             if "visibleReport" in item and type(item["visibleReport"]) is not bool:
+                raise RuntimeError("patrol_state_invalid")
+            if "acknowledged" in item and type(item["acknowledged"]) is not bool:
                 raise RuntimeError("patrol_state_invalid")
             if "projectBinding" in item and (not isinstance(item["projectBinding"], str) or not _TOKEN.fullmatch(item["projectBinding"])):
                 raise RuntimeError("patrol_state_invalid")
@@ -338,6 +343,31 @@ class LauncherPatrol:
         return (item["state"] in {"failed", "interrupted"} and item.get("visibleReport") is False
                 and bool(item.get("priorTurnId")) and len(item.get("history", [])) < _MAX_REPORT_RECOVERIES)
 
+    @staticmethod
+    def _banner_pending(item):
+        """True while an unknown/failed/interrupted entry is still pending user
+        attention. A visible report, exhausted recoveries, or an explicit user
+        acknowledgment each retire it from the Launcher banner count; the
+        entry itself and its escalation metadata are never deleted."""
+        return (not item.get("acknowledged") and not item.get("visibleReport")
+                and item.get("escalation") != "recovery_exhausted")
+
+    def acknowledge(self):
+        """User acknowledged the unreported-delivery banner: every entry that
+        still counts toward it is marked so it stops counting. The next re-armed
+        recovery attempt starts unacknowledged and counts again if it fails."""
+        with self._lock:
+            if getattr(self, "_broken", False):
+                raise RuntimeError("patrol_state_unknown")
+            changed = False
+            for item in self._state["entries"]:
+                if item["state"] in _BANNER_STATES and self._entry_authorized(item) and self._banner_pending(item):
+                    item["acknowledged"] = True
+                    changed = True
+            if changed:
+                self._save()
+            return self.reconcile()
+
     def inspect(self, rows, *, now=None):
         """Inspect current native snapshots, attempting at most one receipt wake."""
         from . import native
@@ -381,6 +411,7 @@ class LauncherPatrol:
                     item["token"] = secrets.token_hex(32)
                     item.pop("visibleReport", None)
                     item.pop("escalation", None)
+                    item.pop("acknowledged", None)
                 item["attempts"] = [stamp for stamp in item.get("attempts", [item["createdAt"]])
                                     if stamp > observed - _HOUR] + [observed]
                 item["state"] = "reserved"
@@ -619,6 +650,7 @@ class LauncherPatrol:
             if changed:
                 self._save()
             return {state: sum(item["state"] == state and self._entry_authorized(item)
+                               and (state not in _BANNER_STATES or self._banner_pending(item))
                                for item in self._state["entries"])
                     for state in ("unknown", "observed", "failed", "interrupted", "completed", "cancelled_pre_admission")}
 

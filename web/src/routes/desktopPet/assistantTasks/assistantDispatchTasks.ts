@@ -94,6 +94,15 @@ function fingerprint(task: AssistantDispatchTask): string {
     task.sourceAvailable, task.receiptBound, task.pendingApprovalCount, task.title, task.resultSummary, task.shouldPoll, task.cleanupPending]);
 }
 
+/** A row whose receipt observation failed (`lastError`) while its last good
+ * receipt still asked for polling is degraded, not finished. The main route's
+ * raw `receipt.shouldPoll` gate keeps polling those rows, so this surface must
+ * keep a low-speed keepalive too instead of stranding the task until a manual
+ * refresh. `task.shouldPoll` stays the fast-cadence gate for healthy rows. */
+export function assistantDispatchKeepalivePending(rows: readonly LauncherAssistantDispatch[]): boolean {
+  return rows.some(row => Boolean(row.lastError) && row.receipt?.shouldPoll === true);
+}
+
 export function projectAssistantDispatchTasks(
   rows: readonly LauncherAssistantDispatch[], options: { sourceAvailable?: boolean } = {},
 ): AssistantDispatchTaskFeed {

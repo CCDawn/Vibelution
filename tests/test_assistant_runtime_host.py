@@ -305,6 +305,37 @@ def test_dispatch_approval_endpoint_is_private_and_bound():
     assert dispatch.calls[-1] == ("dispatch-1", {"task_id": "task-1", "approval_id": "approval-1", "expected_revision": "policy-1"})
 
 
+def test_patrol_acknowledge_endpoint_is_private_ledger_only():
+    class Patrol:
+        def __init__(self):
+            self.calls = 0
+
+        def acknowledge(self):
+            self.calls += 1
+            return {"unknown": 0, "observed": 0, "failed": 0, "interrupted": 0,
+                    "completed": 1, "cancelled_pre_admission": 0}
+
+    class Dispatch:
+        def list_dispatches(self):
+            return []
+
+    patrol = Patrol()
+    app = create_app(native=Native(), token="private-test-token", dispatch=Dispatch())
+    path = "/api/assistant/patrol/acknowledge"
+    client = TestClient(app, base_url="http://127.0.0.1")
+    assert client.post(path).status_code == 401
+    headers = {"Authorization": "Bearer private-test-token"}
+    assert client.post(path, headers={**headers, "Origin": "https://evil.invalid"}).status_code == 403
+    # No patrol owner (startup failure) is a conflict, never a silent success.
+    assert client.post(path, headers=headers).status_code == 409
+    app.state.patrol = patrol
+    ok = client.post(path, headers=headers)
+    assert ok.status_code == 200 and ok.headers["cache-control"] == "no-store"
+    assert ok.json() == {"deliveryStates": {"unknown": 0, "observed": 0, "failed": 0, "interrupted": 0,
+                                            "completed": 1, "cancelled_pre_admission": 0}}
+    assert patrol.calls == 1
+
+
 def test_host_limits_messages_to_own_native_session_and_reuses_request_id():
     app = create_app(native=Native(), token="private-test-token")
     with TestClient(app, base_url="http://127.0.0.1", headers={"Authorization": "Bearer private-test-token"}) as client:
