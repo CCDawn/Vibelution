@@ -12,6 +12,9 @@ from config.public_config import list_llm_provider_preset_options
 from core.llm.provider_discovery.adapters import (
     MAX_DISCOVERED_MODELS,
     MAX_DISCOVERY_RESPONSE_BYTES,
+    AnthropicDiscoveryAdapter,
+    GeminiDiscoveryAdapter,
+    OpenAICompatibleDiscoveryAdapter,
     resolve_discovery_endpoints,
 )
 from core.llm.provider_discovery.service import discover_provider_models
@@ -843,3 +846,117 @@ def test_manual_discovery_still_requires_canonical_provider_id(tmp_path) -> None
     provider.update({"auth_kind": "none", "credential_ref": "none", "requires_credential": False})
     with pytest.raises(ValueError, match="provider_id must match"):
         discover_provider_models(config, "Lab Display", catalog_path=tmp_path / "state.json")
+
+
+# ---------------------------------------------------------------------------
+# provider.extra_headers 透传：adapter 原生鉴权头唯一持有凭据，extra_headers
+# 经有界信任校验后合并（name ^[A-Za-z0-9-]+$、值 <=500 字符、剔除
+# Authorization/x-api-key），原生头后写覆盖。
+# ---------------------------------------------------------------------------
+
+
+def test_openai_adapter_merges_provider_extra_headers(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("VIBELUTION_LLM_PROVIDER_LAB_API_KEY", "native-secret")
+    config = _config("openai")
+    config["llm"]["providers"]["lab"]["extra_headers"] = {"X-Team": "team-a", "X-Org": "org-7"}
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(dict(request.headers))
+        return httpx.Response(200, json={"data": [{"id": "m1"}]})
+
+    result = discover_provider_models(
+        config,
+        "lab",
+        catalog_path=tmp_path / "state.json",
+        transport=httpx.MockTransport(handler),
+    )
+    assert result.models[0].upstream_id == "m1"
+    assert seen["x-team"] == "team-a"
+    assert seen["x-org"] == "org-7"
+    assert seen["authorization"] == "Bearer native-secret"
+
+
+def test_adapter_extra_headers_drop_credential_and_invalid_entries() -> None:
+    provider = {
+        "base_url": "https://models.example/v1",
+        "extra_headers": {
+            "Authorization": "Bearer forged",
+            "x-api-key": "forged-key",
+            "Bad Header!": "x",
+            "Empty": "   ",
+            "X-Team": "team-a",
+        },
+    }
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(dict(request.headers))
+        return httpx.Response(200, json={"data": [{"id": "m1"}]})
+
+    request = ProviderDiscoveryRequest(
+        provider_id="lab",
+        provider=provider,
+        credential="native-secret",
+        transport=httpx.MockTransport(handler),
+    )
+    result = OpenAICompatibleDiscoveryAdapter("openai").discover(request)
+    assert result.models[0].upstream_id == "m1"
+    assert seen["authorization"] == "Bearer native-secret"
+    assert "x-api-key" not in seen
+    assert "bad header!" not in seen
+    assert "empty" not in seen
+    assert seen["x-team"] == "team-a"
+    assert "forged" not in str(seen)
+
+
+def test_anthropic_adapter_keeps_native_api_key_over_extra_headers() -> None:
+    provider = {
+        "base_url": "https://models.example",
+        "extra_headers": {"x-api-key": "forged-key", "X-Team": "team-a"},
+    }
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(dict(request.headers))
+        return httpx.Response(200, json={"data": [{"id": "claude-x"}]})
+
+    request = ProviderDiscoveryRequest(
+        provider_id="lab",
+        provider=provider,
+        credential="native-secret",
+        transport=httpx.MockTransport(handler),
+    )
+    result = AnthropicDiscoveryAdapter().discover(request)
+    assert result.models[0].upstream_id == "claude-x"
+    assert seen["x-api-key"] == "native-secret"
+    assert seen["anthropic-version"] == "2023-06-01"
+    assert seen["x-team"] == "team-a"
+    assert "forged-key" not in str(seen)
+
+
+def test_gemini_adapter_forwards_extra_headers_without_touching_key_param() -> None:
+    provider = {
+        "base_url": "https://models.example",
+        "extra_headers": {"X-Team": "team-a", "Authorization": "Bearer forged"},
+    }
+    seen_headers = {}
+    seen_params = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_headers.update(dict(request.headers))
+        seen_params.update(dict(request.url.params))
+        return httpx.Response(200, json={"models": [{"name": "models/gemini-x"}]})
+
+    request = ProviderDiscoveryRequest(
+        provider_id="lab",
+        provider=provider,
+        credential="native-secret",
+        transport=httpx.MockTransport(handler),
+    )
+    result = GeminiDiscoveryAdapter().discover(request)
+    assert result.models[0].upstream_id == "gemini-x"
+    assert seen_params["key"] == "native-secret"
+    assert seen_headers["x-team"] == "team-a"
+    assert "authorization" not in seen_headers
+    assert "forged" not in str(seen_headers)

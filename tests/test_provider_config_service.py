@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import copy
 import json
+
+import httpx
 from types import SimpleNamespace
 
 import pytest
@@ -1547,3 +1549,35 @@ def test_model_catalog_sweep_skips_schema_v1_config(
     # Schema v1 legacy capability records share state["providers"]; never swept.
     after = load_model_catalog_state()
     assert set(after["providers"]) == {"relay_keep", "relay_dead", "relay_legacy"}
+
+
+# ---------------------------------------------------------------------------
+# discovery HTTP 失败 reason 映射：503 统一归 service_unavailable（前端已有
+# 独立文案），不再与 5xx 泛化的 upstream_rejected 双名并存。
+# ---------------------------------------------------------------------------
+
+
+def _http_status_error(status: int) -> httpx.HTTPStatusError:
+    request = httpx.Request("GET", "https://upstream.example/v1/models")
+    response = httpx.Response(status, request=request)
+    return httpx.HTTPStatusError(
+        "provider discovery request failed", request=request, response=response
+    )
+
+
+def test_discovery_http_503_maps_to_service_unavailable_reason() -> None:
+    details = provider_config_service._provider_discovery_failure_details(
+        _http_status_error(503)
+    )
+    assert details == ("service_unavailable", True)
+
+    # 其他 5xx 保持泛化 upstream_rejected；401/429 不受影响。
+    assert provider_config_service._provider_discovery_failure_details(
+        _http_status_error(502)
+    ) == ("upstream_rejected", True)
+    assert provider_config_service._provider_discovery_failure_details(
+        _http_status_error(401)
+    ) == ("credential_rejected", False)
+    assert provider_config_service._provider_discovery_failure_details(
+        _http_status_error(429)
+    ) == ("rate_limited", True)

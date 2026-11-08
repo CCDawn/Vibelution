@@ -86,7 +86,7 @@ from config.public_config import (
     validate_llm_public_config,
 )
 from config.decision_models import decision_model_preset_payloads
-from config.llm_security import validate_llm_provider_target
+from config.llm_security import redact_llm_probe_error, validate_llm_provider_target
 from config.settings import reload_config
 
 from .config_editor_schema import build_editor_meta, build_editor_sections
@@ -133,6 +133,10 @@ _SENSITIVE_CATALOG_CAPABILITY_FIELD_PARTS = (
 _PENDING_SECRET_PREFIX = "pending-secret:"
 _PENDING_API_KEY_SECRETS: dict[str, tuple[str, str]] = {}
 _PENDING_CLEAR_ENVS: set[str] = set()
+# draft_meta 里 pending_cleared_api_keys 的有界信任上限：cleared 只在 apply 时
+# 触发 HKCU 删除，且逐名过 _FORBIDDEN_API_KEY_ENV_NAMES 黑名单 + 环境变量名
+# 格式/前缀校验（validate_llm_api_key_env）；超过 32 名的剩余条目直接丢弃。
+_MAX_DRAFT_CLEARED_ENV_NAMES = 32
 _MODEL_DISCOVERY_DEFAULT_TIMEOUT_SECONDS = 3.0
 _MODEL_DISCOVERY_NEGATIVE_CACHE_TTL_SECONDS = 45.0
 _MODEL_DISCOVERY_NEGATIVE_CACHE: dict[str, tuple[float, str, list[dict[str, Any]]]] = {}
@@ -463,8 +467,15 @@ def _normalize_draft_meta(meta: dict | None) -> dict[str, object]:
         payload["pending_api_keys"] = normalized_pending
     cleared = meta.get("pending_cleared_api_keys", [])
     if isinstance(cleared, list):
+        # 有界信任：cleared 名单接受 draft_meta 携带的条目，不再要求本进程
+        # 注册过（后端在 UI 清除与 apply 之间重启会丢失进程内
+        # _PENDING_CLEAR_ENVS，导致 HKCU 旧 key 永久残留）。信任边界由
+        # validate_llm_api_key_env（黑名单 + 大写格式 + 认可前缀）和列表
+        # 长度上限共同守住；超出上限的条目静默丢弃。
         normalized_cleared: list[str] = []
         for item in cleared:
+            if len(normalized_cleared) >= _MAX_DRAFT_CLEARED_ENV_NAMES:
+                break
             env_name = str(item or "").strip()
             if not env_name:
                 continue
@@ -472,7 +483,7 @@ def _normalize_draft_meta(meta: dict | None) -> dict[str, object]:
                 env_name = validate_llm_api_key_env(env_name, required=True, context="api_key_env")
             except ValueError:
                 continue
-            if env_name in _PENDING_CLEAR_ENVS and env_name not in normalized_cleared:
+            if env_name not in normalized_cleared:
                 normalized_cleared.append(env_name)
         payload["pending_cleared_api_keys"] = normalized_cleared
     return payload
@@ -570,7 +581,7 @@ def _move_pending_api_key_env(meta: dict[str, object], old_env: str, new_env: st
 
 def _env_has_value(env_name: str) -> bool:
     env_name = validate_llm_api_key_env(env_name, required=False, context="api_key_env")
-    return bool(env_name and os.environ.get(env_name))
+    return bool(env_name and _read_env_var(env_name))
 
 
 def _with_model_key_env_migration(meta: dict[str, object], old_env: str, new_env: str) -> dict[str, object]:
@@ -583,7 +594,9 @@ def _with_model_key_env_migration(meta: dict[str, object], old_env: str, new_env
     if isinstance(pending, dict) and new_env in pending:
         return payload
     if _env_has_value(old_env) and not _env_has_value(new_env):
-        secret = os.environ.get(old_env, "")
+        # 与 _env_has_value 同源：走 _read_env_var（HKCU 优先语义），避免
+        # 进程环境里的同名旧值遮蔽 UI 新保存的 HKCU 值。
+        secret = str(_read_env_var(old_env) or "")
         if secret:
             payload = _with_pending_api_key(payload, new_env, secret)
     return _with_cleared_api_key(payload, old_env)
@@ -985,6 +998,18 @@ def _sanitize_verification_message(message: str) -> str:
     return text
 
 
+# 结构化 HTTP 状态证据（与 core/llm/errors.py 的判定思想一致）：只认
+# "HTTP 503" / '"status_code": 429' / "code=401" 形态。纯文本三位数（模型名
+# "gpt-403-turbo"、request id "4013"）不再被当成上游状态码，避免模型名里
+# 偶然携带的 3 位数把探测结果误判成 auth_failed。
+_VERIFICATION_HTTP_STATUS_PATTERN = re.compile(
+    r"\bHTTP\s+([1-5][0-9]{2})\b"
+    r"|['\"]?status_code['\"]?\s*[:=]\s*([1-5][0-9]{2})\b"
+    r"|\bcode\s*[=:]\s*([1-5][0-9]{2})\b",
+    re.IGNORECASE,
+)
+
+
 def _model_verification_summary(result: dict[str, Any]) -> dict[str, Any]:
     ok = bool(result.get("ok") if "ok" in result else result.get("success"))
     message = str(result.get("message") or result.get("error") or "").strip()
@@ -996,9 +1021,9 @@ def _model_verification_summary(result: dict[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError):
         http_status = None
     if http_status is None:
-        match = re.search(r"\b([1-5][0-9]{2})\b", message)
-        if match:
-            http_status = int(match.group(1))
+        structured = _VERIFICATION_HTTP_STATUS_PATTERN.search(message)
+        if structured:
+            http_status = int(next(group for group in structured.groups() if group))
         elif "service temporarily unavailable" in lowered:
             http_status = 503
         elif "upstream request failed" in lowered:
@@ -1357,7 +1382,7 @@ def _run_draft_test_llm_connection(
                 "contract": profile.contract,
                 "configScope": _llm_test_config_scope(public_config, draft_meta),
                 "errorType": type(exc).__name__,
-                "error": str(exc),
+                "error": redact_llm_probe_error(str(exc), api_key=api_key),
             },
             lifecycle=True,
         )
@@ -2103,6 +2128,7 @@ def _build_workspace(
     base_hash: str = "",
     message: str = "",
     raw_toml: str | None = None,
+    env_write_failures: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     public_config = _with_config_workspace_defaults(public_config)
     diagnostics = inspect_public_config(public_config)
@@ -2125,6 +2151,8 @@ def _build_workspace(
         "baseHash": str(base_hash or draft_hash).strip() or draft_hash,
         "language": lang,
         "configPath": str(CONFIG_PATH),
+        "envWriteFailureCount": len(env_write_failures or []),
+        "envWriteFailures": list(env_write_failures or [])[:50],
         "runtimeProfile": public_config.get("runtime", {}).get("profile", "safe_local"),
         "defaultMode": contract["defaultMode"],
         "defaultRoute": contract["defaultRoute"],
@@ -3209,7 +3237,7 @@ def _discovery_key_source_label(*, explicit_api_key: str, api_key_env: str, draf
         pending_secret = _resolve_pending_api_key(env_name, token)
         if pending_secret:
             return pending_secret, f"草稿环境变量 {env_name}"
-        env_secret = str(os.environ.get(env_name) or "").strip()
+        env_secret = str(_read_env_var(env_name) or "").strip()
         if env_secret:
             return env_secret, f"系统环境变量 {env_name}"
         return "", f"未找到环境变量 {env_name}"
@@ -4132,14 +4160,45 @@ def apply_config_workspace(
     normalized_meta = _normalize_draft_meta(draft_meta)
     cleared_envs = [str(env_name) for env_name in normalized_meta.get("pending_cleared_api_keys", [])]
     updated_envs: list[str] = []
+    failed_env_writes: list[dict[str, str]] = []
     for env_name in normalized_meta.get("pending_cleared_api_keys", []):
-        _delete_user_env_var(str(env_name))
+        try:
+            _delete_user_env_var(str(env_name))
+        except Exception as exc:
+            # 单个 env 写失败不中断整个 apply（config.toml 已保存的事实保持）；
+            # 失败条目保留在 draft_meta/进程注册里，等待下次 apply 重试。
+            error_type = type(exc).__name__
+            failed_env_writes.append({"env": str(env_name), "operation": "delete", "errorType": error_type})
+            _record_config_scene_event(
+                "persist",
+                "config.workspace.apply_env_write_failed",
+                message="Config workspace apply failed to delete one user environment variable.",
+                level="error",
+                outcome="failed",
+                fields={"envName": str(env_name), "operation": "delete", "errorType": error_type},
+                lifecycle=True,
+            )
+            continue
         _PENDING_CLEAR_ENVS.discard(str(env_name))
     for env_name, api_key in normalized_meta.get("pending_api_keys", {}).items():
         secret = _resolve_pending_api_key(str(env_name), api_key)
         if secret is None:
             continue
-        _set_user_env_var(str(env_name), secret)
+        try:
+            _set_user_env_var(str(env_name), secret)
+        except Exception as exc:
+            error_type = type(exc).__name__
+            failed_env_writes.append({"env": str(env_name), "operation": "write", "errorType": error_type})
+            _record_config_scene_event(
+                "persist",
+                "config.workspace.apply_env_write_failed",
+                message="Config workspace apply failed to write one user environment variable.",
+                level="error",
+                outcome="failed",
+                fields={"envName": str(env_name), "operation": "write", "errorType": error_type},
+                lifecycle=True,
+            )
+            continue
         updated_envs.append(str(env_name))
         _drop_pending_api_key_token(api_key)
 
@@ -4162,6 +4221,7 @@ def apply_config_workspace(
             zh="配置已保存到外部 operator config.toml。",
             en="Config saved to external operator config.toml.",
         ),
+        env_write_failures=failed_env_writes,
     )
     _record_config_scene_event(
         "persist",
@@ -4177,6 +4237,8 @@ def apply_config_workspace(
             "pendingApiKeyEnvs": updated_envs,
             "clearedApiKeyEnvCount": len(cleared_envs),
             "clearedApiKeyEnvs": cleared_envs,
+            "envWriteFailureCount": len(failed_env_writes),
+            "envWriteFailures": failed_env_writes[:50],
             "applyMode": "patch" if submitted_base is not None else "snapshot",
             "changedPathCount": len(changed_paths),
             "changedPaths": [_format_config_path(path) for path in changed_paths[:50]],

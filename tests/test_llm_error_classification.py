@@ -664,3 +664,94 @@ def test_raise_for_challenge_receipt_failure_noop_without_code():
 
     _raise_for_challenge_receipt_failure(SimpleNamespace(challenge_receipt_failure_code=""))
     _raise_for_challenge_receipt_failure(SimpleNamespace(challenge_receipt_failure_code=None))
+
+
+# ---------------------------------------------------------------------------
+# auth 判定收紧：裸子串（authorizer / 4013 / request id 里的 401 文案）不再
+# 误判；结构化状态码（对象携带或 "HTTP <code>" 形态）优先于文案子串。
+# ---------------------------------------------------------------------------
+
+
+class _StatusedError(Exception):
+    """模拟 openai/litellm 包装异常：对象自身携带上游 status_code。"""
+
+    def __init__(self, message: str, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "authorizer rejected the request",
+        "request id: req-4013 failed upstream",
+        "trace 1401 done, nothing to see",
+    ],
+)
+def test_auth_bare_substrings_no_longer_classify_auth_error(message):
+    normalized = classify_exception(Exception(message))
+    assert normalized.category != "auth_error", message
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "401 unauthorized",
+        "authentication failed upstream",
+        "invalid api key supplied",
+        "invalid_api_key: bad credential",
+        "API key not valid. Please pass a valid API key.",
+        "Incorrect API key provided",
+        "HTTP 403 forbidden for this key",
+    ],
+)
+def test_specific_auth_evidence_still_classifies_auth_error(message):
+    normalized = classify_exception(Exception(message))
+    assert normalized.category == "auth_error", message
+    assert normalized.retryable is False
+
+
+def test_upstream_status_code_wins_over_message_substrings():
+    # 真 401（对象携带）+ 文案里夹带 "400"：结构化状态码优先，归 auth_error，
+    # 不被 bad_request 关键词表的 "400" 子串抢走。
+    exc = _StatusedError("gateway logged 400 earlier, invalid authorization header", status_code=401)
+    normalized = classify_exception(exc)
+    assert normalized.category == "auth_error"
+    assert normalized.retryable is False
+    assert normalized.details.get("httpStatus") == 401
+
+    # 反向："invalid authorization header" 文案 + 上游 400 是协议错误而非
+    # 认证失败（裸 "auth" 子串已收紧，400 由结构化状态码确定性归类）。
+    exc_400 = _StatusedError("invalid authorization header", status_code=400)
+    normalized_400 = classify_exception(exc_400)
+    assert normalized_400.category == "provider_protocol_error"
+    assert normalized_400.retryable is False
+    assert normalized_400.details.get("httpStatus") == 400
+
+
+def test_message_structured_status_evidence_wins_over_loose_digits():
+    # 消息形态 "HTTP 401 ... 400 ..."：结构化证据 401 优先于裸 "400" 子串。
+    normalized = classify_exception(Exception("upstream returned HTTP 401 after retrying a 400"))
+    assert normalized.category == "auth_error"
+
+    # 无结构化命中的 3 位数不再是认证证据："HTTP 1429"、"tag=4013" 不落 auth。
+    bare = classify_exception(Exception("trace HTTP 1429 tag=4013"))
+    assert bare.category != "auth_error"
+
+
+def test_litellm_rate_limit_object_status_does_not_short_circuit_keyword_table():
+    # litellm.RateLimitError 对象自带 status_code=429：结构化状态码块只覆盖
+    # 401/403/400，429 仍走关键词表（bare 维持 provider_protocol_error，类型
+    # 证据提升由 error_classification 负责），保证既有判例零漂移。
+    pytest.importorskip("litellm")
+    from litellm import RateLimitError as LiteLLMRateLimitError
+
+    bare = classify_exception(
+        LiteLLMRateLimitError(
+            message="Too many requests, please retry later",
+            model="review-model",
+            llm_provider="openai",
+        )
+    )
+    assert bare.category == "provider_protocol_error"
+    assert bare.retryable is False
