@@ -102,7 +102,7 @@ def test_clean_transfer_records_write_no_degraded_event(
 
 def test_invalid_utf8_skips_only_bad_line_and_reports_it(tmp_path, monkeypatch):
     records_path = tmp_path / "transfer_records.jsonl"
-    original = b'{"transferId":"before"}\n\xff\n{bad json\n{"transferId":"after"}\n'
+    original = b'{"transferId":"before"}\n\xff\n{bad json\n[]\n{"transferId":"after"}\n'
     records_path.write_bytes(original)
     monkeypatch.setattr(team_workflow_orchestration_service, "_transfer_records_path", lambda _: records_path)
     events = _capture_workflow_event(monkeypatch)
@@ -112,9 +112,10 @@ def test_invalid_utf8_skips_only_bad_line_and_reports_it(tmp_path, monkeypatch):
     assert [record["transferId"] for record in records] == ["before", "after"]
     assert records_path.read_bytes() == original
     assert len(events) == 1
-    assert events[0]["fields"]["skippedLineCount"] == 2
+    assert events[0]["fields"]["skippedLineCount"] == 3
     assert events[0]["fields"]["skippedReasons"][0] == "line 2: invalid UTF-8"
     assert events[0]["fields"]["skippedReasons"][1].startswith("line 3:")
+    assert events[0]["fields"]["skippedReasons"][2] == "line 4: expected JSON object"
 
 
 def test_coordination_status_survives_invalid_utf8(tmp_path, monkeypatch):
@@ -137,9 +138,13 @@ def test_coordination_status_survives_invalid_utf8(tmp_path, monkeypatch):
     assert any(event["eventCode"] == "workflow.transfer_records_corrupt_lines_skipped" for event in events)
 
 
-def test_decision_refuses_to_overwrite_invalid_utf8(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("bad_line", "error"),
+    [(b"\xff", "invalid UTF-8"), (b"{broken json", "invalid JSON"), (b"[]", "expected JSON object")],
+)
+def test_decision_refuses_to_overwrite_corrupt_records(tmp_path, monkeypatch, bad_line, error):
     records_path = tmp_path / "transfer_records.jsonl"
-    original = b'{"transferId":"good","status":"requested"}\n\xff\n'
+    original = b'{"transferId":"good","status":"requested"}\n' + bad_line + b"\n"
     records_path.write_bytes(original)
     s = team_workflow_orchestration_service
     monkeypatch.setattr(s.team_service, "get_team", lambda *_: {})
@@ -149,7 +154,7 @@ def test_decision_refuses_to_overwrite_invalid_utf8(tmp_path, monkeypatch):
     writes = []
     monkeypatch.setattr(s, "_write_json", lambda *args: writes.append(args))
 
-    with pytest.raises(s.TeamWorkflowOrchestrationError, match="invalid UTF-8 at line 2"):
+    with pytest.raises(s.TeamWorkflowOrchestrationError, match=f"{error} at line 2"):
         decide_transfer_request("team-1", "good", {"decision": "approved", "decidedByAgent": "owner"})
 
     app = FastAPI()
@@ -161,6 +166,6 @@ def test_decision_refuses_to_overwrite_invalid_utf8(tmp_path, monkeypatch):
         )
 
     assert response.status_code == 422
-    assert "invalid UTF-8 at line 2" in response.text
+    assert f"{error} at line 2" in response.text
     assert writes == []
     assert records_path.read_bytes() == original
