@@ -17,7 +17,7 @@ class ConfigurationDiscovery:
 
     def _agent(self, agent_id):
         from .agent_configuration import AgentConfigurationControl
-        # Share the ordinary-Agent visibility and compiled-authority checks.
+        # Share configuration ownership and compiled authority, including Team members.
         view = AgentConfigurationControl(self.native).read_configuration(agent_id)
         if not view["compiledMatches"]:
             raise _error("CONFIG_SNAPSHOT_UNAVAILABLE")
