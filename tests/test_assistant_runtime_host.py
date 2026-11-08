@@ -305,6 +305,37 @@ def test_dispatch_approval_endpoint_is_private_and_bound():
     assert dispatch.calls[-1] == ("dispatch-1", {"task_id": "task-1", "approval_id": "approval-1", "expected_revision": "policy-1"})
 
 
+def test_patrol_acknowledge_endpoint_is_private_ledger_only():
+    class Patrol:
+        def __init__(self):
+            self.calls = 0
+
+        def acknowledge(self):
+            self.calls += 1
+            return {"unknown": 0, "observed": 0, "failed": 0, "interrupted": 0,
+                    "completed": 1, "cancelled_pre_admission": 0}
+
+    class Dispatch:
+        def list_dispatches(self):
+            return []
+
+    patrol = Patrol()
+    app = create_app(native=Native(), token="private-test-token", dispatch=Dispatch())
+    path = "/api/assistant/patrol/acknowledge"
+    client = TestClient(app, base_url="http://127.0.0.1")
+    assert client.post(path).status_code == 401
+    headers = {"Authorization": "Bearer private-test-token"}
+    assert client.post(path, headers={**headers, "Origin": "https://evil.invalid"}).status_code == 403
+    # No patrol owner (startup failure) is a conflict, never a silent success.
+    assert client.post(path, headers=headers).status_code == 409
+    app.state.patrol = patrol
+    ok = client.post(path, headers=headers)
+    assert ok.status_code == 200 and ok.headers["cache-control"] == "no-store"
+    assert ok.json() == {"deliveryStates": {"unknown": 0, "observed": 0, "failed": 0, "interrupted": 0,
+                                            "completed": 1, "cancelled_pre_admission": 0}}
+    assert patrol.calls == 1
+
+
 def test_host_limits_messages_to_own_native_session_and_reuses_request_id():
     app = create_app(native=Native(), token="private-test-token")
     with TestClient(app, base_url="http://127.0.0.1", headers={"Authorization": "Bearer private-test-token"}) as client:
@@ -475,6 +506,34 @@ def test_approval_transport_has_one_native_session_and_single_call_decisions():
 
 
 CONTINUATION = {"turnId": "old-turn", "headId": "old-head", "ledgerSeq": 3, "agentId": "local-assistant"}
+
+
+def test_host_forwards_control_continuation_only_with_fixed_message_and_snapshot():
+    from core.assistant_runtime.control_continuation import CONTROL_CONTINUATION_MESSAGE
+
+    calls = []
+    class ControlNative(Native):
+        def submit(self, message, request_id, **kwargs):
+            calls.append((message, request_id, kwargs))
+            return {"acceptedRequestId": request_id}
+
+    expected = {**CONTINUATION, "sessionId": "native-session"}
+    body = {"message": CONTROL_CONTINUATION_MESSAGE, "requestId": "control-1", "controlContinuation": expected}
+    with TestClient(create_app(native=ControlNative(), token="private-test-token"), base_url="http://127.0.0.1",
+                    headers={"Authorization": "Bearer private-test-token"}) as client:
+        response = client.post("/api/assistant/messages", json=body)
+        assert response.status_code == 200 and response.json()["acceptedRequestId"] == "control-1"
+        for changes in [
+            {"message": "continue freely"}, {"attachmentIds": ["file-1"]}, {"references": [{"messageId": "m"}]},
+            {"controlContinuation": None}, {"controlContinuation": {**expected, "ledgerSeq": True}},
+            {"controlContinuation": {**expected, "ledgerSeq": "3"}},
+            {"controlContinuation": {**expected, "sessionId": " "}},
+            {"controlContinuation": {**expected, "headId": " head "}},
+            {"controlContinuation": {**expected, "extra": True}},
+            {"controlContinuation": {key: value for key, value in expected.items() if key != "sessionId"}},
+        ]:
+            assert client.post("/api/assistant/messages", json={**body, **changes}).status_code == 422
+    assert calls == [(CONTROL_CONTINUATION_MESSAGE, "control-1", {"control_continuation": expected})]
 
 
 def test_fixed_session_stop_and_continue_forward_once_without_renderer_session_selection():

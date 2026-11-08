@@ -99,6 +99,8 @@ export type ChatSessionWorkspaceToolApproval = {
   onApproveForSession?: () => void;
   onApproveForSessionTool?: () => void;
   onApproveWithActionWindow?: () => void;
+  /** b3: one-click session trust for the execute/write development tools. */
+  onApproveForDevelopmentBundle?: () => void;
   onReject: () => void;
 };
 
@@ -179,6 +181,7 @@ export function ChatSessionWorkspacePanel({
             onApproveForSession={toolApproval.onApproveForSession}
             onApproveForSessionTool={toolApproval.onApproveForSessionTool}
             onApproveWithActionWindow={toolApproval.onApproveWithActionWindow}
+            onApproveForDevelopmentBundle={toolApproval.onApproveForDevelopmentBundle}
             onReject={toolApproval.onReject}
           />
         </div>

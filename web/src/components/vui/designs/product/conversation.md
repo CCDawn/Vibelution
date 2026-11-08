@@ -237,7 +237,7 @@ ConversationView 的运行中引导（普通 Chat 与 Launcher 个人助理共�
 ## ChatToolApprovalDialog 文案密度
 
 ### 功能
-审批卡只保留一处快捷键说明和明确的按钮标签；不重复显示按钮含义映射。命令预览、风险、范围及“始终允许”的实际授权范围继续可见。
+审批卡只保留一处快捷键说明和明确的按钮标签；不重复显示按钮含义映射。命令预览、风险、范围及“始终允许”的实际授权范围继续可见。按钮文案与真实授权语义一一对应：shell/文件开发工具的「始终」即「本会话内此工具不再询问」（acceptForSessionTool，本会话级）；`web_fetch_tool` 等保留「始终（此 Agent）」的持久授权语义并展示实际持久范围（来源级）。
 
 ### 适用范围
 - **适用**：会话 composer 上方的待审批工具卡。
@@ -245,7 +245,8 @@ ConversationView 的运行中引导（普通 Chat 与 Launcher 个人助理共�
 
 ### 状态与边界
 - 卡片继续固定在 composer 附近；当前待审批 `requestId` 与 transcript 的 `toolCallId`/`operationId` 没有可靠映射，不以工具名猜测精确关联。
-- 保留一次、始终授权、拒绝的操作按钮及可用快捷键提示。
+- 保留一次、始终授权、拒绝的操作按钮及可用快捷键提示。对 shell/文件开发工具（cli_tool、exec_command、write_stdin、apply_diff_edit_tool、apply_patch_tool、write_file_tool）额外提供一键「本会话信任开发操作」：服务端对包内工具逐个落既有工具级会话授权（当前请求按 acceptForSessionTool 终态化），不新增授权机制；仅在这些工具且服务端投影出 `acceptForSessionTool` 可用时显示。CUA、network/destructive 红线工具永远不出现该按钮；此时该工具的「始终」退回同范围较窄授权（acceptForSession）。
+- 工具级「本会话此工具」独立按钮在「始终」已承载同一动作（shell/文件开发工具）时不重复展示，避免同义双按钮。
 
 ## VComposerApprovalCard
 

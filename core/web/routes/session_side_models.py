@@ -28,6 +28,13 @@ class SessionToolApprovalItem(BaseModel):
     sessionId: str = ""
 
 
+class SessionToolBundleResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    sessionId: str = ""
+    requestId: str = ""
+
+
 class SessionChatReviewCandidateResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 

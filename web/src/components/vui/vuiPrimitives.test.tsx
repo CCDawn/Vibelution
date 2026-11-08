@@ -98,7 +98,12 @@ describe("VUI foundation primitives", () => {
     );
     expect(scannedSources.length).toBeGreaterThan(0);
     expect(scannedSources.join("\n")).not.toContain(".test");
-    expect(tailwindEntry).toContain('@source not "../routes/finance/**/*.test.{ts,tsx}";');
+    // Finance loads through design/route-css/finance.tailwind.css together
+    // with its lazy route chunk: the shell must not scan the finance tree via
+    // globs. The single explicit exception is the advisor note, which chat
+    // renders directly in the ordinary change rail (chat-primary surface).
+    expect(scannedSources.join("\n")).not.toContain("routes/finance/**");
+    expect(tailwindEntry).toContain('@source "../routes/finance/FinancialAssistantChatNote.tsx";');
   });
 
   it("wraps children in the VUI/shadcn provider boundary", () => {

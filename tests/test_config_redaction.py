@@ -154,6 +154,26 @@ def test_windows_user_env_fallback_does_not_spawn_shells():
     assert all("winreg" in source for source in sources)
 
 
+def test_read_env_var_copies_keep_hkcu_first_user_env_fallback():
+    # config.models._read_env_var 与 config.public_config._read_env_var 是一对
+    # 手工同步的副本。防线：两份实现都必须受 VIBELUTION_ENABLE_USER_ENV_FALLBACK
+    # 控制，且 HKCU 分支先于最终 os.environ 直读返回——否则任一副本回退成旧
+    # 进程环境优先，UI 新保存的密钥会被陈旧继承值遮蔽。
+    from config import models
+    from config import public_config
+
+    sources = [
+        inspect.getsource(models._read_env_var),
+        inspect.getsource(public_config._read_env_var),
+    ]
+
+    for source in sources:
+        assert "VIBELUTION_ENABLE_USER_ENV_FALLBACK" in source
+        hkcu_branch_index = source.index("_read_windows_user_env_var(")
+        final_process_env_index = source.rindex("os.environ.get")
+        assert hkcu_branch_index < final_process_env_index
+
+
 def test_env_overrides_toml_for_api_key(tmp_path, monkeypatch):
     _clear_provider_env(monkeypatch)
     config_file = tmp_path / "config.toml"

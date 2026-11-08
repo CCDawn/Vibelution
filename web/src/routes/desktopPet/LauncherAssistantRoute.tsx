@@ -6,6 +6,7 @@ import {
   getLauncherAssistantDetail, getLauncherAssistantDispatches, setLauncherAssistantModel,
   hideLauncherAssistant, sendLauncherAssistantMessage, setLauncherAssistantExpanded,
   launcherConversationApi,
+  acknowledgeLauncherPatrolDelivery,
   getLauncherAssistantApprovals, resolveLauncherAssistantApproval,
   previewLauncherDispatchApproval, decideLauncherDispatchApproval, declineLauncherDispatchSummary, launcherDispatchDeclineRevisionIsValid, type LauncherDispatchApprovalPreview,
   stopLauncherAssistantTurn, continueLauncherAssistantTurn, switchLauncherAssistantHead,
@@ -43,6 +44,7 @@ import {
   type DesktopPetDragPoint, type DesktopPetDragState, type DesktopPetWindowDragBridge
 } from "./desktopPetWindowDrag";
 import { DEFAULT_PET_PREFERENCES } from "./desktopPetPreferences";
+import { usePetCompletion } from "./usePetCompletion";
 import { ChatToolApprovalDialog } from "../chat/ChatToolApprovalDialog";
 import { toolApprovalRiskLabel } from "../chat/toolApprovalLabels";
 import { agentArchivePreviewIsValid, agentPurgePreviewIsValid, autonomyActionIsKnown, autonomyApprovalPreviewIsValid, authorizationUpgradePreviewIsValid, browserInteractPreviewIsValid, dispatchWritePreviewIsValid, launcherAgentCreatePreviewIsValid, operatorImageUploadPreviewIsValid, preferenceProposalPreviewIsValid, projectLifecyclePreviewIsValid, recoveryPreviewIsValid, managementApprovalActionIsKnown, platformManagementActionIsKnown, platformManagementPreviewIsValid, toolApprovalActionPreview, toolApprovalDisplayName } from "../chat/toolApprovalPreview";
@@ -54,6 +56,7 @@ import { readStoredWorkbenchTheme, requestWorkbenchTheme, subscribeWorkbenchThem
 import { PersonalAssistantComputerPanel } from "../personalAssistant/PersonalAssistantComputerPanel";
 import { launcherAssistantComputer } from "../../api/launcherAssistantComputer";
 import { useLauncherComputerAccess } from "./useLauncherComputerAccess";
+import { useLauncherControlContinuation, type LauncherControlContinuation } from "./useLauncherControlContinuation";
 import petStyles from "./DesktopAssistantRoute.styles";
 import { useLauncherAttachmentHistory } from "./useLauncherAttachmentHistory";
 import { applyComposerAttachmentUploadOutcomes, classifyComposerFiles, mergeComposerAttachmentsWithRejections, type ComposerAttachmentUploadOutcome, type ComposerImageAttachment } from "../chat/chatComposerSubmitModel";
@@ -193,9 +196,10 @@ export function resolveAssistantSecretRequest(detail: SessionDetail | undefined)
   return null;
 }
 
-export function LauncherAssistantRoute({ embedded = false, navigationOwned = false, computerRequested = false, entryIntent }: {
+export function LauncherAssistantRoute({ embedded = false, navigationOwned = false, computerRequested = false, entryIntent, onControlContinuationReady }: {
   embedded?: boolean; navigationOwned?: boolean; computerRequested?: boolean;
   entryIntent?: { key: string; title: string; label: string; message: string };
+  onControlContinuationReady?: (control: LauncherControlContinuation | null) => void;
 }) {
   useLauncherThemeControl();
   const client = useQueryClient();
@@ -595,9 +599,10 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       signal.throwIfAborted();
       return result;
     },
-    enabled: reading, retry: false,
-    refetchInterval: query => query.state.data?.some(request => request.status === "pending") && reading
-      ? 2_000 : launcherAssistantPollInterval(reading, detail.data, acceptedTurnId, queuedAcceptance),
+    // The visible collapsed character must notice its own native approvals too.
+    enabled: observingOwnSession, retry: false,
+    refetchInterval: query => query.state.data?.some(request => request.status === "pending") && observingOwnSession
+      ? 2_000 : launcherAssistantPollInterval(observingOwnSession, detail.data, acceptedTurnId, queuedAcceptance),
     refetchIntervalInBackground: false,
   });
   const approval = approvals.data?.find(request => request.status === "pending"
@@ -1070,7 +1075,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     const requestEpoch = epochRef.current;
     try {
       const acceptance = await sendLauncherAssistantMessage(submission.message, submission.requestId,
-        submission.attachmentIds, submission.references);
+        submission.attachmentIds, submission.references, submission.controlContinuation);
       if (!mounted.current || requestEpoch !== epochRef.current || sending.current !== flight || outstanding.current !== submission) return true;
       client.setQueryData<SessionDetail>(detailKey, previous => acceptSessionSubmit(previous, paint, acceptance));
       setActiveLayer(sessionStream.acceptSubmission(submission.requestId, acceptance.turnId, Boolean(acceptance.queuedTurnId)));
@@ -1134,12 +1139,6 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     }
     return true;
   }
-
-  const computerAccess = useLauncherComputerAccess({
-    detail: detail.data, agentId: status.data?.assistant.agentId || "", reading,
-    manualOpen: computerOpen, onCloseManual: () => setComputerOpen(false),
-    lang,
-  });
 
   async function decide(request: SessionToolApprovalRequest, decision: "accept" | "decline") {
     if (approvalGate.current || request.requestId !== approval?.requestId || !request.availableDecisions.includes(decision)
@@ -1392,7 +1391,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     : undefined;
   const preferences = status.data?.settings?.preferences || DEFAULT_PET_PREFERENCES;
   const displayName = status.data?.settings?.displayName || identity?.displayName || copy.title;
-  const { tone, animationState } = launcherAssistantActivity(detail.data);
+  const celebrating = usePetCompletion(sessionId, detail.data, preferences.showCompletion);
   const activity = resolveSessionActivity(detail.data || {});
   const busy = hasExecutionOwnership(activity.execution);
   const stopping = Boolean(detail.data?.stopRequested);
@@ -1402,6 +1401,25 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   const followupQueue = useLauncherAssistantFollowupQueue({
     sessionId, activeTurnId: acceptedTurnId || undefined, detail: detail.data, enabled: queueEnabled, lang,
     blocked: sendPending || sendUnconfirmed || controlPending || stopping || modelConfigPending || Boolean(guidancePendingMode),
+  });
+  function readControlContext() {
+    const currentStatus = client.getQueryData<typeof status.data>(["launcher-assistant", "status"]);
+    const currentDetail = client.getQueryData<SessionDetail>(detailKey);
+    const currentApprovals = client.getQueryData<SessionToolApprovalRequest[]>(["launcher-assistant", "approvals", sessionId, epoch]);
+    return { detail: currentDetail, agentId: currentStatus?.assistant.agentId || "",
+      blocked: !reading || status.isError || detail.isError || approvals.isError
+        || currentStatus?.assistant.directSessionId !== sessionId || Boolean(currentDetail?.stopRequested)
+        || Boolean(sending.current || outstanding.current || requestReadbackGate.current || uploadGate.current || controlGate.current
+          || approvalGate.current || continuationUnconfirmed || sendUnconfirmed || controlPending || modelConfigPending || guidancePendingMode
+          || followupQueue.guidancePending || currentApprovals?.some(row => row.status === "pending" && row.sessionId === sessionId)) };
+  }
+  const controlContinuation = useLauncherControlContinuation({
+    context: readControlContext(), readCurrent: readControlContext, submit,
+    onReady: onControlContinuationReady,
+  });
+  const computerAccess = useLauncherComputerAccess({
+    detail: detail.data, agentId: status.data?.assistant.agentId || "", reading,
+    manualOpen: computerOpen, onCloseManual: () => setComputerOpen(false), lang, continuation: controlContinuation,
   });
   // "待你回答" banner above the composer. Same gates as the chat page: a
   // running turn (execution ownership) or an unfinished send hides the banner,
@@ -1468,6 +1486,24 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     now: Date.now(), sseHealthy: launcherAssistantSseHealthy(sseAliveAt.current, Date.now()),
   });
   const statusHardDown = statusDegradeTone === "error";
+  const petUnavailable = waitingForBackend || statusHardDown || detail.isError;
+  const { tone, animationState } = launcherAssistantActivity(detail.data, {
+    celebrating, needsAttention: Boolean(approval || pendingQuestion),
+    unavailable: petUnavailable,
+  });
+  // Ledger-only banner exit: marking pending patrol entries acknowledged stops
+  // the count; a later re-armed recovery counts again if it fails. A failed
+  // acknowledgment leaves the banner as-is after the status refresh.
+  const [deliveryAckPending, setDeliveryAckPending] = useState(false);
+  const acknowledgeDelivery = useCallback(async () => {
+    if (deliveryAckPending) return;
+    setDeliveryAckPending(true);
+    try { await acknowledgeLauncherPatrolDelivery(); }
+    finally {
+      setDeliveryAckPending(false);
+      void client.invalidateQueries({ queryKey: ["launcher-assistant", "status"], exact: true });
+    }
+  }, [client, deliveryAckPending]);
   const notificationsHosted = usePublishLauncherNotices(expanded ? launcherAssistantPageNotices({
     lang,
     reads: [
@@ -1483,6 +1519,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     ],
     history: { missing: historyAttachments.missingGenerated, failed: historyAttachments.failed, pending: historyAttachments.pending, retry: historyAttachments.retry, refresh: detail.refetch },
     deliveryUnreported: status.data?.patrol?.state === "unavailable" || ["unknown", "failed", "interrupted"].some(key => (status.data?.patrol?.deliveryStates[key] || 0) > 0),
+    deliveryAcknowledge: { pending: deliveryAckPending, run: () => acknowledgeDelivery() },
   }) : []);
   // Read-only context-usage ring from the native detail's usage projections.
   // Null before the first usage frame; diagnostics handoff and the auto-compaction
@@ -1495,7 +1532,9 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   // The header keeps the normal session status line for a weakly degraded poll;
   // "unavailable" is reserved for the hard-down case (persistent failure AND a
   // dead push channel), and the cold-boot wait keeps its own wording.
-  const statusText = feedback || queueStatusText || (waitingForBackend ? lifecycleClosing ? copy.lifecycleClosing : copy.waitingBackend : statusHardDown ? copy.unavailable
+  const attentionStatusText = petUnavailable ? "" : approval ? (lang === "zh" ? "待你确认" : "Awaiting your approval")
+    : pendingQuestion ? (lang === "zh" ? "待你回答" : "Awaiting your answer") : "";
+  const statusText = feedback || attentionStatusText || queueStatusText || (waitingForBackend ? lifecycleClosing ? copy.lifecycleClosing : copy.waitingBackend : petUnavailable ? copy.unavailable
     : status.isPending ? copy.checking
     : detail.data ? !detail.isError && !approval && !stopping && !acceptedTurnId && !sendPending && !sendUnconfirmed && preferences.idleMessage
         && (activity.execution === "idle" || (activity.execution === "settled" && activity.outcome === "completed"))
@@ -1733,7 +1772,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
           });
         }}>{entryIntent.label}</VButton><VButton variant="ghost" onClick={() => setDismissedEntry(entryIntent.key)}>{lang === "zh" ? "暂不处理" : "Dismiss"}</VButton></>} /> : null}
       {computerAccess.show ? <PersonalAssistantComputerPanel key={computerAccess.request?.id || "computer-grant"} active={reading} transport={launcherAssistantComputer}
-        authorizationRequestId={computerAccess.request?.id} presentation="conversation" onGranted={computerAccess.onGranted} onCollapse={computerAccess.onDismiss} /> : null}
+        authorizationRequestId={computerAccess.request?.id} presentation="conversation" onGranted={computerAccess.onGranted} onCollapse={computerAccess.onDismiss}
+        prepareContinuation={computerAccess.prepareContinuation} cancelContinuation={computerAccess.cancelContinuation} /> : null}
       {computerAccess.notice ? <p className={petStyles.computerNotice} role="status">{computerAccess.notice}</p> : null}
       {approvalPrompt}</>}
       fallback={<VStateSurface fill tone="loading" title={copy.loading} />}
@@ -1749,7 +1789,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       title={lang === "zh" ? "部分外观图片暂不可用，聊天仍可使用" : "Some appearance images are unavailable; chat is ready"}
       actions={<VButton onClick={() => { if (readingAssets && avatar.isError) void avatar.refetch(); if (readingAssets && background.isError) void background.refetch(); if (readingAssistantAvatar && assistantAvatar.isError) void assistantAvatar.refetch(); }}>{copy.retry}</VButton>} /> : null}
     {!notificationsHosted && (status.data?.patrol?.state === "unavailable" || ["unknown", "failed", "interrupted"].some(key => (status.data?.patrol?.deliveryStates[key] || 0) > 0))
-      ? <VStateSurface tone="error" title={lang === "zh" ? "部分任务结果暂未汇报，可在对话中让助理查询" : "Some task results have not been reported. Ask the assistant to check in chat."} /> : null}
+      ? <VStateSurface tone="error" title={lang === "zh" ? "部分任务结果暂未汇报，可在对话中让助理查询" : "Some task results have not been reported. Ask the assistant to check in chat."}
+        actions={<VButton isDisabled={deliveryAckPending} onClick={() => void acknowledgeDelivery()}>{lang === "zh" ? "已知晓" : "Acknowledge"}</VButton>} /> : null}
     {dispatchApproval && activePreviewError ? <VStateSurface tone="error" title={activePreviewError}
       actions={<VButton onClick={() => { setPreviewAttempt(value => value + 1); void dispatches.refetch(); }}>{copy.retry}</VButton>} /> : null}
     {selectedApprovalTarget && !approval ? <VStateSurface tone={dispatchApproval ? "info" : "unavailable"}

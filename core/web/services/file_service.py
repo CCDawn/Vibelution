@@ -117,6 +117,11 @@ def read_text_file(relative_path: str) -> dict:
 
 
 def _build_node(path: Path, depth: int, *, stats: dict[str, Any]) -> dict | None:
+    if _is_link(path):
+        # Never follow symlinked/junctioned entries: links must neither expose
+        # names from outside the project root nor leak trees from inside it.
+        return None
+
     if _is_excluded_dir(path):
         if path.is_dir():
             stats["skippedDirectoryCount"] += 1
@@ -129,6 +134,10 @@ def _build_node(path: Path, depth: int, *, stats: dict[str, Any]) -> dict | None
     relative_path = path.relative_to(PROJECT_ROOT).as_posix()
     stats["nodeCount"] += 1
     if path.is_dir():
+        if not _resolved_within_project(path):
+            # Containment backstop: a real directory that resolves outside the
+            # project root is never recursed into.
+            return None
         stats["directoryCount"] += 1
         if depth >= MAX_TREE_DEPTH:
             return {
@@ -188,6 +197,19 @@ def _resolve_project_path(relative_path: str) -> Path:
 
 def _is_excluded_dir(path: Path) -> bool:
     return path.name in EXCLUDED_DIR_NAMES or path.name.startswith(".pytest-run-")
+
+
+def _is_link(path: Path) -> bool:
+    return path.is_symlink() or (hasattr(path, "is_junction") and path.is_junction())
+
+
+def _resolved_within_project(path: Path) -> bool:
+    project_root = PROJECT_ROOT.resolve()
+    try:
+        path.resolve().relative_to(project_root)
+    except ValueError:
+        return False
+    return True
 
 
 def _sort_key(path: Path) -> tuple[int, str]:

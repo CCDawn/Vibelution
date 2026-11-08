@@ -1,0 +1,15 @@
+/* Agent creation surfaces (AgentCreatePanel + agent-create wizard). Loaded
+ * with the lazy AgentCreateWizardDialog chunk, which every entry point (chat
+ * dialog, AgentsRoute, teams TeamCreateDialog) reaches through the wizard. */
+@import "tailwindcss" source(none);
+@import "../theme.tailwind.css";
+
+/* Shared recipe class literals (import constants are not followed by Tailwind). */
+@source "../vuiSurfaceRecipes.ts";
+@source "../vuiSurfaceAlphaPolicy.ts";
+@source "../vuiChromeRecipes.ts";
+
+@source "../../routes/AgentCreatePanel.tsx";
+@source "../../routes/AgentCreatePanel.styles.ts";
+@source "../../routes/agent-create/**/*.{ts,tsx}";
+@source not "../../routes/agent-create/**/*.test.{ts,tsx}";

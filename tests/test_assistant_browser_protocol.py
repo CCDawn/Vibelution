@@ -26,6 +26,54 @@ def result(action, **extra):
     return {'schemaVersion': 1, 'operation': action, 'code': 'ok', **extra}
 
 
+@pytest.mark.parametrize(('action', 'arguments'), [
+    ('browser_ensure', {'url': 'https://example.org/path?q=one#part'}),
+    ('browser_select', {'pageId': PAGE}), ('browser_show', {}),
+])
+def test_reuse_requests_and_results_remain_closed(action, arguments):
+    request = arguments
+    assert browser.validate_request(action, request) == request
+    assert browser.validate_result(action, request, result(action[8:], state=STATE))['state'] == STATE
+    for extra in ({'approved': True}, {'source': 'operator'}, {'operation': 'resume'}, {'value': 'private'}):
+        with pytest.raises(ValueError): browser.validate_request(action, {**request, **extra})
+    for bad_state in ({**STATE, 'visible': True}, {**STATE, 'pages': [{**STATE['pages'][0], 'selected': True}]}):
+        with pytest.raises(ValueError): browser.validate_result(action, request, result(action[8:], state=bad_state))
+    with pytest.raises(ValueError): browser.validate_result(action, request, {**result(action[8:], state=STATE), 'approved': True})
+
+
+def test_reuse_actions_reject_missing_or_unsafe_targets_and_control_transfer():
+    for action, request in [('browser_ensure', {}), ('browser_ensure', {'url': 'https://user:pass@example.org/'}),
+                            ('browser_ensure', {'url': 'javascript:alert(1)'}), ('browser_select', {}),
+                            ('browser_select', {'pageId': 'invalid'}), ('browser_show', {'pageId': PAGE}),
+                            ('browser_resume', {}), ('browser_takeover', {})]:
+        with pytest.raises(ValueError): browser.validate_request(action, request)
+
+
+def test_native_reuse_actions_publish_closed_schemas_and_dispatch_exact_targets():
+    async def run():
+        broker = MainControlBroker(lambda: (), browser_enabled=True)
+        dispatch = Dispatch()
+        bind_actions(dispatch, asyncio.get_running_loop(), main_control=broker)
+        try:
+            for action, args, request in [
+                ('browser_ensure', {'url': 'https://example.org/path?q=one#part'}, {'url': 'https://example.org/path?q=one#part'}),
+                ('browser_select', {'page_id': PAGE}, {'pageId': PAGE}), ('browser_show', {}, {}),
+            ]:
+                contract = await asyncio.to_thread(execute_action, 'describe', {'action': action})
+                assert contract['governed'] is False and contract['parameters']['additionalProperties'] is False
+                assert set(contract['parameters'].get('required', [])) == set(args)
+                with pytest.raises(ValueError): await asyncio.to_thread(execute_action, action, args)
+                with pytest.raises(ValueError): await asyncio.to_thread(execute_action, action, {**args, 'approved': True}, runtime=RUNTIME)
+                flight = asyncio.create_task(asyncio.to_thread(execute_action, action, args, runtime=RUNTIME))
+                claimed = (await broker.claim())['request']
+                assert {k: v for k, v in claimed.items() if k not in {'action', 'deliveryId'}} == request
+                assert broker.settle(claimed['deliveryId'], result(action[8:], state=STATE))
+                assert await flight == {**result(action[8:], state=STATE), 'source': 'launcher-browser', 'untrustedContent': True}
+        finally:
+            broker.close(); unbind_actions(dispatch)
+    asyncio.run(run())
+
+
 def test_closed_requests_reject_unapproved_capabilities_and_bad_values():
     assert browser.validate_request('browser_interact', REQ) == REQ
     for request in ({**REQ, 'selector': '#secret'}, {**REQ, 'operation': 'click', 'value': ''},

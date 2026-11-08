@@ -297,6 +297,108 @@ def test_accept_for_session_grant_mints_evidence_for_repeat_calls(monkeypatch, t
     assert tool_approvals.list_tool_approval_requests("session-a", status="pending") == []
 
 
+# ── A1：只读 git 自动批路径同样签发一次性证据（否则自动批被沙箱门死循环）──
+
+
+def test_request_approval_readonly_git_auto_approve_mints_evidence(monkeypatch, tmp_path):
+    _install_runtime(monkeypatch, permission_preset="request_approval")
+    cwd = _windows_sandbox_gate(monkeypatch, tmp_path)
+    command_hash = execution_evidence.command_execution_hash("git status")
+    outcome = tool_approvals.authorize_or_wait(
+        session_id="session-a",
+        turn_id="turn-a",
+        agent_id="agent-a",
+        call_id="call-auto",
+        tool_name="exec_command",
+        tool_args={"cmd": "git status"},
+        approval="on_request",
+        risk="execute",
+        decision_fingerprint="decision-a",
+        config_revision=3,
+        config_hash="config-hash-a",
+        permission_preset="request_approval",
+        timeout_seconds=0.2,
+    )
+    assert outcome.allowed is True
+    assert outcome.code == "auto_approved"
+    assert not tool_approvals.list_tool_approval_requests("session-a", status="pending")
+    # 自动批已签发一次性证据：沙箱门核对并消费后真实放行（死路有了出口）。
+    assert execution_evidence.peek_execution_evidence(
+        session_id="session-a", turn_id="turn-a", command_hash=command_hash
+    ) != {}
+    result = codex_cli_sandbox.execute_codex_sandbox_command("git status", cwd=cwd)
+    assert result == "sandbox ok"
+    # 证据一次性：消费后直连沙箱门仍 fail-closed；但重试调用会再次自动批并
+    # 签发新证据——不再出现「永远自动批、永远被拦」的无出口循环。
+    assert "SANDBOX_UNVERIFIED" in codex_cli_sandbox.execute_codex_sandbox_command("git status", cwd=cwd)
+    retry = tool_approvals.authorize_or_wait(
+        session_id="session-a",
+        turn_id="turn-a",
+        agent_id="agent-a",
+        call_id="call-auto-2",
+        tool_name="exec_command",
+        tool_args={"cmd": "git status"},
+        approval="on_request",
+        risk="execute",
+        decision_fingerprint="decision-a",
+        config_revision=3,
+        config_hash="config-hash-a",
+        permission_preset="request_approval",
+        timeout_seconds=0.2,
+    )
+    assert retry.allowed is True
+    assert execution_evidence.peek_execution_evidence(
+        session_id="session-a", turn_id="turn-a", command_hash=command_hash
+    ) != {}
+
+
+def test_request_approval_mutating_git_cli_still_prompts(monkeypatch, tmp_path):
+    _install_runtime(monkeypatch, permission_preset="request_approval")
+    cwd = _windows_sandbox_gate(monkeypatch, tmp_path, spawn_record=(spawn := {}))
+    box = {}
+    worker = _execute_with_authorization(
+        ("exec_command", "on_request", "execute"),
+        "exec_command",
+        {"cmd": "git push origin main"},
+        lambda **kwargs: _sandbox_command_result(kwargs.get("cmd", ""), cwd),
+        box,
+        "call-1",
+    )
+    request = _wait_for_pending()
+    assert request["toolName"] == "exec_command"
+    assert not spawn, "non-readonly git must reach a real operator decision"
+    tool_approvals.resolve_tool_approval_request("session-a", request["requestId"], decision="cancel")
+    worker.join(timeout=5)
+
+
+def test_auto_approved_readonly_git_non_windows_mints_no_evidence(monkeypatch):
+    _install_runtime(monkeypatch, permission_preset="request_approval")
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "linux")
+    outcome = tool_approvals.authorize_or_wait(
+        session_id="session-a",
+        turn_id="turn-a",
+        agent_id="agent-a",
+        call_id="call-auto",
+        tool_name="exec_command",
+        tool_args={"cmd": "git status"},
+        approval="on_request",
+        risk="execute",
+        decision_fingerprint="decision-a",
+        config_revision=3,
+        config_hash="config-hash-a",
+        permission_preset="request_approval",
+        timeout_seconds=0.2,
+    )
+    assert outcome.allowed is True
+    assert outcome.code == "auto_approved"
+    # 非 Windows 沙箱自身即执行边界：不签发证据，行为与 Phase 1 之前一致。
+    assert execution_evidence.peek_execution_evidence(
+        session_id="session-a",
+        turn_id="turn-a",
+        command_hash=execution_evidence.command_execution_hash("git status"),
+    ) == {}
+
+
 # ── auto_review 档：Windows 不再静默自动批；非 Windows 回归不变 ──────────────
 
 

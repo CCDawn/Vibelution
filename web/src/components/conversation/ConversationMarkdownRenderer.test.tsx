@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Load the renderer during suite collection so dependency startup does not
 // consume the unchanged behavior-test deadline. Vitest hoists vi.mock first.
 import { ConversationMarkdownRenderer } from "./ConversationMarkdownRenderer";
+import { loadConversationMathRenderer } from "./conversationMathRenderer";
 
 import styles from "./ConversationView.styles";
 
@@ -519,6 +520,9 @@ describe("ConversationMarkdownRenderer", () => {
   });
 
   it("renders single-dollar inline math and $$ block math through KaTeX", async () => {
+    // KaTeX is lazy in production; prime it synchronously so the static
+    // markup assertion sees the transformed output.
+    await loadConversationMathRenderer();
     // Block math is the flow form ($$ on its own lines) — remark-math only
     // marks that as display; a single-line `$$…$$` stays inline.
     const html = renderToStaticMarkup(
@@ -546,6 +550,7 @@ describe("ConversationMarkdownRenderer", () => {
   });
 
   it("degrades a failed formula to its LaTeX source without breaking the message", async () => {
+    await loadConversationMathRenderer();
     const html = renderToStaticMarkup(
       <ConversationMarkdownRenderer content="前文 $\notacommand$ 后文继续。" classNames={styles} />,
     );

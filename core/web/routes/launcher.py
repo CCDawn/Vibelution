@@ -380,7 +380,9 @@ def launcher_fail_desktop_action(action_id: str, payload: DesktopActionResultPay
     response_model_exclude_unset=True,
 )
 def launcher_register_desktop_session(payload: DesktopSessionPayload) -> dict:
-    return launcher_service.register_desktop_session(payload.model_dump())
+    return _desktop_session_mutation_response(
+        lambda: launcher_service.register_desktop_session(payload.model_dump())
+    )
 
 
 @router.put(

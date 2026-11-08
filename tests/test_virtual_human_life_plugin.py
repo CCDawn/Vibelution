@@ -2196,3 +2196,44 @@ def test_legacy_pet_import_requires_preview_digest_and_preserves_source(
 
     assert interaction["result"]["relationship"]["intimacy"] == 76
     assert interaction["result"]["relationship"]["trust"] == 78
+
+
+def test_corrupt_schedule_file_degrades_instead_of_failing_reads(tmp_path: Path) -> None:
+    agents = {"agent-a": _active_agent("agent-a")}
+    service = VirtualHumanLifeService(
+        project_root=tmp_path,
+        agent_loader=lambda agent_id, include_archived=False: agents.get(agent_id),
+        agent_lister=lambda: list(agents.values()),
+        plugin_root_resolver=lambda agent_id: (
+            tmp_path / "agents" / agent_id / "plugins" / "virtual-human-life"
+        ),
+        now_provider=lambda: datetime(2026, 8, 27, 9, 0, tzinfo=timezone.utc),
+    )
+    service.set_binding(
+        "agent-a",
+        enabled=True,
+        expected_version=0,
+        config={"timezone": "Asia/Shanghai"},
+    )
+    today_schedule_path = (
+        service.plugin_root("agent-a") / "schedules" / "2026-08-27.json"
+    )
+    today_schedule_path.parent.mkdir(parents=True, exist_ok=True)
+    today_schedule_path.write_bytes(b"\xff\xfe not utf-8 \xff")
+
+    # A corrupt schedule file is treated like a missing one: the read degrades,
+    # the deterministic planner rebuilds it, and the corrupt bytes are replaced.
+    schedule = service.schedule_for("agent-a", "2026-08-27")
+    assert isinstance(schedule, dict)
+    assert schedule["localDate"] == "2026-08-27"
+    assert today_schedule_path.read_text(encoding="utf-8").lstrip().startswith("{")
+    assert service.schedule_for("agent-a", "2026-08-27")["localDate"] == "2026-08-27"
+
+    # Snapshot keeps serving with the corrupt tomorrow schedule degraded to None.
+    tomorrow_schedule_path = (
+        service.plugin_root("agent-a") / "schedules" / "2026-08-28.json"
+    )
+    tomorrow_schedule_path.write_text('{"broken": ', encoding="utf-8")
+    snapshot = service.snapshot("agent-a")
+    assert snapshot["todaySchedule"]["localDate"] == "2026-08-27"
+    assert snapshot["tomorrowSchedule"] is None

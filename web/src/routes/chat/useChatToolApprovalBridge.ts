@@ -12,6 +12,8 @@ import {
   toolApprovalScopeLabel,
 } from "./toolApprovalLabels";
 import {
+  APPROVAL_DEV_TOOL_BUNDLE_TOOLS,
+  approvalGrantMapsToSessionTool,
   toolApprovalActionPreview,
   toolApprovalDisplayName,
 } from "./toolApprovalPreview";
@@ -31,6 +33,12 @@ export interface UseChatToolApprovalBridgeParams {
     isPending: boolean;
     variables?: { request: AgentToolGovernanceRequest; decision: "approve" | "reject" };
     mutate: (variables: { request: AgentToolGovernanceRequest; decision: "approve" | "reject" }) => void;
+  };
+  /** b3: one-click session trust for the execute/write development tools. */
+  trustDevelopmentToolsMutation: {
+    isPending: boolean;
+    variables?: { sessionId: string; requestId: string };
+    mutate: (variables: { sessionId: string; requestId: string }) => void;
   };
 }
 
@@ -54,6 +62,7 @@ export function useChatToolApprovalBridge({
   lang,
   resolveSessionToolApprovalMutation,
   resolveToolApprovalMutation,
+  trustDevelopmentToolsMutation,
 }: UseChatToolApprovalBridgeParams): ChatToolApprovalBridgeState {
   const pendingToolGovernanceApproval = useMemo(
     () => (detail?.pendingToolGovernanceRequests ?? []).find((request) => request.status === "pending_review") ?? null,
@@ -127,19 +136,47 @@ export function useChatToolApprovalBridge({
     resolveToolApprovalMutation.mutate({ request: pendingToolGovernanceApproval, decision: "approve" });
   }, [pendingSessionToolApproval, pendingToolGovernanceApproval, resolveSessionToolApprovalMutation, resolveToolApprovalMutation]);
 
+  /** A2b: the "A" button copy says session-scoped — make the decision match. */
   const handleApproveToolForSession = useMemo(() => {
     if (
       !pendingSessionToolApproval
       || pendingSessionToolApproval.approval === "always"
-      || !(
-        pendingSessionToolApproval.availableDecisions.includes("acceptAlways")
-        || pendingSessionToolApproval.availableDecisions.includes("acceptForSession")
+    ) {
+      return undefined;
+    }
+    const availableDecisions = pendingSessionToolApproval.availableDecisions;
+    if (approvalGrantMapsToSessionTool(pendingSessionToolApproval.toolName)) {
+      // Shell/file dev tools: exact-args and durable grants never repeat-hit,
+      // so "A" maps to the tool-level session grant the copy describes.
+      if (availableDecisions.includes("acceptForSessionTool")) {
+        return () => {
+          resolveSessionToolApprovalMutation.mutate({
+            request: pendingSessionToolApproval,
+            decision: "acceptForSessionTool",
+          });
+        };
+      }
+      // Red-lined calls (network/destructive risk) keep the narrow same-scope tier.
+      if (!availableDecisions.includes("acceptForSession")) {
+        return undefined;
+      }
+      return () => {
+        resolveSessionToolApprovalMutation.mutate({
+          request: pendingSessionToolApproval,
+          decision: "acceptForSession",
+        });
+      };
+    }
+    if (
+      !(
+        availableDecisions.includes("acceptAlways")
+        || availableDecisions.includes("acceptForSession")
       )
     ) {
       return undefined;
     }
     return () => {
-      const decision = pendingSessionToolApproval.availableDecisions.includes("acceptAlways")
+      const decision = availableDecisions.includes("acceptAlways")
         ? "acceptAlways"
         : "acceptForSession";
       resolveSessionToolApprovalMutation.mutate({
@@ -149,10 +186,15 @@ export function useChatToolApprovalBridge({
     };
   }, [pendingSessionToolApproval, resolveSessionToolApprovalMutation]);
 
-  /** b1: coarser opt-in tier — every call of this tool for the rest of the session. */
+  /**
+   * b1: coarser opt-in tier — every call of this tool for the rest of the
+   * session. For shell/file dev tools the "A" button already performs exactly
+   * this action, so the redundant standalone button is not offered again.
+   */
   const handleApproveToolForSessionTool = useMemo(() => {
     if (
       !pendingSessionToolApproval
+      || approvalGrantMapsToSessionTool(pendingSessionToolApproval.toolName)
       || !pendingSessionToolApproval.availableDecisions.includes("acceptForSessionTool")
     ) {
       return undefined;
@@ -164,6 +206,29 @@ export function useChatToolApprovalBridge({
       });
     };
   }, [pendingSessionToolApproval, resolveSessionToolApprovalMutation]);
+
+  /**
+   * b3: one click trusts every execute/write development tool for this
+   * session. The server resolves the current pending request exactly like
+   * acceptForSessionTool and adds the same tool-level grants for the rest of
+   * the bundle; no new grant mechanism, expiry, or red line is introduced.
+   */
+  const handleApproveDevelopmentBundle = useMemo(() => {
+    if (
+      !pendingSessionToolApproval
+      || pendingSessionToolApproval.approval === "always"
+      || !APPROVAL_DEV_TOOL_BUNDLE_TOOLS.has(pendingSessionToolApproval.toolName)
+      || !pendingSessionToolApproval.availableDecisions.includes("acceptForSessionTool")
+    ) {
+      return undefined;
+    }
+    return () => {
+      trustDevelopmentToolsMutation.mutate({
+        sessionId: pendingSessionToolApproval.sessionId,
+        requestId: pendingSessionToolApproval.requestId,
+      });
+    };
+  }, [pendingSessionToolApproval, trustDevelopmentToolsMutation]);
 
   /** b3: time-boxed delegation for low-risk assistant manage actions. */
   const handleApproveWithActionWindow = useMemo(() => {
@@ -217,9 +282,11 @@ export function useChatToolApprovalBridge({
       onApproveForSession: handleApproveToolForSession,
       onApproveForSessionTool: handleApproveToolForSessionTool,
       onApproveWithActionWindow: handleApproveWithActionWindow,
+      onApproveForDevelopmentBundle: handleApproveDevelopmentBundle,
       onReject: handleRejectToolApproval,
     };
   }, [
+    handleApproveDevelopmentBundle,
     handleApproveToolApproval,
     handleApproveToolForSession,
     handleApproveToolForSessionTool,

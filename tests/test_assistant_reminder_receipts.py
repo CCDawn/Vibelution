@@ -636,3 +636,54 @@ def test_v1_ledger_is_rejected_without_automatic_upgrade(tmp_path):
         assert list(conn.execute("SELECT type,name,sql FROM sqlite_schema ORDER BY name")) == before
     finally:
         conn.close()
+
+
+def test_requeue_system_notification_reclaims_only_an_unread_system_toast(tmp_path):
+    root = tmp_path / "receipts"
+    with opened(root, create=True) as store:
+        token = store.reserve("event")["attemptToken"]
+        # A pending attempt has no completed submission to reclaim.
+        with pytest.raises(ReminderReceiptError, match="receipt_fallback_not_allowed"):
+            store.requeue_system_notification("event")
+        store.record_submitted("event", token, channel="system_notification")
+        with pytest.raises(ReminderReceiptError, match="receipt_invalid_identity"):
+            store.requeue_system_notification("missing event")
+        with pytest.raises(ReminderReceiptError, match="receipt_fallback_not_allowed"):
+            store.requeue_system_notification("missing")
+        result = store.requeue_system_notification("event")
+        assert result["created"] and result["state"] == "submitted"
+        assert result["channel"] == "attention_fallback" and result["pendingVerification"]
+        fresh = result["attemptToken"]
+        assert fresh != token
+        # The stale toast's token can no longer settle a late click.
+        with pytest.raises(ReminderReceiptError, match="receipt_attempt_owner_required"):
+            store.record_opened("event", token, channel="system_notification")
+        # Only unread system toasts are requeued; the channel is now bound.
+        with pytest.raises(ReminderReceiptError, match="receipt_fallback_not_allowed"):
+            store.requeue_system_notification("event")
+        store.record_submitted("event", fresh, channel="attention_fallback")
+        store.record_opened("event", fresh, channel="attention_fallback")
+        # An observed interaction is never requeued.
+        with pytest.raises(ReminderReceiptError, match="receipt_fallback_not_allowed"):
+            store.requeue_system_notification("event")
+        assert store.get("event")["interactionObserved"]
+
+
+def test_requeue_system_notification_replaces_a_dead_sender_registration(tmp_path):
+    import apsw
+    root = tmp_path / "receipts"
+    with opened(root, create=True) as store:
+        token = store.reserve("event")["attemptToken"]
+        store.record_submitted("event", token, channel="system_notification")
+    with opened(root) as restarted:
+        result = restarted.requeue_system_notification("event")
+        assert result["created"] and result["attemptToken"] != token
+        restarted.record_submitted("event", result["attemptToken"], channel="attention_fallback")
+        restarted.record_opened("event", result["attemptToken"], channel="attention_fallback")
+    conn = apsw.Connection(str(root / "reminders.sqlite3"))
+    try:
+        assert list(conn.execute("SELECT count(*) FROM receipt_inflight")) == [(0,)]
+        assert list(conn.execute("SELECT count(*) FROM receipt_senders")) == [(0,)]
+        assert list(conn.execute("SELECT state,channel FROM reminder_receipts")) == [("opened", "attention_fallback")]
+    finally:
+        conn.close()

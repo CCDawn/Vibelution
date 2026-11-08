@@ -215,6 +215,63 @@ def test_tools_api_rejects_unknown_image2_model(monkeypatch):
     assert "Unknown image2 model reference" in response.json()["detail"]
 
 
+def test_tools_api_lists_v2_provider_model_and_allows_default(monkeypatch):
+    """V2 provider-bound image models stay selectable after a config upgrade.
+
+    ``provider_model`` options were previously dropped from the image2 list and
+    rejected by the default-model persistence, so a configured model silently
+    vanished from the selector once the config moved to schema v2 (ISS-049
+    regression).
+    """
+    saved = {}
+    public_config = {
+        "llm": {
+            "schema_version": 2,
+            "providers": {
+                "relay_image": {
+                    "label": "Relay Image",
+                    "service_class": "relay",
+                    "driver": "openai",
+                    "base_url": "https://relay.example/v1",
+                    "credential_ref": "env:RELAY_IMAGE_KEY",
+                    "requires_credential": True,
+                    "models": {
+                        "image_model": {
+                            "upstream_id": "gpt-image-2",
+                            "label": "Image Model V2",
+                        }
+                    },
+                }
+            },
+            "profiles": {},
+            "model_aliases": {},
+        },
+        "tools": {"image2": {"default_model_ref": ""}},
+    }
+
+    monkeypatch.setattr(registry, "load_public_config", lambda: saved.get("config", public_config))
+    monkeypatch.setattr(registry, "save_public_config", lambda updated: saved.setdefault("config", updated))
+    monkeypatch.setattr(registry, "build_effective_config", lambda _updated: None)
+    monkeypatch.setattr(registry, "reload_config", lambda _path: None)
+    monkeypatch.setattr(registry, "_record_registry_event", lambda *args, **kwargs: None)
+
+    list_response = _client().get("/api/tools/image2/models")
+
+    assert list_response.status_code == 200, list_response.text
+    payload = list_response.json()
+    model_refs = [item["modelRef"] for item in payload["models"]]
+    assert "relay_image/image_model" in model_refs
+    option = next(item for item in payload["models"] if item["modelRef"] == "relay_image/image_model")
+    assert option["source"] == "provider_model"
+    assert option["configuredModel"] == "gpt-image-2"
+
+    update_response = _client().put("/api/tools/image2/default-model", json={"modelRef": "relay_image/image_model"})
+
+    assert update_response.status_code == 200, update_response.text
+    assert update_response.json()["defaultModelRef"] == "relay_image/image_model"
+    assert saved["config"]["tools"]["image2"]["default_model_ref"] == "relay_image/image_model"
+
+
 def test_tools_api_lists_agent_scopes(tmp_path, monkeypatch):
     monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
 

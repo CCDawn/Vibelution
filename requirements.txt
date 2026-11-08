@@ -20,6 +20,8 @@ langchain-openai>=0.0.2
 litellm>=1.96.0,<2.0
 openai[realtime]>=2.38.0
 socksio>=1.0.0             # httpx SOCKS proxy support for LiteLLM when ALL_PROXY is set
+httpx>=0.28.1,<1.0         # ChatGPT subscription OAuth and native Responses transport
+PyJWT[crypto]>=2.13.0,<3.0 # Verify ChatGPT OIDC identity against the issuer's signing keys
 mcp==2.0.0                 # Official MCP Python SDK v2; legacy + modern protocol eras
 
 # Research workflow runtime (ADR 0006) — direct deps, not transitive-only

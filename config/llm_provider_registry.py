@@ -78,9 +78,18 @@ def suggest_provider_id(provider: dict[str, Any], existing_ids: Iterable[str]) -
     if not base[0].isalpha():
         base = f"provider_{base}"
     existing = {str(item) for item in existing_ids}
-    if base not in existing:
-        return validate_provider_id(base[:64])
-    return validate_provider_id(f"{base[:55]}_{_fingerprint(provider)[:8]}")
+    fingerprint = _fingerprint(provider)
+    candidates = [
+        base[:64],
+        f"{base[:55]}_{fingerprint[:8]}",
+    ]
+    # Deterministic ordinal fallbacks stay within the 64-char id limit.
+    candidates.extend(f"{base[:52]}_{fingerprint[:8]}_{ordinal}" for ordinal in range(1, 1000))
+    for candidate in candidates:
+        unique = validate_provider_id(candidate[:64])
+        if unique not in existing:
+            return unique
+    raise ValueError("unable to suggest a unique provider_id")
 
 
 def _validate_provider_registry(

@@ -32,6 +32,9 @@ export function launcherAssistantPageNotices(input: {
   appearance: LauncherNoticeRead[];
   history?: { missing: boolean; failed: boolean; pending?: boolean; retry: () => unknown; refresh: () => unknown };
   deliveryUnreported?: boolean;
+  /** Ledger-only acknowledgment for the unreported-delivery banner; the notice
+   * keeps its description and only gains the exit action. */
+  deliveryAcknowledge?: { pending: boolean; run: () => unknown };
 }): LauncherNotice[] {
   const zh = input.lang === "zh";
   const notices: LauncherNotice[] = [];
@@ -75,6 +78,8 @@ export function launcherAssistantPageNotices(input: {
     id: "assistant-delivery", kind: "delivery", tone: "warning",
     title: zh ? "部分任务结果暂未汇报" : "Some task results have not been reported",
     description: zh ? "可在对话中让助理核对原任务的状态。" : "Ask the assistant in chat to check the original task status.",
+    actions: input.deliveryAcknowledge ? [{ id: "acknowledge", label: zh ? "已知晓" : "Acknowledge",
+      pending: input.deliveryAcknowledge.pending, run: () => input.deliveryAcknowledge?.run() }] : undefined,
   });
   return notices;
 }

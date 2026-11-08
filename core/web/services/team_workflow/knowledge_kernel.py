@@ -3662,21 +3662,56 @@ def _normalize_optional_bool(value: Any) -> bool | None:
     return None
 
 
-def _load_transfer_records(team_id: str) -> list[dict[str, Any]]:
+def _load_transfer_records(team_id: str, *, require_complete_records: bool = False) -> list[dict[str, Any]]:
     s = _service()
     path = s._transfer_records_path(team_id)
     if not path.exists():
         return []
     records: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    skipped_reasons: list[str] = []
+    for line_number, raw_line in enumerate(path.read_bytes().splitlines(), start=1):
+        try:
+            line = raw_line.decode("utf-8")
+        except UnicodeDecodeError:
+            if require_complete_records:
+                raise s.TeamWorkflowOrchestrationError(
+                    f"Transfer records contain invalid UTF-8 at line {line_number}; repair the file before updating it."
+                ) from None
+            skipped_reasons.append(f"line {line_number}: invalid UTF-8")
+            continue
         if not line.strip():
             continue
         try:
             payload = json.loads(line)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
+            if require_complete_records:
+                raise s.TeamWorkflowOrchestrationError(
+                    f"Transfer records contain invalid JSON at line {line_number}; repair the file before updating it."
+                ) from None
+            # ISS-064: fail-soft skip stays, but the dropped handoff record
+            # must be observable — report line number and parse reason.
+            skipped_reasons.append(f"line {line_number}: {exc.msg}")
             continue
-        if isinstance(payload, dict):
-            records.append(payload)
+        if not isinstance(payload, dict):
+            if require_complete_records:
+                raise s.TeamWorkflowOrchestrationError(
+                    f"Transfer records: expected JSON object at line {line_number}; repair the file before updating it."
+                )
+            skipped_reasons.append(f"line {line_number}: expected JSON object")
+            continue
+        records.append(payload)
+    if skipped_reasons:
+        s._record_workflow_event(
+            "workflow.transfer_records_corrupt_lines_skipped",
+            team_id,
+            fields={
+                "transferRecordsPath": s._relative_path(path),
+                "skippedLineCount": len(skipped_reasons),
+                "skippedReasons": skipped_reasons[:8],
+            },
+            outcome="degraded",
+            level="warning",
+        )
     return records
 
 

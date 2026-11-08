@@ -17,6 +17,12 @@
 @source "../../routes/desktopPet/DesktopPetCharacter.styles.ts";
 
 /* Compact assistant presentation only; native transcript/composer behavior is retained. */
+/* When a card and the editor cannot fit in a short Launcher window, keep both
+   reachable through the existing conversation surface instead of clipping them. */
+.launcher-assistant-chat-window .vui-components-conversationview.surface:has(> [data-conversation-composer-preceding]) {
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
 /* Keep the native approval controls in the content column of the narrow pet
    window. The first column is reserved for the warning icon. */
 @media (max-width: 639px) {

@@ -159,6 +159,30 @@ def import_data_record_as_source_candidate(team_id: str, run_id: str, record_id:
     s.team_service.assert_team_exists(normalized_team_id)
     import_payload = payload if isinstance(payload, dict) else {}
     run, record = s._load_data_processing_record(normalized_run_id, normalized_record_id)
+    # ISS-044 fail-closed team ownership: ``_load_data_processing_record``
+    # resolves the run globally by runId, so without this guard a valid token
+    # on team B could import team A's run/record into B's candidate store.
+    # The run's frozen scope (fallback metadata) is the ownership authority;
+    # a mismatch is rejected before any duplicate/idempotency or store write,
+    # so repeated cross-team attempts keep failing instead of returning 201.
+    run_scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    run_team_id = s._trim_text(run_scope.get("teamId"), max_length=128)
+    if not run_team_id:
+        run_metadata = run.get("metadata") if isinstance(run.get("metadata"), dict) else {}
+        run_team_id = s._trim_text(run_metadata.get("teamId"), max_length=128)
+    if run_team_id and run_team_id != normalized_team_id:
+        s._record_workflow_event(
+            "candidate.import_cross_team_run_blocked",
+            normalized_team_id,
+            fields={
+                "runId": normalized_run_id,
+                "recordId": normalized_record_id,
+                "runTeamId": run_team_id,
+            },
+            level="warning",
+            outcome="blocked",
+        )
+        raise s.TeamWorkflowOrchestrationError("Data processing run does not belong to this team.")
     source_identity_key = s._source_collection_record_identity_key(record)
     excluded_entry = s._source_collection_record_is_excluded(normalized_team_id, run, record)
     if excluded_entry:

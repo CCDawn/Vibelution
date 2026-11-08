@@ -247,3 +247,61 @@ def test_log_diagnostics_ignores_health_polling_and_favicon_noise(tmp_path, monk
     assert diagnostics["warningCount"] == 0
     assert diagnostics["ignoredSignalCount"] == 3
     assert diagnostics["firstSignalLine"] is None
+
+
+def test_log_diagnostics_json_empty_error_fields_do_not_count_as_errors(tmp_path, monkeypatch):
+    conversation_log = tmp_path / "logs" / "conversations" / "conversation_debug.jsonl"
+    conversation_log.parent.mkdir(parents=True, exist_ok=True)
+    conversation_log.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {"type": "tool_call", "tool": "read_file_tool", "status": "success", "error": "", "exception": None},
+                    ensure_ascii=False,
+                ),
+                json.dumps({"level": "info", "message": "poll ok", "error": ""}, ensure_ascii=False),
+                json.dumps(
+                    {"type": "tool_call", "tool": "write_file_tool", "status": "failed", "error": "connection refused"},
+                    ensure_ascii=False,
+                ),
+                json.dumps({"level": "error", "message": "tool crashed"}, ensure_ascii=False),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(log_service, "PROJECT_ROOT", tmp_path)
+
+    payload = log_service.read_log_file("conversation_logs", "conversation_debug.jsonl")
+
+    diagnostics = payload["diagnostics"]
+    assert diagnostics["severity"] == "error"
+    assert diagnostics["errorCount"] == 2
+    assert diagnostics["warningCount"] == 0
+    assert diagnostics["firstSignalLine"] == 3
+    assert "connection refused" in diagnostics["firstSignalPreview"]
+    assert diagnostics["structuredEventCount"] == 4
+
+
+def test_log_diagnostics_keeps_error_signal_on_health_polling_line(tmp_path, monkeypatch):
+    runtime_log = tmp_path / "logs" / "backend.stdout.log"
+    runtime_log.parent.mkdir(parents=True, exist_ok=True)
+    runtime_log.write_text(
+        "\n".join(
+            [
+                'INFO: 127.0.0.1:51110 - "GET /favicon.ico HTTP/1.1" 404 Not Found',
+                'ERROR: 127.0.0.1:51111 - "GET /api/health HTTP/1.1" 200 OK; health probe failed to persist',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(log_service, "PROJECT_ROOT", tmp_path)
+
+    payload = log_service.read_log_file("runtime_logs", "backend.stdout.log")
+
+    diagnostics = payload["diagnostics"]
+    assert diagnostics["severity"] == "error"
+    assert diagnostics["errorCount"] == 1
+    assert diagnostics["warningCount"] == 0
+    assert diagnostics["ignoredSignalCount"] == 1
+    assert diagnostics["firstSignalLine"] == 2
+    assert "health probe failed" in diagnostics["firstSignalPreview"]

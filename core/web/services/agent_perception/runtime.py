@@ -183,7 +183,13 @@ class AgentPerceptionRuntime:
             raise AgentPerceptionRuntimeError("Agent identity is required.")
         agent = self._agent_loader(normalized)
         if not isinstance(agent, dict) or str(agent.get("agentId") or "").strip() != normalized:
-            raise AgentPerceptionRuntimeError("Agent is unavailable for perception runtime.")
+            # A lookup miss is a "does not exist" outcome, not a runtime fault:
+            # routes already map AgentNotFoundError to 404, matching the agent
+            # directory contract for unknown Agents. Lazy import mirrors
+            # _load_agent to avoid import cycles.
+            from core.web.services.agent_directory_service import AgentNotFoundError
+
+            raise AgentNotFoundError(f"Agent not found: {normalized}")
         return agent
 
     def _policy(self, agent: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:

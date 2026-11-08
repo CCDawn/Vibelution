@@ -430,15 +430,50 @@ def _normalize_task(value: Any) -> dict[str, Any]:
     return normalized
 
 
+def _record_task_store_degraded_read(
+    team_id: str,
+    research_project_id: str,
+    path: Path,
+    exc: Exception,
+) -> None:
+    """ISS-063: an unreadable task store degrades to an empty list, but the
+    skip must stay observable — record one structured workflow event with the
+    store path and the parse failure summary instead of failing silently."""
+
+    s = _service()
+    try:
+        s._record_workflow_event(
+            "research_project_agent_task_store_unreadable",
+            team_id,
+            fields={
+                "researchProjectId": research_project_id,
+                "storePath": s._relative_path(path),
+                "errorType": exc.__class__.__name__,
+                "message": str(exc)[:200],
+            },
+            outcome="degraded",
+            level="warning",
+        )
+    except Exception:  # noqa: BLE001 - observability must not break the read
+        return
+
+
 def _read_store(team_id: str, research_project_id: str) -> dict[str, Any]:
     path = _store_path(team_id, research_project_id)
     if not path.exists():
         return _empty_store(team_id, research_project_id)
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError) as exc:
+        _record_task_store_degraded_read(team_id, research_project_id, path, exc)
         return _empty_store(team_id, research_project_id)
     if not isinstance(payload, dict):
+        _record_task_store_degraded_read(
+            team_id,
+            research_project_id,
+            path,
+            TypeError("research project agent task store payload is not an object"),
+        )
         return _empty_store(team_id, research_project_id)
     tasks = [
         _normalize_task(item)

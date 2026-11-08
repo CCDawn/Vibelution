@@ -118,7 +118,6 @@ class AgentConfigurationControl:
     def _snapshot(self, directory, agent_id):
         from .agent_directory import _ownership, _rows, _teams
         from .session_parameters import _visibility_source
-        from core.web.services.external_agent.policy import external_mcp_eligibility
         from core.web.services.agent_config_authority import canonical_agent_config_payload
 
         sources = ExistingStateSnapshot(self.native.project_root, directory, pin_workspace=True)
@@ -139,15 +138,13 @@ class AgentConfigurationControl:
         mode = directory._normalize_primary_mode(agent.get("primaryMode") or directory._infer_agent_primary_mode(agent))
         projected = {**agent, "conversationIndexKind": classification["kind"], "roleKey": role}
         ownership = _ownership(projected, classification["kind"], mode, memberships.get(agent_id, []), team_index, {})
-        decision = external_mcp_eligibility(projected, active_team_lookup=lambda _aid:
-            next((team for team in memberships.get(agent_id, []) if team["status"] == "active"), None))
         binding = _visibility_source(sources, "binding", agent_id)
         if binding is not None and (not isinstance(binding, dict) or type(binding.get("enabled")) is not bool
                 or binding.get("agentId") != agent_id):
             raise ValueError("Invalid Companion binding")
-        if (directory._agent_archive_protected(agent) or ownership["kind"] in {"team", "system", "companion"}
-                or not decision.eligible or classification["kind"] != "personal_agent" or classification["errors"]
-                or binding is not None and binding["enabled"]):
+        # Configuration belongs to personal and Team Agents alike. Dispatch and
+        # archive eligibility do not decide whether their parameters are editable.
+        if ownership["kind"] not in {"personal", "team"} or binding is not None and binding["enabled"]:
             raise _error("AGENT_PROTECTED", 403)
         if type(agent.get("configRevision")) is not int or agent["configRevision"] < 0:
             raise ValueError("Invalid configuration revision")

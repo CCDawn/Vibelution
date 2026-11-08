@@ -88,6 +88,7 @@ from core.web.services.self_evolution_service import (
 )
 from core.web.services.self_evolution_control_service import (
     SelfEvolutionRunBusyError,
+    SelfEvolutionRunCorruptError,
     SelfEvolutionRunNotFoundError,
     SelfEvolutionRunValidationError,
     execute_self_observation_action,
@@ -716,7 +717,12 @@ def self_observation_start_run(payload: SelfObservationRunStartPayload) -> dict:
     response_model_exclude_unset=True,
 )
 def self_observation_run(run_id: str) -> dict:
-    snapshot = get_self_observation_run_snapshot(run_id)
+    try:
+        snapshot = get_self_observation_run_snapshot(run_id)
+    except SelfEvolutionRunCorruptError as exc:
+        # Same corrupt semantics as the event-stream endpoint so the pair
+        # never diverges (one crashing while the other serves data).
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     if snapshot is None:
         raise HTTPException(status_code=404, detail="Self observation run not found")
     return snapshot
@@ -727,7 +733,12 @@ def self_observation_run(run_id: str) -> dict:
     response_class=StreamingResponse,
 )
 def self_observation_run_events(run_id: str) -> StreamingResponse:
-    snapshot = get_self_observation_run_snapshot(run_id)
+    try:
+        snapshot = get_self_observation_run_snapshot(run_id)
+    except SelfEvolutionRunCorruptError as exc:
+        # Same corrupt semantics as the detail endpoint (ISS-073): a damaged
+        # record is an explicit 404 on both sides, never a partial stream.
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     if snapshot is None:
         raise HTTPException(status_code=404, detail="Self observation run not found")
     return StreamingResponse(
@@ -777,7 +788,13 @@ def self_evolution_start_campaign(payload: SelfEvolutionCampaignStartPayload, re
 @router.get("/evolution/self/campaigns/active", response_model=EvolutionRunResponse | None,
             response_model_exclude_unset=True)
 def self_evolution_active_campaign() -> dict | None:
-    return default_orchestrator().active_campaign()
+    try:
+        return default_orchestrator().active_campaign()
+    except ValueError:
+        # Fail soft (ISS-072): one corrupt campaign record must not 500 the
+        # active read; the service already skips+events, this guards any
+        # remaining read-side ValueError the same way.
+        return None
 
 
 @router.get("/evolution/self/campaigns/{campaign_id}", response_model=EvolutionRunResponse,

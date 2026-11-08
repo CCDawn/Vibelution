@@ -297,7 +297,7 @@ def test_contracts_are_closed_and_do_not_add_daily_action_approval():
         "authorization_upgrade", "authorization_reduce", "authorization_revoke", "runtime_command",
         "research_command", "team_update", "agent_tool_policy_update", "agent_dispatch_access_set",
         "knowledge_acl_grant", "knowledge_acl_revoke", "flow_save", "flow_start", "team_create",
-        "team_member_add", "team_member_remove", "team_archive"}
+        "team_member_add", "team_member_remove", "team_archive", "team_recovery_confirm_deployment"}
     governed |= {"agent_parameters_update", "agent_prompt_update"}
     # The expanded management surface uses native governance. Ordinary Agent
     # create/update/avatar remain daily actions; this does not add approvals.

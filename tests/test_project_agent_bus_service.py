@@ -1,3 +1,5 @@
+import json
+
 from core.agent_kernel import service as agent_kernel_service
 from core.infrastructure import developer_sandbox
 from core.web.services import agent_directory_service, project_agent_bus_service, session_service
@@ -327,3 +329,45 @@ def test_project_agent_bus_interrupts_only_target_agents(tmp_path, monkeypatch):
     assert child_payload["deliveries"][0]["wake_status"] == "skipped_busy"
     assert child_payload["deliveries"][0]["turn_id"] == ""
     assert child_payload["interruptions"][0]["status"] == "interrupted"
+
+
+def test_bus_timeline_skips_corrupt_lines_and_records_skip_event(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        agent_directory_service,
+        "count_active_agents",
+        lambda *, include_archived=False: 0,
+    )
+    events_path = project_agent_bus_service._bus_events_path()
+    events_path.parent.mkdir(parents=True, exist_ok=True)
+    events_path.write_text(
+        json.dumps({"eventId": "projectbus-good", "messageType": "project_observation"}, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    with events_path.open("ab") as handle:
+        handle.write(b"\xff\xfe not utf-8 \xff\n")
+        handle.write(b'{"eventId": broken\n')
+
+    scene_events: list[dict] = []
+
+    def _capture_scene(*args, **kwargs):
+        scene_events.append({"args": args, "kwargs": kwargs})
+        return {"accepted": True}
+
+    monkeypatch.setattr(project_agent_bus_service, "record_runtime_scene_event", _capture_scene)
+
+    result = project_agent_bus_service.list_project_agent_bus_events()
+
+    # Surviving events still serve; corrupt lines are isolated, not fatal.
+    assert [event["eventId"] for event in result["events"]] == ["projectbus-good"]
+    assert result["activeAgentCount"] == 0
+    skip_events = [
+        event for event in scene_events
+        if event["args"] and event["args"][2] == "project_agent_bus.events.corrupt_lines_skipped"
+    ]
+    assert len(skip_events) == 1
+    assert skip_events[0]["args"][:2] == ("project_agent_bus", "events")
+    assert skip_events[0]["kwargs"]["level"] == "warning"
+    assert skip_events[0]["kwargs"]["outcome"] == "degraded"
+    assert skip_events[0]["kwargs"]["fields"] == {"skippedLines": 2}

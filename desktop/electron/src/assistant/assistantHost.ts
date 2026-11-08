@@ -73,11 +73,13 @@ export type AssistantHostRequest =
   | { operation: "setManagementPermissionPreset"; preset: "request_approval" | "auto_review" | "full_access"; expectedRevision: number }
   | { operation: "detail"; beforeMessageIndex?: number }
   | { operation: "status" | "dispatches" | "config" | "approvals" | "assistantAvatar" }
+  | { operation: "acknowledgePatrolDelivery" }
   | { operation: "resolveApproval"; requestId: string; decision: "accept" | "decline" }
   | { operation: "previewDispatchApproval"; dispatchId: string; taskId: string; approvalId: string }
   | { operation: "declineDispatchApproval"; dispatchId: string; taskId: string; approvalId: string; revision: string }
   | { operation: "decideDispatchApproval"; dispatchId: string; taskId: string; approvalId: string; revision: string; decision: "accept" | "decline" }
-  | { operation: "send"; message: string; requestId: string; attachmentIds?: string[]; references?: unknown[] }
+  | { operation: "send"; message: string; requestId: string; attachmentIds?: string[]; references?: unknown[];
+      controlContinuation?: { agentId: string; sessionId: string; turnId: string; headId: string; ledgerSeq: number } }
   | { operation: "uploadAttachment"; filename: string; contentType: string; dataBase64: string }
   | { operation: "upload_attachment"; kind: "user_secret"; value: string; secretKind?: "api_key" | "token" | "password" | "secret"; label?: string }
   | { operation: "readAttachment"; artifactId: string }
@@ -177,8 +179,9 @@ type Generation = {
   exitHandled?: boolean;
 };
 
-class HostError extends Error {
-  constructor(readonly code: string) { super(code); }
+export class HostError extends Error {
+  /** detail carries the backend's structured failure code when one was read. */
+  constructor(readonly code: string, readonly detail?: string) { super(code); }
 }
 function object(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -1057,7 +1060,10 @@ export class AssistantHost {
         if (lifecycle.committed) throw new HostError("ASSISTANT_LIFECYCLE_CLOSING");
         lifecycle.arrival = true;
       }
-      const safeWhileWaiting = ["status", "detail", "dispatches", "teamRuns", "config", "approvals", "curation", "operatorAsset", "assistantAvatar", "setManagementPermissionPreset", "budgetParameters", "setBudgetParameters", "usageSummary", "resolveApproval", "previewDispatchApproval", "decideDispatchApproval", "declineDispatchApproval", "stop", "computerState"]
+      // acknowledgePatrolDelivery is a patrol-ledger-only write: it never
+      // reaches the native Session, so the banner exit stays live while a
+      // migration fence holds ordinary writers.
+      const safeWhileWaiting = ["status", "detail", "dispatches", "teamRuns", "config", "approvals", "curation", "operatorAsset", "assistantAvatar", "setManagementPermissionPreset", "budgetParameters", "setBudgetParameters", "usageSummary", "resolveApproval", "previewDispatchApproval", "decideDispatchApproval", "declineDispatchApproval", "acknowledgePatrolDelivery", "stop", "computerState"]
         .includes(captured.operation);
       // Confirmation only settles an existing native waiter; it remains a
       // counted writer in the host barrier even after admission is sealed.
@@ -1192,6 +1198,18 @@ export class AssistantHost {
         }
         return result;
       }
+      case "acknowledgePatrolDelivery": {
+        if (!ownKeys(payload, ["operation"])) throw new HostError("ASSISTANT_REQUEST_INVALID");
+        const result = await this.rpc(generation, "/api/assistant/patrol/acknowledge", "POST", {}, REQUEST_MS, false, 8192);
+        if (!object(result) || Object.keys(result).length !== 1 || !object(result.deliveryStates))
+          throw new HostError("ASSISTANT_RESPONSE_INVALID");
+        const states = Object.keys(result.deliveryStates);
+        if (states.length !== 6 || !["unknown", "observed", "failed", "interrupted", "completed", "cancelled_pre_admission"]
+          .every(state => states.includes(state))
+          || Object.values(result.deliveryStates).some(value => !Number.isSafeInteger(value) || (value as number) < 0))
+          throw new HostError("ASSISTANT_RESPONSE_INVALID");
+        return result;
+      }
       case "resolveApproval":
         if (!ownKeys(payload, ["operation", "requestId", "decision"])
           || typeof payload.requestId !== "string" || !/^[A-Za-z0-9_.:-]{1,160}$/.test(payload.requestId)
@@ -1281,15 +1299,17 @@ export class AssistantHost {
             || !token(result.authorizationRequest.sessionId) || !token(result.authorizationRequest.turnId)
             || result.grantId !== null || result.pending !== null || !["idle", "ended"].includes(result.status)))
           throw new HostError("ASSISTANT_RESPONSE_INVALID");
+        // The action set is owned by the host service and grows over time
+        // (launch, click_at, hotkey, ...). Unknown actions pass through for
+        // the service to judge; the shell only bounds the mirrored shape.
         if (result.pending !== null && (!object(result.pending) || !exact(result.pending, ["id", "action", "targetLabel", "text"])
-          || !token(result.pending.id) || typeof result.pending.action !== "string"
-          || !["click", "set_value", "type_text", "scroll"].includes(result.pending.action)
+          || !token(result.pending.id) || !bounded(result.pending.action, 40)
           || !bounded(result.pending.targetLabel, 400) || !(result.pending.text === null || bounded(result.pending.text, 2000))
           || result.grantId === null || result.status !== "waiting_confirmation")) throw new HostError("ASSISTANT_RESPONSE_INVALID");
         return result;
       }
-      case "send":
-        if (!ownKeys(payload, ["operation", "message", "requestId", "attachmentIds", "references"])
+      case "send": {
+        if (!ownKeys(payload, ["operation", "message", "requestId", "attachmentIds", "references", "controlContinuation"])
           || typeof payload.message !== "string" || payload.message.length > 64_000
           || (payload.attachmentIds !== undefined && (!Array.isArray(payload.attachmentIds) || payload.attachmentIds.length > 8
             || payload.attachmentIds.some(id => typeof id !== "string" || !/^[A-Za-z0-9_.-]{1,255}$/.test(id) || id === "." || id === "..")))
@@ -1297,9 +1317,24 @@ export class AssistantHost {
             || payload.references.some(reference => !object(reference) || JSON.stringify(reference).length > 16_000)))
           || (!payload.message.trim() && !payload.attachmentIds?.length)
           || typeof payload.requestId !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(payload.requestId)) throw new HostError("ASSISTANT_REQUEST_INVALID");
+        if ("controlContinuation" in payload) {
+          const expected = payload.controlContinuation;
+          if (!object(expected) || Object.keys(expected).length !== 5
+            || !ownKeys(expected, ["agentId", "sessionId", "turnId", "headId", "ledgerSeq"])
+            || ![expected.agentId, expected.sessionId, expected.turnId, expected.headId].every(value =>
+              typeof value === "string" && value.trim() && value === value.trim() && value.length <= 200)
+            || [expected.agentId, expected.sessionId, expected.turnId].some(value => value.length > 160)
+            || !positiveInteger(expected.ledgerSeq)
+            || payload.message !== "控制已交回，请先重新观察当前页面或授权窗口，再继续当前任务；不要重放未经确认的操作。"
+            || payload.attachmentIds?.length || payload.references?.length) throw new HostError("ASSISTANT_REQUEST_INVALID");
+          if (expected.agentId !== generation.agentId || expected.sessionId !== generation.sessionId)
+            throw new HostError("ASSISTANT_IDENTITY_INVALID");
+        }
         return await this.rpc(generation, "/api/assistant/messages", "POST", { message: payload.message, requestId: payload.requestId,
           ...(payload.attachmentIds?.length ? { attachmentIds: payload.attachmentIds } : {}),
-          ...(payload.references?.length ? { references: payload.references } : {}) });
+          ...(payload.references?.length ? { references: payload.references } : {}),
+          ...(payload.controlContinuation ? { controlContinuation: payload.controlContinuation } : {}) });
+      }
       case "uploadAttachment": {
         if (!ownKeys(payload, ["operation", "filename", "contentType", "dataBase64"])
           || typeof payload.filename !== "string" || !payload.filename.length || payload.filename.length > 255
@@ -2102,8 +2137,13 @@ export class AssistantHost {
           if (response.status === 422) throw new HostError("ASSISTANT_MODEL_INVALID");
           if (response.status === 503) throw new HostError("ASSISTANT_MODEL_UNAVAILABLE");
         }
-        throw new HostError(path === "/api/assistant/reminders/next" && response.status === 409
-          ? "ASSISTANT_REMINDER_BLOCKED" : "ASSISTANT_HTTP_FAILED");
+        if (path === "/api/assistant/reminders/next" && response.status === 409) {
+          // host.py answers fail-closed reminder owners with 409 and a stable
+          // code; the pump stops polling and the shell picks the matching
+          // blocked-reminder guidance from this detail code.
+          throw new HostError("ASSISTANT_REMINDER_BLOCKED", failureCode ?? undefined);
+        }
+        throw new HostError("ASSISTANT_HTTP_FAILED");
       }
       const length = Number(response.headers.get("content-length"));
       if (Number.isFinite(length) && length > maxResponseBytes) {

@@ -317,7 +317,40 @@ def test_after_native_write_failures_are_unconfirmed(configuration_env, monkeypa
     assert error.value.code == "OPERATION_UNCONFIRMED"
 
 
-@pytest.mark.parametrize("protected", ["archived", "pa", "system", "protected", "team", "companion", "binding", "hidden"])
+@pytest.mark.parametrize("member_kind", ["ordinary", "dedicated", "fixed_role"])
+def test_team_members_can_read_and_update_model_parameters_without_leaving_team(configuration_env, member_kind):
+    from core.web.services.agent_config_authority import canonical_agent_config_payload
+    from core.web.services.external_agent.policy import external_mcp_eligibility
+
+    data = configuration_env
+    team = {"teamId": "team-a", "name": "Team", "status": "active", "members": [{"agentId": "agent-a"}]}
+    data.team_index.write_text(json.dumps({"teams": [team]}), encoding="utf-8")
+    if member_kind == "dedicated":
+        data.agent.update(createdBy="challenge_cup_team", primaryMode="research", roleKey="challenge_cup_planner")
+        data.agent["metadata"]["teamId"] = "team-a"
+    elif member_kind == "fixed_role":
+        data.agent["metadata"].update(protected=True, fixedRole=True, systemRole="team_planner", teamId="team-a")
+    data.save()
+    current = data.store.repository.get_current_agent_config("agent-a")
+    data.store.repository.compare_and_swap_agent_config(agent_id="agent-a",
+        expected_config_revision_id=current["configRevisionId"], display_name=data.agent["displayName"],
+        kind="persistent", status="active", config=canonical_agent_config_payload(data.agent), source="test").result(timeout=3)
+    membership_before = data.team_index.read_bytes()
+
+    assert not external_mcp_eligibility(data.agent, active_team_lookup=lambda _aid: team).eligible
+    assert data.control.read_configuration("agent-a")["compiledMatches"] is True
+    result = data.control.update_parameters(request("model", {
+        "expected_model_ref": "fixture/model", "context_window": 32000, "reasoning_effort": "low",
+    }))
+    assert result["verified"] is True
+    model = data.control.read_configuration("agent-a")["parameters"]["model"]
+    assert model["stored"]["reasoningEffort"] == model["effective"]["reasoningEffort"] == "low"
+    assert len(data.owner_calls) == 1
+    assert data.team_index.read_bytes() == membership_before
+    assert not external_mcp_eligibility(data.agent, active_team_lookup=lambda _aid: team).eligible
+
+
+@pytest.mark.parametrize("protected", ["archived", "pa", "system", "protected", "companion", "binding", "hidden"])
 def test_protected_classes_reject_configuration_reads_and_writes(configuration_env, protected):
     from core.web.services.external_management.service import ManagementError
     data = configuration_env
@@ -327,8 +360,6 @@ def test_protected_classes_reject_configuration_reads_and_writes(configuration_e
         data.agent["roleKey"] = "personal_assistant"
     elif protected in {"system", "protected"}:
         data.agent["metadata"]["systemRole" if protected == "system" else "protected"] = True
-    elif protected == "team":
-        data.team_index.write_text(json.dumps({"teams": [{"teamId": "team-a", "name": "Team", "status": "active", "members": [{"agentId": "agent-a"}]}]}), encoding="utf-8")
     elif protected == "companion":
         data.agent["metadata"]["virtualHumanCompanion"] = True
     elif protected == "binding":

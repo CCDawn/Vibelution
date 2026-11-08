@@ -104,6 +104,9 @@ const ASSISTANT_ACTION_DETAILS: Record<string, readonly [string, string, Assista
   // Browser / appearance reads.
   browser_state: ["查看浏览器状态", "Check browser state", "browser"],
   browser_open: ["打开网页", "Open webpage", "browser"],
+  browser_ensure: ["复用或打开网页", "Reuse or open webpage", "browser"],
+  browser_select: ["切换网页", "Switch webpage", "browser"],
+  browser_show: ["显示网页", "Show webpage", "browser"],
   browser_read: ["读取网页", "Read webpage", "browser"],
   browser_navigate: ["导航网页", "Navigate webpage", "browser"],
   browser_back: ["返回上一页", "Go back", "browser"],

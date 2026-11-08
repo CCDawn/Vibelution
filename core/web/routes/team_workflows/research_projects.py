@@ -311,7 +311,7 @@ def team_workflow_research_project_agent_task_reconcile(
             },
             detail={"code": exc.code, "message": str(exc)},
         )
-    except ResearchProjectError as exc:
+    except (ResearchProjectError, TeamWorkflowOrchestrationError) as exc:
         _raise_team_workflow_route_error(
             "research_project_agent_task.reconcile",
             team_id,

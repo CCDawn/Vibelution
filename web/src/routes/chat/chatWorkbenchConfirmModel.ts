@@ -7,5 +7,7 @@ export type ChatWorkbenchConfirmRequest =
   | { kind: "reset-group" };
 
 export function sessionConfirmTitle(session: SessionSummary): string {
-  return (session.agentDisplayName || session.title || session.id).trim() || session.id;
+  // Session title first: the confirm dialog names the conversation being
+  // deleted, not the agent behind it (ISS-035).
+  return (session.title || session.agentDisplayName || session.id).trim() || session.id;
 }

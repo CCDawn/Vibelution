@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { AssistantBrowser } from "../src/browser/assistantBrowser.js";
+import type { AssistantBrowser, BrowserState } from "../src/browser/assistantBrowser.js";
 import { parseMainControlClaim, projectMainControlResult } from "../src/assistant/mainControlTransport.js";
 import { createBrowserMainControl, invokeOperatorBrowser, parseOperatorBrowserCommand } from "../src/browser/browserMainControl.js";
 
@@ -8,13 +8,52 @@ const state = { pages: [{ id: pageId, url: "https://example.com/", title: "Examp
 const row = { deliveryId, action: "browser_interact", pageId, snapshotId, elementRef: "1", url: "https://example.com/path?q=one#section", elementName: "Save", operation: "click" } as const;
 const claim = (r: unknown) => parseMainControlClaim({ schemaVersion: 1, request: r });
 function setup() {
-  const browser = { getState: vi.fn(() => state), previewInteraction: vi.fn(async () => ({ pageId, snapshotId, elementRef: "1", url: row.url, title: "Example", name: "Save", role: "button" })),
-    click: vi.fn(async () => {}), fill: vi.fn(async () => {}), open: vi.fn(async () => state), back: vi.fn(async () => {}), forward: vi.fn(async () => {}), reload: vi.fn(async () => {}), snapshot: vi.fn(async () => ({ pageId, snapshotId, url: row.url, title: "Example", untrusted: true, text: "visible", elements: [] })), setBounds: vi.fn(), requestTakeover: vi.fn(async () => state) };
+  const browser = { getState: vi.fn((): BrowserState => state), previewInteraction: vi.fn(async () => ({ pageId, snapshotId, elementRef: "1", url: row.url, title: "Example", name: "Save", role: "button" })),
+    click: vi.fn(async () => {}), fill: vi.fn(async () => {}), open: vi.fn(async () => state), ensure: vi.fn(async () => state), select: vi.fn(() => state), back: vi.fn(async () => {}), forward: vi.fn(async () => {}), reload: vi.fn(async () => {}), snapshot: vi.fn(async () => ({ pageId, snapshotId, url: row.url, title: "Example", untrusted: true, text: "visible", elements: [] })), setBounds: vi.fn(), requestTakeover: vi.fn(async () => state) };
   const ensureWorkspace = vi.fn(async () => {});
   const control = createBrowserMainControl({ browser: () => browser as unknown as AssistantBrowser, ensureWorkspace });
   return { browser, ensureWorkspace, control };
 }
 describe("private browser protocol", () => {
+  it.each([
+    { action: "browser_ensure", url: "https://example.com/" },
+    { action: "browser_select", pageId },
+    { action: "browser_show" },
+  ] as const)("keeps $action closed and shows the workspace before using the existing owner", async payload => {
+    const request = claim({ deliveryId, ...payload })!;
+    expect(request).toEqual({ deliveryId, ...payload });
+    for (const extra of [{ source: "operator" }, { approved: true }, { operation: "resume" }, { value: "private" }]) {
+      expect(() => claim({ deliveryId, ...payload, ...extra })).toThrow("ASSISTANT_MAIN_CONTROL_INVALID");
+    }
+    const f = setup();
+    expect(await f.control(request as Parameters<typeof f.control>[0])).toEqual({ schemaVersion: 1, operation: payload.action.slice(8), code: "ok", state });
+    const ownerCall = payload.action === "browser_ensure" ? f.browser.ensure : payload.action === "browser_select" ? f.browser.select : f.browser.getState;
+    expect(f.ensureWorkspace.mock.invocationCallOrder[0]).toBeLessThan(ownerCall.mock.invocationCallOrder[0]);
+    if (payload.action === "browser_ensure") expect(f.browser.ensure).toHaveBeenCalledWith(payload.url, "assistant");
+    if (payload.action === "browser_select") expect(f.browser.select).toHaveBeenCalledWith(pageId, "assistant");
+    expect(f.browser.open).not.toHaveBeenCalled(); expect(f.browser.requestTakeover).not.toHaveBeenCalled();
+  });
+  it("shows the workspace without creating pages or releasing an operator takeover", async () => {
+    const f = setup(); const taken = { ...state, takeover: true };
+    f.browser.getState.mockReturnValue(taken);
+    expect(await f.control({ deliveryId, action: "browser_show" })).toEqual({ schemaVersion: 1, operation: "show", code: "ok", state: taken });
+    expect(f.browser.ensure).not.toHaveBeenCalled(); expect(f.browser.select).not.toHaveBeenCalled(); expect(f.browser.open).not.toHaveBeenCalled();
+    for (const action of ["browser_resume", "browser_takeover"]) expect(() => claim({ deliveryId, action })).toThrow();
+  });
+  it("shows an empty workspace without manufacturing an active page", async () => {
+    const f = setup(); const empty = { pages: [], activePageId: null, takeover: false };
+    f.browser.getState.mockReturnValue(empty);
+    expect(await f.control({ deliveryId, action: "browser_show" })).toEqual({ schemaVersion: 1, operation: "show", code: "ok", state: empty });
+    expect(f.browser.open).not.toHaveBeenCalled(); expect(f.browser.ensure).not.toHaveBeenCalled(); expect(f.browser.select).not.toHaveBeenCalled();
+  });
+  it.each(["browser_ensure", "browser_select", "browser_show"] as const)("never executes %s after workspace display is cancelled", async action => {
+    const f = setup(); let release!: () => void;
+    f.ensureWorkspace.mockImplementationOnce(() => new Promise<void>(resolve => { release = resolve; }));
+    const request = claim({ deliveryId, action, ...(action === "browser_ensure" ? { url: "https://example.com/" } : action === "browser_select" ? { pageId } : {}) })!;
+    const abort = new AbortController(); const pending = f.control(request as Parameters<typeof f.control>[0], abort.signal);
+    abort.abort(); expect(await pending).toMatchObject({ code: "BROWSER_UNAVAILABLE" }); release(); await Promise.resolve();
+    expect(f.browser.ensure).not.toHaveBeenCalled(); expect(f.browser.select).not.toHaveBeenCalled(); expect(f.browser.getState).not.toHaveBeenCalled();
+  });
   it("binds execution to the approved page, snapshot, ref, URL and name", async () => {
     const f = setup();
     expect(await f.control(row)).toEqual({ schemaVersion: 1, operation: "interact", code: "ok", state });

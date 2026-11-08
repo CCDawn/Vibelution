@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ComponentProps } from "react";
 import { ArrowLeft, ArrowRight, Globe, Maximize2, MessageCircle, PanelRightClose, Plus, RotateCw, X } from "lucide-react";
 import { browserState, launcherBrowserBridge, safeBrowserUrl, type BrowserOperation, type BrowserState } from "../../api/launcherAssistantBrowser";
+import type { LauncherControlContinuation } from "./useLauncherControlContinuation";
 import { PANE_RESIZE_HANDLE_WIDTH } from "../../components/layout/paneLayoutPersistence";
 import { WORKBENCH_LAYOUT_IDS } from "../../components/layout/workbenchLayoutIds";
 import { useShellI18n } from "../../i18n/useShellI18n";
@@ -12,7 +13,7 @@ const COPY = {
   zh: {
     browser: "浏览器", web: "网页", webPage: "网页", tabs: "网页标签", closeTab: "关闭",
     ownedByUser: "你正在操作", ownedByAssistant: "助理可操作",
-    takeOver: "接手", handOff: "交给助理", waiting: "等待当前操作",
+    takeOver: "接手", handOff: "交给助理并继续", waiting: "等待当前操作",
     backToChat: "回到对话", expandWeb: "展开网页", collapseWeb: "收起网页",
     newPage: "新建网页", back: "后退", forward: "前进", reload: "刷新",
     address: "网页地址", addressPlaceholder: "输入网址", open: "打开",
@@ -25,7 +26,7 @@ const COPY = {
   en: {
     browser: "Browser", web: "Web", webPage: "Web page", tabs: "Web tabs", closeTab: "Close",
     ownedByUser: "You're in control", ownedByAssistant: "Assistant is in control",
-    takeOver: "Take over", handOff: "Hand off to assistant", waiting: "Waiting for the current action",
+    takeOver: "Take over", handOff: "Hand off and continue", waiting: "Waiting for the current action",
     backToChat: "Back to conversation", expandWeb: "Expand web page", collapseWeb: "Collapse web page",
     newPage: "New web page", back: "Back", forward: "Forward", reload: "Reload",
     address: "Web address", addressPlaceholder: "Enter a URL", open: "Open",
@@ -61,6 +62,9 @@ export function LauncherAssistantBrowserWorkspace({ revealRequested = false, ass
   const workspaceRef = useRef<HTMLDivElement>(null);
   const stateRevision = useRef(0);
   const ownerPending = useRef(false);
+  const currentState = useRef(state);
+  const continuation = useRef<LauncherControlContinuation | null>(null);
+  const bindContinuation = useCallback((control: LauncherControlContinuation | null) => { continuation.current = control; }, []);
   const active = state.pages.find(page => page.id === state.activePageId);
   const webVisible = !collapsed && (!narrow || mobilePage === "web");
   const canShowPage = webVisible && !draft && Boolean(active);
@@ -74,16 +78,16 @@ export function LauncherAssistantBrowserWorkspace({ revealRequested = false, ass
   const run = useCallback(async (operation: BrowserOperation) => {
     setError("");
     const revision = stateRevision.current;
-    try { const result = browserState(await launcherBrowserBridge().invoke(operation)); if (revision === stateRevision.current) setState(result); return result; }
+    try { const result = browserState(await launcherBrowserBridge().invoke(operation)); if (revision === stateRevision.current) { currentState.current = result; setState(result); } return result; }
     catch { setError(copy.operationFailed); return null; }
   }, [copy]);
   useEffect(() => {
     let live = true;
     try {
       const bridge = launcherBrowserBridge();
-      const unsubscribe = bridge.onChanged(value => { if (!live) return; try { const next = browserState(value); stateRevision.current += 1; setState(next); } catch { setError(copy.stateUnavailable); } });
+      const unsubscribe = bridge.onChanged(value => { if (!live) return; try { const next = browserState(value); stateRevision.current += 1; if (next.takeover && !currentState.current.takeover) continuation.current?.cancel(); currentState.current = next; setState(next); } catch { setError(copy.stateUnavailable); } });
       const revision = stateRevision.current;
-      void bridge.invoke({ operation: "state" }).then(value => { if (live && revision === stateRevision.current) setState(browserState(value)); }).catch(() => { if (live) setError(copy.stateUnavailable); });
+      void bridge.invoke({ operation: "state" }).then(value => { if (live && revision === stateRevision.current) { const next = browserState(value); currentState.current = next; setState(next); } }).catch(() => { if (live) setError(copy.stateUnavailable); });
       return () => { live = false; unsubscribe(); };
     } catch { setError(copy.browserUnavailable); }
   }, [copy]);
@@ -142,7 +146,14 @@ export function LauncherAssistantBrowserWorkspace({ revealRequested = false, ass
   async function changeOwner() {
     if (ownerPending.current) return;
     ownerPending.current = true; setPending(true);
-    try { await run({ operation: state.takeover ? "resume" : "takeover" }); } finally { ownerPending.current = false; setPending(false); }
+    const resume = state.takeover;
+    const control = continuation.current;
+    if (!resume) control?.cancel();
+    const intent = resume ? control?.capture() : null;
+    try {
+      const result = await run({ operation: resume ? "resume" : "takeover" });
+      if (resume && result && !result.takeover && !currentState.current.takeover) control?.complete(intent || null, () => !currentState.current.takeover);
+    } finally { ownerPending.current = false; setPending(false); }
   }
   const browser = <section className={styles.browser} aria-label={copy.browser}>
     <header className={styles.header}>
@@ -178,7 +189,7 @@ export function LauncherAssistantBrowserWorkspace({ revealRequested = false, ass
     {narrow && !collapsed ? <div className={styles.mobileSwitch}><VButton variant={!webVisible ? "secondary" : "ghost"} aria-pressed={!webVisible} onClick={() => { setFull(false); setMobilePage("chat"); }}>{copy.chat}</VButton><VButton variant={webVisible ? "secondary" : "ghost"} aria-pressed={webVisible} onClick={() => { setCollapsed(false); setMobilePage("web"); }}>{copy.web}</VButton></div> : null}
     {collapsed ? <VButton variant="ghost" className={styles.restore} aria-label={copy.openPage} icon={<Globe size={16} />} onClick={() => { setCollapsed(false); setMobilePage("web"); }}>{copy.web}</VButton> : null}
     <VSplitWorkspace className={`${styles.split} ${!webVisible ? styles.chatOnly : narrow || full ? styles.webOnly : ""}`} resize={{ layoutId: WORKBENCH_LAYOUT_IDS.launcherAssistantBrowser, sidebar: { defaultWidth: 360, minWidth: chatMinWidth, maxWidth: Math.max(chatMinWidth, Math.floor(workspaceWidth - browserMinWidth - PANE_RESIZE_HANDLE_WIDTH)) } }}
-      sidebar={<LauncherAssistantRoute embedded navigationOwned {...assistantProps} />}
+      sidebar={<LauncherAssistantRoute embedded navigationOwned {...assistantProps} onControlContinuationReady={bindContinuation} />}
       main={browser} />
   </div>;
 }

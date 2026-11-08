@@ -57,7 +57,7 @@ upstream_id = "deepseek-v4-flash"
 | `api` | 可选 | 如 `openai-completions` `openai-responses` `anthropic-messages` `deepseek-chat`；影响协议推断 |
 | `base_url` | 是 | 服务根；勿带错 path |
 | `auth_kind` | 是* | `api_key` \| `oauth` \| `none` |
-| `credential_ref` | 密钥场景必填 | `env:VAR_NAME` 或 `none` |
+| `credential_ref` | 需要认证时必填 | `env:VAR_NAME`、`oauth:chatgpt` 或 `none` |
 | `requires_credential` | | 默认 true |
 | `compat_mode` | 建议 | `native` / `openai` / `openai_compatible` |
 | `service_class` | | `official_api` `aggregator` `relay` `self_hosted` `local_runtime` |
@@ -107,6 +107,22 @@ allowed = ["chat_completions", "responses"]
 | `include` / `exclude` | 过滤 |
 
 ## 密钥
+
+### ChatGPT 订阅
+
+`auth_kind = "oauth"` 与 `credential_ref = "oauth:chatgpt"` 表示使用官方 ChatGPT 授权的套餐用量。
+它固定使用 `https://api.openai.com/v1` 的 Responses 协议，不能改成中转地址、覆盖发现地址或填入 API Key。
+订阅凭据由本机加密存储管理，不写入此配置、环境变量或 Codex 的登录缓存。工作台和独立 Launcher 助理使用同一凭据来源。
+
+该接入保留 Vibelution 的会话、工具、权限和记忆。额度与 Codex / ChatGPT Work 共用，
+达到限制后不会自动切换收费 API。模型列表成功只表示发现完成；真实推理须等待 `response.completed`。
+Windows 是首期凭据存储支持平台；无法使用系统加密时连接会明确失败。
+
+订阅接口不接受部分 API 参数，包括硬性输出 token 上限。普通模型调用按订阅协议发送；
+要求可强制执行输出预算的研究或运营流程会在请求前拒绝，不能靠丢弃预算字段继续运行。
+
+实现边界见 [订阅推理模块](../../../core/llm/chatgpt_subscription/README.md)，
+上游契约见 [官方订阅接入说明](https://developers.openai.com/siwc/token-sharing-open-source)。
 
 优先：
 

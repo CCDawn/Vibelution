@@ -233,3 +233,100 @@ with TestClient(app, base_url='http://127.0.0.1') as client:
     result = client.post('/api/assistant/reminders/next', headers=headers)
     assert result.status_code == 409 and result.json()['detail']['code'] == 'receipt_capacity_exceeded'
 ''', config_text=TEST_MODEL_CONFIG)
+
+
+def test_unread_system_toast_is_requeued_once_through_attention_fallback(tmp_path):
+    _run(tmp_path, r'''
+import json, os
+from datetime import datetime, timezone
+from pathlib import Path
+from fastapi.testclient import TestClient
+from core.assistant_runtime import reminders
+from core.assistant_runtime.host import NativeFacade, create_app
+from core.web.services import personal_affairs_service
+root = Path(os.environ['VIBELUTION_ASSISTANT_NATIVE_ROOT'])
+class Clock:
+    minute = 0
+    @classmethod
+    def now(cls, tz): return datetime(2026, 10, 1, 10, cls.minute, tzinfo=timezone.utc)
+reminders.datetime = Clock
+reminders._SYSTEM_REDELIVERY_AFTER_SECONDS = 600
+headers = {'Authorization': 'Bearer isolated-main-token'}
+app = create_app(native=NativeFacade(root), token='isolated-main-token')
+with TestClient(app, base_url='http://127.0.0.1') as client:
+    agent = app.state.assistant['assistant']['agentId']
+    personal_affairs_service.get_personal_affairs_service().add_item(
+        agent, kind='todo', title='swallowed', due_at='2020-01-01T00:00:00Z')
+    event = client.post('/api/assistant/reminders/next', headers=headers).json()['event']
+    assert event['recoveredFallback'] is False
+    body = {'eventId': event['id'], 'attemptToken': event['attemptToken'], 'channel': 'system_notification'}
+    assert client.post('/api/assistant/reminders/submitted', headers=headers, json=body).status_code == 200
+    # Inside the delay window the unconfirmed display keeps waiting.
+    Clock.minute = 5
+    assert client.post('/api/assistant/reminders/next', headers=headers).json()['event'] is None
+    # After the delay the same day requeues it through the attention fallback.
+    Clock.minute = 20
+    requeued = client.post('/api/assistant/reminders/next', headers=headers).json()['event']
+    assert requeued['id'] == event['id'] and requeued['recoveredFallback'] is True
+    assert requeued['attemptToken'] != event['attemptToken']
+    assert client.post('/api/assistant/reminders/next', headers=headers).json()['event'] is None
+    fresh = {'eventId': requeued['id'], 'attemptToken': requeued['attemptToken'], 'channel': 'attention_fallback'}
+    assert client.post('/api/assistant/reminders/submitted', headers=headers, json=fresh).status_code == 200
+    opened = client.post('/api/assistant/reminders/opened', headers=headers, json=fresh)
+    assert opened.status_code == 200 and opened.json()['receipt']['interactionObserved']
+    # The replaced token can no longer settle a stale toast click.
+    stale = dict(body, channel='attention_fallback')
+    assert client.post('/api/assistant/reminders/opened', headers=headers, json=stale).status_code != 200
+''', config_text=TEST_MODEL_CONFIG)
+
+
+def test_unread_system_toast_survives_restart_and_requeues_once(tmp_path):
+    _run(tmp_path, r'''
+import json, os
+from datetime import datetime, timezone
+from pathlib import Path
+from fastapi.testclient import TestClient
+from core.assistant_runtime import reminders
+from core.assistant_runtime.host import NativeFacade, create_app
+from core.web.services import personal_affairs_service
+root = Path(os.environ['VIBELUTION_ASSISTANT_NATIVE_ROOT'])
+class Clock:
+    @classmethod
+    def now(cls, tz): return datetime(2026, 10, 1, 10, 0, tzinfo=timezone.utc)
+reminders.datetime = Clock
+headers = {'Authorization': 'Bearer isolated-main-token'}
+app = create_app(native=NativeFacade(root), token='isolated-main-token')
+with TestClient(app, base_url='http://127.0.0.1') as client:
+    agent = app.state.assistant['assistant']['agentId']
+    personal_affairs_service.get_personal_affairs_service().add_item(
+        agent, kind='todo', title='restart swallow', due_at='2020-01-01T00:00:00Z')
+    event = client.post('/api/assistant/reminders/next', headers=headers).json()['event']
+    body = {'eventId': event['id'], 'attemptToken': event['attemptToken'], 'channel': 'system_notification'}
+    assert client.post('/api/assistant/reminders/submitted', headers=headers, json=body).status_code == 200
+    (root / 'swallowed-event.json').write_text(json.dumps(body))
+''', config_text=TEST_MODEL_CONFIG)
+    _run(tmp_path, r'''
+import json, os
+from datetime import datetime, timezone
+from pathlib import Path
+from fastapi.testclient import TestClient
+from core.assistant_runtime import reminders
+from core.assistant_runtime.host import NativeFacade, create_app
+root = Path(os.environ['VIBELUTION_ASSISTANT_NATIVE_ROOT'])
+class Clock:
+    minute = 0
+    @classmethod
+    def now(cls, tz): return datetime(2026, 10, 1, 10, cls.minute, tzinfo=timezone.utc)
+reminders.datetime = Clock
+reminders._SYSTEM_REDELIVERY_AFTER_SECONDS = 600
+headers = {'Authorization': 'Bearer isolated-main-token'}
+with TestClient(create_app(native=NativeFacade(root), token='isolated-main-token'),
+                base_url='http://127.0.0.1') as client:
+    # The restarted owner starts its own unread window for the retained receipt.
+    assert client.post('/api/assistant/reminders/next', headers=headers).json()['event'] is None
+    Clock.minute = 30
+    requeued = client.post('/api/assistant/reminders/next', headers=headers).json()['event']
+    old = json.loads((root / 'swallowed-event.json').read_text())
+    assert requeued['id'] == old['eventId'] and requeued['recoveredFallback'] is True
+    assert requeued['attemptToken'] != old['attemptToken']
+''', config_text=TEST_MODEL_CONFIG)

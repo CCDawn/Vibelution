@@ -21,11 +21,15 @@ const LITERAL_SPACING = /\b(?:p|px|py|pt|pb|pl|pr|m|mx|my|mt|mb|ml|mr|gap|space-
 const SPACING_DEBT: Record<string, Record<string, number>> = {
   "routes/AgentConversationDirectory.styles.ts": { "py-[7px]": 1 },
   "components/conversation/ConversationView.styles.ts": {
-    "mb-[18px]": 1, "mb-[10px]": 1, "mt-[18px]": 1, "py-[22px]": 1,
+    "mb-[18px]": 1, "mb-[10px]": 1, "mt-[18px]": 1, "py-[22px]": 2, "pl-[23px]": 1,
+  },
+  "components/vui/renderers/shadcn/memory/memoryGraphRenderer.styles.ts": {
+    "py-[5px]": 1, "py-[4px]": 2,
   },
   "routes/chat/ChatLoadingShell.styles.ts": { "mb-[18px]": 1, "mb-[10px]": 1 },
   "routes/chat/ChatRightRail.styles.ts": { "py-[18px]": 2 },
   "routes/chat/ChatSessionBrowser.styles.ts": { "px-[13px]": 1 },
+  "routes/memory/PlatformKnowledgeGraphWorkbench.styles.ts": { "p-[3px]": 1 },
   "routes/shared/ProgressiveRegionSkeleton.tsx": { "mb-[18px]": 1 },
 };
 

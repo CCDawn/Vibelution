@@ -1,12 +1,8 @@
 import React, { createContext, useContext, useEffect, useRef, useState, type ComponentPropsWithoutRef } from "react";
 import { Check, Copy, WrapText } from "lucide-react";
 import ReactMarkdown, { type Options as ReactMarkdownOptions } from "react-markdown";
-import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
-// Local bundling only: fonts resolve from node_modules alongside the CSS —
-// no CDN or external font fetch is allowed.
-import "katex/dist/katex.min.css";
 
 import { VNativeButton } from "../vui";
 import {
@@ -16,7 +12,12 @@ import {
 } from "./conversationMarkdownBlockBoundary";
 import { formattedCodeBlockContent } from "./conversationFormattedCodeBlock";
 import { classifyConversationMarkdownLinkTarget } from "./conversationMarkdownLinkTargets";
-import { guardConversationMarkdownMath } from "./conversationMarkdownMathGuard";
+import { containsDeliberateConversationMath, guardConversationMarkdownMath } from "./conversationMarkdownMathGuard";
+import {
+  loadConversationMathRenderer,
+  peekConversationMathRenderer,
+  type RehypeKatexModule,
+} from "./conversationMathRenderer";
 import { remarkConversationAutolinks } from "./conversationMarkdownAutolinks";
 import { ConversationMarkdownMermaidBlock } from "./conversationMarkdownMermaidBlock";
 import { safeConversationMarkdownUrl } from "./conversationMarkdownUrl";
@@ -65,17 +66,46 @@ export type ConversationMarkdownRendererProps = {
 // failed formula to its LaTeX source instead of throwing — a ParseError falls
 // back to a `.katex-error` span carrying the source text).
 const markdownPlugins = [remarkGfm, remarkMath, remarkConversationAutolinks];
-const markdownRehypePlugins: NonNullable<ReactMarkdownOptions["rehypePlugins"]> = [
-  [
-    rehypeKatex,
-    {
-      errorColor: "var(--fg-tertiary)",
-      // Strict-mode issues (unicode/text-mode nits) must not fail the first
-      // render pass; ParseErrors still degrade to the source-text span.
-      strict: "ignore" as const,
-    },
-  ],
-];
+const markdownRehypePluginsBase: NonNullable<ReactMarkdownOptions["rehypePlugins"]> = [];
+
+function markdownRehypePluginsWithKatex(katex: RehypeKatexModule): NonNullable<ReactMarkdownOptions["rehypePlugins"]> {
+  return [
+    [
+      katex,
+      {
+        errorColor: "var(--fg-tertiary)",
+        // Strict-mode issues (unicode/text-mode nits) must not fail the first
+        // render pass; ParseErrors still degrade to the source-text span.
+        strict: "ignore" as const,
+      },
+    ],
+  ];
+}
+
+/**
+ * KaTeX is lazy (~240 KiB + stylesheet): math-bearing messages render their
+ * first pass from the same remark-math tree without the katex transform, and
+ * upgrade once the plugin module + stylesheet land. Messages without math
+ * never trigger the fetch.
+ */
+function useConversationMathRenderer(needsMath: boolean): RehypeKatexModule | null {
+  const [katex, setKatex] = useState<RehypeKatexModule | null>(() => peekConversationMathRenderer());
+  useEffect(() => {
+    if (!needsMath || katex) {
+      return;
+    }
+    let active = true;
+    void loadConversationMathRenderer().then((module) => {
+      if (active) {
+        setKatex(module);
+      }
+    }).catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [needsMath, katex]);
+  return katex;
+}
 
 /**
  * Content-memoized: completed messages never re-parse; a re-render with the
@@ -95,7 +125,12 @@ export const ConversationMarkdownRenderer = React.memo(function ConversationMark
   renderText,
 }: ConversationMarkdownRendererProps) {
   const normalized = normalizeConversationMarkdown(content);
-  if (!normalized.trim()) {
+  const isEmpty = !normalized.trim();
+  // Math detection runs on the guarded text so the lazy katex trigger agrees
+  // with what the remark-math pass will actually parse.
+  const needsMath = !isEmpty && containsDeliberateConversationMath(guardConversationMarkdownMath(normalized));
+  const katex = useConversationMathRenderer(needsMath);
+  if (isEmpty) {
     return null;
   }
   const guarded = guardConversationMarkdownMath(normalized);
@@ -104,7 +139,7 @@ export const ConversationMarkdownRenderer = React.memo(function ConversationMark
     <div className={[classNames.markdownBody, hasTable ? classNames.markdownBodyWithTable : ""].filter(Boolean).join(" ")}>
       <ReactMarkdown
         remarkPlugins={markdownPlugins}
-        rehypePlugins={markdownRehypePlugins}
+        rehypePlugins={katex ? markdownRehypePluginsWithKatex(katex) : markdownRehypePluginsBase}
         skipHtml
         components={markdownComponents(classNames, duplicateImageUrls, renderImage, workspaceRoot, language, renderText, onOpenRailFile)}
       >

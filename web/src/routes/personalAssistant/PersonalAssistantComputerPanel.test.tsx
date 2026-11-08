@@ -44,14 +44,44 @@ async function render(active = true) {
   await act(async () => root.render(<QueryClientProvider client={client}><PersonalAssistantComputerPanel active={active} onCollapse={collapse} /></QueryClientProvider>));
   await settle();
 }
-async function renderConversation(onGranted = vi.fn(), authorizationRequestId?: string) {
-  await act(async () => root.render(<QueryClientProvider client={client}><PersonalAssistantComputerPanel active onCollapse={collapse} presentation="conversation" onGranted={onGranted} authorizationRequestId={authorizationRequestId} /></QueryClientProvider>));
+async function renderConversation(onGranted = vi.fn(), authorizationRequestId?: string, prepareContinuation?: Parameters<typeof PersonalAssistantComputerPanel>[0]["prepareContinuation"]) {
+  await act(async () => root.render(<QueryClientProvider client={client}><PersonalAssistantComputerPanel active onCollapse={collapse} presentation="conversation" onGranted={onGranted} authorizationRequestId={authorizationRequestId} prepareContinuation={prepareContinuation} /></QueryClientProvider>));
   await settle();
   return onGranted;
 }
 function button(label: string) { const found = [...container.querySelectorAll("button")].find(row => row.textContent === label || row.getAttribute("aria-label") === label); if (!found) throw new Error(`Missing button ${label}`); return found; }
 async function click(label: string) { await act(async () => button(label).click()); await settle(); }
 describe("single-window personal assistant controls", () => {
+  it("presents an unauthorized state as an optional preference, not a blocking gate", async () => {
+    await render();
+    expect(container.textContent).toContain("助理现在无需授权即可操作电脑");
+    expect(container.textContent).toContain("未选择默认窗口");
+    expect(container.textContent).not.toContain("未授权");
+    expect(button("授权这个窗口")).toBeDefined();
+    expect(container.textContent).toContain("可选择一个默认操作窗口");
+  });
+  it("freezes the continuation before grant and calls it only after the exact window succeeds", async () => {
+    const finish = vi.fn(); const prepare = vi.fn(() => finish);
+    let resolve!: (state: ComputerState) => void;
+    vi.mocked(grantPersonalAssistantComputer).mockImplementation(() => new Promise(done => { resolve = done; }));
+    await renderConversation(vi.fn(), "request-original", prepare);
+    await act(async () => (container.querySelector('[aria-pressed="false"]') as HTMLButtonElement).click());
+    await act(async () => button("授权并继续当前任务").click());
+    expect(prepare).toHaveBeenCalledWith("grant"); expect(finish).not.toHaveBeenCalled();
+    expect(grantPersonalAssistantComputer).toHaveBeenCalledWith({ selectionId: target.selectionId, allowVision: true, authorizationRequestId: "request-original" });
+    vi.mocked(fetchPersonalAssistantComputer).mockResolvedValue(ready);
+    await act(async () => resolve(ready)); await settle();
+    expect(finish).toHaveBeenCalledOnce();
+  });
+  it("does not continue on rejected grants or passive authorized state", async () => {
+    const finish = vi.fn(); const prepare = vi.fn(() => finish);
+    vi.mocked(grantPersonalAssistantComputer).mockRejectedValue(new Error("expired request"));
+    await renderConversation(vi.fn(), "request-original", prepare);
+    await act(async () => (container.querySelector('[aria-pressed="false"]') as HTMLButtonElement).click());
+    await click("授权并继续当前任务");
+    await act(async () => client.setQueryData(queryKeys.personalAssistantComputer(), ready));
+    expect(prepare).toHaveBeenCalledOnce(); expect(finish).not.toHaveBeenCalled();
+  });
   it("requires an explicit window and grants once from the conversation card", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     const onGranted = await renderConversation();
@@ -59,7 +89,7 @@ describe("single-window personal assistant controls", () => {
     expect(container.querySelector('input[type="checkbox"]')).toBeNull();
     expect(onGranted).not.toHaveBeenCalled();
     await act(async () => (container.querySelector('[aria-pressed="false"]') as HTMLButtonElement).click());
-    expect(container.textContent).toContain("允许助理读取并操作「今天的计划.txt」");
+    expect(container.textContent).toContain("将「今天的计划.txt」设为默认操作窗口");
     expect(container.textContent).toContain("窗口画面将提供给当前助理模型");
     await click("更换窗口");
     expect(button("允许读取并操作").disabled).toBe(true);
@@ -179,7 +209,7 @@ describe("single-window personal assistant controls", () => {
     vi.mocked(fetchPersonalAssistantComputer).mockResolvedValue(ready);
     await click("授权这个窗口");
     expect(grantPersonalAssistantComputer).toHaveBeenCalledWith({ selectionId: "selection", allowVision: true });
-    expect(container.textContent).toContain("本次授权 · 仅此窗口");
+    expect(container.textContent).toContain("默认目标 · 仅此窗口");
     expect(fetchPersonalAssistantComputerWindows).toHaveBeenCalledTimes(1);
     await act(async () => client.setQueryData(queryKeys.personalAssistantComputer(), { ...idle, status: "ended", message: "窗口已关闭" }));
     await settle();

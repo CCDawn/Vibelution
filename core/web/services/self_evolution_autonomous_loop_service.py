@@ -14,8 +14,12 @@ from typing import Any, Callable
 
 from core.infrastructure.process_liveness import is_pid_alive
 from core.infrastructure.file_lock import cross_process_file_lock
-from core.runtime_manager.work_run_store import WorkRunStore
-from core.web.services.runtime_scene_service import record_runtime_scene_event
+from core.logging import debug as _debug_logger
+from core.runtime_manager.work_run_store import WorkRunStore, work_run_snapshot_shape_error
+from core.web.services.runtime_scene_service import (
+    record_runtime_scene_event,
+    record_runtime_scene_event_quietly,
+)
 from core.web.services.self_evolution_candidate_target_contract import (
     CandidateTargetContractError,
     normalize_target_files,
@@ -579,13 +583,49 @@ class SelfEvolutionAutonomousLoopService:
         return self._run_cleanup(snapshot)
 
     def load(self, run_id: str) -> dict[str, Any]:
-        return self._load_required(run_id)
+        snapshot = self._load_required(run_id)
+        shape_error = work_run_snapshot_shape_error(snapshot)
+        if shape_error:
+            # A damaged record must be distinguishable from a missing one, so
+            # detail reads fail with an explicit corrupt reason instead of
+            # serving wire fields that cannot pass response validation.
+            raise AutonomousLoopValidationError(
+                f"Self-evolution autonomous loop record is corrupt: {shape_error}"
+            )
+        return snapshot
 
     def load_active(self) -> dict[str, Any] | None:
-        return self._store.load_active_snapshot(RUN_KIND)
+        return self._load_skipping_corrupt(self._store.load_active_snapshot(RUN_KIND), surface="active")
 
     def load_latest(self) -> dict[str, Any] | None:
-        return self._store.load_latest_snapshot(RUN_KIND)
+        return self._load_skipping_corrupt(self._store.load_latest_snapshot(RUN_KIND), surface="latest")
+
+    def _load_skipping_corrupt(self, snapshot: Any, *, surface: str) -> dict[str, Any] | None:
+        """Fail soft: one corrupt record must never 500 an active/latest read."""
+
+        shape_error = work_run_snapshot_shape_error(snapshot)
+        if not shape_error:
+            return snapshot
+        run_id = str(snapshot.get("runId") or "") if isinstance(snapshot, dict) else ""
+        _debug_logger.warning(
+            f"Skipped corrupt self-evolution autonomous loop snapshot on {surface} read: {shape_error}",
+            tag="SELF_EVOLUTION",
+        )
+        record_runtime_scene_event_quietly(
+            "work_run",
+            "state",
+            "self_evolution.autonomous_loop.snapshot_skipped",
+            message="Self-evolution autonomous loop read skipped a corrupt snapshot.",
+            level="warning",
+            outcome="partial",
+            fields={
+                "runKind": RUN_KIND,
+                "runId": run_id,
+                "surface": surface,
+                "reason": shape_error,
+            },
+        )
+        return None
 
     def interrupt_active_for_restart(self, reason: str) -> list[dict[str, Any]]:
         """Persist stops for this process's active runs before operator restart."""

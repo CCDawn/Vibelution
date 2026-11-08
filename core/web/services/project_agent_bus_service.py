@@ -7,6 +7,7 @@ round-robin meetings; targeted messages are delivered to Agent inboxes.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import threading
 from datetime import datetime, timezone
@@ -19,6 +20,8 @@ from core.agent_kernel import service as agent_kernel_service
 from . import agent_directory_service, session_service
 from .runtime_scene_service import record_runtime_scene_event
 
+
+logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -40,7 +43,9 @@ def utc_now_iso() -> str:
 def list_project_agent_bus_events(*, limit: int = 80) -> dict[str, Any]:
     """Return recent bus timeline events and the current active Agent count."""
 
-    events = _read_jsonl(_bus_events_path())
+    events, corrupt_lines = _read_jsonl_with_health(_bus_events_path())
+    if corrupt_lines:
+        _record_bus_corrupt_skip(corrupt_lines)
     try:
         capped_limit = max(1, min(int(limit or 80), 300))
     except (TypeError, ValueError):
@@ -557,23 +562,64 @@ def _write_jsonl(path: Path, payloads: list[dict[str, Any]]) -> None:
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    events, _ = _read_jsonl_with_health(path)
+    return events
+
+
+def _read_jsonl_with_health(path: Path) -> tuple[list[dict[str, Any]], int]:
+    """Read bus timeline rows, isolating corrupt lines instead of failing.
+
+    Returns ``(events, corrupt_line_count)``. A line that is not valid UTF-8
+    or not parseable JSON is skipped and counted so the timeline keeps serving
+    surviving events while the corruption stays observable.
+    """
     if not path.exists():
-        return []
+        return [], 0
     events: list[dict[str, Any]] = []
+    corrupt_lines = 0
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        raw_lines = path.read_bytes().splitlines()
     except OSError:
-        return []
-    for line in lines:
+        return [], 0
+    for raw_line in raw_lines:
+        try:
+            line = raw_line.decode("utf-8")
+        except UnicodeDecodeError:
+            corrupt_lines += 1
+            continue
         if not line.strip():
             continue
         try:
             payload = json.loads(line)
         except json.JSONDecodeError:
+            corrupt_lines += 1
             continue
         if isinstance(payload, dict):
             events.append(payload)
-    return events
+    if corrupt_lines:
+        logger.warning(
+            "project_agent_bus corrupt event lines skipped path=%s skippedLines=%d",
+            path,
+            corrupt_lines,
+        )
+    return events, corrupt_lines
+
+
+def _record_bus_corrupt_skip(corrupt_lines: int) -> None:
+    """Record the skip of corrupt bus timeline lines on the bus scene channel."""
+    try:
+        record_runtime_scene_event(
+            "project_agent_bus",
+            "events",
+            "project_agent_bus.events.corrupt_lines_skipped",
+            message="project_agent_bus.events.corrupt_lines_skipped",
+            level="warning",
+            outcome="degraded",
+            fields={"skippedLines": int(corrupt_lines)},
+            lifecycle=True,
+        )
+    except Exception:
+        return
 
 
 def _trim_lines(value: str, *, max_lines: int) -> str:

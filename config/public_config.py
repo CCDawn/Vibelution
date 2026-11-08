@@ -67,6 +67,17 @@ HEADER_LINES = [
     "# ============================================================",
 ]
 PUBLIC_PROVIDER_FIELDS = PUBLIC_INLINE_PROVIDER_FIELDS
+_V2_MODEL_OPTION_PROVIDER_FIELDS = (
+    *PUBLIC_INLINE_PROVIDER_FIELDS,
+    "auth_kind",
+    "vendor",
+    "driver",
+)
+_V2_MODEL_OPTION_PROVIDER_OBJECT_FIELDS = {
+    "protocols": ("default", "allowed", "routes"),
+    "discovery": ("mode", "adapter", "models_url_override", "cache_ttl_seconds", "include", "exclude"),
+    "deployment": ("runtime_framework", "artifact_path"),
+}
 PROFILE_OVERRIDE_FIELDS = PROFILE_REFERENCE_OVERRIDE_FIELDS
 SCHEMA_V2_LEGACY_MODEL_WRITE_ERROR = (
     "schema v2 model writes must use provider-scoped configuration; "
@@ -1585,13 +1596,17 @@ def _read_windows_user_env_var(name: str) -> str:
 
 
 def _read_env_var(name: str) -> str:
-    value = os.environ.get(name, "")
-    if value:
-        return value
+    # HKCU-first mirrors config.models._read_env_var: HKCU is the authoritative
+    # location where the UI persists keys; a value inherited into the process
+    # may come from a session block written before the key changed and would
+    # shadow the fresh HKCU value forever. Without the flag, keep reading
+    # os.environ only.
     fallback_enabled = str(os.environ.get("VIBELUTION_ENABLE_USER_ENV_FALLBACK", "") or "").strip().lower()
-    if fallback_enabled not in {"1", "true", "yes", "on"}:
-        return ""
-    return _read_windows_user_env_var(name)
+    if fallback_enabled in {"1", "true", "yes", "on"}:
+        user_value = _read_windows_user_env_var(name)
+        if user_value:
+            return user_value
+    return os.environ.get(name, "")
 
 
 def read_persisted_user_env_var(name: str) -> str:
@@ -2144,7 +2159,7 @@ def list_llm_model_options(public_config: dict) -> list[dict[str, object]]:
                 provider = {
                     **{
                         field: copy.deepcopy(raw_provider.get(field))
-                        for field in PUBLIC_INLINE_PROVIDER_FIELDS
+                        for field in _V2_MODEL_OPTION_PROVIDER_FIELDS
                         if field in raw_provider
                     },
                     "id": str(provider_id),
@@ -2155,6 +2170,10 @@ def list_llm_model_options(public_config: dict) -> list[dict[str, object]]:
                     "requires_api_key": bool(raw_provider.get("requires_api_key", requires_credential)),
                     "requires_credential": requires_credential,
                 }
+                for field, allowed_fields in _V2_MODEL_OPTION_PROVIDER_OBJECT_FIELDS.items():
+                    value = raw_provider.get(field)
+                    if isinstance(value, dict):
+                        provider[field] = {key: copy.deepcopy(value[key]) for key in allowed_fields if key in value}
                 protocols = raw_provider.get("protocols") if isinstance(raw_provider.get("protocols"), dict) else {}
                 for model_key, raw_model in raw_models.items():
                     if not isinstance(raw_model, dict) or raw_model.get("enabled", True) is False:
@@ -2616,26 +2635,34 @@ def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
         return {"ok": False, "message": str(exc)}
 
     try:
-        from core.llm.client import LLMClient, _default_completion_backend, _default_responses_backend
+        from core.llm.client import (
+            LLMClient,
+            _default_anthropic_native_backend,
+            _default_completion_backend,
+            _default_responses_backend,
+        )
     except Exception:
         return _probe_llm_http(provider, profile, api_key)
 
     probe_timeout = coerce_llm_runtime_probe_timeout(provider, profile.connect_timeout, profile.timeout)
-    # Thinking-default models emit reasoning tokens before any visible output, so a
-    # 1-token budget deterministically returns finish_reason=length for them.
-    probe_max_output_tokens = 1
+    # 非最小预算不足以判活即可：1-token 预算下任何多于一个 token 的正常回复
+    # （含未声明 reasoning_state_field 的 thinking 模型的开场思考）都会以
+    # finish_reason=length 收场，把可用 provider 误报成截断失败。32 让正常
+    # ping 回复（"OK"/"pong" 级）稳定落地；显式 reasoning 模型仍走下方 2048。
+    probe_max_output_tokens = 32
     if (
         str(getattr(profile, "contract", "") or "").strip().lower() == "reasoning_chat"
         or str(getattr(profile, "reasoning_state_field", "") or "").strip()
     ):
         probe_max_output_tokens = 2048
+    # streaming 跟随 profile 原值：SSE-only 上游对 stream:false 直接 400，强制
+    # 关流会把可用 provider 误报成探测失败。探测与 chat 必须走同一形态。
     try:
         probe_profile = profile.model_copy(
             update={
                 "max_output_tokens": probe_max_output_tokens,
                 "timeout": probe_timeout,
                 "connect_timeout": min(int(getattr(profile, "connect_timeout", probe_timeout) or probe_timeout), probe_timeout),
-                "streaming": False,
                 "retry_policy": RetryPolicyConfig(max_attempts=1, backoff_base_seconds=0.1),
             }
         )
@@ -2644,7 +2671,6 @@ def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
         probe_profile.max_output_tokens = probe_max_output_tokens
         probe_profile.timeout = probe_timeout
         probe_profile.connect_timeout = min(int(getattr(profile, "connect_timeout", probe_timeout) or probe_timeout), probe_timeout)
-        probe_profile.streaming = False
         probe_profile.retry_policy = RetryPolicyConfig(max_attempts=1, backoff_base_seconds=0.1)
 
     class _ProbeConfig:
@@ -2695,24 +2721,63 @@ def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
             return _default_responses_backend(payload)
         return _default_completion_backend(payload)
 
-    try:
-        client = LLMClient(config=_ProbeConfig(), profile_id=profile.profile_id, backend=real_backend)
-        invoke_llm(
-            client,
-            [{"role": "user", "content": "ping"}],
-            tools=[],
-            context=LLMInvocationContext(
-                surface="config_runtime_probe",
-                run_kind="non_conversation_probe",
-                agent_id="public_config",
-                llm_slot="dialogue",
-                model_id=str(getattr(profile, "model_ref", "") or getattr(profile, "model", "")),
-                cache_scope="config_probe",
-                cache_partition=f"config-runtime-probe-{profile.profile_id}",
-                prompt_purpose="provider_ping",
-                conversation_bound=False,
-            ),
+    def native_anthropic_backend(payload: dict[str, Any]) -> dict[str, Any]:
+        # anthropic_messages_native provider 必须保留 client 的 native 分派路径
+        # （与 chat 一致）。若让它落到 real_backend → litellm completion，native
+        # 形态的 base_url（含 /v1/messages）会被按 chat_completions 拼错，探测
+        # 对这类 provider 必假阴性。这里只做捕获再委托默认 native backend。
+        max_output_tokens = payload.get("max_output_tokens")
+        max_tokens = payload.get("max_tokens") if "max_tokens" in payload else max_output_tokens
+        captured_payload.update(
+            {
+                "model": payload.get("model"),
+                "base_url": payload.get("base_url"),
+                "stream": payload.get("stream"),
+                "max_tokens": max_tokens,
+                "max_output_tokens": max_output_tokens,
+                "timeout": payload.get("timeout"),
+            }
         )
+        return _default_anthropic_native_backend(payload)
+
+    try:
+        client = LLMClient(
+            config=_ProbeConfig(),
+            profile_id=profile.profile_id,
+            backend=real_backend,
+            anthropic_backend=native_anthropic_backend,
+        )
+        probe_context = LLMInvocationContext(
+            surface="config_runtime_probe",
+            run_kind="non_conversation_probe",
+            agent_id="public_config",
+            llm_slot="dialogue",
+            model_id=str(getattr(profile, "model_ref", "") or getattr(profile, "model", "")),
+            cache_scope="config_probe",
+            cache_partition=f"config-runtime-probe-{profile.profile_id}",
+            prompt_purpose="provider_ping",
+            conversation_bound=False,
+        )
+        if bool(getattr(probe_profile, "streaming", False)):
+            # SSE-only 上游对 stream:false 直接 400：streaming profile 必须走与
+            # chat 相同的流式分派（client.stream），否则探测必假阴性。探测预算
+            # 很小，排空整个流即可。
+            from core.llm.invocation import stream_llm
+
+            for _chunk in stream_llm(
+                client,
+                [{"role": "user", "content": "ping"}],
+                tools=[],
+                context=probe_context,
+            ):
+                pass
+        else:
+            invoke_llm(
+                client,
+                [{"role": "user", "content": "ping"}],
+                tools=[],
+                context=probe_context,
+            )
     except Exception as exc:
         return {"ok": False, "message": redact_llm_probe_error(str(exc), api_key=api_key)}
 
@@ -2911,9 +2976,31 @@ def _config_edit_lock(config_path: Path, *, timeout_seconds: float = 10.0, stale
             yield
 
 
+_CONFIG_EDIT_LOCK_DEPTH = threading.local()
+
+
 @contextmanager
 def _config_edit_lock_unfenced(config_path: Path, *, timeout_seconds: float = 10.0, stale_seconds: float = 300.0):
     lock_path = resolve_config_lock_path(config_path)
+    key = os.path.normcase(str(lock_path))
+    depths = getattr(_CONFIG_EDIT_LOCK_DEPTH, "counts", None)
+    if depths is None:
+        depths = _CONFIG_EDIT_LOCK_DEPTH.counts = {}
+    if depths.get(key, 0) > 0:
+        # Same-thread re-entry: a long-span writer (apply_config_workspace's
+        # read-baseline-merge-persist critical section, or the config
+        # bootstrap's schema upgrader) already owns the sidecar, and a nested
+        # save_public_config / load_public_config must re-enter instead of
+        # self-deadlocking on its own O_EXCL sidecar. Other threads and other
+        # processes still serialize on the lock file below.
+        depths[key] += 1
+        try:
+            yield
+        finally:
+            depths[key] -= 1
+            if depths[key] <= 0:
+                depths.pop(key, None)
+        return
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     token = f"{os.getpid()}:{uuid.uuid4().hex}"
     deadline = time.monotonic() + timeout_seconds
@@ -2936,9 +3023,11 @@ def _config_edit_lock_unfenced(config_path: Path, *, timeout_seconds: float = 10
             if time.monotonic() >= deadline:
                 raise RuntimeError(f"Config edit lock is busy: {lock_path}")
             time.sleep(0.05)
+    depths[key] = 1
     try:
         yield
     finally:
+        depths.pop(key, None)
         if acquired:
             try:
                 if lock_path.read_text(encoding="utf-8").strip() == token:

@@ -21,6 +21,7 @@
 | Workbench 默认/可用性契约 | `workbench_contract_service.py` | 与 operator config 混为第二写入者 |
 | Workbench UI 布局偏好（项目本地） | `workbench_ui_preferences_service.py` | 写 operator `config.toml` |
 | HTTP 路由 / DTO | `core/web/routes/config.py` + `config_*_models.py` | route 直连 `config/` 包绕过 service；泄露完整 API key |
+| ChatGPT 订阅授权 / 连接状态 | `chatgpt_subscription_service.py` → `core/llm/chatgpt_subscription/`；route `chatgpt_subscription.py` | 返回 token、绕过 operator draft/apply、导入 Codex 登录缓存 |
 
 **「改 provider 挂哪？」** → `provider_config_service.py`（draft）+ `config/llm_provider_registry.py`（持久 registry）+ apply 经 `config_service.apply_config_workspace`；活跃文件始终是 operator `config.toml`（非仓库根 template）。
 

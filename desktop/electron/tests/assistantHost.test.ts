@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AssistantHost, type AssistantHostOptions, type AssistantHostRequest } from "../src/assistant/assistantHost.js";
+import { AssistantHost, HostError, type AssistantHostOptions, type AssistantHostRequest } from "../src/assistant/assistantHost.js";
 import { invokeAssistant, LAUNCHER_ASSISTANT_URL } from "../src/assistant/assistantBridge.js";
 import { affairsSyncMigrationId } from "../src/assistant/mainControlTransport.js";
 import { applyDesktopLaunchSettingsToEnvironment } from "../src/launch/desktopLaunchSettings.js";
@@ -78,6 +78,53 @@ function usageSnapshot() {
 }
 
 describe("AssistantHost", () => {
+  it("binds control continuation sends to the captured identity and preserves the exact retry body", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const controlContinuation = { agentId: "a", sessionId: "s", turnId: "old-turn", headId: "head", ledgerSeq: 4 };
+    const request = { operation: "send" as const, requestId: "control-1", controlContinuation,
+      message: "控制已交回，请先重新观察当前页面或授权窗口，再继续当前任务；不要重放未经确认的操作。" };
+    fetchImpl.mockRejectedValueOnce(new Error("ack lost"));
+    await expect(host.request(request)).rejects.toThrow("ASSISTANT_TRANSPORT_FAILED");
+    const failedBody = fetchImpl.mock.calls.at(-1)?.[1]?.body;
+    await host.request(request);
+    expect(fetchImpl.mock.calls.at(-1)?.[1]?.body).toBe(failedBody);
+    expect(JSON.parse(String(failedBody))).toEqual({ message: request.message, requestId: "control-1", controlContinuation });
+    const before = fetchImpl.mock.calls.length;
+    for (const changes of [{ agentId: "new-agent" }, { sessionId: "new-session" }])
+      await expect(host.request({ ...request, controlContinuation: { ...controlContinuation, ...changes } }))
+        .rejects.toThrow("ASSISTANT_IDENTITY_INVALID");
+    for (const changes of [{ message: "continue freely" }, { attachmentIds: ["file-1"] }, { references: [{ messageId: "m" }] },
+      { controlContinuation: null }, { controlContinuation: { ...controlContinuation, ledgerSeq: true } },
+      { controlContinuation: { ...controlContinuation, headId: " head " } },
+      { controlContinuation: { ...controlContinuation, extra: true } }])
+      await expect(host.request({ ...request, ...changes } as unknown as AssistantHostRequest)).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    expect(fetchImpl.mock.calls.length).toBe(before);
+    await host.stop();
+  });
+
+  it("rejects a control send retained across migration once the new native identity is ready", async () => {
+    const { host, fetchImpl, native, root } = fixture({ graceful: true });
+    Object.assign(native, { exitCode: vi.fn(() => 0) });
+    await host.start();
+    const request = { operation: "send" as const, requestId: "old-control", controlContinuation:
+      { agentId: "a", sessionId: "s", turnId: "old-turn", headId: "head", ledgerSeq: 4 },
+      message: "控制已交回，请先重新观察当前页面或授权窗口，再继续当前任务；不要重放未经确认的操作。" };
+    const admission = host.beginMigrationAdmission();
+    await admission.seal();
+    const queued = host.request(request);
+    expect(await host.retireForMigration()).toBe(true);
+    host.prepareForMigrationRestart({ schemaVersion: 1, revision: 0, projects: { project: root } }, false);
+    const originalFetch = fetchImpl.getMockImplementation()!;
+    fetchImpl.mockImplementation(async (...args) => String(args[0]).endsWith("/api/assistant")
+      ? Response.json({ assistant: { agentId: "new-agent", directSessionId: "new-session" } }) : originalFetch(...args));
+    await host.startForMigration();
+    admission.release();
+    await expect(queued).rejects.toThrow("ASSISTANT_IDENTITY_INVALID");
+    expect(fetchImpl.mock.calls.filter(([url]) => String(url).endsWith("/api/assistant/messages"))).toHaveLength(0);
+    await host.stop();
+  });
+
   it("reads a fixed compact usage snapshot and refuses identity or scope injection", async () => {
     const { host, fetchImpl } = fixture({ graceful: true });
     await host.start();
@@ -97,6 +144,20 @@ describe("AssistantHost", () => {
       fetchImpl.mockResolvedValueOnce(Response.json({ ...snapshot, [key]: "foreign" }));
       await expect(host.request({ operation: "usageSummary" })).rejects.toThrow("ASSISTANT_IDENTITY_INVALID");
     }
+    await host.stop();
+  });
+
+  it("maps a fail-closed reminder owner to ASSISTANT_REMINDER_BLOCKED with its backend code", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    fetchImpl.mockResolvedValueOnce(Response.json({ detail: { code: "receipt_integrity_failed" } }, { status: 409 }));
+    const failure = await host.nextReminder().catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(HostError);
+    expect((failure as HostError).code).toBe("ASSISTANT_REMINDER_BLOCKED");
+    expect((failure as HostError).detail).toBe("receipt_integrity_failed");
+    // A transient owner failure keeps the retryable status-only mapping.
+    fetchImpl.mockResolvedValueOnce(Response.json({ detail: { code: "receipt_store_busy" } }, { status: 503 }));
+    await expect(host.nextReminder()).rejects.toThrow("ASSISTANT_HTTP_FAILED");
     await host.stop();
   });
 
@@ -173,6 +234,31 @@ describe("AssistantHost", () => {
     fetchImpl.mockResolvedValueOnce(Response.json({ detail: "private" }, { status: 409 }));
     await expect(host.request({ operation: "setBudgetParameters", revision: 3, maxCallsPerTurn: 0 })).rejects.toThrow("ASSISTANT_BUDGET_CONFLICT");
     expect(fetchImpl.mock.calls.length).toBe(calls + 1);
+    await host.stop();
+  });
+
+  it("acknowledges the patrol delivery banner through one fixed ledger-only write", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    for (const payload of [{ operation: "acknowledgePatrolDelivery", extra: true },
+      { operation: "acknowledgePatrolDelivery", dispatchId: "x" }])
+      await expect(host.request(payload as AssistantHostRequest)).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    const calls = fetchImpl.mock.calls.length;
+    const states = { unknown: 0, observed: 1, failed: 2, interrupted: 0, completed: 3, cancelled_pre_admission: 0 };
+    fetchImpl.mockResolvedValueOnce(Response.json({ deliveryStates: states }));
+    await expect(host.request({ operation: "acknowledgePatrolDelivery" }))
+      .resolves.toEqual({ deliveryStates: states });
+    expect(String(fetchImpl.mock.calls.at(-1)![0])).toBe("http://127.0.0.1:12345/api/assistant/patrol/acknowledge");
+    expect(fetchImpl.mock.calls.at(-1)![1]?.method).toBe("POST");
+    expect(JSON.parse(String(fetchImpl.mock.calls.at(-1)![1]?.body))).toEqual({});
+    for (const reply of [{}, { deliveryStates: {} }, { deliveryStates: { unknown: -1 } },
+      { deliveryStates: { unknown: true } }, { deliveryStates: { unknown: 1.5 } },
+      { deliveryStates: { unknown: 0 }, extra: 1 }, { unknown: 0 },
+      { deliveryStates: { unknown: 0, observed: 0, failed: 0, interrupted: 0, completed: 0 } }])
+      fetchImpl.mockResolvedValueOnce(Response.json(reply));
+    for (const _ of [1, 2, 3, 4, 5, 6, 7, 8])
+      await expect(host.request({ operation: "acknowledgePatrolDelivery" })).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
+    expect(fetchImpl.mock.calls.length).toBe(calls + 9);
     await host.stop();
   });
   it("posts management presets once with closed CAS inputs and bounded verified receipts", async () => {
@@ -921,6 +1007,23 @@ describe("AssistantHost", () => {
     ]) await expect(host.request(bad as AssistantHostRequest)).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
     expect(fetchImpl.mock.calls).toHaveLength(count);
     fetchImpl.mockResolvedValueOnce(Response.json({ ...idle, path: "private" }));
+    await expect(host.request({ operation: "computerState" })).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
+    await host.stop();
+  });
+
+  it("passes unknown computer actions through and keeps the mirrored bounds", async () => {
+    // The open contract owns the action set (launch, click_at, hotkey, ...);
+    // the shell mirrors only the shape and never rejects a known-bounded
+    // action the service decided to emit.
+    const { host, fetchImpl } = fixture({ graceful: true }); await host.start();
+    const withPending = (action: string) => ({ available: true, status: "waiting_confirmation", message: "",
+      grantId: "grant", window: { selectionId: "sel", title: "Title", appName: "App" },
+      pending: { id: "p", action, targetLabel: "Button", text: null } });
+    for (const action of ["launch", "click_at", "hotkey", "set_value"]) {
+      fetchImpl.mockResolvedValueOnce(Response.json(withPending(action)));
+      expect(await host.request({ operation: "computerState" })).toEqual(withPending(action));
+    }
+    fetchImpl.mockResolvedValueOnce(Response.json(withPending("x".repeat(41))));
     await expect(host.request({ operation: "computerState" })).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
     await host.stop();
   });

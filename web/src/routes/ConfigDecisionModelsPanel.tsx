@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
+import { ArrowLeft, Bot, ChevronRight, Plus } from "lucide-react";
 
 import { testDecisionModel } from "../api/config";
 import type { ConfigDecisionModelPreset, ConfigDecisionModelProbe } from "../api/types/config";
-import { VButton, VCheckbox, VInput, VSection, VStringSelect } from "../components/vui";
+import { VButton, VCheckbox, VChip, VDropdownMenu, VInput, VSection, VStringSelect } from "../components/vui";
 import styles from "./ConfigDecisionModelsPanel.styles";
 
 export type DecisionModelEntry = {
+  [key: string]: unknown;
   label: string;
   model_id: string;
   base_url: string;
@@ -25,11 +27,14 @@ type ConfigDecisionModelsPanelProps = {
   disabled: boolean;
   lang: string;
   onCommit: (models: DecisionModelMap, handoffModelId: string) => void;
+  /** Local values not yet represented by the parent draft, including incomplete entries. */
+  onPendingChange?: (pending: boolean) => void;
   onToggleEnabled?: (id: string, enabled: boolean) => Promise<boolean>;
   onSelectHandoff?: (handoffId: string) => Promise<boolean>;
 };
 
 const MAX_ENTRIES = 24;
+const ENTRY_FIELDS = new Set(["label", "model_id", "base_url", "min_probability", "enabled", "note"]);
 
 export function readDecisionModelMap(raw: unknown): DecisionModelMap {
   if (!raw || typeof raw !== "object") return {};
@@ -41,6 +46,7 @@ export function readDecisionModelMap(raw: unknown): DecisionModelMap {
       ? row.min_probability
       : Number(row.min_probability);
     models[id] = {
+      ...row,
       label: typeof row.label === "string" ? row.label : "",
       model_id: typeof row.model_id === "string" ? row.model_id : "",
       base_url: typeof row.base_url === "string" ? row.base_url : "",
@@ -128,6 +134,7 @@ function snapshot(models: DecisionModelMap, handoffModelId: string): string {
       entry.min_probability,
       entry.enabled,
       entry.note,
+      Object.keys(entry).filter((key) => !ENTRY_FIELDS.has(key)).sort().map((key) => [key, entry[key]]),
     ];
   });
   return JSON.stringify({ handoffModelId, rows });
@@ -164,6 +171,7 @@ export function ConfigDecisionModelsPanel({
   disabled,
   lang,
   onCommit,
+  onPendingChange,
   onToggleEnabled,
   onSelectHandoff,
 }: ConfigDecisionModelsPanelProps) {
@@ -171,9 +179,14 @@ export function ConfigDecisionModelsPanel({
   const [draft, setDraft] = useState<DecisionModelMap>(models);
   const [handoff, setHandoff] = useState(handoffModelId);
   const [probe, setProbe] = useState<Record<string, ConfigDecisionModelProbe>>({});
+  const probeTargets = useRef<Record<string, string>>({});
   const [probing, setProbing] = useState("");
   const [holdReason, setHoldReason] = useState("");
   const [savingImmediate, setSavingImmediate] = useState(false);
+  const [editingId, setEditingId] = useState("");
+  const listTriggers = useRef<Record<string, HTMLButtonElement | null>>({});
+  const addTrigger = useRef<HTMLButtonElement | null>(null);
+  const lastEditingId = useRef("");
   const persistedModels = savedModels ?? models;
   const persistedHandoff = savedHandoffModelId ?? handoffModelId;
   const draftRef = useRef(draft);
@@ -182,8 +195,18 @@ export function ConfigDecisionModelsPanel({
   const dirty = useRef(false);
   const lastApplied = useRef("");
   const lastSent = useRef(snapshot(models, handoffModelId));
+  const lastReportedPending = useRef<boolean | null>(null);
   draftRef.current = draft;
   handoffRef.current = handoff;
+
+  useEffect(() => {
+    if (editingId) {
+      lastEditingId.current = editingId;
+    } else if (lastEditingId.current) {
+      (listTriggers.current[lastEditingId.current] ?? addTrigger.current)?.focus();
+      lastEditingId.current = "";
+    }
+  }, [editingId]);
 
   useEffect(() => {
     const remote = snapshot(models, handoffModelId);
@@ -210,6 +233,23 @@ export function ConfigDecisionModelsPanel({
     setDraft(models);
     setHandoff(handoffModelId);
   }, [models, handoffModelId]);
+
+  useEffect(() => {
+    if (!onPendingChange) return;
+    // Saved switch and binding props own immediate actions. Their older local
+    // copies must neither create pending text nor hide a retained text draft.
+    const comparableDraft = onToggleEnabled
+      ? Object.fromEntries(Object.entries(draftRef.current).map(([id, entry]) => [
+        id,
+        models[id] ? { ...entry, enabled: models[id].enabled } : entry,
+      ]))
+      : draftRef.current;
+    const pending = snapshot(comparableDraft, onSelectHandoff ? handoffModelId : handoffRef.current)
+      !== snapshot(models, handoffModelId);
+    if (lastReportedPending.current === pending) return;
+    lastReportedPending.current = pending;
+    onPendingChange(pending);
+  }, [draft, handoff, models, handoffModelId, onPendingChange, onToggleEnabled, onSelectHandoff]);
 
   function remember(nextModels: DecisionModelMap, nextHandoff: string) {
     draftRef.current = nextModels;
@@ -272,176 +312,240 @@ export function ConfigDecisionModelsPanel({
     }
   }
 
+  function closeEditor() {
+    if (!disabled) publish(draftRef.current, handoffRef.current);
+    setEditingId("");
+  }
+
+  function checkConnection(id: string) {
+    const entry = draftRef.current[id];
+    if (!entry || disabled || probing) return;
+    probeTargets.current[id] = JSON.stringify([entry.base_url, entry.model_id]);
+    setProbing(id);
+    void testDecisionModel({ baseUrl: entry.base_url, modelId: entry.model_id })
+      .then((result) => setProbe((current) => ({ ...current, [id]: result })))
+      .catch(() => {
+        setProbe((current) => ({
+          ...current,
+          [id]: { ok: false, error: zh ? "连通检查失败" : "Connectivity check failed" },
+        }));
+      })
+      .finally(() => setProbing((current) => current === id ? "" : current));
+  }
+
+  function probeMessage(result: ConfigDecisionModelProbe) {
+    return result.ok
+      ? `${zh ? "模型响应" : "Model response"}: ${result.choice ?? ""} ${result.probability ?? ""}`.trim()
+      : result.error;
+  }
+
+  function currentProbe(id: string) {
+    const entry = draft[id];
+    return entry && probeTargets.current[id] === JSON.stringify([entry.base_url, entry.model_id])
+      ? probe[id]
+      : undefined;
+  }
+
   const full = Object.keys(draft).length >= MAX_ENTRIES;
+  const editingEntry = draft[editingId];
+  const activeHandoff = onSelectHandoff ? persistedHandoff : handoff;
   const enabledOptions = Object.entries(onSelectHandoff ? persistedModels : draft)
     .filter(([, entry]) => entry.enabled)
     .map(([id, entry]) => ({ value: id, label: entry.label || id }));
 
+  function addEntry(id: string, entry: DecisionModelEntry) {
+    if (disabled || draftRef.current[id] || Object.keys(draftRef.current).length >= MAX_ENTRIES) return;
+    publish({ ...draftRef.current, [id]: entry }, handoffRef.current);
+    setEditingId(id);
+  }
+
   return (
-    <VSection id="config-decision-models" title={zh ? "决策模型" : "Decision models"} data-testid="config-decision-models">
-      <p className={styles.intro}>
-        {zh
-          ? "这里保存一整类本地决策模型。它们不进入对话槽。可以启用多条，Agent 交接只绑定一条；没绑定就不会调用。配置页不下载权重，也不启动服务。"
-          : "Store a class of local decision models here. They stay out of chat slots. Several can be enabled, and agent handoff binds exactly one. No binding means no call. This page does not download weights or start the server."}
-      </p>
-      {holdReason ? <p className={styles.hold}>{holdReason}</p> : null}
-      <div className={styles.actions}>
-        {presets.map((preset) => (
-          <VButton
-            key={preset.presetId}
-            isDisabled={disabled || full || Boolean(draft[preset.presetId])}
-            onPress={() => {
-              if (draftRef.current[preset.presetId] || Object.keys(draftRef.current).length >= MAX_ENTRIES) return;
-              publish(
-                { ...draftRef.current, [preset.presetId]: entryFromPreset(preset, lang) },
-                handoffRef.current,
-              );
-            }}
-          >
-            {preset.label}
-          </VButton>
-        ))}
+    <VSection
+      id="config-decision-models"
+      title={editingEntry ? editingEntry.label || editingId : (zh ? "决策模型" : "Decision models")}
+      actions={editingEntry ? (
         <VButton
-          isDisabled={disabled || full}
-          onPress={() => {
-            if (Object.keys(draftRef.current).length >= MAX_ENTRIES) return;
-            const id = nextCustomId(draftRef.current);
-            publish(
-              {
-                ...draftRef.current,
-                [id]: {
-                  label: zh ? "自定义决策模型" : "Custom decision model",
-                  model_id: "",
-                  base_url: "http://127.0.0.1:8088/v1/systemone",
-                  min_probability: 0.8,
-                  enabled: true,
-                  note: "",
-                },
-              },
-              handoffRef.current,
-            );
-          }}
-        >
-          {zh ? "自定义" : "Custom"}
-        </VButton>
-      </div>
-      <label className={styles.narrow}>
-        <span>{zh ? "交接使用" : "Handoff uses"}</span>
-        <VStringSelect
-          ariaLabel={zh ? "交接使用的决策模型" : "Decision model bound to handoff"}
-          isDisabled={disabled || savingImmediate}
-          value={onSelectHandoff ? persistedHandoff : handoff}
-          placeholder={zh ? "不绑定" : "Unbound"}
-          options={[{ value: "", label: zh ? "不绑定" : "Unbound" }, ...enabledOptions]}
-          onValueChange={(value) => {
-            if (onSelectHandoff) {
-              void saveImmediate(() => onSelectHandoff(value));
-            } else {
-              publish(draftRef.current, value);
-            }
-          }}
+          variant="ghost"
+          isIconOnly
+          icon={<ArrowLeft size={18} />}
+          aria-label={zh ? "返回用途" : "Back to usage"}
+          onPress={closeEditor}
         />
-      </label>
-      {Object.entries(draft).map(([id, entry]) => (
-        <div key={id} className={styles.card}>
-          <div className={styles.cardHeader}>
-            <strong className={styles.cardTitle}>{entry.label || id}</strong>
-            <VCheckbox
-              isSelected={onToggleEnabled ? (persistedModels[id]?.enabled ?? entry.enabled) : entry.enabled}
-              isDisabled={disabled || savingImmediate || Boolean(onToggleEnabled && !persistedModels[id])}
-              onChange={(selected) => {
-                if (onToggleEnabled) {
-                  if (persistedModels[id]) void saveImmediate(() => onToggleEnabled(id, selected));
+      ) : (
+        <VDropdownMenu
+          aria-label={zh ? "添加决策模型" : "Add decision model"}
+          trigger={<VButton ref={addTrigger} isDisabled={disabled || full} icon={<Plus size={15} />}>{zh ? "添加" : "Add"}</VButton>}
+          items={[
+            ...presets.map((preset) => ({
+              id: preset.presetId,
+              label: preset.label,
+              disabled: disabled || full || Boolean(draft[preset.presetId]),
+              onSelect: () => addEntry(preset.presetId, entryFromPreset(preset, lang)),
+            })),
+            {
+              id: "custom",
+              label: zh ? "自定义" : "Custom",
+              disabled: disabled || full,
+              onSelect: () => addEntry(nextCustomId(draftRef.current), {
+                label: zh ? "自定义决策模型" : "Custom decision model",
+                model_id: "",
+                base_url: "http://127.0.0.1:8088/v1/systemone",
+                min_probability: 0.8,
+                enabled: true,
+                note: "",
+              }),
+            },
+          ]}
+        />
+      )}
+      className={styles.section}
+      headerClassName={[styles.header, editingEntry ? styles.editorHeader : ""].join(" ")}
+      data-testid="config-decision-models"
+    >
+      {!editingEntry ? (
+        <div className={styles.content}>
+          {holdReason ? <p className={styles.hold} role="status">{holdReason}</p> : null}
+          <label className={styles.narrow}>
+            <span>{zh ? "交接" : "Handoff"}</span>
+            <VStringSelect
+              ariaLabel={zh ? "交接使用的决策模型" : "Decision model bound to handoff"}
+              isDisabled={disabled || savingImmediate}
+              value={onSelectHandoff ? persistedHandoff : handoff}
+              placeholder={zh ? "不绑定" : "Unbound"}
+              options={[{ value: "", label: zh ? "不绑定" : "Unbound" }, ...enabledOptions]}
+              onValueChange={(value) => {
+                if (onSelectHandoff) {
+                  void saveImmediate(() => onSelectHandoff(value));
                 } else {
-                  patchEntry(id, { enabled: selected }, true);
+                  publish(draftRef.current, value);
                 }
               }}
-            >
-              {zh ? "启用" : "Enabled"}
-            </VCheckbox>
+            />
+          </label>
+          {!Object.keys(draft).length ? (
+            <p className={styles.note}>{zh ? "还没有决策模型" : "No decision models yet"}</p>
+          ) : null}
+          <ul className={styles.list} aria-label={zh ? "决策模型列表" : "Decision model list"}>
+            {Object.entries(draft).map(([id, entry]) => (
+              <li key={id} className={styles.row} data-decision-model-id={id}>
+                <VButton
+                  ref={(button) => { listTriggers.current[id] = button; }}
+                  variant="ghost"
+                  contentLayout="plain"
+                  className={styles.rowButton}
+                  isDisabled={disabled}
+                  aria-label={zh ? `编辑 ${entry.label || id}` : `Edit ${entry.label || id}`}
+                  onPress={() => setEditingId(id)}
+                >
+                  <Bot size={20} className={styles.rowIcon} />
+                  <span className={styles.summary}>
+                    <span className={styles.summaryHeading}>
+                      <strong className={styles.cardTitle}>{entry.label || id}</strong>
+                      {activeHandoff === id ? <VChip tone="info">{zh ? "用于交接" : "Handoff"}</VChip> : null}
+                      {!entryReady(entry) ? <VChip tone="warning">{zh ? "待补全" : "Incomplete"}</VChip> : null}
+                    </span>
+                    <span className={styles.modelId}>{entry.model_id || (zh ? "尚未填写模型名" : "Model id not set")}</span>
+                    {currentProbe(id) ? <span className={styles.probe} role="status">{probeMessage(currentProbe(id)!)}</span> : null}
+                  </span>
+                  <ChevronRight size={16} className={styles.rowIcon} />
+                </VButton>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <div className={styles.editor} data-testid="decision-model-editor">
+          {holdReason ? <p className={styles.hold} role="status">{holdReason}</p> : null}
+          <div className={styles.formGrid}>
+            <label className={styles.field}>
+              <span>{zh ? "名称" : "Name"}</span>
+              <VInput
+                autoFocus
+                value={editingEntry.label}
+                disabled={disabled}
+                onChange={(event) => patchEntry(editingId, { label: event.target.value }, false)}
+                onBlur={() => publish(draftRef.current, handoffRef.current)}
+              />
+            </label>
+            <label className={styles.field}>
+              <span>{zh ? "模型名" : "Model id"}</span>
+              <VInput
+                value={editingEntry.model_id}
+                disabled={disabled}
+                onChange={(event) => patchEntry(editingId, { model_id: event.target.value }, false)}
+                onBlur={() => publish(draftRef.current, handoffRef.current)}
+              />
+            </label>
           </div>
-          {entry.note ? <p className={styles.note}>{entry.note}</p> : null}
-          <label className={styles.field}>
-            <span>{zh ? "名称" : "Name"}</span>
-            <VInput
-              value={entry.label}
-              disabled={disabled}
-              onChange={(event) => patchEntry(id, { label: event.target.value }, false)}
-              onBlur={() => publish(draftRef.current, handoffRef.current)}
-            />
-          </label>
-          <label className={styles.field}>
-            <span>{zh ? "模型名" : "Model id"}</span>
-            <VInput
-              value={entry.model_id}
-              disabled={disabled}
-              onChange={(event) => patchEntry(id, { model_id: event.target.value }, false)}
-              onBlur={() => publish(draftRef.current, handoffRef.current)}
-            />
-          </label>
           <label className={styles.field}>
             <span>{zh ? "本地地址" : "Local URL"}</span>
             <VInput
-              value={entry.base_url}
+              value={editingEntry.base_url}
               disabled={disabled}
-              onChange={(event) => patchEntry(id, { base_url: event.target.value }, false)}
+              onChange={(event) => patchEntry(editingId, { base_url: event.target.value }, false)}
               onBlur={() => publish(draftRef.current, handoffRef.current)}
             />
           </label>
-          <label className={styles.narrow}>
-            <span>{zh ? "最低概率" : "Minimum probability"}</span>
-            <VInput
-              type="number"
-              min={0.01}
-              max={1}
-              step={0.01}
-              value={String(entry.min_probability)}
-              disabled={disabled}
-              onChange={(event) => {
-                const value = Number(event.target.value);
-                if (Number.isFinite(value)) patchEntry(id, { min_probability: value }, false);
-              }}
-              onBlur={() => publish(draftRef.current, handoffRef.current)}
-            />
-          </label>
+          <div className={styles.formGrid}>
+            <label className={styles.narrow}>
+              <span>{zh ? "最低概率" : "Minimum probability"}</span>
+              <VInput
+                type="number"
+                min={0.01}
+                max={1}
+                step={0.01}
+                value={String(editingEntry.min_probability)}
+                disabled={disabled}
+                onChange={(event) => {
+                  const value = Number(event.target.value);
+                  if (Number.isFinite(value)) patchEntry(editingId, { min_probability: value }, false);
+                }}
+                onBlur={() => publish(draftRef.current, handoffRef.current)}
+              />
+            </label>
+            <div className={styles.field}>
+              <span>{zh ? "启用" : "Enabled"}</span>
+              <VCheckbox
+                aria-label={zh ? `启用 ${editingEntry.label || editingId}` : `Enable ${editingEntry.label || editingId}`}
+                isSelected={onToggleEnabled ? (persistedModels[editingId]?.enabled ?? editingEntry.enabled) : editingEntry.enabled}
+                isDisabled={disabled || savingImmediate || Boolean(onToggleEnabled && !persistedModels[editingId])}
+                onChange={(selected) => {
+                  if (onToggleEnabled) {
+                    if (persistedModels[editingId]) void saveImmediate(() => onToggleEnabled(editingId, selected));
+                  } else {
+                    patchEntry(editingId, { enabled: selected }, true);
+                  }
+                }}
+              >
+                {zh ? "启用" : "Enabled"}
+              </VCheckbox>
+          </div>
+          </div>
+          {editingEntry.note ? <p className={styles.note}>{editingEntry.note}</p> : null}
           <div className={styles.actions}>
             <VButton
-              isDisabled={disabled || probing === id}
-              onPress={() => {
-                setProbing(id);
-                void testDecisionModel({ baseUrl: entry.base_url, modelId: entry.model_id })
-                  .then((result) => setProbe((current) => ({ ...current, [id]: result })))
-                  .catch(() => {
-                    setProbe((current) => ({
-                      ...current,
-                      [id]: { ok: false, error: zh ? "连通检查失败" : "Connectivity check failed" },
-                    }));
-                  })
-                  .finally(() => setProbing(""));
-              }}
+              isDisabled={disabled || Boolean(probing)}
+              isPending={probing === editingId}
+              onPress={() => checkConnection(editingId)}
             >
               {zh ? "检查连通" : "Check connection"}
             </VButton>
             <VButton
+              variant="danger"
               isDisabled={disabled}
               onPress={() => {
                 const next = { ...draftRef.current };
-                delete next[id];
-                publish(next, handoffRef.current === id ? "" : handoffRef.current);
+                delete next[editingId];
+                publish(next, handoffRef.current === editingId ? "" : handoffRef.current);
+                setEditingId("");
               }}
             >
               {zh ? "删除" : "Remove"}
             </VButton>
           </div>
-          {probe[id] ? (
-            <p className={styles.probe}>
-              {probe[id].ok
-                ? `${probe[id].choice ?? ""} ${probe[id].probability ?? ""}`.trim()
-                : probe[id].error}
-            </p>
-          ) : null}
+          {currentProbe(editingId) ? <p className={styles.probe} role="status">{probeMessage(currentProbe(editingId)!)}</p> : null}
         </div>
-      ))}
+      )}
     </VSection>
   );
 }

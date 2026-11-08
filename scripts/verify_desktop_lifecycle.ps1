@@ -13,7 +13,7 @@ $entryCatalogScript = Join-Path $projectDir "scripts/desktop_entry_catalog.ps1"
 . $entryCatalogScript
 $entryCatalog = Assert-DesktopEntryCatalog -ProjectDir $projectDir
 $packageVerifier = Join-Path $projectDir "scripts/verify_desktop_package.ps1"
-$desktopExe = Resolve-DesktopPublicEntryPath -Catalog $entryCatalog -ProjectDir $projectDir
+$desktopExe = Resolve-DesktopPackageEntryPath -Catalog $entryCatalog -ProjectDir $projectDir
 $MaxCommandLineLength = 260
 $canaryUserDataRoot = Join-Path $projectDir ".runtime/electron-package-canary-user-data"
 

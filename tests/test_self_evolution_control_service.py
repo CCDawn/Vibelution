@@ -784,6 +784,29 @@ def test_self_evolution_agent_bindings_create_fixed_role_slots(tmp_path, monkeyp
     assert payload["modes"]["self_evolution"]["slots"]["observer"] == bindings["observer"]["agentId"]
 
 
+def test_first_self_evolution_config_read_preserves_explicitly_selected_session(tmp_path, monkeypatch):
+    """First-time background role seeding must not steal the active session pointer.
+
+    A user with an explicitly selected chat session reads the self-evolution
+    role config; the seed session creation behind that read runs with
+    ``activate=False`` so the server-side active session stays on the user's
+    chat (ISS-048 regression).
+    """
+    monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(service, "ROLLBACK_ROOT", tmp_path / "workspace" / "web_self_evolution")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
+
+    user_session = session_service.create_chat_session(title="User chat", created_by="user")
+    assert session_service.load_active_conversation_id(tmp_path) == user_session["id"]
+
+    service.self_evolution_agent_bindings()
+
+    assert set(service.self_evolution_agent_bindings()) == {"executor", "reviewer", "observer"}
+    assert session_service.load_active_conversation_id(tmp_path) == user_session["id"]
+
+
 def test_self_evolution_agent_bindings_reuse_valid_slots_without_full_role_repair(tmp_path, monkeypatch):
     monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(service, "ROLLBACK_ROOT", tmp_path / "workspace" / "web_self_evolution")

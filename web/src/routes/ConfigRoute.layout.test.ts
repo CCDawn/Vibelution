@@ -197,7 +197,7 @@ describe("ConfigRoute layout contract", () => {
     expect(quickSetupStylesSource).not.toContain("min-h-[28rem]");
     expect(quickSetupStylesSource).not.toContain("minmax(22rem,0.9fr)_minmax(28rem,1.1fr)");
     expect(routeSource).toContain('workspace.schemaVersion === 2 && isSectionVisible("models")');
-    expect(routeSourceRaw).toContain("compactHome");
+    expect(routeSourceRaw).toContain("modelEditorDrafts={modelEditorDrafts}");
     expect(routeSource).toContain('isSectionVisible("models")');
   });
 
@@ -425,9 +425,9 @@ describe("ConfigRoute layout contract", () => {
     expect(migrationPanelSource).toContain("data-migration-status");
   });
 
-  it("keeps Provider management desktop-first with bounded internal table overflow", () => {
+  it("keeps Provider management in shared panes without viewport-sized overlays", () => {
     expect(providerPanelStyles.registryWorkspace).not.toContain("max-[960px]");
-    expect(providerPanelStyles.tableScroll).toContain("overflow-auto");
+    expect(providerPanelSource).toContain("<VListDetailPage");
     expect(providerPanelStylesSource).not.toContain("width:100vw");
   });
 
@@ -443,8 +443,12 @@ describe("ConfigRoute layout contract", () => {
     expect(quickSetupStyles.modelInput).toContain("max-[640px]:flex-wrap");
     expect(quickSetupStyles.primaryAction).toContain("min-h-10");
     expect(styles.providerModeButton).not.toMatch(/min-h-|font-size/);
-    // P0: add-provider entry lives on the provider list bottom row, not the page header.
-    expect(providerPanelSource).toContain('data-provider-action="add-provider"');
+    // The page header owns creation; the service rail contains search and rows.
+    const pageSource = routeSourceRaw.slice(routeSourceRaw.indexOf("<VSettingsFormPage"));
+    const headerActions = pageSource.slice(pageSource.indexOf("actions={"), pageSource.indexOf("footerClassName="));
+    expect(headerActions).toContain("onPress={() => setProviderConnecting(true)}");
+    expect(headerActions).toContain(".addService}");
+    expect(providerPanelSource).not.toContain('data-provider-action="add-provider"');
     expect(routeSource).toContain("aria-pressed={providerShowMore}");
     expect(routeSource).not.toContain('aria-pressed={providerWorkspaceMode === "quick"}');
     expect(quickSetupStyles.feedback).not.toContain("min-h-");
@@ -452,12 +456,10 @@ describe("ConfigRoute layout contract", () => {
     expect(quickSetupStylesSource).not.toContain("bottom-0");
   });
 
-  it("keeps existing Provider management in a bounded desktop list-detail grid", () => {
-    expect(providerPanelSource).toContain("defaultWidth: 224");
+  it("keeps existing Provider management on the shared persistent list-detail workspace", () => {
+    expect(providerPanelSource).toContain("WORKBENCH_LAYOUT_IDS.configModelAssets");
     expect(providerPanelStyles.registryWorkspace).not.toContain("max-[960px]");
-    expect(providerPanelStyles.providerList).toContain("min-h-0");
-    expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
-    expect(providerPanelStyles.detailSurface).toContain("overflow-y-auto");
+    expect(providerPanelSource).toContain("<VEntityList");
     expect(providerPanelSource).toContain("workspaceView");
     expect(providerPanelSource).toContain("compactHome");
   });
@@ -507,7 +509,7 @@ describe("ConfigRoute layout contract", () => {
     expect(styles.content).toContain("h-full");
     expect(styles.pageViewport).toContain("overflow-y-auto");
     expect(styles.pageViewport).toContain("content-start");
-    expect(styles.providerModelsLayout).not.toContain("h-full");
+    expect(styles.providerModelsLayout).toContain("h-full");
     expect(styles.notice).toContain("relative");
     expect(styles.notice).toContain("z-10");
     expect(styles.notice).toContain("shrink-0");
@@ -643,18 +645,14 @@ describe("ConfigRoute layout contract", () => {
   it("converges the provider registry into a compact VUI workbench contract", () => {
     expect(providerPanelStylesSource).not.toMatch(/\bsurface-card\b(?!\))/);
     expect(providerPanelStyles.sectionSurface).toContain("!rounded-none");
-    expect(providerPanelSource).toContain("defaultWidth: 224");
-    expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
-    expect(providerPanelStyles.tableScroll).toContain("min-h-0");
-    expect(providerPanelStyles.providerButton).toContain("!min-h-9");
-    expect(providerPanelStyles.tableScroll).toContain("overflow-auto");
-    // P1: model scan rows use the entity list language, not a second table grid.
-    expect(providerPanelStyles.modelList).toContain("overflow-y-auto");
+    expect(providerPanelSource).toContain("WORKBENCH_LAYOUT_IDS.configModelAssets");
+    // Whole-row viewport geometry is verified in the real page. The route
+    // contract protects VUI ownership, filtering, and real model operations.
+    expect(providerPanelSource).toContain("<VStringSelect");
     expect(providerPanelSource).toContain("filterProviderModels");
     expect(providerPanelSource).toContain("deriveProviderModelActionState");
     expect(providerPanelSource).toContain("copy.searchModelsAria");
     expect(configCopySource).toContain("搜索模型");
-    expect(providerPanelStyles.dangerZone).toContain("justify-between");
     expect(configCopySource).toContain("测试调用");
     expect(providerPanelSource).toContain("copy.testCall");
     expect(providerPanelSource).toContain("verificationStatus");
@@ -1093,12 +1091,13 @@ describe("ConfigRoute layout contract", () => {
     expect(styles.configHeader).toContain("[&>[data-vui=route-header]]:!border-0");
   });
 
-  it("keeps a canonical Config h1 across loaded and placeholder states", () => {
+  it("keeps one settings page h1 including the compact model settings title", () => {
     expect(placeholderPanelSource).toContain("VRouteHeader");
     expect(placeholderPanelSource).not.toContain("<VPanelHeader");
     expect(routeSource).toContain("<ConfigSettingsSidebar");
     expect(routeSource).toContain("VSettingsFormPage");
-    expect(routeSource).toContain('title={showingSettingsIndex ? copy.pageTitle : activePage?.title ?? copy.pageTitle}');
+    expect(routeSourceRaw).toContain('title={isSectionVisible("models") ? MODEL_SETTINGS_COPY[');
+    expect(routeSourceRaw).toContain('].title : showingSettingsIndex ? copy.pageTitle : activePage?.title ?? copy.pageTitle}');
     expect(routeSource).toContain("<ConfigSettingsIndex");
     expect(routeSource).not.toContain("返回设置列表");
     expect(routeSource).toContain('onShowAll={() => showSettingsIndex()}');

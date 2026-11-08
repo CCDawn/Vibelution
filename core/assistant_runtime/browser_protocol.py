@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 from uuid import UUID
 
 BROWSER_ACTIONS = frozenset('browser_' + name for name in
-    ('state', 'open', 'read', 'navigate', 'back', 'forward', 'reload', 'scroll', 'interact'))
+    ('state', 'open', 'ensure', 'select', 'show', 'read', 'navigate', 'back', 'forward', 'reload', 'scroll', 'interact'))
 ERROR_CODES = frozenset('BROWSER_' + code for code in (
     'URL_INVALID', 'PAGE_LIMIT', 'SOURCE_INVALID', 'SOURCE_FORBIDDEN', 'DISPOSED',
     'PAGE_NOT_FOUND', 'NAVIGATION_FAILED', 'SNAPSHOT_FAILED', 'SNAPSHOT_STALE',
@@ -63,7 +63,7 @@ def validate_request(action, request):
     if action not in BROWSER_ACTIONS or type(request) is not dict or not _bounded(request):
         raise ValueError('Invalid browser request')
     operation = action.removeprefix('browser_')
-    keys = {'state': set(), 'open': {'url'}, 'read': {'pageId'},
+    keys = {'state': set(), 'open': {'url'}, 'ensure': {'url'}, 'select': {'pageId'}, 'show': set(), 'read': {'pageId'},
         'navigate': {'pageId', 'url'}, 'back': {'pageId'}, 'forward': {'pageId'},
         'reload': {'pageId'}, 'scroll': {'pageId', 'direction'},
         'interact': {'pageId', 'snapshotId', 'elementRef', 'url', 'elementName', 'operation'}}[operation]

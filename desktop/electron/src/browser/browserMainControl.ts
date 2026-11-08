@@ -51,7 +51,7 @@ export function createBrowserMainControl(options: { browser: () => AssistantBrow
     const unavailable = () => browserError(request, "BROWSER_UNAVAILABLE");
     const unknown = () => browserError(request, "BROWSER_ACTION_OUTCOME_UNKNOWN");
     if (signal?.aborted) return unavailable();
-    if (request.action === "browser_open") {
+    if (["browser_open", "browser_ensure", "browser_select", "browser_show"].includes(request.action)) {
       try { await abortable(options.ensureWorkspace(), signal, () => undefined); } catch { return unavailable(); }
       if (signal?.aborted) return unavailable();
     }
@@ -66,7 +66,10 @@ export function createBrowserMainControl(options: { browser: () => AssistantBrow
         let state: BrowserState;
         switch (request.action) {
           case "browser_state": state = browser.getState(); break;
+          case "browser_show": state = browser.getState(); break;
           case "browser_open": state = await browser.open(request.url, "assistant"); break;
+          case "browser_ensure": state = await browser.ensure(request.url, "assistant"); break;
+          case "browser_select": state = browser.select(request.pageId, "assistant"); break;
           case "browser_navigate": state = await browser.navigate(request.pageId, request.url, "assistant"); break;
           case "browser_back": await browser.back(request.pageId, "assistant"); state = browser.getState(); break;
           case "browser_forward": await browser.forward(request.pageId, "assistant"); state = browser.getState(); break;

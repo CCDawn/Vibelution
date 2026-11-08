@@ -4,11 +4,14 @@ import { ConfigSettingsIndex } from "./ConfigSettingsIndex";
 import { ConfigShortcutsPanel } from "./ConfigShortcutsPanel";
 import { ConfigDecisionModelsPanel, readDecisionModelMap } from "./ConfigDecisionModelsPanel";
 import { ConfigAppearancePreferences } from "./ConfigAppearancePreferences";
+import { foldModelEditorDrafts, modelEditorDraftCount, modelEditorDraftsAreValid, type ModelEditorDrafts } from "./config/modelEditorDrafts";
+import { MODEL_SETTINGS_COPY } from "./config/modelSettingsCopy";
 
 import { useQueryClient } from "@tanstack/react-query";
 import {
   ChevronRight,
   Image as ImageIcon,
+  MoreHorizontal,
   Pencil,
   Plus,
   RefreshCw,
@@ -91,6 +94,7 @@ import {
   VStateSurface,
   VSurface,
   VTextarea,
+  VTabs,
 } from "../components/vui";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
@@ -129,6 +133,7 @@ import {
 } from "./config/configFieldEditorsModel";
 import { useConfigProviderDraftActions } from "./config/useConfigProviderDraftActions";
 import { useConfigProviderQuickSetupActions } from "./config/useConfigProviderQuickSetupActions";
+import { useChatGPTSubscriptionModelSetup } from "./config/useChatGPTSubscriptionModelSetup";
 import { useConfigMigrationActions } from "./config/useConfigMigrationActions";
 import { ConfigOverviewPanel } from "./ConfigOverviewPanel";
 import {
@@ -252,7 +257,8 @@ export function ConfigRoute() {
   const [activeWorkspace, setActiveWorkspace] = useState<ConfigWorkspace | null>(null);
   const [jsonText, setJsonText] = useState("{}");
   const [notice, setNotice] = useState<{ tone: NoticeTone; text: string }>({ tone: "neutral", text: "" });
-  const [busyAction, setBusyAction] = useState("");
+  const [configBusyAction, setBusyAction] = useState("");
+  const [subscriptionSetupBusy, setSubscriptionSetupBusy] = useState(false);
   // Desktop-only bridge probe (stable for the page lifetime): the assistant
   // restart verbs only exist in the Launcher shell.
   const [assistantBridgeAvailable] = useState(() => hasAssistantHostRestartBridge());
@@ -280,6 +286,10 @@ export function ConfigRoute() {
   // 「上次停留分区」恢复每次挂载只尝试一次。
   const lastLocationRestoreAttemptedRef = useRef(false);
   const [sectionUiState, setSectionUiState] = useState<Record<string, ConfigSectionUiState>>({});
+  const [modelEditorDrafts, setModelEditorDrafts] = useState<ModelEditorDrafts>({});
+  const [modelSettingsView, setModelSettingsView] = useState("services");
+  const [hasPendingDecisionInput, setHasPendingDecisionInput] = useState(false);
+  const [decisionEditorGeneration, setDecisionEditorGeneration] = useState(0);
   // 即时类字段（boolean/select）的行徽标生命周期：waiting → applied|failed。
   const [immediateFieldStatus, setImmediateFieldStatus] = useState<Record<string, ImmediateFieldStatus>>({});
   const immediateStatusTimersRef = useRef<Record<string, number>>({});
@@ -329,6 +339,9 @@ export function ConfigRoute() {
 
   const workspace = activeWorkspace ?? workspaceQuery.data;
   const currentLanguage = getDraftLanguage(draftConfig, workspace?.language === "en" ? "en" : "zh");
+  const busyAction = configBusyAction || (subscriptionSetupBusy
+    ? currentLanguage === "en" ? "Adding ChatGPT models…" : "正在添加 ChatGPT 模型…"
+    : "");
   const copy = CONFIG_COPY[currentLanguage];
   const requestedSectionId = String(searchParams.get("section") || "").trim();
   const requestedPageId = String(searchParams.get("page") || "").trim();
@@ -540,11 +553,12 @@ export function ConfigRoute() {
     }
     return items;
   }, [draftConfig, editorMeta, editorSections, sectionUiState]);
-  const pendingConfigDraftCount = pendingConfigDraftItems.length;
+  const pendingModelEditorDraftCount = modelEditorDraftCount(modelEditorDrafts);
+  const pendingConfigDraftCount = pendingConfigDraftItems.length + pendingModelEditorDraftCount + Number(hasPendingDecisionInput);
   const hasLocalConfigChanges = hasPendingApply || hasEditorChanges || pendingConfigDraftCount > 0;
-  const hasInvalidConfigDraft = pendingConfigDraftItems.some((item) => !item.valid);
+  const hasInvalidConfigDraft = pendingConfigDraftItems.some((item) => !item.valid) || !modelEditorDraftsAreValid(modelEditorDrafts);
   const canApplyConfigWorkspace =
-    !structuredActionsDisabled && !hasInvalidConfigDraft && (canSaveConfig || pendingConfigDraftCount > 0);
+    !structuredActionsDisabled && !hasInvalidConfigDraft && !hasPendingDecisionInput && (canSaveConfig || pendingConfigDraftCount > 0);
   // 跨页 presence 广播：保持原有口径，接入分区草稿待保存计数。
   const configDraftPresenceDirty =
     hasUnsavedConfigChanges || hasPendingSecretChanges(draftMeta) || pendingConfigDraftCount > 0;
@@ -556,11 +570,11 @@ export function ConfigRoute() {
       shouldBlockConfigLeave({
         hasPendingApply,
         hasPendingSectionDrafts: pendingConfigDraftCount > 0,
-        busy: Boolean(busyAction),
+        busy: Boolean(busyAction) && pendingModelEditorDraftCount === 0 && !hasPendingDecisionInput,
         currentPathname: currentLocation.pathname,
         nextPathname: nextLocation.pathname,
       }),
-    [busyAction, hasPendingApply, pendingConfigDraftCount],
+    [busyAction, hasPendingApply, pendingConfigDraftCount, pendingModelEditorDraftCount, hasPendingDecisionInput],
   );
   const leaveBlocker = useBlocker(shouldBlockLeave);
   const leaveGuardOpen = leaveBlocker.state === "blocked";
@@ -971,6 +985,7 @@ export function ConfigRoute() {
     providerDraftRequestRef,
     activeWorkspace,
     providerPresetOptions,
+    onProviderRemoved: (providerId) => setModelEditorDrafts((current) => Object.fromEntries(Object.entries(current).filter(([ref]) => !ref.startsWith(`${providerId}/`)))),
     requireDraft,
     syncWorkspace,
     markError,
@@ -1023,6 +1038,7 @@ export function ConfigRoute() {
       return providerRows.find((row) => row.providerId === providerId)?.models.find((item) => item.modelRef === ref)?.upstreamId ?? "";
     });
     if (unpinned) {
+      setModelEditorDrafts((current) => Object.fromEntries(Object.entries(current).filter(([ref]) => ref !== modelRef)));
       await persistImmediateDraft(copy.applying);
     }
   }
@@ -1044,6 +1060,20 @@ export function ConfigRoute() {
       await persistImmediateDraft(copy.applying);
     }
   }
+
+  const subscriptionSetupBlockedReason = pendingConfigDraftCount > 0 || hasEditorChanges
+    ? currentLanguage === "en"
+      ? "Save or discard other settings drafts before adding subscription models."
+      : "请先保存或还原其他设置草稿，再添加订阅模型。"
+    : configBusyAction && !subscriptionSetupBusy
+      ? currentLanguage === "en" ? "Wait for the current settings operation to finish." : "请等待当前设置操作结束。"
+      : "";
+  const handleAddSubscriptionModels = useChatGPTSubscriptionModelSetup({
+    providerDraftRequestRef, baseConfigRef: editBaselineRef, syncWorkspace,
+    handleApply, setSelectedProviderId, language: currentLanguage,
+    setupBlockedReason: subscriptionSetupBlockedReason,
+    onSetupBusyChange: setSubscriptionSetupBusy,
+  });
 
   async function handleApplyProviderRoutePreview() {
     await applyProviderRoutePreview(routePreview);
@@ -1128,6 +1158,9 @@ export function ConfigRoute() {
       if (fresh.data) {
         syncWorkspace(fresh.data);
         setSectionUiState({});
+        setModelEditorDrafts({});
+        setHasPendingDecisionInput(false);
+        setDecisionEditorGeneration((current) => current + 1);
         setSectionSaveErrors({});
       }
     } catch (error) {
@@ -1197,7 +1230,7 @@ export function ConfigRoute() {
       // baseHash 乐观并发与过期降级重试保持不变）。
       let effectiveOverride = draftOverride;
       let foldedSectionDrafts = false;
-      if (!effectiveOverride && pendingConfigDraftCount > 0) {
+      if (!effectiveOverride && pendingConfigDraftItems.length > 0) {
         const folded = foldPendingSectionDrafts(requireDraft());
         if (!folded.allValid) {
           throw new Error(copy.saveBlockedInvalid);
@@ -1222,6 +1255,10 @@ export function ConfigRoute() {
         loadFailedMessage: copy.loadFailed,
       });
 
+      if (!draftOverride && modelEditorDraftCount(modelEditorDrafts) > 0) {
+        payload.publicConfig = foldModelEditorDrafts(payload.publicConfig, modelEditorDrafts);
+      }
+
       let response: ConfigWorkspace;
       try {
         response = await applyConfigWorkspace(payload);
@@ -1239,6 +1276,7 @@ export function ConfigRoute() {
         });
       }
       syncWorkspace(response, "success");
+      if (!draftOverride) setModelEditorDrafts({});
       if (foldedSectionDrafts) {
         // 保存成功后清空所有分区编辑态（草稿已提交，徽标清除）。
         setSectionUiState((current) =>
@@ -1250,7 +1288,7 @@ export function ConfigRoute() {
           ),
         );
       }
-      publishConfigDraftPresence(false);
+      publishConfigDraftPresence(Boolean(draftOverride) && pendingConfigDraftCount > 0);
       await invalidateWorkbenchQueries(payload.publicConfig);
       // B1: a saved provider config only reaches the resident assistant host
       // through a restart — the host reads config.toml and refreshes saved
@@ -1568,7 +1606,7 @@ export function ConfigRoute() {
 
   return (
     <div
-      className={styles.page}
+      className={`${styles.page} ${isSectionVisible("models") ? styles.modelPage : ""}`}
       data-vui-recipe="config-settings-workbench"
       data-vui-layout-id={CONFIG_SETTINGS_LAYOUT_ID}
       data-vui-domain-recipe="config-settings"
@@ -1653,7 +1691,7 @@ export function ConfigRoute() {
         onConfirm={() => { void reloadWorkspace().then(() => setDiscardDraftOpen(false)); }} />
       <VSplitWorkspace
         chrome="workbench"
-        className={styles.settingsSplit}
+        className={`${styles.settingsSplit} ${isSectionVisible("models") ? styles.modelSettingsSplit : ""}`}
         data-vui-region="config-settings-split"
         columnsClassName=""
         resize={false}
@@ -1685,30 +1723,31 @@ export function ConfigRoute() {
         main={(
       <VSettingsFormPage
         ariaLabel={activePage?.title ?? copy.pageTitle}
-        className={styles.content}
+        className={`${styles.content} ${isSectionVisible("models") ? styles.modelContent : ""}`}
         data-vui-region="config-settings-main"
-        headerClassName={styles.configHeader}
+        headerClassName={`${styles.configHeader} ${isSectionVisible("models") ? styles.modelHeader : ""}`}
         bodyClassName="!gap-0 !overflow-hidden !content-stretch"
-        title={showingSettingsIndex ? copy.pageTitle : activePage?.title ?? copy.pageTitle}
-        meta={showingSettingsIndex ? undefined : configSettingsPageDescription(activePage, currentLanguage)}
+        title={isSectionVisible("models") ? MODEL_SETTINGS_COPY[currentLanguage === "en" ? "en" : "zh"].title : showingSettingsIndex ? copy.pageTitle : activePage?.title ?? copy.pageTitle}
+        meta={showingSettingsIndex || isSectionVisible("models") ? undefined : configSettingsPageDescription(activePage, currentLanguage)}
         actions={
           <div className={styles.configStatusActions}>
             {isSectionVisible("models") && workspace.schemaVersion === 2 && !providerConnecting ? (
                 <VActionGroup ariaLabel={copy.modelsActionsAria}>
                   <VButton
                     title={copy.advancedSettingsHint}
+                    aria-label={copy.advancedSettings}
+                    icon={<MoreHorizontal size={16} />}
                     className={styles.providerModeButton}
                     aria-pressed={providerShowMore}
                     variant={providerShowMore ? "primary" : "ghost"}
                     onPress={() => { setProviderConnecting(false); setProviderShowMore((open) => !open); }}
                   >
-                    {providerShowMore ? copy.collapseAdvancedSettings : copy.advancedSettings}
                   </VButton>
                 </VActionGroup>
             ) : null}
             {isSectionVisible("models") && workspace.schemaVersion === 2 && !providerConnecting ? (
               <VButton variant="primary" icon={<Plus size={14} />} isDisabled={structuredActionsDisabled || Boolean(busyAction)}
-                onPress={() => setProviderConnecting(true)}>{copy.addModelService}</VButton>
+                onPress={() => setProviderConnecting(true)}>{MODEL_SETTINGS_COPY[currentLanguage === "en" ? "en" : "zh"].addService}</VButton>
             ) : null}
             {isSectionVisible("overview") ? <VButton variant="ghost" icon={<RotateCcw size={14} />} isDisabled={Boolean(busyAction)}
               onPress={() => { if (hasLocalConfigChanges) setDiscardDraftOpen(true); else void reloadWorkspace(); }}>{copy.refresh}</VButton> : null}
@@ -1717,26 +1756,26 @@ export function ConfigRoute() {
               onPress={() => { void restartAssistantHostWithNotice("manual"); }}>{copy.restartAssistant}</VButton> : null}
           </div>
         }
-        footerClassName={styles.saveFooter}
-        footer={hasLocalConfigChanges ? <>
+        footerClassName={`${styles.saveFooter} ${isSectionVisible("models") ? styles.modelFooter : ""}`}
+        footer={hasLocalConfigChanges || isSectionVisible("models") ? <>
           <span className={hasInvalidConfigDraft ? styles.inlineError : styles.helperText} role="status">
-            {hasInvalidConfigDraft ? copy.saveBlockedInvalid : copy.unsavedChanges}
+            {hasPendingDecisionInput ? MODEL_SETTINGS_COPY[currentLanguage === "en" ? "en" : "zh"].pendingDecision : hasInvalidConfigDraft ? copy.saveBlockedInvalid : hasLocalConfigChanges ? copy.unsavedChanges : copy.statusSaved}
           </span>
-          {pendingConfigDraftCount > 0 ? <VChip tone={hasInvalidConfigDraft ? "danger" : "neutral"} data-testid="config-pending-save-count">
+          {pendingConfigDraftCount > 0 && !isSectionVisible("models") ? <VChip tone={hasInvalidConfigDraft ? "danger" : "neutral"} data-testid="config-pending-save-count">
             {pendingConfigDraftCount}{copy.settingsPendingCountUnit}
           </VChip> : null}
           <div className={styles.configStatusActions}>
-            <VButton variant="ghost" isDisabled={Boolean(busyAction)} onPress={() => setDiscardDraftOpen(true)}>
+            {hasLocalConfigChanges ? <VButton variant="ghost" isDisabled={Boolean(busyAction)} onPress={() => setDiscardDraftOpen(true)}>
               {copy.discardChanges}
-            </VButton>
+            </VButton> : null}
             <VButton variant="primary" isDisabled={!canApplyConfigWorkspace || providerSetupVisible} isPending={Boolean(busyAction)}
               title={hasInvalidConfigDraft ? copy.saveBlockedInvalid : undefined} onPress={() => { void handleApply(); }} icon={<Save size={14} />}>
-              {saveButtonLabel}
+              {isSectionVisible("models") && !busyAction ? MODEL_SETTINGS_COPY[currentLanguage === "en" ? "en" : "zh"].save : saveButtonLabel}
             </VButton>
           </div>
         </> : undefined}
       >
-        <div ref={contentViewportRef} className={styles.pageViewport} data-vui-region="config-settings-body">
+        <div ref={contentViewportRef} className={`${styles.pageViewport} ${isSectionVisible("models") ? styles.modelViewport : ""}`} data-vui-region="config-settings-body">
 
         {showingSettingsIndex ? <ConfigSettingsIndex
           showUsage={!requestedSectionId}
@@ -1793,6 +1832,15 @@ export function ConfigRoute() {
 
         {isSectionVisible("models") ? (
           <div className={styles.providerModelsLayout}>
+            <VTabs aria-label={currentLanguage === "en" ? "Model settings" : "模型设置"}
+              className={styles.modelTopTabs}
+              listClassName={styles.modelTabList}
+              triggerClassName={styles.modelTabTrigger}
+              value={modelSettingsView} onValueChange={setModelSettingsView} items={[
+              { id: "services", label: MODEL_SETTINGS_COPY[currentLanguage === "en" ? "en" : "zh"].services },
+              { id: "usage", label: MODEL_SETTINGS_COPY[currentLanguage === "en" ? "en" : "zh"].usage },
+            ]} />
+            <div className={`${styles.modelServicesView} ${providerShowMore || providerConnecting ? styles.modelSetupView : ""}`} hidden={modelSettingsView !== "services"}>
             {workspace.schemaVersion === 2 ? (
               <>
 
@@ -1844,8 +1892,19 @@ export function ConfigRoute() {
                 ) : !providerShowMore ? (
                   <>
                 <ConfigProviderRegistryPanel
-                  compactHome
+                  modelEditorDrafts={modelEditorDrafts}
+                  onModelEditorDraftChange={(modelRef, edits) => {
+                    setModelEditorDrafts((current) => {
+                      const next = { ...current };
+                      if (Object.keys(edits).length) next[modelRef] = edits;
+                      else delete next[modelRef];
+                      return next;
+                    });
+                  }}
                   copy={copy}
+                  language={currentLanguage}
+                  onAddSubscriptionModels={handleAddSubscriptionModels}
+                  subscriptionSetupBlockedReason={subscriptionSetupBlockedReason}
                   routeEditor={routeEditProviderId ? <>
                 {routeEditProviderId && !routePreview ? (
                   <VSurface as="section" padding="compact" tone="row" className={styles.providerRouteEditSurface}>
@@ -2014,7 +2073,11 @@ export function ConfigRoute() {
                     void handleUnpinProviderModel(modelRef);
                   }}
                   onTestModel={(modelRef) => {
-                    void handleTestProviderModel(modelRef);
+                    try {
+                      const edits = modelEditorDrafts[modelRef];
+                      const snapshot = edits ? foldModelEditorDrafts(requireDraft(), { [modelRef]: edits }) : requireDraft();
+                      void handleTestProviderModel(modelRef, snapshot);
+                    } catch (error) { markError(error); }
                   }}
                   onProbeImageInput={(modelRef) => {
                     void handleCheckModelImageCapabilities([modelRef]);
@@ -2080,7 +2143,11 @@ export function ConfigRoute() {
               />
             )}
             {providerActionError && !providerConnecting ? <p className={styles.noticeError} role="alert">{providerActionError}</p> : null}
-            {workspace.schemaVersion === 2 && !providerConnecting ? <ConfigDecisionModelsPanel
+            </div>
+            <div className={styles.modelUsageView} hidden={modelSettingsView !== "usage"}>
+            {workspace.schemaVersion === 2 ? <ConfigDecisionModelsPanel
+              key={decisionEditorGeneration}
+              onPendingChange={setHasPendingDecisionInput}
               models={readDecisionModelMap(asRecord(draftConfig.llm).decision_models)}
               handoffModelId={getString(asRecord(draftConfig.llm).decision_handoff_model_id)}
               presets={workspace.decisionModelPresets ?? []}
@@ -2099,6 +2166,7 @@ export function ConfigRoute() {
                 });
               }}
             /> : null}
+            </div>
           </div>
         ) : null}
 

@@ -4,7 +4,7 @@
 - composer 输入框 ``textarea[aria-label="发送消息"]``，Enter 提交；
 - 生成中：``[role="status"][data-active-turn-stage]`` + 停止按钮 aria-label「终止」；
 - 消息计数：会话根 ``div[data-agent-thread-message-count]``（免模型断言利器）；
-- 停止反馈：``[data-testid="composer-stop-pending-feedback"]``（终止请求在途）；
+- 停止反馈：``[data-testid="composer-pending-feedback"]``（终止请求在途）；
 - 空态：``这条会话还没有可展示的消息。`` + ``[data-vui="conversation-starter-cards"]``；
 - hover 工具条 ``span[data-conversation-hover-actions="1"]``：opacity 门控
   （``opacity-0 group-hover:opacity-100``），Playwright 的 is_visible 对 opacity:0
@@ -42,7 +42,6 @@ STOP_BUTTON = 'button[aria-label="终止"]'
 SEND_BUTTON = 'button[aria-label="发送"]'
 THREAD_ROOT = "div[data-agent-thread-message-count]"
 ACTIVE_TURN_STAGE = '[role="status"][data-active-turn-stage]'
-STOP_PENDING_FEEDBACK = '[data-testid="composer-stop-pending-feedback"]'
 HOVER_ACTIONS = 'span[data-conversation-hover-actions="1"]'
 SELECTION_MENU = '[data-conversation-selection-menu="1"]'
 STARTER_CARDS = '[data-vui="conversation-starter-cards"]'
@@ -61,6 +60,8 @@ def _thread_message_count(page: Any) -> int:
 
 def test_send_message_stop_mode_then_terminate(page: Any, e2e_instance: Any) -> None:
     """发消息后进入 stop 模式 + turn stage + 消息数增长；终止后回到可输入态。"""
+    from playwright.sync_api import expect
+
     session_id = create_session(e2e_instance.port, title="e2e conversation flow")
     _open_session(page, e2e_instance.base_url, session_id)
 
@@ -68,7 +69,7 @@ def test_send_message_stop_mode_then_terminate(page: Any, e2e_instance: Any) -> 
     composer.wait_for(state="visible", timeout=15_000)
     count_before = _thread_message_count(page)
 
-    message_text = "e2e 免模型断言：请忽略这条消息"
+    message_text = "e2e 停止验收：请用三段说明质数及其性质，至少五百字，不要调用工具。"
     composer.click()
     composer.fill(message_text)
     composer.press("Enter")
@@ -87,19 +88,22 @@ def test_send_message_stop_mode_then_terminate(page: Any, e2e_instance: Any) -> 
         page.wait_for_timeout(300)
     assert _thread_message_count(page) > count_before
 
-    # 立即终止：stop 请求在途反馈 → 回到可输入态。
-    page.locator(STOP_BUTTON).first.click()
-    page.locator(STOP_PENDING_FEEDBACK).first.wait_for(state="visible", timeout=10_000)
-    # 回到可输入态：终止按钮消失、发送按钮回归、composer 可输入。
+    # 快速请求可能在下一次页面查询前完成，验证 stop 应答和最终可输入状态。
+    with page.expect_response(
+        lambda response: response.request.method == "POST"
+        and response.url.endswith(f"/api/sessions/{session_id}/stop"),
+        timeout=15_000,
+    ) as stopped:
+        page.locator(STOP_BUTTON).first.click()
+    assert stopped.value.ok, "Stop request must be accepted"
+    # 终止按钮消失，composer 恢复；空输入可能显示“继续任务”，输入后显示发送。
     deadline = page.evaluate("performance.now()") + 30_000
     while page.locator(STOP_BUTTON).count() > 0 and page.locator(STOP_BUTTON).first.is_visible():
         assert page.evaluate("performance.now()") < deadline, "终止后 stop 模式未退出"
         page.wait_for_timeout(300)
+    expect(composer).to_be_enabled(timeout=30_000)
+    composer.fill("停止后的测试草稿")
     page.locator(SEND_BUTTON).first.wait_for(state="visible", timeout=15_000)
-    assert composer.is_enabled(), "终止后 composer 仍不可输入"
-    assert page.locator(STOP_PENDING_FEEDBACK).count() == 0 or not page.locator(
-        STOP_PENDING_FEEDBACK
-    ).first.is_visible(), "终止完成后停止反馈仍在"
 
 
 def test_empty_session_empty_state_and_starters(page: Any, e2e_instance: Any) -> None:

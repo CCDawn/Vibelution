@@ -656,11 +656,52 @@ def _normalize_organization(raw: dict[str, Any] | None) -> dict[str, Any]:
     return _normalize_proposal_backlog(normalized)
 
 
+def _convert_org_records(records: list[Any], converter: Any, *, record_kind: str) -> list[Any]:
+    """Convert stored org records one by one; a corrupt record is dropped, not fatal.
+
+    ISS-053: one mistyped node/edge (wrong field types) must not turn the
+    whole organization / flow-canvas read into a 500.  The bad record is
+    skipped and reported through the existing org audit event channel while
+    the remaining records render normally.
+    """
+
+    converted: list[Any] = []
+    dropped: list[dict[str, Any]] = []
+    for item in records:
+        try:
+            converted.append(converter(item))
+        except Exception as exc:  # noqa: BLE001 - isolation is the point
+            dropped.append(
+                {
+                    "recordKind": record_kind,
+                    "recordId": _clean_id(
+                        item.get("agentId") or item.get("nodeId") or item.get("edgeId") or item.get("id")
+                    )
+                    if isinstance(item, dict)
+                    else "",
+                    "errorType": exc.__class__.__name__,
+                    "message": str(exc)[:200],
+                }
+            )
+    if dropped:
+        _record_org_event(
+            "research.organization.corrupt_records_dropped",
+            outcome="degraded",
+            level="warning",
+            fields={"droppedCount": len(dropped), "dropped": dropped[:12]},
+        )
+    return converted
+
+
 def _organization_to_api(graph: dict[str, Any]) -> dict[str, Any]:
     payload = _normalize_organization(graph)
     payload["path"] = str(_organization_path(get_workspace()))
-    payload["agents"] = [_agent_node_to_api(node) for node in payload.get("agents") or []]
-    payload["edges"] = [_edge_to_api(edge) for edge in payload.get("edges") or []]
+    payload["agents"] = _convert_org_records(
+        payload.get("agents") or [], _agent_node_to_api, record_kind="agent"
+    )
+    payload["edges"] = _convert_org_records(
+        payload.get("edges") or [], _edge_to_api, record_kind="edge"
+    )
     return payload
 
 
@@ -672,19 +713,25 @@ def _organization_to_canvas_api(graph: dict[str, Any]) -> dict[str, Any]:
         if isinstance(agent, dict) and _clean_id(agent.get("agentId"))
     }
     payload["path"] = str(_organization_path(get_workspace()))
-    payload["agents"] = [
-        _agent_node_to_canvas_api(node, active_agents_by_id.get(_clean_id(node.get("agentId"))))
+    canvas_nodes = [
+        node
         for node in payload.get("agents") or []
         if _clean_id(node.get("agentId")) in active_agents_by_id
         and str(node.get("status") or "active").strip() == "active"
     ]
+    payload["agents"] = _convert_org_records(
+        canvas_nodes,
+        lambda node: _agent_node_to_canvas_api(node, active_agents_by_id.get(_clean_id(node.get("agentId")))),
+        record_kind="agent",
+    )
     active_node_ids = {_clean_id(node.get("agentId")) for node in payload["agents"]}
-    payload["edges"] = [
-        _edge_to_api(edge)
+    canvas_edges = [
+        edge
         for edge in payload.get("edges") or []
         if _clean_id(edge.get("fromAgentId") or edge.get("source")) in active_node_ids
         and _clean_id(edge.get("toAgentId") or edge.get("target")) in active_node_ids
     ]
+    payload["edges"] = _convert_org_records(canvas_edges, _edge_to_api, record_kind="edge")
     return payload
 
 
@@ -1474,7 +1521,7 @@ def _agent_node_to_api(node: dict[str, Any]) -> dict[str, Any]:
         "agent": agent,
         "toolPolicy": tool_policy,
         "memoryPolicy": resolve_memory_policy_for_agent(agent_id) if agent_id else {},
-        "allowedTools": list(tool_policy.get("allowedTools") or []),
+        "allowedTools": _as_list(tool_policy.get("allowedTools")),
         "updatedAt": str((agent or {}).get("updatedAt") or node.get("updatedAt") or ""),
     }
 
@@ -1509,7 +1556,7 @@ def _agent_node_to_canvas_api(node: dict[str, Any], active_agent: dict[str, Any]
                 else [],
             },
         },
-        "allowedTools": list((node.get("toolPolicy") if isinstance(node.get("toolPolicy"), dict) else {}).get("allowedTools") or [])[:40],
+        "allowedTools": _as_list((node.get("toolPolicy") if isinstance(node.get("toolPolicy"), dict) else {}).get("allowedTools"))[:40],
         "updatedAt": str(agent.get("updatedAt") or node.get("updatedAt") or ""),
     }
 
@@ -1517,7 +1564,7 @@ def _agent_node_to_canvas_api(node: dict[str, Any], active_agent: dict[str, Any]
 def _normalize_communication_policy(policy: dict[str, Any]) -> dict[str, Any]:
     allowed_types = [
         _normalize_message_type(item)
-        for item in list(policy.get("allowedMessageTypes") or policy.get("messageTypes") or [])
+        for item in _as_list(policy.get("allowedMessageTypes") or policy.get("messageTypes"))
         if str(item or "").strip()
     ]
     if not allowed_types:
@@ -1531,7 +1578,7 @@ def _normalize_communication_policy(policy: dict[str, Any]) -> dict[str, Any]:
         max_forward_depth = 1
     return {
         "allowedMessageTypes": list(dict.fromkeys(allowed_types)),
-        "allowedIntents": [trim_lines(str(item or ""), max_lines=1) for item in list(policy.get("allowedIntents") or []) if str(item or "").strip()],
+        "allowedIntents": [trim_lines(str(item or ""), max_lines=1) for item in _as_list(policy.get("allowedIntents")) if str(item or "").strip()],
         "wakeStrategy": wake_strategy,
         "maxForwardDepth": max_forward_depth,
     }
@@ -2556,16 +2603,30 @@ def _coerce_wake_target(payload: dict[str, Any], *, source_type: str, intent: st
     return bool(payload.get("wakeTarget", source_type == "user"))
 
 
+def _as_list(value: Any) -> list[Any]:
+    """Coerce a stored list field to a list; wrong-typed scalars degrade to [].
+
+    ISS-053: organization graph records are user/Agent-writable JSON.  A
+    mistyped list field (e.g. ``allowedTools: 42``) must degrade that one
+    field instead of raising a TypeError that turns the whole canvas or
+    organization read into a 500.
+    """
+
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return []
+
+
 def _normalize_allowed_tools(values: Any) -> list[str]:
-    items = [str(item or "").strip() for item in list(values or []) if str(item or "").strip()]
+    items = [str(item or "").strip() for item in _as_list(values) if str(item or "").strip()]
     return list(dict.fromkeys(items))
 
 
 def _normalize_contract_lines(values: Any) -> list[str]:
     if isinstance(values, str):
-        raw_items = [values]
+        raw_items: list[Any] = [values]
     else:
-        raw_items = list(values or [])
+        raw_items = _as_list(values)
     return [
         trim_lines(str(item or ""), max_lines=1)
         for item in raw_items

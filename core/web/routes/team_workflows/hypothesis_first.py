@@ -24,7 +24,11 @@ from core.research.workflow.contracts import (
     scope_hash_for,
 )
 from core.web.services import chat_room_service
-from core.web.services.team_service import TeamNotFoundError, TeamServiceError
+from core.web.services.team_service import (
+    assert_team_exists,
+    TeamNotFoundError,
+    TeamServiceError,
+)
 from core.web.services.team_workflow import (
     challenge_question_retire,
     hypothesis_rounds,
@@ -814,6 +818,10 @@ def team_workflow_hypothesis_round_get(team_id: str, round_id: str) -> dict:
 def _etag_matches(if_none_match: str | None, representation_version: str) -> bool:
     for token in str(if_none_match or "").split(","):
         normalized = token.strip()
+        if normalized == "*":
+            # RFC 9110 13.1.2: the resource exists whenever this comparison runs
+            # (the route always projects a state payload), so "*" matches.
+            return True
         if normalized.startswith("W/"):
             normalized = normalized[2:].strip()
         if normalized.strip('"') == representation_version:
@@ -1237,11 +1245,16 @@ def team_workflow_hypothesis_first_anomaly_inbox(
     resolve CTA action）、阶段预算预检阻塞（带 extend_budget CTA
     action）。响应在合同投影之上只增不删（``attach_inbox_actions``），
     排序/合并/完整性全部由合同保证。
-    未给 questionId 时返回合法的空收件箱（无信号的合法状态）。
+    未给 questionId 时返回合法的空收件箱（无信号的合法状态）；团队仍须
+    存在——空题号不豁免团队校验（ISS-070），未知团队与带题号路径同样 404。
     """
 
     normalized_question_id = question_id.strip().upper()
     if not normalized_question_id:
+        try:
+            assert_team_exists(team_id)
+        except _DOMAIN_ERRORS as exc:
+            _map_domain_error("hypothesis_first.chain.anomaly_inbox", team_id, exc)
         return {
             "schemaVersion": 1,
             "teamId": team_id,

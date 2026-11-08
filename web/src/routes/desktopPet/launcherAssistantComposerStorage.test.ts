@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadLauncherComposer, restoreLauncherComposerAttachments, saveLauncherComposer,
   type PersistedLauncherComposer } from "./launcherAssistantComposerStorage";
 import type { ComposerImageAttachment } from "../chat/chatComposerSubmitModel";
+import { LAUNCHER_ASSISTANT_CONTROL_CONTINUATION_MESSAGE } from "../../api/launcherAssistant";
 
 function memoryStorage() {
   const entries = new Map<string, string>();
@@ -38,6 +39,16 @@ function chip(overrides: Partial<ComposerImageAttachment> = {}): ComposerImageAt
 afterEach(() => vi.unstubAllGlobals());
 
 describe("launcher assistant composer recovery storage", () => {
+  it("recovers the exact control request and snapshot without consuming a later draft", () => {
+    const storage = memoryStorage();
+    const value = { ...empty(), draft: "next unsent task", outstanding: { message: LAUNCHER_ASSISTANT_CONTROL_CONTINUATION_MESSAGE,
+      requestId: "control.original", preserveDraft: true as const,
+      controlContinuation: { agentId: "a", sessionId: "s", turnId: "t", headId: "h", ledgerSeq: 9 } } };
+    expect(saveLauncherComposer("s", "embedded", value, storage)).toBe(true);
+    expect(loadLauncherComposer("s", "embedded", storage)).toMatchObject(value);
+    expect(saveLauncherComposer("s", "embedded", { ...value, outstanding: { ...value.outstanding, message: "changed" } }, storage)).toBe(false);
+    expect(saveLauncherComposer("s", "embedded", { ...value, outstanding: { ...value.outstanding, attachmentIds: ["file"] } }, storage)).toBe(false);
+  });
   it("round-trips reference-only original requests and a continuation snapshot without replacing their IDs", () => {
     const storage = memoryStorage();
     const references = [{ kind: "message", referenceId: "message:m1", sourceSessionId: "source-session", sourceMessageId: "m1", quote: "原引用" }];

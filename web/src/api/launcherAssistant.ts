@@ -2,6 +2,21 @@ import type { AgentPermissionPreset, ConfigBootstrap, SessionBudgetParameters, S
 import type { DesktopPetPreferences } from "../routes/desktopPet/desktopPetPreferences";
 import type { SessionContinuationExpectation } from "./chat";
 
+export type LauncherAssistantControlContinuation = {
+  agentId: string; sessionId: string; turnId: string; headId: string; ledgerSeq: number;
+};
+export const LAUNCHER_ASSISTANT_CONTROL_CONTINUATION_MESSAGE = "控制已交回，请先重新观察当前页面或授权窗口，再继续当前任务；不要重放未经确认的操作。";
+
+export function validLauncherAssistantControlContinuation(value: unknown): value is LauncherAssistantControlContinuation {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const fields = value as Record<string, unknown>;
+  return Object.keys(fields).length === 5
+    && ["agentId", "sessionId", "turnId", "headId"].every(key => typeof fields[key] === "string"
+      && Boolean((fields[key] as string).trim()) && fields[key] === (fields[key] as string).trim()
+      && (fields[key] as string).length <= (key === "headId" ? 200 : 160))
+    && Number.isSafeInteger(fields.ledgerSeq) && (fields.ledgerSeq as number) >= 1;
+}
+
 export type LauncherOperatorProfile = {
   displayName: string;
   avatarPreset: "default" | "circle" | "spark" | "codex" | "minimal" | "initial";
@@ -88,11 +103,12 @@ export type LauncherAssistantRequest =
   | { operation: "setManagementPermissionPreset"; preset: AgentPermissionPreset; expectedRevision: number }
   | { operation: "detail"; beforeMessageIndex?: number }
   | { operation: "status" | "dispatches" | "hide" | "approvals" | "openLauncher" | "assistantAvatar" }
+  | { operation: "acknowledgePatrolDelivery" }
   | { operation: "resolveApproval"; requestId: string; decision: "accept" | "decline" }
   | { operation: "previewDispatchApproval"; dispatchId: string; taskId: string; approvalId: string }
   | { operation: "declineDispatchApproval"; dispatchId: string; taskId: string; approvalId: string; revision: string }
   | { operation: "decideDispatchApproval"; dispatchId: string; taskId: string; approvalId: string; revision: string; decision: "accept" | "decline" }
-  | { operation: "send"; message: string; requestId: string; attachmentIds?: string[]; references?: SessionReferenceAttachment[] }
+  | { operation: "send"; message: string; requestId: string; attachmentIds?: string[]; references?: SessionReferenceAttachment[]; controlContinuation?: LauncherAssistantControlContinuation }
   | { operation: "uploadAttachment"; filename: string; contentType: string; dataBase64: string }
   /** Privacy attachments ride their own closed verb: plaintext never becomes a
    * base64 body, a URL, or any persisted renderer state — the response carries
@@ -415,6 +431,22 @@ export async function getLauncherAssistantStatus(): Promise<LauncherAssistantSta
   return result as LauncherAssistantStatus;
 }
 
+/** The user acknowledged the "unreported delivery" banner: pending patrol
+ * ledger entries stop counting until a later re-armed recovery fails again. */
+const PATROL_DELIVERY_STATES = ["unknown", "observed", "failed", "interrupted", "completed", "cancelled_pre_admission"];
+export async function acknowledgeLauncherPatrolDelivery(): Promise<{ deliveryStates: Record<string, number> }> {
+  const result = await launcherAssistantInvoke({ operation: "acknowledgePatrolDelivery" });
+  if (!record(result) || Object.keys(result).length !== 1 || !record(result.deliveryStates)
+    || Array.isArray(result.deliveryStates))
+    throw new Error("ASSISTANT_RESPONSE_INVALID");
+  const keys = Object.keys(result.deliveryStates);
+  if (keys.length !== PATROL_DELIVERY_STATES.length
+    || PATROL_DELIVERY_STATES.some(state => !keys.includes(state))
+    || Object.values(result.deliveryStates).some(value => !Number.isSafeInteger(value) || (value as number) < 0))
+    throw new Error("ASSISTANT_RESPONSE_INVALID");
+  return result as { deliveryStates: Record<string, number> };
+}
+
 /** A CAS write is sent once. Conflicts require a fresh explicit choice. */
 export async function setLauncherManagementPermissionPreset(preset: AgentPermissionPreset, expectedRevision: number): Promise<LauncherManagementPermission> {
   if (!isLauncherManagementPermission({ preset, revision: expectedRevision })) throw new Error("ASSISTANT_PERMISSION_INVALID");
@@ -468,15 +500,26 @@ export function validLauncherAssistantReferences(references: SessionReferenceAtt
 }
 
 export async function sendLauncherAssistantMessage(message: string, requestId: string, attachmentIds: string[] = [],
-                                                   references: SessionReferenceAttachment[] = []): Promise<LauncherAssistantAcceptance> {
+                                                   references: SessionReferenceAttachment[] = [],
+                                                   controlContinuation?: LauncherAssistantControlContinuation): Promise<LauncherAssistantAcceptance> {
   if ((!message.trim() && !attachmentIds.length && !references.length) || !attachmentIds.every(validArtifactId)
     || !validLauncherAssistantReferences(references)
-    || !/^[A-Za-z0-9_.:-]{1,128}$/.test(requestId)) throw new LauncherAssistantRejectedError("消息或请求标识无效。");
-  const result = await launcherAssistantBridge().invoke({
+    || !/^[A-Za-z0-9_.:-]{1,128}$/.test(requestId)
+    || (controlContinuation !== undefined && (!validLauncherAssistantControlContinuation(controlContinuation)
+      || message !== LAUNCHER_ASSISTANT_CONTROL_CONTINUATION_MESSAGE || attachmentIds.length || references.length))) throw new LauncherAssistantRejectedError("消息或请求标识无效。");
+  let result: unknown;
+  try { result = await launcherAssistantBridge().invoke({
     operation: "send", message, requestId,
     ...(attachmentIds.length ? { attachmentIds } : {}),
     ...(references.length ? { references } : {}),
-  });
+    ...(controlContinuation ? { controlContinuation } : {}),
+  }); } catch (error) {
+    if (controlContinuation && error instanceof Error && (error.message === "ASSISTANT_IDENTITY_INVALID"
+      || /^Error invoking remote method '[^']+': (?:Error: )?ASSISTANT_IDENTITY_INVALID$/.test(error.message))) {
+      throw new LauncherAssistantRejectedError("会话已变化，本次接续未发送。请在当前会话重新发出指令。");
+    }
+    throw error;
+  }
   if (record(result) && (result.status === "queued" || result.queuedTurnId !== undefined)) {
     if (result.accepted !== true || result.status !== "queued" || result.turnId !== ""
       || typeof result.queuedTurnId !== "string" || !result.queuedTurnId.trim() || result.clientSubmissionId !== requestId) {

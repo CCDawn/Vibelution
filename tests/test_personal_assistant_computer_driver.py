@@ -229,6 +229,38 @@ def test_text_uses_exact_uia_value_never_unverified_focus(action):
     assert value == calls[0][1]["value"]
 
 
+def test_click_at_maps_to_background_pixel_click_with_capture_admission():
+    connection = adapter.Connection(lambda: "")
+    calls = []
+    connection.rpc = lambda *args, **kwargs: calls.append((args, kwargs))
+    connection.click_at({"pid": 3, "hwnd": 4}, 120, 48, "s0000002a")
+    assert calls == [(("click",), {"pid": 3, "window_id": 4, "delivery_mode": "background",
+                                   "x": 120, "y": 48, "capture_id": "s0000002a"})]
+    connection.click_at({"pid": 3, "hwnd": 4}, 5, 6)
+    assert calls[1][1] == {"pid": 3, "window_id": 4, "delivery_mode": "background", "x": 5, "y": 6}
+
+
+def test_hotkey_maps_to_background_key_combo():
+    connection = adapter.Connection(lambda: "")
+    calls = []
+    connection.rpc = lambda *args, **kwargs: calls.append((args, kwargs))
+    connection.hotkey({"pid": 3, "hwnd": 4}, ["ctrl", "shift", "p"])
+    assert calls == [(("hotkey",), {"pid": 3, "window_id": 4, "delivery_mode": "background",
+                                    "keys": ["ctrl", "shift", "p"]})]
+
+
+def test_snapshot_carries_snapshot_id_for_pixel_grounding(monkeypatch):
+    connection = adapter.Connection(lambda: "")
+    monkeypatch.setattr(connection, "windows", lambda: [{"pid": 3, "window_id": 4}])
+    monkeypatch.setattr(adapter, "process_identity", lambda pid: (5.0, r"C:\Apps\app.exe"))
+    connection.rpc = lambda *args, **kwargs: ({"elements": [{"role": "Edit"}], "snapshot_id": "s0000002a",
+                                               "truncated": False, "degraded": False}, [])
+    result = connection.snapshot({"pid": 3, "hwnd": 4, "birth": 5.0, "executable": r"C:\Apps\app.exe"})
+    assert result["snapshot_id"] == "s0000002a"
+    connection.rpc = lambda *args, **kwargs: ({"elements": []}, [])
+    assert connection.snapshot({"pid": 3, "hwnd": 4, "birth": 5.0, "executable": r"C:\Apps\app.exe"})["snapshot_id"] == ""
+
+
 def test_unreadable_text_cannot_fall_back_to_keyboard():
     connection = adapter.Connection(lambda: "")
     connection.rpc = lambda *args, **kwargs: pytest.fail("unsafe input")

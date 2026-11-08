@@ -12,6 +12,42 @@ def isolate_fixture_lifecycle(monkeypatch):
     monkeypatch.setattr(conftest, "_resolve_data_home", lambda entry: "fixture-data")
 
 
+@pytest.mark.parametrize("missing_root", [None, "", "   "])
+def test_registry_lookup_skips_entries_without_project_root(tmp_path, monkeypatch, missing_root):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(instance_registry, "load_registry", lambda: {"instances": {
+        "unrelated": {"projectRoot": missing_root, "status": "failed"},
+        "target": {"projectRoot": str(tmp_path), "status": "steady"},
+    }})
+
+    key, entry = instance_registry.find_entry(tmp_path)
+
+    assert key == "target"
+    assert entry["status"] == "steady"
+
+
+def test_registry_lookup_does_not_infer_missing_root_from_current_directory(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(instance_registry, "load_registry", lambda: {"instances": {
+        "unrelated": {"status": "failed"},
+    }})
+
+    with pytest.raises(instance_registry.InstanceRegistryError, match="没有 projectRoot"):
+        instance_registry.find_entry(tmp_path)
+
+
+def test_health_rejects_missing_workspace_root_even_when_cwd_matches(tmp_path, monkeypatch):
+    import vibelution_storage
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(vibelution_storage, "load_project_identity", lambda _: {})
+    data_home = tmp_path / "data"
+    health = {"routesReady": True, "storageWorkspaceRoot": str(data_home / "workspace"),
+              "serving": {"frontend": {"builtFromCommit": "test"}}}
+    with pytest.raises(instance_registry.InstanceRegistryError, match="workspaceRoot=None"):
+        instance_registry.assert_health_serves_worktree(health, tmp_path, data_home=data_home)
+
+
 @pytest.mark.parametrize("baseline_generation", [0, 3])
 def test_failed_start_response_cleans_its_fresh_instance_and_preserves_failure(monkeypatch, baseline_generation):
     monkeypatch.delenv("VIBELUTION_E2E_ATTACH", raising=False)

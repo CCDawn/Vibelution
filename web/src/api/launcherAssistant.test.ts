@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getLauncherAssistantDetail, getLauncherAssistantDispatches, getLauncherAssistantStatus, getLauncherAssistantTeamRuns,
+  acknowledgeLauncherPatrolDelivery,
   hideLauncherAssistant, launcherAssistantBridge, launcherConversationApi,
   sendLauncherAssistantMessage, setLauncherAssistantExpanded, setLauncherAssistantModel,
   getLauncherAssistantApprovals, resolveLauncherAssistantApproval,
@@ -14,10 +15,32 @@ import {
   getLauncherAssistantBudget, setLauncherAssistantBudget,
   getLauncherAssistantUsageSummary,
   updateLauncherAssistantQueuedTurn, removeLauncherAssistantQueuedTurn, sendNowLauncherAssistantQueuedTurn,
+  LAUNCHER_ASSISTANT_CONTROL_CONTINUATION_MESSAGE,
 } from "./launcherAssistant";
 import type { SessionToolApprovalRequest } from "./types";
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe("operator continuation send", () => {
+  it.each(["ASSISTANT_IDENTITY_INVALID", "Error invoking remote method 'assistant:request': Error: ASSISTANT_IDENTITY_INVALID"])("treats %s as pre-admission only for a bound continuation", async message => {
+    const invoke = vi.fn().mockRejectedValue(new Error(message));
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    const expected = { agentId: "a", sessionId: "s", turnId: "t", headId: "h", ledgerSeq: 5 };
+    await expect(sendLauncherAssistantMessage(LAUNCHER_ASSISTANT_CONTROL_CONTINUATION_MESSAGE, "original", [], [], expected)).rejects.toMatchObject({ name: "LauncherAssistantRejectedError" });
+    await expect(sendLauncherAssistantMessage("normal send", "ordinary")).rejects.toMatchObject({ name: "Error", message });
+  });
+  it("preserves the exact native snapshot and rejects arbitrary content or attachments before IPC", async () => {
+    const invoke = vi.fn().mockResolvedValue({ accepted: true, turnId: "next" });
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    const expected = { agentId: "a", sessionId: "s", turnId: "t", headId: "h", ledgerSeq: 5 };
+    await expect(sendLauncherAssistantMessage(LAUNCHER_ASSISTANT_CONTROL_CONTINUATION_MESSAGE, "original", [], [], expected)).resolves.toEqual({ turnId: "next" });
+    expect(invoke).toHaveBeenCalledWith({ operation: "send", message: LAUNCHER_ASSISTANT_CONTROL_CONTINUATION_MESSAGE, requestId: "original", controlContinuation: expected });
+    for (const send of [() => sendLauncherAssistantMessage("changed", "original", [], [], expected),
+      () => sendLauncherAssistantMessage(LAUNCHER_ASSISTANT_CONTROL_CONTINUATION_MESSAGE, "original", ["file"], [], expected),
+      () => sendLauncherAssistantMessage(LAUNCHER_ASSISTANT_CONTROL_CONTINUATION_MESSAGE, "original", [], [], { ...expected, ledgerSeq: 0 })]) await expect(send()).rejects.toThrow();
+    expect(invoke).toHaveBeenCalledOnce();
+  });
+});
 
 function usageSnapshot() {
   const numbers = { inputTokens: 100, cachedInputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0,
@@ -244,6 +267,29 @@ describe("Launcher assistant budget contract", () => {
     expect(invoke).toHaveBeenCalledTimes(calls + 1);
     invoke.mockResolvedValueOnce({ revision: 4, maxCallsPerTurn: 16 });
     await expect(setLauncherAssistantBudget({ revision: 3, maxCallsPerTurn: 0 })).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
+  });
+});
+
+describe("Launcher patrol-delivery acknowledgment contract", () => {
+  it("sends the fixed ledger-only operation once and keeps only safe delivery counts", async () => {
+    const states = { unknown: 0, observed: 1, failed: 0, interrupted: 0, completed: 2, cancelled_pre_admission: 0 };
+    const invoke = vi.fn().mockResolvedValueOnce({ deliveryStates: states });
+    vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+    await expect(acknowledgeLauncherPatrolDelivery()).resolves.toEqual({ deliveryStates: states });
+    expect(invoke).toHaveBeenCalledExactlyOnceWith({ operation: "acknowledgePatrolDelivery" });
+    const calls = invoke.mock.calls.length;
+    for (const reply of [{}, { deliveryStates: {} }, { deliveryStates: { unknown: -1 } },
+      { deliveryStates: { unknown: true } }, { deliveryStates: { unknown: 1.5 } },
+      { deliveryStates: { unknown: 0, mystery: 1 } }, { deliveryStates: { unknown: 0 }, extra: 1 },
+      { unknown: 0 }, { deliveryStates: null },
+      { deliveryStates: { unknown: 0, observed: 0, failed: 0, interrupted: 0, completed: 0 } }]) {
+      invoke.mockResolvedValueOnce(reply);
+      await expect(acknowledgeLauncherPatrolDelivery()).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
+    }
+    expect(invoke.mock.calls.length).toBe(calls + 10);
+    invoke.mockRejectedValueOnce(new Error("ASSISTANT_PATROL_UNAVAILABLE"));
+    await expect(acknowledgeLauncherPatrolDelivery()).rejects.toThrow("ASSISTANT_PATROL_UNAVAILABLE");
+    expect(invoke.mock.calls.length).toBe(calls + 11);
   });
 });
 

@@ -146,18 +146,18 @@ class Connection:
             raise ComputerBlocked("驱动拒绝操作，可能检测到人工操作或不支持后台输入；没有自动重试或切换前台。", "The driver refused the action, possibly due to human activity or unsupported background input. No automatic retry or foreground switch was attempted.")
         return data, raw.get("content", [])
 
-    def windows(self) -> list[dict]:
-        data, _ = self.rpc("list_windows")
+    def windows(self, *, on_screen_only: bool = False) -> list[dict]:
+        data, _ = self.rpc("list_windows", on_screen_only=on_screen_only)
         return data.get("windows", [])
 
     def snapshot(self, window: dict, *, images: bool = False) -> dict:
         birth, executable = process_identity(window["pid"])
         if birth != window["birth"] or executable != window["executable"]:
-            raise ComputerBlocked("窗口进程身份已变化，本次授权结束。", "The window process identity has changed. This authorization has ended.")
+            raise ComputerBlocked("窗口进程身份已变化，请重新观察。", "The window process identity has changed. Observe again.")
         matches = [row for row in self.windows() if row.get("pid") == window["pid"]
                    and row.get("window_id") == window["hwnd"]]
         if len(matches) != 1:
-            raise ComputerBlocked("已授权窗口已关闭，本次授权结束。", "The authorized window has closed. This authorization has ended.")
+            raise ComputerBlocked("目标窗口已关闭，请重新观察。", "The target window has closed. Observe again.")
         data, content = self.rpc("get_window_state", pid=window["pid"], window_id=window["hwnd"],
                                  tree_format="elements", include_screenshot=images,
                                  max_elements=200, timeout_ms=3000)
@@ -177,7 +177,25 @@ class Connection:
                         for row in data.get("images", []) if isinstance(row, dict)]
         if images and data.get("screenshot_frame_valid") is False:
             raise ComputerBlocked("窗口截图未通过有效性检查，请重新观察。", "The window screenshot failed validation. Observe the window again.")
-        return {"elements": elements, "fingerprint": fingerprint, "incomplete": incomplete, "images": pictures}
+        snapshot_id = data.get("snapshot_id")
+        return {"elements": elements, "fingerprint": fingerprint, "incomplete": incomplete, "images": pictures,
+                "snapshot_id": snapshot_id if isinstance(snapshot_id, str) and snapshot_id else ""}
+
+    def click_at(self, window: dict, x: int, y: int, capture_id: str = "") -> None:
+        """Background pixel click at window-local screenshot coordinates.
+
+        capture_id (when present) makes the driver admit x/y against the exact
+        capture the caller read, so stale coordinates fail closed.
+        """
+        args = {"pid": window["pid"], "window_id": window["hwnd"], "delivery_mode": "background",
+                "x": x, "y": y}
+        if capture_id:
+            args["capture_id"] = capture_id
+        self.rpc("click", **args)
+
+    def hotkey(self, window: dict, keys: list[str]) -> None:
+        self.rpc("hotkey", pid=window["pid"], window_id=window["hwnd"],
+                 delivery_mode="background", keys=list(keys))
 
     def act(self, window: dict, action: str, element: dict | None, text: str) -> str | None:
         args = {"pid": window["pid"], "window_id": window["hwnd"], "delivery_mode": "background"}

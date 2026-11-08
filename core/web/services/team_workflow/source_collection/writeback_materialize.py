@@ -375,12 +375,26 @@ def _source_collection_stage_writeback_candidate_coverage(
         for item in source_candidates
         if s._trim_text(item.get("candidateId"), max_length=160)
     ]
-    records = s._source_collection_stage_records_for_run(run_id)
+    all_records = s._source_collection_stage_records_for_run(run_id)
+    records = all_records
     try:
         run = s.data_processing_service.get_processing_run(run_id)
-        records, _excluded_source_summary = s._source_collection_filter_active_records(team_id, run, records)
+        records, _excluded_source_summary = s._source_collection_filter_active_records(team_id, run, all_records)
     except s.data_processing_service.DataProcessingError:
         pass
+    # ISS-038: merged retry results still carry entries that reference records
+    # the exclusion ledger legitimately removed. Resolution must run against
+    # the full record set and such hits are classified as excluded/skip —
+    # never as invalid IDs and never as failures.
+    excluded_record_ids = {
+        s._trim_text(item.get("recordId"), max_length=160)
+        for item in all_records
+        if s._trim_text(item.get("recordId"), max_length=160)
+    } - {
+        s._trim_text(item.get("recordId"), max_length=160)
+        for item in records
+        if s._trim_text(item.get("recordId"), max_length=160)
+    }
     record_ids = [
         s._trim_text(item.get("recordId"), max_length=160)
         for item in records
@@ -397,18 +411,22 @@ def _source_collection_stage_writeback_candidate_coverage(
             coverage_kind = "record_extractions"
             processed_ids: list[str] = []
             invalid_ids: list[str] = []
+            excluded_ids: list[str] = []
             blocked_ids: list[str] = []
             duplicate_ids: list[str] = []
             alias_warnings: list[dict[str, str]] = []
             seen: set[str] = set()
             for entry in record_entries:
                 raw_record_id = s._source_collection_stage_writeback_record_id(entry) or s._source_collection_stage_writeback_candidate_id(entry)
-                resolved_record_id, warning = s._resolve_source_collection_record_id(raw_record_id, records)
+                resolved_record_id, warning = s._resolve_source_collection_record_id(raw_record_id, all_records)
                 if not resolved_record_id:
                     invalid_ids.append(raw_record_id)
                     continue
                 if warning:
                     alias_warnings.append({"inputId": raw_record_id, "recordId": resolved_record_id, "warning": warning})
+                if resolved_record_id in excluded_record_ids:
+                    excluded_ids.append(resolved_record_id)
+                    continue
                 if resolved_record_id in seen:
                     duplicate_ids.append(resolved_record_id)
                     continue
@@ -435,12 +453,14 @@ def _source_collection_stage_writeback_candidate_coverage(
                 "processed": len(processed_ids),
                 "missing": len(missing_ids),
                 "invalid": len(invalid_clean),
+                "excluded": len(excluded_ids),
                 "blocked": len(blocked_ids),
                 "duplicate": len(duplicate_ids),
                 "complete": complete,
                 "processedRecordIds": processed_ids[:120],
                 "missingRecordIds": missing_ids[:120],
                 "invalidRecordIds": invalid_clean[:80],
+                "excludedRecordIds": excluded_ids[:80],
                 "blockedRecordIds": blocked_ids[:80],
                 "duplicateRecordIds": duplicate_ids[:80],
                 "recordIdAliasWarnings": alias_warnings[:80],

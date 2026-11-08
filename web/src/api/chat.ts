@@ -79,6 +79,28 @@ export function resolveSessionToolApprovalDecision(
   );
 }
 
+/** Server-projected result of the b3 one-click development trust bundle. */
+export type SessionDevelopmentTrustResult = {
+  sessionId: string;
+  requestId: string;
+  grantedTools: string[];
+};
+
+/**
+ * b3 one click: trust the execute/write development tools for this session.
+ * The server resolves the pending request like acceptForSessionTool and adds
+ * the same tool-level session grants for the remaining bundle tools.
+ */
+export function trustSessionDevelopmentTools(
+  sessionId: string,
+  requestId: string,
+): Promise<SessionDevelopmentTrustResult> {
+  return fetchJson<SessionDevelopmentTrustResult>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/tool-approvals/${encodeURIComponent(requestId)}/trust-development-session`,
+    { method: "POST" },
+  );
+}
+
 /**
  * Adds a completed chat session to the human review queue.
  * Keep this request in the chat API boundary instead of a route lifecycle hook.

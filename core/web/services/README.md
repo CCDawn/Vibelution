@@ -209,6 +209,7 @@
 | `model_capability_service.py` | Shared model capability inference for web services. | — | — | — |
 | `model_reference_service.py` | LLM model reference lifecycle helpers. | — | `config.py` | `test_web_config_routes.py`, `test_provider_config_service.py`, `test_model_reference_service.py` |
 | `provider_config_service.py` | Draft-only Provider registry orchestration for the config workbench. | — | `config.py` | `test_web_config_routes.py`, `test_provider_config_service.py`, `test_config_redaction.py` |
+| `chatgpt_subscription_service.py` | Safe ChatGPT plan account commands over the shared encrypted LLM credential owner. | `core/llm/chatgpt_subscription/README.md` | `chatgpt_subscription.py` | `test_web_chatgpt_subscription_routes.py`, `test_chatgpt_subscription_auth.py` |
 | `theme_background_service.py` | Workbench theme background image storage helpers. | — | `config.py` | `test_web_config_routes.py`, `test_theme_background_service.py` |
 | `tool_policy_configuration_service.py` | Versioned Agent ToolPolicy configuration, validation, and explain projections. | — | `agents.py` | `test_agent_support_route_contract.py`, `test_agent_tool_policy_configuration.py` |
 
