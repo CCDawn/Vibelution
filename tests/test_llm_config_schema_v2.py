@@ -103,6 +103,84 @@ def test_v2_effective_config_resolves_provider_credential_without_inline_copies(
     assert not any(provider_id.startswith("inline_") for provider_id in effective.llm.providers)
 
 
+def test_chat_prefers_provider_credential_ref_over_profile_api_key_env(monkeypatch) -> None:
+    # chat 链路（resolve_api_key_for_profile）必须与测试链路对齐：provider
+    # credential_ref 是凭据属主，优先于 profile/model 级 api_key_env。
+    from config import models
+
+    for name in (
+        "VIBELUTION_ENABLE_USER_ENV_FALLBACK",
+        "VIBELUTION_LLM_PROVIDER_DUAL_RELAY_API_KEY",
+        "VIBELUTION_LLM_PROFILE_DUAL_RELAY_API_KEY",
+        "VIBELUTION_LLM_PROVIDER_DUAL_RELAY_FALLBACK_ENV",
+        # relay maps to the vendor canonical env; a machine-level key must not
+        # leak into this precedence assertion.
+        "OPENAI_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    provider = models.ProviderConfig(
+        provider_id="dual_key_relay",
+        kind="relay",
+        base_url="https://relay.example/v1",
+        auth_kind="api_key",
+        credential_ref="env:VIBELUTION_LLM_PROVIDER_DUAL_RELAY_API_KEY",
+        requires_credential=True,
+        api_key_env="VIBELUTION_LLM_PROVIDER_DUAL_RELAY_FALLBACK_ENV",
+    )
+    profile = models.LLMProfile(
+        profile_id="primary",
+        provider_id="dual_key_relay",
+        model="dual-model",
+        api_key_env="VIBELUTION_LLM_PROFILE_DUAL_RELAY_API_KEY",
+    )
+    config = models.LLMConfig(providers={"dual_key_relay": provider}, profiles={"primary": profile})
+    monkeypatch.setenv("VIBELUTION_LLM_PROVIDER_DUAL_RELAY_API_KEY", "credential-ref-secret")
+    monkeypatch.setenv("VIBELUTION_LLM_PROFILE_DUAL_RELAY_API_KEY", "profile-env-secret")
+
+    assert provider.resolve_api_key() == "credential-ref-secret"
+    assert config.resolve_api_key_for_profile("primary") == "credential-ref-secret"
+    assert (
+        config.get_api_key_source_label_for_profile("primary")
+        == "provider-credential-ref:VIBELUTION_LLM_PROVIDER_DUAL_RELAY_API_KEY"
+    )
+
+
+def test_credential_ref_miss_falls_back_to_env_chain_and_plaintext_last(monkeypatch) -> None:
+    # credential_ref 解析为空时回退 env 链；明文 api_key 永远兜底在最后。
+    from config import models
+
+    for name in (
+        "VIBELUTION_ENABLE_USER_ENV_FALLBACK",
+        "VIBELUTION_LLM_PROVIDER_DUAL_RELAY_API_KEY",
+        "VIBELUTION_LLM_PROFILE_DUAL_RELAY_API_KEY",
+        "RELAY_API_KEY",
+        # relay maps to OPENAI_API_KEY; a machine-level key must not leak into
+        # this fallback assertion.
+        "OPENAI_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    provider = models.ProviderConfig(
+        provider_id="dual_key_relay",
+        kind="relay",
+        base_url="https://relay.example/v1",
+        auth_kind="api_key",
+        credential_ref="env:VIBELUTION_LLM_PROVIDER_DUAL_RELAY_API_KEY",
+        requires_credential=True,
+        api_key="plaintext-last-resort",
+    )
+    profile = models.LLMProfile(
+        profile_id="primary",
+        provider_id="dual_key_relay",
+        model="dual-model",
+        api_key_env="VIBELUTION_LLM_PROFILE_DUAL_RELAY_API_KEY",
+    )
+    config = models.LLMConfig(providers={"dual_key_relay": provider}, profiles={"primary": profile})
+
+    assert provider.resolve_api_key() == "plaintext-last-resort"
+    assert config.resolve_api_key_for_profile("primary") == "plaintext-last-resort"
+    assert config.get_api_key_source_label_for_profile("primary") == "config-or-kwargs"
+
+
 def test_v1_normalization_is_no_longer_a_runtime_path() -> None:
     legacy = {
         "llm": {

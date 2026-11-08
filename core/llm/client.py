@@ -3970,6 +3970,11 @@ class LLMClient:
     def _choice_message(self, response: Any) -> Dict[str, Any]:
         if isinstance(response, dict):
             choices = response.get("choices") or []
+            if not choices:
+                # Anthropic Messages native responses carry ``content`` blocks
+                # instead of OpenAI ``choices``; the canonical outcome is the
+                # authority, so the legacy extraction just yields nothing.
+                return {}
             return (choices[0] or {}).get("message") or {}
         choices = getattr(response, "choices", None) or []
         if not choices:

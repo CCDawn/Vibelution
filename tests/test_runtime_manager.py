@@ -287,6 +287,35 @@ def test_print_status_reports_stale_runtime_manager_source(capsys):
     assert "source changed" in output
 
 
+def test_daemon_entry_enables_user_env_fallback(monkeypatch):
+    # Daemon 进程入口必须与 web_workbench.main 一样启用 HKCU 优先的 user env
+    # fallback，否则 supervised run / 命令链路读到旧会话块遗留的同名 env 值。
+    enabled_labels = []
+
+    # Spy must not delegate to the real helper: setting the env flag here would
+    # leak into the process environment (monkeypatch does not revert direct
+    # os.environ writes) and pollute later tests.
+    def spy_enable(*, context_label: str = "backend") -> None:
+        enabled_labels.append(context_label)
+
+    monkeypatch.setattr(daemon, "enable_user_env_fallback", spy_enable)
+
+    class _StubDaemon:
+        def __init__(self) -> None:
+            self.run_forever_called = False
+
+        def run_forever(self) -> None:
+            self.run_forever_called = True
+
+    stub = _StubDaemon()
+    monkeypatch.setattr(daemon, "RuntimeManagerDaemon", lambda: stub)
+
+    daemon.run_daemon()
+
+    assert enabled_labels and "daemon" in enabled_labels[0]
+    assert stub.run_forever_called is True
+
+
 def test_cli_command_forwards_stop_manager(monkeypatch):
     calls = []
 

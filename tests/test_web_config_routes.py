@@ -2661,10 +2661,14 @@ def test_config_workspace_test_llm_keeps_remote_probe_timeout_short():
         temperature=0.3,
         max_output_tokens=4096,
         timeout=120,
-        connect_timeout=20,
+        connect_timeout=60,
     )
 
-    assert config_service._llm_test_probe_timeout_seconds(provider, profile) == 10
+    # Remote probe cap was relaxed 10s -> 30s: slow-handshake / slow-reasoning
+    # upstreams used to be reported as probe failures. The cap stays bounded
+    # (effective timeout = min(connect, timeout, cap), so profile values above
+    # the cap still clamp to 30s).
+    assert config_service._llm_test_probe_timeout_seconds(provider, profile) == 30
 
 
 def test_config_image_input_probe_status_avoids_generic_vision_overmatch():

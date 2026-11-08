@@ -21,11 +21,11 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from config.llm_key_env import USER_ENV_FALLBACK_ENV, enable_user_env_fallback  # noqa: E402
 from config.workbench import DEFAULT_WORKBENCH_HOST, configured_backend_port  # noqa: E402
 from core.web.server_shutdown import own_server  # noqa: E402
 
 
-USER_ENV_FALLBACK_ENV = "VIBELUTION_ENABLE_USER_ENV_FALLBACK"
 DEFER_RUNTIME_SCENE_RETENTION_ENV = "VIBELUTION_DEFER_RUNTIME_SCENE_RETENTION"
 HTTP_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 2
 
@@ -79,12 +79,10 @@ HealthAccessLogFilter = WorkbenchAccessLogFilter
 def enable_user_env_fallback_for_workbench() -> None:
     """Let Windows launcher-started backends resolve user-scoped API keys."""
 
-    if os.name != "nt":
-        return
-    if os.environ.get(USER_ENV_FALLBACK_ENV):
-        return
-    os.environ[USER_ENV_FALLBACK_ENV] = "1"
-    logging.getLogger("uvicorn.error").info("Enabled Windows user environment fallback for workbench API key lookup.")
+    # Shared implementation also used by the Runtime Manager daemon entry, so
+    # daemon-run backends follow the same HKCU-first key lookup as the
+    # launcher-started workbench.
+    enable_user_env_fallback(context_label="workbench")
 
 
 def default_port() -> int:

@@ -1736,7 +1736,9 @@ def test_runtime_llm_probe_uses_real_backend_with_small_payload(monkeypatch):
         "overrides": {},
     }
     effective = build_effective_config(public_config)
-    profile = effective.llm.get_profile("primary")
+    # Non-stream probe branch: streaming profiles follow the stream dispatch
+    # (see test_runtime_llm_probe_follows_profile_streaming).
+    profile = effective.llm.get_profile("primary").model_copy(update={"streaming": False})
     provider = effective.llm.get_provider(profile.provider_id)
     captured = {}
 
@@ -1785,6 +1787,7 @@ def test_runtime_llm_probe_extends_private_lan_local_timeout(monkeypatch):
         max_output_tokens=4096,
         timeout=120,
         connect_timeout=20,
+        streaming=False,
     )
     captured = {}
 
@@ -1827,6 +1830,7 @@ def test_runtime_llm_probe_allows_reasoning_budget_for_thinking_models(monkeypat
         max_output_tokens=128000,
         timeout=600,
         connect_timeout=30,
+        streaming=False,
     )
     captured = {}
 
@@ -1865,6 +1869,7 @@ def test_runtime_llm_probe_keeps_single_token_budget_without_reasoning_contract(
         max_output_tokens=4096,
         timeout=120,
         connect_timeout=30,
+        streaming=False,
     )
     captured = {}
 
@@ -1882,6 +1887,160 @@ def test_runtime_llm_probe_keeps_single_token_budget_without_reasoning_contract(
     assert result["ok"] is True, result
     assert result["max_tokens"] == 1
     assert captured["max_tokens"] == 1
+
+
+def test_runtime_llm_probe_follows_profile_streaming(monkeypatch):
+    # SSE-only 上游对 stream:false 直接 400：streaming profile 的探测必须走
+    # 与 chat 相同的流式分派，而不是被强制成非流请求。
+    provider = ProviderConfig(
+        provider_id="relay_sse_only",
+        kind="relay",
+        api_key_env="VIBELUTION_LLM_MODEL_RELAY_SSE_ONLY_API_KEY",
+        base_url="https://1.1.1.1/v1",
+        compat_mode="openai",
+        requires_api_key=True,
+    )
+    profile = LLMProfile(
+        profile_id="primary",
+        provider_id="relay_sse_only",
+        model="sse-only-model",
+        temperature=0.7,
+        max_output_tokens=4096,
+        timeout=120,
+        connect_timeout=30,
+    )
+    captured = {}
+
+    def fake_stream_backend(payload):
+        captured.update(payload)
+
+        def chunks():
+            yield {
+                "id": "chatcmpl-probe",
+                "object": "chat.completion.chunk",
+                "choices": [
+                    {"index": 0, "delta": {"role": "assistant", "content": "ok"}, "finish_reason": None}
+                ],
+            }
+            yield {
+                "id": "chatcmpl-probe",
+                "object": "chat.completion.chunk",
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            }
+
+        return chunks()
+
+    monkeypatch.setenv("VIBELUTION_LLM_MODEL_RELAY_SSE_ONLY_API_KEY", "relay-secret")
+    monkeypatch.setattr("core.llm.client._default_completion_backend", fake_stream_backend)
+    monkeypatch.setattr("core.llm.client._default_responses_backend", fake_stream_backend)
+    monkeypatch.setattr("config.public_config.validate_llm_provider_target", lambda *_args, **_kwargs: None)
+
+    result = _probe_llm_runtime(provider, profile, "relay-secret")
+
+    assert result["ok"] is True, result
+    assert captured["stream"] is True
+    assert result["stream"] is True
+    assert result["max_tokens"] == 1
+
+
+def test_runtime_llm_probe_non_local_timeout_cap_is_thirty_seconds(monkeypatch):
+    provider = ProviderConfig(
+        provider_id="relay_slow_upstream",
+        kind="relay",
+        api_key_env="VIBELUTION_LLM_MODEL_RELAY_SLOW_UPSTREAM_API_KEY",
+        base_url="https://1.1.1.1/v1",
+        compat_mode="openai",
+        requires_api_key=True,
+    )
+    profile = LLMProfile(
+        profile_id="primary",
+        provider_id="relay_slow_upstream",
+        model="slow-reasoning-model",
+        temperature=0.7,
+        max_output_tokens=4096,
+        timeout=120,
+        connect_timeout=30,
+        streaming=False,
+    )
+    captured = {}
+
+    def fake_backend(payload):
+        captured.update(payload)
+        return {
+            "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+    monkeypatch.setattr("core.llm.client._default_completion_backend", fake_backend)
+
+    result = _probe_llm_runtime(provider, profile, "relay-secret")
+
+    assert result["ok"] is True, result
+    assert captured["timeout"].read == 30.0
+    assert captured["timeout"].connect == 30.0
+
+
+def test_runtime_llm_probe_keeps_anthropic_native_dispatch(monkeypatch):
+    # anthropic_messages_native 的探测必须保留 client 的 native 分派路径；
+    # 落到 litellm completion 会把 /v1/messages 形态的 base_url 拼错 → 假阴性。
+    provider = ProviderConfig(
+        provider_id="anthropic_native_probe",
+        kind="anthropic",
+        driver="anthropic",
+        service_class="official_api",
+        compat_mode="native",
+        base_url="https://api.anthropic.com/v1/messages",
+        auth_kind="api_key",
+        credential_ref="env:VIBELUTION_LLM_MODEL_ANTHROPIC_NATIVE_PROBE_API_KEY",
+        requires_credential=True,
+        requires_api_key=True,
+        context_window=200000,
+    )
+    profile = LLMProfile(
+        profile_id="anthropic_native_probe",
+        provider_id="anthropic_native_probe",
+        model="claude-sonnet-4",
+        streaming=False,
+        max_output_tokens=64,
+        timeout=30,
+        connect_timeout=10,
+    )
+    native_calls = []
+    completion_calls = []
+
+    def fake_native_backend(payload):
+        native_calls.append(dict(payload))
+        return {
+            "id": "msg_probe",
+            "type": "message",
+            "role": "assistant",
+            "model": payload.get("model"),
+            "content": [{"type": "text", "text": "ok"}],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+        }
+
+    def fake_completion_backend(payload):
+        completion_calls.append(dict(payload))
+        return {
+            "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+    monkeypatch.setenv("VIBELUTION_LLM_MODEL_ANTHROPIC_NATIVE_PROBE_API_KEY", "anthropic-probe-key")
+    monkeypatch.setattr("core.llm.client._default_anthropic_native_backend", fake_native_backend)
+    monkeypatch.setattr("core.llm.client._default_completion_backend", fake_completion_backend)
+    monkeypatch.setattr("core.llm.client._default_responses_backend", fake_completion_backend)
+    monkeypatch.setattr("config.public_config.validate_llm_provider_target", lambda *_args, **_kwargs: None)
+
+    result = _probe_llm_runtime(provider, profile, "anthropic-probe-key")
+
+    assert result["ok"] is True, result
+    assert len(native_calls) == 1
+    assert completion_calls == []
+    assert native_calls[0]["base_url"].endswith("/v1/messages")
+    assert result["runtime_route"] == "claude-sonnet-4"
 
 
 def test_legacy_profile_llm_test_endpoint_is_removed(tmp_path, monkeypatch):

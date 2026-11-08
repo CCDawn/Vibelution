@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
@@ -10,6 +11,30 @@ from typing import Any
 
 from .models import PROVIDER_API_KEY_ENV_ALIASES, get_provider_api_key_env
 from .public_config import load_public_config, read_persisted_user_env_var
+
+USER_ENV_FALLBACK_ENV = "VIBELUTION_ENABLE_USER_ENV_FALLBACK"
+
+
+def enable_user_env_fallback(*, context_label: str = "backend") -> None:
+    """Enable HKCU-first user env fallback for this process (Windows only).
+
+    The UI persists LLM keys under HKCU Environment; a launcher/daemon-started
+    backend may have inherited a stale same-name value from an older session
+    block. Setting this flag makes ``config.models._read_env_var`` and
+    ``config.public_config._read_env_var`` prefer fresh HKCU values before
+    ``os.environ``. Any pre-existing value of the flag (including an explicit
+    ``0``) is preserved — callers may deliberately opt out.
+    """
+
+    if os.name != "nt":
+        return
+    if os.environ.get(USER_ENV_FALLBACK_ENV):
+        return
+    os.environ[USER_ENV_FALLBACK_ENV] = "1"
+    logging.getLogger(__name__).info(
+        "Enabled Windows user environment fallback for %s API key lookup.",
+        context_label,
+    )
 
 
 # Every chat turn re-syncs configured LLM key env vars. The config side is
@@ -159,7 +184,9 @@ def sync_llm_key_env_from_persisted_user_env(
 
 
 __all__ = [
+    "USER_ENV_FALLBACK_ENV",
     "configured_llm_key_env_names",
+    "enable_user_env_fallback",
     "read_persisted_user_env_var",
     "reset_llm_key_env_read_cache",
     "sync_llm_key_env_from_persisted_user_env",

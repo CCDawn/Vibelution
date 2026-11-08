@@ -9,7 +9,9 @@ from typing import Any, Dict
 from urllib.parse import urlparse
 
 
-MAX_LLM_PROBE_CONNECT_TIMEOUT_SECONDS = 10
+# 10s 会把慢握手/慢 reasoning 上游的可用 provider 误报成探测失败；与本地
+# LAN 上限统一放宽到 30s（探测语义仍有界，max_attempts 恒为 1）。
+MAX_LLM_PROBE_CONNECT_TIMEOUT_SECONDS = 30
 MAX_LLM_LOCAL_NETWORK_PROBE_TIMEOUT_SECONDS = 30
 
 _API_KEY_ENV_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{2,80}$")

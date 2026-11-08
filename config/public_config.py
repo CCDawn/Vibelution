@@ -2532,7 +2532,12 @@ def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
         return {"ok": False, "message": str(exc)}
 
     try:
-        from core.llm.client import LLMClient, _default_completion_backend, _default_responses_backend
+        from core.llm.client import (
+            LLMClient,
+            _default_anthropic_native_backend,
+            _default_completion_backend,
+            _default_responses_backend,
+        )
     except Exception:
         return _probe_llm_http(provider, profile, api_key)
 
@@ -2545,13 +2550,14 @@ def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
         or str(getattr(profile, "reasoning_state_field", "") or "").strip()
     ):
         probe_max_output_tokens = 2048
+    # streaming 跟随 profile 原值：SSE-only 上游对 stream:false 直接 400，强制
+    # 关流会把可用 provider 误报成探测失败。探测与 chat 必须走同一形态。
     try:
         probe_profile = profile.model_copy(
             update={
                 "max_output_tokens": probe_max_output_tokens,
                 "timeout": probe_timeout,
                 "connect_timeout": min(int(getattr(profile, "connect_timeout", probe_timeout) or probe_timeout), probe_timeout),
-                "streaming": False,
                 "retry_policy": RetryPolicyConfig(max_attempts=1, backoff_base_seconds=0.1),
             }
         )
@@ -2560,7 +2566,6 @@ def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
         probe_profile.max_output_tokens = probe_max_output_tokens
         probe_profile.timeout = probe_timeout
         probe_profile.connect_timeout = min(int(getattr(profile, "connect_timeout", probe_timeout) or probe_timeout), probe_timeout)
-        probe_profile.streaming = False
         probe_profile.retry_policy = RetryPolicyConfig(max_attempts=1, backoff_base_seconds=0.1)
 
     class _ProbeConfig:
@@ -2611,24 +2616,63 @@ def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
             return _default_responses_backend(payload)
         return _default_completion_backend(payload)
 
-    try:
-        client = LLMClient(config=_ProbeConfig(), profile_id=profile.profile_id, backend=real_backend)
-        invoke_llm(
-            client,
-            [{"role": "user", "content": "ping"}],
-            tools=[],
-            context=LLMInvocationContext(
-                surface="config_runtime_probe",
-                run_kind="non_conversation_probe",
-                agent_id="public_config",
-                llm_slot="dialogue",
-                model_id=str(getattr(profile, "model_ref", "") or getattr(profile, "model", "")),
-                cache_scope="config_probe",
-                cache_partition=f"config-runtime-probe-{profile.profile_id}",
-                prompt_purpose="provider_ping",
-                conversation_bound=False,
-            ),
+    def native_anthropic_backend(payload: dict[str, Any]) -> dict[str, Any]:
+        # anthropic_messages_native provider 必须保留 client 的 native 分派路径
+        # （与 chat 一致）。若让它落到 real_backend → litellm completion，native
+        # 形态的 base_url（含 /v1/messages）会被按 chat_completions 拼错，探测
+        # 对这类 provider 必假阴性。这里只做捕获再委托默认 native backend。
+        max_output_tokens = payload.get("max_output_tokens")
+        max_tokens = payload.get("max_tokens") if "max_tokens" in payload else max_output_tokens
+        captured_payload.update(
+            {
+                "model": payload.get("model"),
+                "base_url": payload.get("base_url"),
+                "stream": payload.get("stream"),
+                "max_tokens": max_tokens,
+                "max_output_tokens": max_output_tokens,
+                "timeout": payload.get("timeout"),
+            }
         )
+        return _default_anthropic_native_backend(payload)
+
+    try:
+        client = LLMClient(
+            config=_ProbeConfig(),
+            profile_id=profile.profile_id,
+            backend=real_backend,
+            anthropic_backend=native_anthropic_backend,
+        )
+        probe_context = LLMInvocationContext(
+            surface="config_runtime_probe",
+            run_kind="non_conversation_probe",
+            agent_id="public_config",
+            llm_slot="dialogue",
+            model_id=str(getattr(profile, "model_ref", "") or getattr(profile, "model", "")),
+            cache_scope="config_probe",
+            cache_partition=f"config-runtime-probe-{profile.profile_id}",
+            prompt_purpose="provider_ping",
+            conversation_bound=False,
+        )
+        if bool(getattr(probe_profile, "streaming", False)):
+            # SSE-only 上游对 stream:false 直接 400：streaming profile 必须走与
+            # chat 相同的流式分派（client.stream），否则探测必假阴性。探测预算
+            # 很小，排空整个流即可。
+            from core.llm.invocation import stream_llm
+
+            for _chunk in stream_llm(
+                client,
+                [{"role": "user", "content": "ping"}],
+                tools=[],
+                context=probe_context,
+            ):
+                pass
+        else:
+            invoke_llm(
+                client,
+                [{"role": "user", "content": "ping"}],
+                tools=[],
+                context=probe_context,
+            )
     except Exception as exc:
         return {"ok": False, "message": redact_llm_probe_error(str(exc), api_key=api_key)}
 

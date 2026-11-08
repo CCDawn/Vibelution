@@ -406,11 +406,19 @@ class ProviderConfig(BaseModel):
         return self
 
     def resolve_api_key(self) -> Optional[str]:
+        # credential_ref 是 provider 声明的凭据属主，必须优先于任何派生/继承的
+        # env 候选（与 config_service 探测链路同一优先序）。credential_ref 解析
+        # 为空时回退旧 env 链，明文 api_key 永远兜底在最后。
         if self.credential_ref:
             from .llm_credentials import resolve_credential_ref
 
-            resolution = resolve_credential_ref(self.credential_ref, resolve_secret=True)
-            return resolution.secret or None
+            try:
+                resolution = resolve_credential_ref(self.credential_ref, resolve_secret=True)
+            except ValueError:
+                resolution = None
+            secret = str(getattr(resolution, "secret", "") or "").strip() if resolution is not None else ""
+            if secret:
+                return secret
         env_candidates: List[str] = []
         if self.api_key_env:
             env_candidates.append(self.api_key_env)
@@ -846,6 +854,19 @@ class LLMConfig(BaseModel):
 
         if is_subscription_provider(provider):
             return provider.resolve_api_key()
+        # provider.credential_ref 优先于 profile/model 级 api_key_env（对齐测试
+        # 链路 _resolve_model_option_api_key 的优先序）；解析为空时继续走
+        # profile/model env，provider env 链与明文 api_key 仍在最后兜底。
+        credential_ref = str(getattr(provider, "credential_ref", "") or "").strip()
+        if credential_ref:
+            from .llm_credentials import resolve_credential_ref
+
+            try:
+                credential = resolve_credential_ref(credential_ref, resolve_secret=True)
+            except ValueError:
+                credential = None
+            if credential is not None and str(getattr(credential, "secret", "") or "").strip():
+                return str(credential.secret).strip()
         profile_model_env = str(getattr(profile, "api_key_env", "") or "").strip()
         if profile_model_env:
             value = _read_env_var(profile_model_env)
@@ -867,6 +888,21 @@ class LLMConfig(BaseModel):
 
         if is_subscription_provider(provider):
             return "oauth:chatgpt"
+        # 与 resolve_api_key_for_profile 的 credential_ref 优先分支对齐：来源
+        # 标签反映真实取键路径，而不是把 credential_ref 命中误报成 missing。
+        credential_ref = str(getattr(provider, "credential_ref", "") or "").strip()
+        if credential_ref:
+            from .llm_credentials import resolve_credential_ref
+
+            try:
+                credential = resolve_credential_ref(credential_ref, resolve_secret=True)
+            except ValueError:
+                credential = None
+            if credential is not None and str(getattr(credential, "secret", "") or "").strip():
+                reference = str(getattr(credential, "reference", "") or "")
+                if reference.startswith("env:"):
+                    return f"provider-credential-ref:{reference.removeprefix('env:')}"
+                return "provider-credential-ref"
         profile_model_env = str(getattr(profile, "api_key_env", "") or "").strip()
         _, model_entry = self.get_model_library_entry_for_profile(profile)
         model_env = ""

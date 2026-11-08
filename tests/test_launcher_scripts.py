@@ -1452,9 +1452,10 @@ def test_web_workbench_access_log_filter_installs_once(monkeypatch):
 
 
 def test_web_workbench_enables_windows_user_env_fallback(monkeypatch):
+    from config import llm_key_env
     from scripts import web_workbench
 
-    monkeypatch.setattr(web_workbench.os, "name", "nt", raising=False)
+    monkeypatch.setattr(llm_key_env.os, "name", "nt", raising=False)
     monkeypatch.delenv(web_workbench.USER_ENV_FALLBACK_ENV, raising=False)
 
     web_workbench.enable_user_env_fallback_for_workbench()
@@ -1463,9 +1464,10 @@ def test_web_workbench_enables_windows_user_env_fallback(monkeypatch):
 
 
 def test_web_workbench_preserves_explicit_user_env_fallback(monkeypatch):
+    from config import llm_key_env
     from scripts import web_workbench
 
-    monkeypatch.setattr(web_workbench.os, "name", "nt", raising=False)
+    monkeypatch.setattr(llm_key_env.os, "name", "nt", raising=False)
     monkeypatch.setenv(web_workbench.USER_ENV_FALLBACK_ENV, "0")
 
     web_workbench.enable_user_env_fallback_for_workbench()

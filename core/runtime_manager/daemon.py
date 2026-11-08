@@ -19,6 +19,7 @@ from typing import Any
 
 from config.llm_key_env import (
     configured_llm_key_env_names,
+    enable_user_env_fallback,
     sync_llm_key_env_from_persisted_user_env,
 )
 from config.public_config import load_public_config, read_persisted_user_env_var
@@ -5769,4 +5770,8 @@ class RuntimeManagerDaemon:
 
 
 def run_daemon() -> None:
+    # 与工作台入口（web_workbench.main）一致：daemon 进程内的 LLM 凭据解析
+    # 也走 HKCU 优先的 user env fallback，避免 supervised run / 命令链路读到
+    # 旧会话块遗留的同名进程环境值。
+    enable_user_env_fallback(context_label="runtime-manager daemon")
     RuntimeManagerDaemon().run_forever()
