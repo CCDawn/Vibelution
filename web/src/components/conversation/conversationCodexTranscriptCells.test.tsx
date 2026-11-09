@@ -84,4 +84,34 @@ describe("codex transcript narration lanes", () => {
     expect(container.textContent).not.toContain("[1m");
     expect(container.textContent).not.toContain("[0m");
   });
+
+  it("shows a short settled thought inline and keeps a long one folded", async () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    // Honour the caller default so the length rule under test decides, not the mock.
+    const honoringDefaults = createCodexTranscriptCellRenderers({
+      lang: "zh",
+      t: (key: TranslationKey) => key,
+      getExpansionState: (_messageId, _section, defaultExpanded) => defaultExpanded,
+      toggleSection: () => undefined,
+    });
+    const shortText = "先确认锁等待占比，再决定要不要动结构。";
+    const longText = "先确认锁等待占比。".repeat(40);
+    const renderThought = async (text: string) => {
+      const node = honoringDefaults.renderCodexThoughtScrollCell("message-1", {
+        cellId: "cell-thought-1",
+        sectionId: "reasoning:cell-thought-1",
+        text,
+        status: "completed",
+        tone: "default",
+      });
+      await act(async () => {
+        root?.render(<VuiProvider>{node}</VuiProvider>);
+      });
+      return container?.textContent ?? "";
+    };
+    expect(await renderThought(shortText)).toContain(shortText);
+    expect(await renderThought(longText)).not.toContain(longText.slice(0, 24));
+  });
 });

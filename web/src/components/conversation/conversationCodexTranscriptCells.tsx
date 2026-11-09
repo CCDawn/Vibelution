@@ -25,8 +25,11 @@ import {
   ThoughtStreamingSummary,
 } from "./conversationThoughtUnits";
 import { stripAnsiArtifacts } from "./conversationAnsiSanitize";
+import { SHORT_THOUGHT_MAX_CHARS } from "./thoughtExpansionPolicy";
 import styles from "./ConversationView.styles";
 import processStyles from "./ConversationProcessDisclosure.styles";
+
+/** Below this many characters a settled thought is inline content, not a log. */
 
 export function reasoningExpansionSectionId(cell: Pick<CodexTranscriptCell, "id" | "sourceItemId">) {
   // Prefer sourceItemId so stream updates that rewrite cell.id keep the same open/closed choice.
@@ -85,8 +88,11 @@ export function createCodexTranscriptCellRenderers({
       return null;
     }
     const isLive = input.status === "running" || input.status === "pending";
-    // The shared session expansion store preserves explicit choices over lifecycle defaults.
-    const defaultExpanded = false;
+    // A settled thought this short is content, not a process log: folding two or
+    // three lines into a rolling one-liner costs more attention than showing it.
+    // Longer thoughts keep the collapsed default so the transcript stays
+    // scannable, and the shared expansion store still lets an explicit toggle win.
+    const defaultExpanded = !isLive && fullText.length <= SHORT_THOUGHT_MAX_CHARS;
     const expanded = getExpansionState(messageId, input.sectionId, defaultExpanded);
     const thoughtTitle = isLive
       ? (lang === "zh" ? "思考中" : "Thinking…")
