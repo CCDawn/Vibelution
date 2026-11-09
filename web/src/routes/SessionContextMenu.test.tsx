@@ -20,10 +20,10 @@ describe("SessionContextMenu", () => {
     expect(menuSource).not.toContain('role="menuitem"');
   });
 
-  it("shows the Agent configuration action for Agent-backed sessions", () => {
-    expect(menuSource).toContain("session.agentId && onOpenAgentConfig");
-    expect(menuSource).toContain('id: "open-agent-config"');
-    expect(menuSource).toContain('lang === "zh" ? "打开 Agent 配置" : "Open Agent config"');
+  it("offers a copy-link action and no Agent configuration action", () => {
+    expect(menuSource).toContain('id: "copy-link"');
+    expect(menuSource).toContain("/chat?");
+    expect(menuSource).not.toContain('id: "open-agent-config"');
     expect(menuSource).toContain('t("clearSessionHistory")');
     expect(menuSource).not.toContain('role="menuitem"');
   });
