@@ -9,6 +9,8 @@ Agent's private event log for audit and UI review.
 from __future__ import annotations
 
 import json
+import logging
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -18,10 +20,15 @@ from core.logging import debug as _debug_logger
 
 from . import agent_directory_service, agent_role_tool_profile_service
 from .runtime_scene_service import record_runtime_scene_event
-from .tool_catalog import HIGH_PERMISSION_TIER, LOW_PERMISSION_TIER, permission_tier_for_tool, risk_tags_for_tool
-
+from .tool_catalog import (
+    HIGH_PERMISSION_TIER,
+    LOW_PERMISSION_TIER,
+    permission_tier_for_tool,
+    risk_tags_for_tool,
+)
 
 TOOL_GOVERNANCE_EVENT_FILE = "tool_governance_requests.jsonl"
+logger = logging.getLogger(__name__)
 LOW_RISK_GRANT_TOOLS = {
     "grep_search_tool",
     "glob_tool",
@@ -202,6 +209,7 @@ def resolve_tool_governance_request(
     resolved_by: str = "user",
     resolution_note: str = "",
 ) -> dict[str, Any]:
+    started_at = time.perf_counter()
     target_agent = _raw_agent(target_agent_id, include_archived=True)
     if not target_agent:
         raise agent_directory_service.AgentNotFoundError(f"Agent not found: {target_agent_id}")
@@ -213,7 +221,9 @@ def resolve_tool_governance_request(
         raise AgentToolGovernanceError("Unsupported tool governance decision.")
 
     path = _request_path(target_agent)
+    read_started = time.perf_counter()
     requests = _read_requests(target_agent)
+    read_ms = (time.perf_counter() - read_started) * 1000.0
     for item in requests:
         if str(item.get("requestId") or item.get("eventId") or "").strip() != normalized_request_id:
             continue
@@ -238,8 +248,11 @@ def resolve_tool_governance_request(
         item["resolvedAt"] = utc_now_iso()
         item["resolvedBy"] = trim_lines(str(resolved_by or "user"), max_lines=1) or "user"
         item["resolutionNote"] = trim_lines(str(resolution_note or "approved"), max_lines=4)
+        apply_ms = 0.0
         if grant_scope == "persistent":
+            apply_started = time.perf_counter()
             applied_agent = _apply_tool_delta(str(target_agent.get("agentId") or ""), normalized_delta)
+            apply_ms = (time.perf_counter() - apply_started) * 1000.0
             item["appliedToolPolicyId"] = str(applied_agent.get("toolPolicyId") or "")
             item["after"] = _policy_snapshot(applied_agent.get("toolPolicy") if isinstance(applied_agent.get("toolPolicy"), dict) else {})
         else:
@@ -253,8 +266,19 @@ def resolve_tool_governance_request(
                 applied_at=str(item.get("resolvedAt") or "").strip(),
             )
             item["after"] = _policy_snapshot(_policy_with_temporary_delta(policy, normalized_delta))
+        write_started = time.perf_counter()
         _write_requests(path, requests)
+        write_ms = (time.perf_counter() - write_started) * 1000.0
         _record_tool_governance_event("agent_tool_governance.request_applied", item, outcome="applied")
+        logger.info(
+            "tool_governance.resolve_timing decision=%s grantScope=%s readMs=%.1f applyMs=%.1f writeMs=%.1f totalMs=%.1f",
+            normalized_decision,
+            grant_scope,
+            read_ms,
+            apply_ms,
+            write_ms,
+            (time.perf_counter() - started_at) * 1000.0,
+        )
         return item
     raise AgentToolGovernanceNotFoundError(f"Tool governance request not found: {request_id}")
 
