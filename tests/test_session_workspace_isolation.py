@@ -343,6 +343,9 @@ def test_run_session_turn_restores_persisted_llm_key_env_before_agent_create(tmp
     base_config.llm.providers[provider_id].requires_api_key = True
     base_config.llm.providers[provider_id].api_key = ""
     base_config.llm.providers[provider_id].api_key_env = ""
+    # chat 凭据解析链 credential_ref 优先于 model env（读取真实环境/HKCU），
+    # 测试需指向不存在的 env ref 才能让断点落在受控的 model env 上。
+    base_config.llm.providers[provider_id].credential_ref = "env:VIBELUTION_TEST_UNSET_CREDENTIAL_REF"
     base_config.llm.model_library["agent-dialogue-model"] = {
         "provider_id": provider_id,
         "model": "agent-dialogue-runtime",
@@ -474,7 +477,13 @@ def test_session_detail_repairs_stale_legacy_profile_from_agent_instance(tmp_pat
     assert repair_events[0]["fields"]["removedFieldNames"] == ["agentProfileId", "agent_profile_id"]
 
 
-def test_run_session_turn_uses_fixed_agent_prompt_snapshot(tmp_path, monkeypatch):
+def test_run_session_turn_uses_admission_captured_prompt_snapshot(tmp_path, monkeypatch):
+    """每轮 prompt 在受理时刻冻结（5ffe7f899/a61c4c679）。
+
+    旧契约（模板编辑只影响新会话）已被受理捕获取代：submit 受理时用
+    当时模板捕获 prompt evidence，worker 优先使用该快照。模板更新对
+    已有会话的**下一次受理**生效，本轮与后续轮不受中途漂移影响。
+    """
     _seed_session(tmp_path, "session-live")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
@@ -538,28 +547,26 @@ def test_run_session_turn_uses_fixed_agent_prompt_snapshot(tmp_path, monkeypatch
     session_service.submit_session_message("session-live", "do it", mental_model_enabled=False)
     prompt_template_service.update_prompt_template(
         "prompt-chat-custom",
-        content="你是第二版会话 Agent。这个新内容只能影响新会话。",
+        content="你是第二版会话 Agent。第二版内容从下一次受理开始生效。",
     )
     session_service.submit_session_message("session-live", "continue", mental_model_enabled=False)
 
     assert len(captured_contexts) == 2
+    # 第一轮在模板更新前受理：使用第一版内容。
     assert "Agent System Prompt Snapshot" in captured_contexts[0]
     assert "PromptTemplateId: prompt-chat-custom" in captured_contexts[0]
     assert "统一 Agent 配置迁移" in captured_contexts[0]
     assert "Agent Prompt Template" not in captured_contexts[0]
-    assert "这个新内容只能影响新会话" not in captured_contexts[1]
-    assert "统一 Agent 配置迁移" in captured_contexts[1]
-    stored_state = load_chat_state(tmp_path)
-    snapshot = stored_state["conversations"][0]["agentPromptSnapshot"]
-    assert snapshot["promptTemplateId"] == "prompt-chat-custom"
-    assert "统一 Agent 配置迁移" in snapshot["content"]
-    assert snapshot["corePromptSchemaVersion"] == prompt_template_service.CORE_PROMPT_SCHEMA_VERSION
-    assert [item["name"] for item in snapshot["corePrompts"]] == list(
-        prompt_template_service.CORE_PROMPT_NAMES
-    )
-    assert snapshot["content"].count("## Core Prompt: COMMON") == 1
-    assert snapshot["content"].count("## Core Prompt: SOUL") == 1
-    assert snapshot["content"].count("## Core Prompt: AGENTS") == 1
+    # 第二轮在模板更新后受理：受理捕获链（accepted_prompt_config）按受理时
+    # 模板重新捕获，第二版内容随本次受理生效；旧版内容不再出现。
+    assert "Agent System Prompt Snapshot" in captured_contexts[1]
+    assert "PromptTemplateId: prompt-chat-custom" in captured_contexts[1]
+    assert "第二版内容从下一次受理开始生效" in captured_contexts[1]
+    assert "统一 Agent 配置迁移" not in captured_contexts[1]
+    # 受理捕获快照仍冻结完整核心提示词结构（每节恰好一次）。
+    assert captured_contexts[1].count("## Core Prompt: COMMON") == 1
+    assert captured_contexts[1].count("## Core Prompt: SOUL") == 1
+    assert captured_contexts[1].count("## Core Prompt: AGENTS") == 1
     assert core_snapshot_marks == [True, True]
 
 
