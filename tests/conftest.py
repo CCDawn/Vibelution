@@ -331,6 +331,35 @@ def hermetic_mxc_sandbox(monkeypatch):
     mxc_backend.reset_verification_cache()
 
 
+# Product-injected process env: present only when the suite runs under a live
+# workbench instance. They must never decide test behavior.
+_PRODUCT_INJECTED_ENV_VARS = (
+    "VIBELUTION_PORT",
+    "AGENT_WORKBENCH_BACKEND_PORT",
+    "VIBELUTION_FRONTEND_PORT",
+    "AGENT_WORKBENCH_FRONTEND_PORT",
+    "VIBELUTION_LAUNCHER_PORT",
+    "AGENT_LAUNCHER_CONTROL_PORT",
+    "VIBELUTION_ELECTRON_MAIN_ORCHESTRATES_WINDOWS",
+)
+
+
+@pytest.fixture(autouse=True)
+def isolate_workbench_process_env(monkeypatch):
+    """Keep the running product's process env out of test semantics.
+
+    The suite is routinely executed by the workbench backend itself (closeout,
+    pre-merge gates), so the child pytest inherits the live instance's ports and
+    orchestration switches. Those values silently change branch selection inside
+    the code under test: ``_electron_main_orchestrates_windows`` flips to True and
+    ``configured_backend_port`` overrides the configured port, so assertions
+    written against a clean process fail only while the product is running.
+    Tests that need a value set it explicitly.
+    """
+    for name in _PRODUCT_INJECTED_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+
 @pytest.fixture(autouse=True)
 def reset_singletons(request):
     """
