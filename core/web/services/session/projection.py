@@ -363,11 +363,15 @@ def _build_session_list_data(
     s._record_session_agent_missing_index_batch_event(hidden_summaries, source="list_sessions")
     sessions.sort(
         key=lambda item: (
-            -s._timestamp_sort_key(item.get("updatedAt") or item.get("lastActive") or ""),
+            s._timestamp_sort_key(item.get("updatedAt") or item.get("lastActive") or ""),
             # Same-second timestamps must not depend on input order (view
-            # switching reshuffles the source rows); fall back to a stable id key.
+            # switching reshuffles the source rows). ``id`` is the session id
+            # here, same as the directory path's ``id``; reverse=True sorts it
+            # DESC, matching the SQL repository (``session_id DESC``) and the
+            # directory path so path switches keep the same-second order.
             str(item.get("id") or ""),
-        )
+        ),
+        reverse=True,
     )
     return _SessionListBuildResult(
         sessions=sessions,

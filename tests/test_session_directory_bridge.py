@@ -309,3 +309,218 @@ def test_pure_read_chain_leaves_directory_recency_untouched(tmp_path, monkeypatc
         assert recencies()["session-new"] > 2000
     finally:
         directory_runtime.shutdown_session_directory_runtime()
+
+
+def _same_second_rows() -> list[dict[str, str]]:
+    """Rows sharing second-level timestamps so the tiebreak decides the order."""
+
+    return [
+        {"sessionId": "session-old-a", "updatedAt": "2026-01-01T00:00:00"},
+        {"sessionId": "session-tie-z", "updatedAt": "2026-01-01T00:00:01"},
+        {"sessionId": "session-tie-m", "updatedAt": "2026-01-01T00:00:01"},
+        {"sessionId": "session-new", "updatedAt": "2026-01-01T00:00:02"},
+        {"sessionId": "session-tie-a", "updatedAt": "2026-01-01T00:00:01"},
+        {"sessionId": "session-old-z", "updatedAt": "2026-01-01T00:00:00"},
+    ]
+
+
+_SAME_SECOND_EXPECTED_ORDER = [
+    "session-new",
+    "session-tie-z",
+    "session-tie-m",
+    "session-tie-a",
+    "session-old-z",
+    "session-old-a",
+]
+
+
+def _fake_summary_from_directory_row(row, **_kwargs):
+    updated_at = str(row.get("updatedAt") or "")
+    return {"id": str(row.get("sessionId") or ""), "updatedAt": updated_at, "lastActive": updated_at}
+
+
+def _patch_directory_list_paths(monkeypatch, rows):
+    """Fake the directory store plumbing around list_session_summaries."""
+
+    store = SimpleNamespace(
+        repository=SimpleNamespace(
+            list_directory_page=lambda **_kwargs: {"rows": list(rows), "nextCursor": ""},
+        ),
+    )
+    monkeypatch.setattr(
+        directory_bridge.directory_runtime,
+        "wait_for_directory_startup",
+        lambda *, timeout: "ready",
+    )
+    monkeypatch.setattr(
+        directory_bridge.directory_runtime,
+        "get_open_directory_store",
+        lambda: store,
+    )
+    monkeypatch.setattr(directory_bridge, "_chat_state_directory_overlay", lambda: ({}, {}))
+    monkeypatch.setattr(directory_bridge, "_session_runtime_status_snapshot", lambda: {})
+    monkeypatch.setattr(
+        directory_bridge, "_summary_from_directory_row", _fake_summary_from_directory_row
+    )
+    monkeypatch.setattr(
+        directory_bridge,
+        "_filter_user_directory_summaries",
+        lambda summaries, *, include_hidden: summaries,
+    )
+    monkeypatch.setattr(
+        directory_bridge,
+        "_merge_agent_directory_stub_summaries",
+        lambda summaries, **_kwargs: summaries,
+    )
+    monkeypatch.setattr(
+        directory_bridge, "_with_terminal_states", lambda items, *, store: items
+    )
+    monkeypatch.setattr(session_service, "_agent_lookup_for_conversations", lambda: {})
+
+
+def test_list_session_summaries_orders_same_second_rows_by_session_id_desc(monkeypatch):
+    """Same-second rows tiebreak on session id DESC (SQL repository direction)."""
+
+    rows = list(reversed(_same_second_rows()))  # input order must not matter
+    _patch_directory_list_paths(monkeypatch, rows)
+
+    summaries = directory_bridge.list_session_summaries()
+
+    assert [item["id"] for item in summaries] == _SAME_SECOND_EXPECTED_ORDER
+
+
+def test_directory_and_legacy_projection_paths_agree_on_same_second_order(monkeypatch):
+    """The core regression: both read paths order one same-second batch alike.
+
+    Path switching (cache miss, stale projection, degraded directory) used to
+    flip same-second groups because the directory path inherited the SQL
+    session_id DESC order while the legacy projection tiebreaked by id ASC.
+    """
+
+    from types import SimpleNamespace as Namespace
+
+    from core.web.services.session import projection
+
+    rows = _same_second_rows()
+
+    # Path 1: directory store.
+    _patch_directory_list_paths(monkeypatch, rows)
+    directory_order = [
+        item["id"] for item in (directory_bridge.list_session_summaries() or [])
+    ]
+
+    # Path 2: legacy projection rebuild, same rows projected through the
+    # lightweight summary builder with the directory read forced unavailable.
+    monkeypatch.setattr(
+        directory_bridge, "list_session_summaries", lambda **_kwargs: None
+    )
+    conversations = [
+        {"id": row["sessionId"], "updatedAt": row["updatedAt"]} for row in rows
+    ]
+    fake_service = Namespace(
+        _perf_counter=lambda: 0.0,
+        _elapsed_ms=lambda _start: 0,
+        _agent_lookup_for_conversations=lambda: {},
+        _agent_directory_stub_hidden_team_member_ids=lambda: set(),
+        _load_conversations=lambda **_kwargs: (None, conversations),
+        _append_agent_directory_conversations=lambda conversations, **_kwargs: conversations,
+        _build_session_summary=lambda item, **_kwargs: {
+            "id": item["id"],
+            "updatedAt": item["updatedAt"],
+            "lastActive": item["updatedAt"],
+        },
+        _record_session_agent_missing_index_batch_event=lambda items, **_kwargs: None,
+        _timestamp_sort_key=session_service._timestamp_sort_key,
+        _session_list_source_signature=lambda: ("test-source",),
+    )
+    result = projection._build_session_list_data(fake_service, include_hidden_internal=True)
+    assert result.source == "legacy_projection"
+    legacy_order = [item["id"] for item in result.sessions]
+
+    assert legacy_order == directory_order
+    # And the shared order is the canonical SQL tiebreak: same-second id DESC.
+    assert legacy_order == _SAME_SECOND_EXPECTED_ORDER
+
+
+@pytest.mark.parametrize(
+    ("sort", "expected_ids"),
+    [
+        # updatedAt_desc is the canonical direction: ts DESC then id DESC.
+        (
+            "updatedAt_desc",
+            ["session-b", "session-z", "session-m", "session-a"],
+        ),
+        # The id tiebreak stays DESC regardless of the primary direction (the
+        # SQL repository direction), so the catalog mirror and every read path
+        # agree on one same-key batch order.
+        (
+            "updatedAt_asc",
+            ["session-z", "session-m", "session-a", "session-b"],
+        ),
+        (
+            "title_asc",
+            ["session-m", "session-b", "session-z", "session-a"],
+        ),
+        (
+            "title_desc",
+            ["session-z", "session-a", "session-m", "session-b"],
+        ),
+    ],
+)
+def test_session_query_sort_key_tiebreaks_equal_keys_by_id(sort, expected_ids):
+    """Shared query sort (directory query, body search, canonical fallback)."""
+
+    items = [
+        {"id": "session-a", "title": "Beta", "updatedAt": "2026-01-01T00:00:00"},
+        {"id": "session-z", "title": "Beta", "updatedAt": "2026-01-01T00:00:00"},
+        {"id": "session-m", "title": "Alpha", "updatedAt": "2026-01-01T00:00:00"},
+        {"id": "session-b", "title": "Alpha", "updatedAt": "2026-01-01T00:01:00"},
+    ]
+    key = session_service._session_query_sort_key(sort)
+
+    ordered = sorted(
+        # Reversing the input proves the result does not depend on input order.
+        list(reversed(items)),
+        key=key,
+        reverse=sort.endswith("_desc"),
+    )
+
+    assert [item["id"] for item in ordered] == expected_ids
+
+
+def test_list_child_session_summaries_orders_same_second_rows_by_session_id_desc(
+    monkeypatch,
+):
+    """Child session rows share the parent list's same-second tiebreak."""
+
+    rows = list(reversed(_same_second_rows()))
+    store = SimpleNamespace(
+        repository=SimpleNamespace(
+            get_session=lambda *_args, **_kwargs: None,
+            list_child_sessions=lambda *_args, **_kwargs: rows,
+        ),
+    )
+    monkeypatch.setattr(
+        directory_bridge.directory_runtime,
+        "wait_for_directory_startup",
+        lambda *, timeout: "ready",
+    )
+    monkeypatch.setattr(
+        directory_bridge.directory_runtime,
+        "get_open_directory_store",
+        lambda: store,
+    )
+    monkeypatch.setattr(directory_bridge, "_session_runtime_status_snapshot", lambda: {})
+    monkeypatch.setattr(
+        directory_bridge, "_summary_from_directory_row", _fake_summary_from_directory_row
+    )
+    monkeypatch.setattr(
+        directory_bridge, "_with_terminal_states", lambda items, *, store: items
+    )
+    monkeypatch.setattr(session_service, "_agent_lookup_for_conversations", lambda: {})
+
+    payload = directory_bridge.list_child_session_summaries("root-session")
+
+    assert payload is not None
+    assert payload["rootSessionId"] == "root-session"
+    assert [item["id"] for item in payload["items"]] == _SAME_SECOND_EXPECTED_ORDER

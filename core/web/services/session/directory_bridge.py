@@ -426,10 +426,16 @@ def list_session_summaries(*, include_hidden: bool = False) -> list[dict[str, An
         runtime_statuses=runtime_statuses,
         agent_inbox_pending_count_cache=agent_inbox_pending_count_cache,
     )
+    # (timestamp, session_id) with reverse=True == timestamp DESC, id DESC —
+    # the same same-second tiebreak direction as the SQL repository
+    # (``recency_at_ms DESC, session_id DESC``) and the legacy projection, so
+    # switching read paths cannot reshuffle same-second rows.
     summaries.sort(
         key=lambda item: (
-            -s._timestamp_sort_key(item.get("updatedAt") or item.get("lastActive") or ""),
-        )
+            s._timestamp_sort_key(item.get("updatedAt") or item.get("lastActive") or ""),
+            str(item.get("id") or ""),
+        ),
+        reverse=True,
     )
     return _with_terminal_states(summaries, store=store)
 
@@ -471,7 +477,14 @@ def list_child_session_summaries(session_id: str) -> dict[str, Any] | None:
         )
         for row in rows
     ]
-    items.sort(key=lambda item: str(item.get("updatedAt") or ""), reverse=True)
+    # Same tiebreak contract as the parent list: updatedAt DESC, session id DESC.
+    items.sort(
+        key=lambda item: (
+            str(item.get("updatedAt") or ""),
+            str(item.get("id") or ""),
+        ),
+        reverse=True,
+    )
     return {"rootSessionId": root_session_id, "items": _with_terminal_states(items, store=store)}
 
 

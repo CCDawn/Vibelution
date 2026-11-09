@@ -323,7 +323,15 @@ def list_archived_sessions(
             lightweight=True,
         ) or {"id": session_id}
         archived.append(normalized)
-    archived.sort(key=lambda item: str(item.get("updatedAt") or ""), reverse=True)
+    # ``id`` is the session id; DESC tiebreak matches the session list's
+    # session_id DESC so same-second rows keep one deterministic order.
+    archived.sort(
+        key=lambda item: (
+            str(item.get("updatedAt") or ""),
+            str(item.get("id") or ""),
+        ),
+        reverse=True,
+    )
     total = len(archived)
     try:
         limit_value = int(limit)

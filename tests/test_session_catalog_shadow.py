@@ -104,9 +104,11 @@ def test_sql_catalog_preserves_canonical_order_for_timestamps_and_title_ties(
             "lastActive": updated_at,
         }
 
-    # This is the already-canonical legacy list order. The offset timestamp is
-    # earlier than the UTC timestamp despite sorting later as raw text; the
-    # same-title rows deliberately oppose lexical session-id tie breaking.
+    # The snapshot input mirrors production: the catalog snapshot is built from
+    # ``list_sessions`` output, so ``source_order`` encodes the canonical
+    # updatedAt DESC + session-id DESC order. The same-second rows
+    # (z-title-tie vs offset-earlier) carry the id DESC tiebreak and the
+    # same-title rows exercise the title-sort parity.
     summaries = [
         summary(
             "session-later-utc",
@@ -114,14 +116,14 @@ def test_sql_catalog_preserves_canonical_order_for_timestamps_and_title_ties(
             updated_at="2026-01-01T00:30:00Z",
         ),
         summary(
-            "session-offset-earlier",
-            title="same",
-            updated_at="2026-01-01T01:00:00+01:00",
-        ),
-        summary(
             "session-z-title-tie",
             title="same",
             updated_at="2026-01-01T00:00:00Z",
+        ),
+        summary(
+            "session-offset-earlier",
+            title="same",
+            updated_at="2026-01-01T01:00:00+01:00",
         ),
         summary(
             "session-a-title-tie",

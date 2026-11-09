@@ -51,7 +51,16 @@ def list_conversations() -> list[dict[str, Any]]:
         sessions
     )
     items.extend(group_items)
-    items.sort(key=lambda item: str(item.get("updatedAt") or ""), reverse=True)
+    # conversationId is the session id (direct) or room id (group); the DESC
+    # tiebreak matches the session list's session_id DESC so same-second rows
+    # keep one deterministic order across endpoints.
+    items.sort(
+        key=lambda item: (
+            str(item.get("updatedAt") or ""),
+            str(item.get("conversationId") or ""),
+        ),
+        reverse=True,
+    )
     _record_conversation_index_loaded(
         item_count=len(items),
         session_count=len(sessions),
@@ -145,7 +154,14 @@ def list_group_conversations(
     """Project group rooms from an already loaded session page."""
 
     items, _filtered_count = _list_group_conversations_with_count(sessions)
-    items.sort(key=lambda item: str(item.get("updatedAt") or ""), reverse=True)
+    # Same tiebreak contract as list_conversations (room id DESC).
+    items.sort(
+        key=lambda item: (
+            str(item.get("updatedAt") or ""),
+            str(item.get("conversationId") or ""),
+        ),
+        reverse=True,
+    )
     return items
 
 

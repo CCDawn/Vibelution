@@ -2206,14 +2206,60 @@ def _session_ledger_sequence(session_id: str) -> int:
     return s._journal_bridge.session_ledger_sequence(session_id, project_root=s.PROJECT_ROOT)
 
 
+class _InvertedSortStr:
+    """String whose natural sort order is reversed.
+
+    Lets the shared ``reverse=`` flag own the primary key direction while the
+    session-id tiebreak stays DESC unconditionally (the SQL repository's
+    ``session_id DESC``): ascending sorts encode the id inverted, descending
+    sorts rely on the flag flipping the whole key.
+    """
+
+    __slots__ = ("value",)
+
+    def __init__(self, value: str) -> None:
+        self.value = value
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, _InvertedSortStr) and self.value == other.value
+
+    def __lt__(self, other: object) -> bool:
+        if not isinstance(other, _InvertedSortStr):
+            return NotImplemented
+        return self.value > other.value
+
+
 def _session_query_sort_key(sort: str):
+    # Second tuple element keeps same-key rows deterministic (second-level
+    # timestamps tie heavily). The session-id tiebreak stays DESC regardless of
+    # the primary sort direction — the SQL repository direction — so every read
+    # path (directory query, body search, canonical fallback and the session
+    # catalog mirror) orders one same-key batch alike. Callers keep
+    # ``reverse=sort.endswith("_desc")``: for ``_desc`` sorts the reversed
+    # comparison flips both elements; for ``_asc`` sorts only the primary flips
+    # while _InvertedSortStr keeps the id DESC.
     s = _service()
     normalized = str(sort or "").strip()
+    descending = normalized.endswith("_desc")
+
+    def _id_tiebreak(item):
+        value = str(item.get("id") or "")
+        return value if descending else _InvertedSortStr(value)
+
     if normalized.startswith("title"):
-        return lambda item: str(item.get("title") or "").strip().lower()
+        return lambda item: (
+            str(item.get("title") or "").strip().lower(),
+            _id_tiebreak(item),
+        )
     if normalized.startswith("createdAt"):
-        return lambda item: s._timestamp_sort_key(item.get("createdAt") or item.get("updatedAt") or item.get("lastActive") or "")
-    return lambda item: s._timestamp_sort_key(item.get("updatedAt") or item.get("lastActive") or "")
+        return lambda item: (
+            s._timestamp_sort_key(item.get("createdAt") or item.get("updatedAt") or item.get("lastActive") or ""),
+            _id_tiebreak(item),
+        )
+    return lambda item: (
+        s._timestamp_sort_key(item.get("updatedAt") or item.get("lastActive") or ""),
+        _id_tiebreak(item),
+    )
 
 
 def _session_reasoning_effort_snapshot(session_id: str) -> str:
