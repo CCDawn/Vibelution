@@ -64,6 +64,7 @@
 - 验证去重：同一 HEAD/命令/输入未变则复用结果，不得重复执行；closeout 才跑完整 selector，manifest 传 `--manifest`。用户行为须测试和日志，关键路径须 runtime-scene 证据。
 - 活跃 operator config 是 `%USERPROFILE%\Documents\Vibelution\config\config.toml`；仓库根 `config/` 目录是活的 Python 配置代码库，不属于 legacy/template；真正以 legacy/template 对待的是仓库根目录下的 `config.toml` 文件。
 - Launcher 刷新使用 `%LOCALAPPDATA%\Vibelution\Launcher\VibelutionLauncher.exe --project "<project-root>" <start|stop|restart>`；用户主动重启先停止并保存任务，再重启。自动刷新遇到 active work 可预约等待；任务收口或启动技术失败须如实报告，不假报已重启。
+- **重启纪律**：宣称「修复已生效」前必须核对运行时事实，不能只看代码和测试——后端进程启动时间、前端产物构建时间（`web/dist` 或 `.vibelution-builds` active release）、`logs/runtime_scenes` 最新场景时间，必须都晚于修复提交；任一更早就说明跑的是旧代码，须走 Launcher 重启，不得报告为已修复。顶栏「重启/恢复工作台」与 CLI `restart` 同属正式链路（同一 `/api/launcher` 控制面与 `ensure_frontend_build` 预检），不得当作降级方案；但按钮被点不等于命令已送达——必须在 launcher 控制面日志看到 restart 记录并出现新 runtime scene，才可确认重启发生。重启未落地时如实报告 blocker，不假报已重启。
 - 任何新增或修改产品后台子进程 spawn 的路径，默认按 §2 无控制台红线实现与验证；能弹出可见控制台的路径不得合入。
 
 ## 5. 对用户汇报
