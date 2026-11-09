@@ -38,6 +38,9 @@ BUILD_SCHEMA_VERSION = 2
 RELEASES_DIR_NAME = ".vibelution-builds"
 ACTIVE_RELEASE_NAME = "active.json"
 LOCK_DIR_NAME = "frontend-build.lockdir"
+# A concurrent task can touch web/ while a release builds. One bounded retry
+# re-inspects the settled sources instead of failing the whole restart.
+FRONTEND_BUILD_INPUT_RETRY_LIMIT = 2
 LOCK_INITIALIZATION_GRACE_SECONDS = 5.0
 # BuildKey fingerprint surface. Everything the production build consumes must
 # be listed here or under ``_BUILD_INPUT_DIRS``; a consumed-but-unlisted input
@@ -1088,6 +1091,15 @@ class _PendingBuildCleanupError(RuntimeError):
         self.readers = readers
 
 
+class FrontendInputsChangedError(RuntimeError):
+    """Sources changed between inspection and publication.
+
+    Refusing to publish a mixed release is correct; failing the restart is
+    not, because a merge or checkout landing mid-build is routine. The caller
+    re-inspects and rebuilds against the settled sources.
+    """
+
+
 def _retire_build_process(owner: OwnedProcess | None, readers: list[Thread], *, timeout: float) -> bool:
     deadline = time.monotonic() + max(0.0, timeout)
     try:
@@ -1319,7 +1331,9 @@ def _build_frontend_release(
             or str(final["buildInputs"].get("productionInputStateDigest") or "")
             != str(inspection["buildInputs"].get("productionInputStateDigest") or "")
         ):
-            raise RuntimeError("Frontend inputs changed while building; refusing to publish a mixed release.")
+            raise FrontendInputsChangedError(
+                "Frontend inputs changed while building; refusing to publish a mixed release."
+            )
         _require_frontend_build_time(deadline, "publication")
         assert stage is not None
         published = publish_staging_release(
@@ -1451,9 +1465,31 @@ def ensure_frontend_build(
             _require_frontend_build_time(deadline, "initial build inspection")
             if bool(inspection["current"]):
                 return {"rebuilt": False, "skipped": True, "lock": lock, "timingsMs": timings, **inspection}
-            with _build_phase("buildMs"):
-                result = _build_frontend_release(root, web_dir, manager, lock, inspection, deadline=deadline)
-            return {**result, "timingsMs": timings}
+            attempts = 0
+            while True:
+                attempts += 1
+                try:
+                    with _build_phase("buildMs"):
+                        result = _build_frontend_release(
+                            root, web_dir, manager, lock, inspection, deadline=deadline
+                        )
+                    return {**result, "timingsMs": timings, "inputRetries": attempts - 1}
+                except FrontendInputsChangedError:
+                    if attempts > FRONTEND_BUILD_INPUT_RETRY_LIMIT:
+                        raise
+                    _require_frontend_build_time(deadline, "input retry inspection")
+                    with _build_phase("inspectionMs"):
+                        inspection = inspect_frontend_build(root, package_manager=manager)
+                    _require_frontend_build_time(deadline, "input retry inspection")
+                    if bool(inspection["current"]):
+                        return {
+                            "rebuilt": False,
+                            "skipped": True,
+                            "lock": lock,
+                            "timingsMs": timings,
+                            "inputRetries": attempts,
+                            **inspection,
+                        }
     finally:
         _record_build_phase("totalMs", started)
         _FRONTEND_BUILD_TIMINGS.reset(timings_token)

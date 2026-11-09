@@ -1121,10 +1121,17 @@ def test_save_and_revert_during_build_does_not_publish_transient_release(monkeyp
         return result
 
     monkeypatch.setattr(frontend_build, "_run_checked", save_and_revert_after_vite)
-    with pytest.raises(RuntimeError, match="inputs changed while building"):
-        frontend_build.ensure_frontend_build(tmp_path)
 
-    assert json.loads(frontend_build.active_release_path(tmp_path).read_text(encoding="utf-8"))["release"] == "release-old"
+    # The save-and-revert leaves the sources settled, so the retry rebuilds
+    # against them instead of failing the restart. The guard still holds: the
+    # published release is built from the final inputs, never the transient ones.
+    result = frontend_build.ensure_frontend_build(tmp_path)
+
+    assert result["rebuilt"] is True
+    assert result["inputRetries"] == 1
+    active = json.loads(frontend_build.active_release_path(tmp_path).read_text(encoding="utf-8"))
+    assert active["release"] == f"release-{result['buildKey'][:16]}"
+    assert frontend_build.inspect_frontend_build(tmp_path)["current"] is True
 
 
 def test_pointer_rejects_path_escape(tmp_path: Path) -> None:
@@ -1901,3 +1908,87 @@ def test_release_build_selects_typescript_config(monkeypatch, tmp_path):
     frontend_build.ensure_frontend_build(tmp_path)
     command = next(command for label, command in commands if label == "vite build")
     assert command[command.index("--config") + 1] == "vite.config.ts"
+
+
+def test_input_change_retries_the_build_instead_of_failing_the_restart(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    _release(tmp_path, "release-old")
+    _activate(tmp_path, "release-old")
+    attempts: list[int] = []
+
+    def changed_once(command: list[str], *, cwd: Path, label: str) -> str:
+        if label == "vite build":
+            attempts.append(1)
+            if len(attempts) == 1:
+                raise frontend_build.FrontendInputsChangedError("sources moved mid-build")
+        return _successful_runner(command, cwd=cwd, label=label)
+
+    monkeypatch.setattr(frontend_build, "_run_checked", changed_once)
+
+    result = frontend_build.ensure_frontend_build(tmp_path)
+
+    assert result["rebuilt"] is True
+    assert result["inputRetries"] == 1
+    assert len(attempts) == 2
+    assert frontend_build.inspect_frontend_build(tmp_path)["current"] is True
+
+
+def test_input_change_beyond_the_retry_budget_keeps_the_previous_release(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    _release(tmp_path, "release-old")
+    _activate(tmp_path, "release-old")
+    attempts: list[int] = []
+
+    def always_changed(command: list[str], *, cwd: Path, label: str) -> str:
+        if label == "vite build":
+            attempts.append(1)
+            raise frontend_build.FrontendInputsChangedError("sources moved mid-build")
+        return "ok"
+
+    monkeypatch.setattr(frontend_build, "_run_checked", always_changed)
+
+    with pytest.raises(frontend_build.FrontendInputsChangedError):
+        frontend_build.ensure_frontend_build(tmp_path)
+
+    assert len(attempts) == frontend_build.FRONTEND_BUILD_INPUT_RETRY_LIMIT + 1
+    assert json.loads(frontend_build.active_release_path(tmp_path).read_text(encoding="utf-8"))["release"] == "release-old"
+    assert frontend_build.resolve_active_frontend_dist(tmp_path).name == "release-old"
+
+
+def test_input_change_retry_skips_when_reinspection_is_already_current(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    _release(tmp_path, "release-old")
+    _activate(tmp_path, "release-old")
+    real_inspect = frontend_build.inspect_frontend_build
+    inspections: list[int] = []
+
+    def inspect_settled_after_retry(root: Path, *, package_manager: str | None = None) -> dict:
+        inspections.append(1)
+        settled = real_inspect(root, package_manager=package_manager)
+        if len(inspections) > 1:
+            return {**settled, "current": True}
+        return settled
+
+    def changed_once(command: list[str], *, cwd: Path, label: str) -> str:
+        if label == "vite build":
+            raise frontend_build.FrontendInputsChangedError("sources moved mid-build")
+        return "ok"
+
+    monkeypatch.setattr(frontend_build, "inspect_frontend_build", inspect_settled_after_retry)
+    monkeypatch.setattr(frontend_build, "_run_checked", changed_once)
+
+    result = frontend_build.ensure_frontend_build(tmp_path)
+
+    assert result["rebuilt"] is False
+    assert result["skipped"] is True
+    assert result["inputRetries"] == 1
+    assert json.loads(frontend_build.active_release_path(tmp_path).read_text(encoding="utf-8"))["release"] == "release-old"
