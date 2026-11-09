@@ -125,7 +125,11 @@ MAX_HUMAN_GATE_ITEMS = 20
 # projections and the affair ledger. A short memo (single-flight, so concurrent
 # callers share one read) cuts that work in half while bounding how long a
 # newly arrived item can stay unseen.
-HUMAN_ATTENTION_CACHE_TTL_SECONDS = 10.0
+# The client polls every 5s; a 10s TTL turned roughly every second poll into a
+# full re-collection, and because collection runs under the cache lock every
+# concurrent poller queued behind that 2.4s read. 30s still surfaces reminders
+# promptly while cutting full collections to one per six polls.
+HUMAN_ATTENTION_CACHE_TTL_SECONDS = 30.0
 
 _HUMAN_ATTENTION_CACHE_LOCK = threading.Lock()
 
