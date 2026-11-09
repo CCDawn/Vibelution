@@ -4,7 +4,10 @@ import type { SessionReferenceAttachment } from "../../api/types";
 import { postBrowserTelemetry } from "../../app/browserTelemetry";
 import { useChatStartupPresentation } from "./useChatStartupPresentation";
 import { LazyConversationView } from "../../components/conversation/LazyConversationView";
-import { createComposerDraftStore } from "../../components/conversation/composerDraftStore";
+import {
+  createComposerDraftStore,
+  syncComposerDraftStoreFromUpstream,
+} from "../../components/conversation/composerDraftStore";
 import type { ComposerQueueItem } from "../../components/conversation/composerFollowupQueueModel";
 import type {
   ConversationComposerAttachment,
@@ -287,6 +290,11 @@ export const ChatConversationComposerBridge = memo(function ChatConversationComp
     () => createComposerDraftStore(composer.value),
     [sessionId, composer.editingMessageId],
   );
+  // Submitting clears the upstream draft while the store keeps the keystroke
+  // text, so without this the composer keeps showing the message just sent.
+  useEffect(() => {
+    syncComposerDraftStoreFromUpstream(draftStore, composer.value);
+  }, [composer.value, draftStore]);
 
   return (
     <LazyConversationView
