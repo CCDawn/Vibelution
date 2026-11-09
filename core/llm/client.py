@@ -1216,6 +1216,13 @@ def _llm_retry_event_fields(
         ):
             if key in safe_metadata:
                 role_fields[key] = safe_metadata[key]
+    # Diagnostic fields come first on purpose. The runtime scene normalizer keeps
+    # at most MAX_TELEMETRY_FIELD_ITEMS (24) entries per event in insertion
+    # order, and ``role_fields`` alone can supply 30+ keys. With the diagnostics
+    # last, every failure event silently lost errorType/attempt/error, so an
+    # upstream 400 body could never be read back from the scene log. Keeping the
+    # diagnostics in the first twelve slots survives the budget regardless of
+    # how many role keys the caller's metadata carries.
     return {
         "role": role,
         "profileId": profile_id,
@@ -1223,16 +1230,16 @@ def _llm_retry_event_fields(
         "model": model,
         "messageCount": message_count,
         "toolCount": tool_count,
-        **role_fields,
-        "metadata": safe_metadata,
-        "attempt": attempt,
-        "maxAttempts": max_attempts,
         "errorType": llm_error.category,
         "retryable": llm_error.retryable,
         "errorDisposition": disposition
         if disposition is not None
         else classify_error(llm_error).disposition,
+        "attempt": attempt,
+        "maxAttempts": max_attempts,
         "error": str(llm_error),
+        **role_fields,
+        "metadata": safe_metadata,
     }
 
 

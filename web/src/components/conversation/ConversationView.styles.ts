@@ -292,8 +292,8 @@ backToBottomButton:
   cliAgentLifecycleText:
     `vui-components-conversationview cliAgentLifecycleText min-w-0 text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] ${vuiStateCoolInfoClass}`,
   cliAgentLifecycleTime:
-    `vui-components-conversationview cliAgentLifecycleTime min-w-0 text-vui-xs leading-tight text-[var(--fg-tertiary)] ${vuiStateCoolInfoClass}`,
-  cliAgentLifecycleTurn: `vui-components-conversationview cliAgentLifecycleTurn min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateCoolInfoClass} !bg-[var(--vui-surface-panel)]`,
+    `vui-components-conversationview cliAgentLifecycleTime ml-auto min-w-0 shrink-0 text-vui-xs leading-tight text-[var(--fg-tertiary)] ${vuiStateCoolInfoClass}`,
+  cliAgentLifecycleTurn: `vui-components-conversationview cliAgentLifecycleTurn mx-auto flex w-full ${transcriptMeasure} min-w-0 items-center gap-2 ${vuiOpaqueRowClass} p-2 ${vuiStateCoolInfoClass} !bg-[var(--vui-surface-panel)]`,
   // Turn-envelope dividers (ZCode alignment): hairlines flanking a small icon
   // and a short label. Compression checkpoints, model switches and the fork
   // provenance marker all share the row; only the tone differs.
