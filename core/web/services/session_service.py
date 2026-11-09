@@ -1428,7 +1428,7 @@ def stop_session_service_admission() -> None:
             _SESSION_EXECUTOR_DRAIN_THREADS.append(joiner)
 
 
-def _record_restart_resume_pending() -> None:
+def record_restart_resume_pending(*, replace: bool = True) -> None:
     """Record turns this graceful stop interrupts so startup can resume them.
 
     A restart and an operator pressing stop both end in the same terminal
@@ -1451,13 +1451,15 @@ def _record_restart_resume_pending() -> None:
         for snapshot in snapshots
         if isinstance(snapshot, dict)
     ]
-    restart_resume_pending.record_pending_restart_resume(_WORK_RUN_STORE, entries)
+    restart_resume_pending.record_pending_restart_resume(
+        _WORK_RUN_STORE, entries, replace=replace
+    )
 
 
 def shutdown_session_service(*, deadline: float) -> dict[str, Any]:
     """Drain accepted session/projection work using the lifespan deadline."""
 
-    _record_restart_resume_pending()
+    record_restart_resume_pending(replace=False)
     stop_session_service_admission()
     with _SESSION_EXECUTOR_LIFECYCLE_LOCK:
         joiners = tuple(_SESSION_EXECUTOR_DRAIN_THREADS)

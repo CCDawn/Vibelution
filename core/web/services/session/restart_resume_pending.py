@@ -30,8 +30,15 @@ def marker_path_for_store(store: Any) -> Path | None:
     return Path(root).parent / MARKER_FILENAME
 
 
-def record_pending_restart_resume(store: Any, entries: Iterable[dict[str, Any]]) -> None:
-    """Overwrite the marker with the turns this shutdown is interrupting."""
+def record_pending_restart_resume(
+    store: Any, entries: Iterable[dict[str, Any]], *, replace: bool = True
+) -> None:
+    """Overwrite the marker with the turns this shutdown is interrupting.
+
+    ``replace=False`` keeps an existing marker: a later drain call runs after the
+    interrupted runs have already settled, so its empty list is not evidence that
+    nothing was interrupted.
+    """
 
     path = marker_path_for_store(store)
     if path is None:
@@ -46,7 +53,8 @@ def record_pending_restart_resume(store: Any, entries: Iterable[dict[str, Any]])
             continue
         by_session.setdefault(session_id, []).append(turn_id)
     if not by_session:
-        clear_pending_restart_resume(store)
+        if replace:
+            clear_pending_restart_resume(store)
         return
     payload = {
         "schemaVersion": MARKER_SCHEMA_VERSION,

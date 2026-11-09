@@ -972,6 +972,9 @@ def shutdown(*, timeout: float = 8.0) -> dict[str, Any]:
         if not _STARTED:
             return {"closed": True}
         _, _, sessions, runtime = _services()
+        # Record before the stop below settles these runs; afterwards the
+        # snapshots are terminal and nothing can be recovered from them.
+        sessions.record_restart_resume_pending()
         sessions.stop_session_service_admission()
         if not _OFFLINE_MIGRATION:
             try:
