@@ -29,6 +29,12 @@ export type VStateSurfaceProps = Omit<ComponentPropsWithoutRef<"section">, "titl
    * and content-sized fact chips instead of full-width 1fr cards.
    */
   density?: VStateSurfaceDensity;
+  /**
+   * Let the compact body scroll instead of clamping to two lines. Use it for
+   * inline surfaces that carry operator-facing prose (an Agent question) rather
+   * than a one-line notice, where clamping silently hides the text.
+   */
+  bodyScrollable?: boolean;
 };
 
 const BASE =
@@ -75,6 +81,10 @@ const DESCRIPTION =
 const DESCRIPTION_COMPACT =
   "min-w-0 max-w-[88ch] [font-size:var(--vui-font-xs)] leading-snug text-[var(--fg-secondary)] " +
   "[display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]";
+/** Same compact body without the two-line clamp; scrolls instead of hiding text. */
+const DESCRIPTION_COMPACT_SCROLLABLE =
+  "min-w-0 max-w-[88ch] max-h-[9rem] overflow-y-auto whitespace-pre-wrap break-words " +
+  "[font-size:var(--vui-font-xs)] leading-snug text-[var(--fg-secondary)]";
 /** Stretching cards — good for sparse overview; bad for 2 short facts on wide screens. */
 const FACTS = "grid min-w-0 grid-cols-[repeat(auto-fit,minmax(8rem,1fr))] gap-1.5";
 /** Content-sized chips that wrap; no full-row empty floors. */
@@ -109,6 +119,7 @@ function skeletonLineCount(value: boolean | number | undefined): number {
 
 export function VStateSurface({
   actions,
+  bodyScrollable = false,
   busy,
   children,
   className,
@@ -146,7 +157,7 @@ export function VStateSurface({
         <div className={COPY}>
           <strong className={compact ? TITLE_COMPACT : TITLE}>{title}</strong>
           {children ? (
-            <span className={compact ? DESCRIPTION_COMPACT : DESCRIPTION}>{children}</span>
+            <span className={compact ? (bodyScrollable ? DESCRIPTION_COMPACT_SCROLLABLE : DESCRIPTION_COMPACT) : DESCRIPTION}>{children}</span>
           ) : null}
         </div>
       </div>
