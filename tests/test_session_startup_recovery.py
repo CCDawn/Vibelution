@@ -878,10 +878,41 @@ def test_stale_restart_interrupt_is_not_replayed(
 def test_operator_cancelled_turn_is_not_resumed_from_journal(
     recovery_env, tmp_path, submit_calls
 ) -> None:
-    """Only ``process_restarted`` interruptions are resumable."""
+    """Only restart-reason interruptions are resumable."""
 
     _seed_conversation(tmp_path)
     _seed_restart_interrupted_turn(tmp_path, reason="operator_cancelled")
+
+    summary = startup_recovery.recover_interrupted_session_turns_on_startup()
+
+    assert summary["resumedCount"] == 0
+    assert summary["journalInterruptResumeCount"] == 0
+    assert submit_calls == []
+
+
+def test_electron_user_restart_is_resumed_from_journal(
+    recovery_env, tmp_path, submit_calls, drain_calls
+) -> None:
+    """The Electron lifecycle stop writes ``electron_user_restart``; resume it."""
+
+    _seed_conversation(tmp_path)
+    _seed_restart_interrupted_turn(tmp_path, reason="electron_user_restart")
+
+    summary = startup_recovery.recover_interrupted_session_turns_on_startup()
+
+    assert summary["resumedCount"] == 1
+    assert summary["journalInterruptResumeCount"] == 1
+    assert [call["content"] for call in submit_calls] == [ORIGINAL_PROMPT]
+    assert submit_calls[0]["turn_mode"] == "hot_restart_resume"
+
+
+def test_electron_user_close_is_not_resumed_from_journal(
+    recovery_env, tmp_path, submit_calls
+) -> None:
+    """Closing the window is a deliberate leave; it must stay stopped."""
+
+    _seed_conversation(tmp_path)
+    _seed_restart_interrupted_turn(tmp_path, reason="electron_user_close")
 
     summary = startup_recovery.recover_interrupted_session_turns_on_startup()
 

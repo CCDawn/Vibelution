@@ -196,13 +196,17 @@ def _companion_session_ids(s: Any) -> set[str] | None:
     return session_ids
 
 
-# Hard-kill restarts never reach the graceful shutdown hook, so neither the
-# shutdown marker nor an active chat_turn snapshot survives them. The runtime's
-# own reconcile still stamps the abandoned turn with ``turn_interrupted`` and
-# ``reason=process_restarted``; that journal fact is the only durable evidence
-# left after a hard kill, and this sweep falls back to it. The age window keeps
-# a stale interrupted turn from being replayed at every startup.
-_RESTART_INTERRUPT_REASON = "process_restarted"
+# Restarts never reach the graceful shutdown hook, so neither the shutdown
+# marker nor an active chat_turn snapshot survives them. The runtime still
+# stamps the abandoned turn with ``turn_interrupted`` plus the stop reason it
+# was given; that journal fact is the only durable evidence left, and this
+# sweep falls back to it. Two reasons mean "a restart took this turn":
+# ``process_restarted`` (runtime reconcile) and ``electron_user_restart``
+# (the Electron lifecycle stop in control.py _RUNTIME_STOP_REASONS). Operator
+# leave (``electron_user_close``) and full shutdown (``runtime_shutdown``)
+# stay excluded so a deliberate stop is never auto-resumed. The age window
+# keeps a stale interrupted turn from being replayed at every startup.
+_RESTART_INTERRUPT_REASONS = frozenset({"process_restarted", "electron_user_restart"})
 _RESTART_INTERRUPT_MAX_AGE_SECONDS = 30 * 60.0
 _RESTART_INTERRUPT_MAX_AGE_ENV = "VIBELUTION_SESSION_RECOVERY_MAX_AGE_SECONDS"
 
@@ -240,8 +244,9 @@ def _latest_restart_interrupted_turn(events: list[Any]) -> tuple[str, str]:
     """Latest turn the runtime stamped ``turn_interrupted`` because of a restart.
 
     Returns ``(turn_id, timestamp)`` or ``("", "")``. Only interruptions whose
-    payload reason is ``process_restarted`` qualify: a turn the operator
-    cancelled carries a different reason and must stay cancelled. Turns an
+    payload reason is a restart reason (``_RESTART_INTERRUPT_REASONS``)
+    qualify: a turn the operator cancelled carries a different reason and must
+    stay cancelled. Turns an
     earlier sweep already resumed are skipped so one crash is not replayed
     forever.
     """
@@ -271,7 +276,7 @@ def _latest_restart_interrupted_turn(events: list[Any]) -> tuple[str, str]:
             continue
         payload = getattr(event, "payload", None)
         reason = str(payload.get("reason") or "").strip() if isinstance(payload, dict) else ""
-        if reason != _RESTART_INTERRUPT_REASON:
+        if reason not in _RESTART_INTERRUPT_REASONS:
             continue
         return turn_id, str(getattr(event, "timestamp", "") or "").strip()
     return "", ""
