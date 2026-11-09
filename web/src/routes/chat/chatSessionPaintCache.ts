@@ -87,6 +87,9 @@ export function mergeStickySessionDetailPaint(
   if (!sticky || sticky.id !== live.id) {
     return { ...live, provisionalTranscript: undefined };
   }
+  if (sticky === live) {
+    return { ...live, provisionalTranscript: undefined };
+  }
   // Prefer full window merge when both sides carry messageWindow metadata.
   return mergeEditResubmitDetail(sticky, live, (before, incoming) => ({
     ...(before?.messageWindow && incoming.messageWindow
@@ -95,6 +98,19 @@ export function mergeStickySessionDetailPaint(
           messageWindow: incoming.messageWindow ?? before?.messageWindow }),
     provisionalTranscript: undefined,
   }));
+}
+
+/**
+ * Store a paint that is already the merged sticky+live view.
+ * rememberSessionDetailPaint would merge it a second time: the merged detail
+ * always carries at least the sticky message count, so the extra merge pass is
+ * pure work on the streaming hot path.
+ */
+function rememberMergedSessionDetailPaint(sessionId: string, merged: SessionDetail) {
+  if (!sessionId || merged.provisionalTranscript) {
+    return;
+  }
+  touchOrder(sessionId, merged);
 }
 
 /** Store a hydrated detail for instant re-paint on tab return. */
@@ -156,7 +172,7 @@ export function resolveStickySessionDetailPaint(options: {
   if (live?.id === activeSessionId && !live.provisionalTranscript) {
     if (sticky?.id === activeSessionId) {
       const merged = mergeStickySessionDetailPaint(sticky, live);
-      rememberSessionDetailPaint(merged);
+      rememberMergedSessionDetailPaint(activeSessionId, merged);
       return merged;
     }
     rememberSessionDetailPaint(live);
