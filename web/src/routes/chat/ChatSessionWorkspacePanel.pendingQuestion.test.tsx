@@ -91,16 +91,12 @@ function renderPanel(frameOverrides: Partial<ComponentProps<typeof ChatSessionWo
 }
 
 describe("ChatSessionWorkspacePanel pending question banner", () => {
-  it("renders the compact info banner above the composer for a fresh question", () => {
+  // The assistant already asked this question in its reply. Mainstream chat
+  // surfaces do not echo that paragraph back above the composer, and doing so
+  // duplicated the raw Markdown text in a second place.
+  it("does not echo the pending question above the composer", () => {
     renderPanel({ pendingQuestion: QUESTION });
-    expect(capturedComposerPreceding).toBeTruthy();
-    const markup = renderToStaticMarkup(<>{capturedComposerPreceding}</>);
-    expect(markup).toContain('data-vui="state-surface"');
-    expect(markup).toContain('data-tone="info"');
-    expect(markup).toContain('data-density="compact"');
-    expect(markup).toContain("待你回答");
-    expect(markup).toContain("部署到测试环境还是生产环境？");
-    expect(markup).toContain('data-chat-pending-question="q-1"');
+    expect(capturedComposerPreceding).toBeNull();
   });
 
   it("hides the banner while the session owns execution", () => {
@@ -126,9 +122,9 @@ describe("ChatSessionWorkspacePanel pending question banner", () => {
     expect(capturedComposerPreceding).toBeNull();
   });
 
-  it("shows the banner without a turnId comparison when the slot carries an empty turnId", () => {
+  it("stays empty even when the slot carries an empty turnId", () => {
     renderPanel({ pendingQuestion: { ...QUESTION, turnId: "" } });
-    expect(capturedComposerPreceding).toBeTruthy();
+    expect(capturedComposerPreceding).toBeNull();
   });
 
   it("renders nothing when the slot is empty", () => {
