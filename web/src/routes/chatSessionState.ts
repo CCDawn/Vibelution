@@ -7,6 +7,8 @@ import {  editMessageIndex,
   mergeEditResubmitDetailWithOutcome,
 } from "./chat/chatEditResubmitState";
 import { isSessionDeleteTombstoned } from "./sessionDeleteTombstone";
+import { messageSequenceOrder } from "../components/conversation/conversationMessageOrder";
+import { isLiveOverlayMessage } from "../components/conversation/conversationMessagePredicates";
 
 export type OptimisticUserMessageInput = {
   sessionId: string;
@@ -21,6 +23,23 @@ export type OptimisticUserMessageInput = {
 const OPTIMISTIC_USER_MESSAGE_METADATA_KEY = "optimisticUserMessage";
 const CLIENT_SUBMISSION_ID_METADATA_KEY = "clientSubmissionId";
 let fallbackSubmissionSequence = 0;
+
+/**
+ * Tail sequence for a locally appended user row. The journal numbers durable
+ * messages, so a fresh row parks one past the highest sequenced entry; the next
+ * optimistic send sees the index already written on its predecessor and steps
+ * again. That keeps local order on the same sequence axis as the journal
+ * instead of leaving the row unsequenced for the renderer to guess.
+ */
+function nextOptimisticMessageIndex(detail: SessionDetail): number {
+  return (detail.messages ?? []).reduce((highest, message) => {
+    if (isLiveOverlayMessage(message)) {
+      return highest;
+    }
+    const order = messageSequenceOrder(message);
+    return Number.isFinite(order) ? Math.max(highest, order) : highest;
+  }, 0) + 1;
+}
 
 export function createClientSubmissionId(sessionId: string): string {
   const randomUuid = globalThis.crypto?.randomUUID?.();
@@ -292,6 +311,7 @@ export function appendOptimisticUserMessage(
   }
 
   const createdAt = input.createdAt ?? new Date().toISOString();
+  const messageIndex = nextOptimisticMessageIndex(detail);
   const optimisticMessage: ConversationMessage = {
     id: optimisticUserMessageId(input),
     role: "user",
@@ -301,6 +321,7 @@ export function appendOptimisticUserMessage(
     metadata: {
       [OPTIMISTIC_USER_MESSAGE_METADATA_KEY]: true,
       [CLIENT_SUBMISSION_ID_METADATA_KEY]: input.clientSubmissionId,
+      messageIndex,
       pending: true,
       attachmentIds: input.attachmentIds ?? [],
       references: input.references ?? [],
