@@ -99,6 +99,9 @@ _CAPABILITY_FIELD_ALIASES = {
     "structuredContent": "supports_structured_content",
     "supportsStructuredContent": "supports_structured_content",
     "supports_structured_content": "supports_structured_content",
+    "reasoningEffort": "supports_reasoning_effort",
+    "supportsReasoningEffort": "supports_reasoning_effort",
+    "supports_reasoning_effort": "supports_reasoning_effort",
 }
 
 _RUNTIME_TO_CATALOG_CAPABILITY = {
@@ -117,6 +120,7 @@ _RUNTIME_TO_CATALOG_CAPABILITY = {
     "supports_strict_json_schema": "strict_json_schema",
     "supports_responses_transport": "responses_transport",
     "supports_structured_content": "structured_content",
+    "supports_reasoning_effort": "reasoning_effort",
 }
 _CATALOG_TO_RUNTIME_CAPABILITY = {
     catalog_field: runtime_field
@@ -611,6 +615,29 @@ def llm_model_entry_issues(
             for value in (model_entry.get("reasoning_effort_values") or [])
             if str(value or "").strip()
         ]
+        declared_overrides, _declared_fields = _declared_capability_overrides(
+            model_entry
+        )
+        declared_defaults = (
+            model_entry.get("defaults")
+            if isinstance(model_entry.get("defaults"), dict)
+            else {}
+        )
+        # 条目既可能已拍平（顶层键），也可能保留 defaults 子表；两种形态都要看。
+        declared_effort_values = effort_values or [
+            str(value or "").strip()
+            for value in (declared_defaults.get("reasoning_effort_values") or [])
+            if str(value or "").strip()
+        ]
+        if (
+            declared_overrides.get("supports_reasoning_effort") is False
+            and declared_effort_values
+        ):
+            _add_error(
+                "capabilities.supports_reasoning_effort=false 表示这条通道不接受 "
+                "reasoning_effort，但仍声明了 reasoning_effort_values="
+                f"{declared_effort_values}；请清空思考强度可选值，或去掉该能力声明"
+            )
         if adapter not in {"", "none"} and not effort_values:
             _add_error(
                 f"reasoning_effort_adapter=`{adapter}` 已声明但 reasoning_effort_values 为空；"

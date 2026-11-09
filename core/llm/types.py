@@ -67,6 +67,10 @@ class LLMCapabilities:
     supports_strict_json_schema: bool = False
     supports_responses_transport: bool = False
     supports_structured_content: bool = False
+    # 通道能力声明：False 表示这条 provider/model 组合不接受 reasoning_effort
+    # 顶层参数（例如经 litellm 中转池访问时节点配置不齐）。声明为 False 时
+    # 请求在发送前就剥掉该参数，不再依赖 400 探测学习。
+    supports_reasoning_effort: bool = True
 
 
 @dataclass
