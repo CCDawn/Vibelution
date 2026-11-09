@@ -2264,6 +2264,34 @@ def _remember_route_unsupported_params(route_key: str, params: Tuple[str, ...]) 
             _LLM_ROUTE_UNSUPPORTED_PARAMS.pop(oldest, None)
 
 
+#: 通道能力声明 → 顶层参数名。能力字段为 False 时，该参数在发送前剥掉。
+_DECLARED_UNSUPPORTED_PARAM_GATES: Tuple[Tuple[str, str], ...] = (
+    ("supports_reasoning_effort", "reasoning_effort"),
+)
+
+
+def _strip_declared_unsupported_params(
+    payload: Dict[str, Any], capabilities: Any
+) -> Tuple[Dict[str, Any], Tuple[str, ...]]:
+    """按通道能力声明在发送前剥掉明确不支持的顶层参数。
+
+    与 per-route 负缓存预剥语义一致，区别只在事实来源：这里读的是 operator
+    在配置里声明的确定能力，而不是运行时 400 探测学到的结论。未声明、或声明
+    了但当前 payload 顶层没有该参数时，原样返回且不产生副作用。
+    """
+    if capabilities is None:
+        return payload, ()
+    declared = tuple(
+        param_name
+        for capability_field, param_name in _DECLARED_UNSUPPORTED_PARAM_GATES
+        if getattr(capabilities, capability_field, None) is False
+    )
+    present = tuple(name for name in declared if name in payload)
+    if not present:
+        return payload, ()
+    return _strip_unsupported_params(payload, present), present
+
+
 def _pre_strip_cached_unsupported_params(
     payload: Dict[str, Any], route_key: str
 ) -> Tuple[Dict[str, Any], Tuple[str, ...]]:
@@ -5115,6 +5143,36 @@ class LLMClient:
             lifecycle=False,
         )
 
+    def _record_declared_unsupported_params_strip(
+        self, phase: str, stripped: Tuple[str, ...]
+    ) -> None:
+        """通道能力声明导致的首发前剥参观测。
+
+        这条事件是「配置声明生效」的证据：本轮没有先付 400 探测，也不应该再
+        出现 ``unsupported_params_degraded``。声明与运行时负缓存合流到同一处
+        预剥，语义一致。
+        """
+        _record_llm_scene_event(
+            phase,
+            f"llm.{phase}.declared_unsupported_params_stripped",
+            message=(
+                "channel capability declaration says this parameter is unsupported; "
+                "stripping it before send."
+            ),
+            level="info",
+            outcome="succeeded",
+            fields={
+                "role": self.role,
+                "profileId": self.profile_id,
+                "provider": self.provider.kind,
+                "model": self.profile.model,
+                "serviceClass": self._route_service_class(),
+                "declaredUnsupported": True,
+                "strippedParams": list(stripped),
+            },
+            lifecycle=False,
+        )
+
     def _record_protocol_degrade_recovery(
         self,
         *,
@@ -5195,6 +5253,15 @@ class LLMClient:
         param_degrade_rounds = 0
         stripped_params_log: List[str] = []
         route_key = _llm_route_concurrency_key(self.provider, self.profile, profile_id=self.profile_id)
+        # 通道能力声明优先：配置里 capabilities.supports_reasoning_effort=false
+        # 的 route 在首发前就按声明剥参，不再先付一次 400 探测。
+        payload, declared_stripped_params = _strip_declared_unsupported_params(
+            payload, self.capabilities
+        )
+        if declared_stripped_params:
+            self._record_declared_unsupported_params_strip(
+                phase, declared_stripped_params
+            )
         # per-route 负缓存命中即预剥：注入后、首发前剥掉已确认被拒的参数，
         # 免去每通一次的 400 探测 + 重发固定开销（2026-10-06）。
         payload, pre_stripped_params = _pre_strip_cached_unsupported_params(payload, route_key)
