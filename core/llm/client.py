@@ -117,6 +117,11 @@ _LLM_ROUTE_GATE_WAIT_MIN_SECONDS = 1.0
 _LLM_ROUTE_GATE_WAIT_MAX_SECONDS = 600.0
 _LLM_ROUTE_GATE_WAIT_LIMIT: float | None = None
 
+# 有界等待期间的可见提示节流：首次进入等待立刻发一条 llm_status
+# ``concurrency_waiting``，之后每 10s 刷新一次已等待时长。只在该路由显式
+# 配置了 route_concurrency >= 1 时才会走到（0 = 不限制，不进闸门）。
+_ROUTE_WAIT_NOTICE_INTERVAL_SECONDS = 10.0
+
 _LLM_STREAM_TOTAL_DEADLINE_ENV = "VIBELUTION_LLM_STREAM_TOTAL_DEADLINE_SECONDS"
 _LLM_STREAM_TOTAL_DEADLINE_DEFAULT_SECONDS = DEFAULT_LLM_STREAM_TOTAL_DEADLINE_SECONDS
 _LLM_STREAM_TOTAL_DEADLINE_MIN_SECONDS = 60.0
@@ -770,13 +775,18 @@ def _resolve_llm_route_concurrency_limit(config: Any = None) -> int:
     ``[llm]`` config (``route_concurrency``), and missing/invalid values fall
     back to the packaged default. Nothing is read at import time, and the
     per-route gate keying is unchanged: existing gates keep their semaphore.
+
+    ``0`` (the packaged default) means **no route gate at all**: callers are
+    never queued and never rejected for lack of a slot. A positive value keeps
+    the previous bounded-wait behaviour. Negative/garbage values fall through
+    to the default rather than silently disabling the gate.
     """
 
     override = _LLM_ROUTE_CONCURRENCY_LIMIT
-    if isinstance(override, int) and not isinstance(override, bool) and override >= 1:
+    if isinstance(override, int) and not isinstance(override, bool) and override >= 0:
         return override
     value = getattr(getattr(config, "llm", None), "route_concurrency", None)
-    if isinstance(value, int) and not isinstance(value, bool) and value >= 1:
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
         return value
     return DEFAULT_LLM_ROUTE_CONCURRENCY
 
@@ -794,6 +804,12 @@ def _reserve_llm_route_slot(
     message_count: int,
     tool_count: int,
 ):
+    if int(limit) <= 0:
+        # 0 = 显式关闭同路由并发闸门：不排队、不发等待/占用事件，调用直接
+        # 进入发送阶段。provider 侧的限流与上层预算仍然生效，但本地不再
+        # 出现"抢不到槽位 → gate_timeout → 重试叠乘"的空转。
+        yield 0
+        return
     gate = _llm_route_concurrency_gate(route_key, limit=limit)
     wait_started = time.time()
     gate_wait_budget = _llm_route_gate_wait_seconds()
@@ -818,11 +834,40 @@ def _reserve_llm_route_slot(
             },
             lifecycle=False,
         )
+        # 可见提示：过去这里只写 scene 事件，界面上只剩“已工作 N 秒”，用户
+        # 完全不知道自己卡在排队上。改走 llm_status 通道，让会话里出现一行
+        # “正在排队等待模型通道”，并每 10s 刷新已等待时长。
+        _publish_llm_status_event(
+            "concurrency_waiting",
+            role=role,
+            profileId=profile_id,
+            provider=provider,
+            model=model,
+            phase=phase,
+            limit=limit,
+            waitedMs=0,
+            waitBudgetMs=int(gate_wait_budget * 1000),
+        )
+        last_wait_notice_at = gate_wait_started_monotonic
         while True:
             acquired = gate.acquire(timeout=0.1)
             if acquired:
                 break
             _raise_if_llm_cancelled()
+            now_monotonic = time.monotonic()
+            if now_monotonic - last_wait_notice_at >= _ROUTE_WAIT_NOTICE_INTERVAL_SECONDS:
+                last_wait_notice_at = now_monotonic
+                _publish_llm_status_event(
+                    "concurrency_waiting",
+                    role=role,
+                    profileId=profile_id,
+                    provider=provider,
+                    model=model,
+                    phase=phase,
+                    limit=limit,
+                    waitedMs=int((now_monotonic - gate_wait_started_monotonic) * 1000),
+                    waitBudgetMs=int(gate_wait_budget * 1000),
+                )
             # 有界等待：上限由 VIBELUTION_LLM_ROUTE_GATE_WAIT_SECONDS 控制
             #（默认 120s，钳制 1-600s）。之前这里是无上限自旋，被遗弃的
             # 讲者线程只要还持有槽位就能让同路由后续调用全部永久排队。
@@ -1713,8 +1758,11 @@ def _qwen_inflight_cache_keepalive_enabled(
         if isinstance(cache_payload, Mapping)
         else 0
     )
+    # ``route_concurrency <= 0`` 表示不限制并发（无闸门），此时按“仍有并发
+    # 余量”处理：keepalive 的初衷是并发低时别让前缀缓存过期，取消限制后
+    # 这个前提恒成立。
     return bool(
-        route_concurrency >= 2
+        (route_concurrency <= 0 or route_concurrency >= 2)
         and _qwen_inflight_cache_keepalive_interval_seconds() > 0
         and str(protocol_summary.get("promptCacheProviderStrategy") or "")
         .strip()

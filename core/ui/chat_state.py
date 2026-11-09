@@ -463,6 +463,17 @@ def clear_session_chat_state_cache() -> None:
         _SESSION_STATE_READ_CACHE.clear()
 
 
+def chat_state_write_epoch() -> int:
+    """Return the process-wide chat-state write epoch.
+
+    Every chat-state write bumps it, so callers that memoize a derived read can
+    key their cache on the epoch instead of re-reading the store.
+    """
+
+    with _SESSION_STATE_READ_CACHE_LOCK:
+        return _CHAT_STATE_WRITE_EPOCH
+
+
 def _bump_chat_state_write_epoch() -> None:
     """Invalidate the session read cache after any chat-state write."""
 

@@ -59,3 +59,21 @@ def test_existing_snapshot_compares_creation_time_within_path_and_handle_pairs(t
             for name in ('st_dev', 'st_ino', 'st_size', 'st_mtime_ns', 'st_ctime_ns')})
     monkeypatch.setattr(os, 'fstat', handle_stat)
     assert read_existing_config_snapshot(source) == {'value': 1}
+
+
+def test_default_path_load_degrades_when_the_config_edit_lock_is_busy(tmp_path, monkeypatch):
+    """A read must not die because another process is editing the config.
+
+    2026-11-09: every short-lived Launcher bridge (freshness/status) cold-loads
+    the public config, bootstrap waited the full ten-second lock timeout and the
+    bridge failed before answering, so the desktop top bar reported every read
+    as broken while a concurrent test run held the lock.
+    """
+    from config import public_config as owner
+    source = tmp_path / 'config.toml'
+    source.write_text('[workbench]\nbackend_port = 9241\n', encoding='utf-8')
+    monkeypatch.setattr(owner, 'CONFIG_PATH', source)
+    def busy(*_args, **_kwargs):
+        raise TimeoutError('Timed out acquiring cross-process file lock: config-edit.lock')
+    monkeypatch.setattr(owner, 'ensure_global_config_initialized', busy)
+    assert owner.load_public_config()['workbench']['backend_port'] == 9241

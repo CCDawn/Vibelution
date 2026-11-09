@@ -361,11 +361,9 @@ def _archive_duplicate_team_chat_rooms(keep_room_id: str, team_id: str) -> None:
     historical_room_ids = set(s._historical_team_chat_room_ids(normalized_team_id))
     historical_room_ids.discard(normalized_keep_room_id)
     duplicates = [
-        room for room in chat_room_service.list_chat_rooms()
+        room for room in chat_room_service.list_team_chat_room_refs(normalized_team_id)
         if str(room.get("roomId") or "").strip() != normalized_keep_room_id
         and str(room.get("roomId") or "").strip() not in historical_room_ids
-        and str((room.get("config") or {}).get("source") or "").strip() == "team"
-        and str((room.get("config") or {}).get("teamId") or "").strip() == normalized_team_id
         and str(room.get("status") or "").strip() not in {"running", "stopping"}
     ]
     for room in duplicates:

@@ -1605,6 +1605,79 @@ def _resolve_live_electron_executable(session: dict[str, Any] | None = None) -> 
     return None
 
 
+def _packaged_electron_guard_reason() -> str:
+    """Why this checkout has no bootstrappable packaged shell ('' when it has one)."""
+
+    if _packaged_electron_desktop_executable() is None:
+        return "packaged_entry_missing"
+    if _packaged_electron_is_current_checkout():
+        return ""
+    return "packaged_shell_launch_blocking"
+
+
+def desktop_shell_visible_window_route() -> dict[str, Any]:
+    """Which desktop shell must own the visible Workbench window for a fresh start.
+
+    Visible windows belong to Electron. Callers may bootstrap the packaged entry
+    or hand the open to a live shell, but must never fall back to Edge and must
+    never treat "no shell" as a reason to skip the backend.
+    """
+
+    session = _latest_active_electron_desktop_session()
+    owner_pid = _live_electron_owner_pid()
+    if session or owner_pid > 0:
+        executable = _resolve_live_electron_executable(session)
+        if executable is not None:
+            return {
+                "available": True,
+                "reason": "live_desktop_shell",
+                "pid": int(owner_pid or _desktop_session_process_id(session)),
+                "executable": str(executable),
+            }
+        return {
+            "available": False,
+            "reason": "live_shell_executable_unknown",
+            "pid": int(owner_pid),
+            "executable": "",
+        }
+    guard_reason = _packaged_electron_guard_reason()
+    if not guard_reason:
+        packaged = _packaged_electron_desktop_executable()
+        return {
+            "available": True,
+            "reason": "packaged_shell_bootstrap",
+            "pid": 0,
+            "executable": str(packaged) if packaged is not None else "",
+        }
+    return {"available": False, "reason": guard_reason, "pid": 0, "executable": ""}
+
+
+def open_workbench_window_via_desktop_shell(*, env: dict[str, str] | None = None) -> dict[str, Any]:
+    """Ask the desktop shell to show Workbench; never spawn Edge or a second backend."""
+
+    route = desktop_shell_visible_window_route()
+    if not bool(route.get("available")):
+        return {"opened": False, "reason": str(route.get("reason") or "desktop_shell_unavailable")}
+    executable_text = str(route.get("executable") or "").strip()
+    if not executable_text:
+        return {"opened": False, "reason": "desktop_shell_executable_unknown"}
+    executable = Path(executable_text)
+    try:
+        _signal_live_electron_open_workbench(executable=executable, env=dict(env or os.environ.copy()))
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        return {
+            "opened": False,
+            "reason": f"desktop_shell_signal_failed:{type(exc).__name__}",
+            "executable": str(executable),
+            "detail": str(exc)[:300],
+        }
+    return {
+        "opened": True,
+        "reason": str(route.get("reason") or "signaled"),
+        "executable": str(executable),
+    }
+
+
 def _signal_live_electron_open_workbench(*, executable: Path, env: dict[str, str]) -> None:
     """Ask the live Electron shell to open Workbench; never spawn Edge."""
 
@@ -2228,6 +2301,15 @@ def run_launcher_action(
         and not bootstrap_checkout_electron
         and not electron_orchestrates
     )
+    electron_window_degraded = bool(missing_visible_electron)
+    electron_window_guard_reason = ""
+    if electron_window_degraded:
+        # No desktop shell can own a window right now (missing entry, stale shell
+        # refusing launch, or no live session). Starting the backend is still the
+        # useful half of the request: degrade to headless and report why, instead
+        # of aborting the whole start and leaving the product unable to run.
+        electron_window_guard_reason = _packaged_electron_guard_reason() or "no_live_desktop_shell"
+        effective_no_browser = True
     reuse_electron_backend = _can_reuse_backend_for_electron_window_open(
         action=action,
         session=electron_session,
@@ -2254,9 +2336,18 @@ def run_launcher_action(
             no_browser=effective_no_browser,
             env=env,
         )
-        if missing_visible_electron:
-            startup_telemetry["failureStage"] = "electron_window_required"
-            raise RuntimeError(_ELECTRON_WINDOW_REQUIRED_MESSAGE)
+        if electron_window_degraded:
+            startup_telemetry["electronWindowDegraded"] = True
+            startup_telemetry["electronWindowGuardReason"] = electron_window_guard_reason
+            _record_launcher_action_event(
+                "launcher.action.electron_window_degraded",
+                action=action,
+                no_browser=effective_no_browser,
+                env=env,
+                message=electron_window_guard_reason,
+                electron_window_degraded=True,
+                electron_window_guard_reason=electron_window_guard_reason,
+            )
         control_plane_started = time.monotonic()
         if reuse_electron_backend:
             completed = subprocess.CompletedProcess(
@@ -2287,6 +2378,7 @@ def run_launcher_action(
         )
         request_electron_window = bool(
             electron_window_action
+            and not electron_window_degraded
             and (not no_browser or bool(electron_session) or electron_orchestrates)
         )
         if completed.returncode == 0 and request_electron_window:
@@ -2399,6 +2491,8 @@ def run_launcher_action(
             backend_reused=bool(startup_telemetry.get("backendReused")),
             desktop_session_registered=bool(startup_telemetry.get("desktopSessionRegistered")),
             workbench_open=bool(startup_telemetry.get("workbenchOpen")),
+            electron_window_degraded=bool(startup_telemetry.get("electronWindowDegraded")),
+            electron_window_guard_reason=str(startup_telemetry.get("electronWindowGuardReason") or ""),
         )
         if completed is not None:
             completed.startup_telemetry = dict(startup_telemetry)
@@ -2424,6 +2518,8 @@ def _record_launcher_action_event(
     backend_reused: bool | None = None,
     desktop_session_registered: bool | None = None,
     workbench_open: bool | None = None,
+    electron_window_degraded: bool | None = None,
+    electron_window_guard_reason: str = "",
 ) -> None:
     internal_action = str(action or "").startswith("internal-")
     payload: dict[str, Any] = {
@@ -2458,9 +2554,12 @@ def _record_launcher_action_event(
         ("backendReused", backend_reused),
         ("desktopSessionRegistered", desktop_session_registered),
         ("workbenchOpen", workbench_open),
+        ("electronWindowDegraded", electron_window_degraded),
     ):
         if value is not None:
             payload[key] = bool(value)
+    if electron_window_guard_reason:
+        payload["electronWindowGuardReason"] = truncate_event_text(electron_window_guard_reason, limit=80)
     if return_code is not None:
         payload["returnCode"] = int(return_code)
         payload["ok"] = int(return_code) == 0

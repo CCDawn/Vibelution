@@ -19,6 +19,7 @@ import tomllib
 from core.llm import LLMInvocationContext, assert_llm_compatibility, invoke_llm
 from .llm_credentials import resolve_credential_ref
 from .llm_identity import make_model_ref
+from .lock_errors import ConfigEditLockBusy
 from .llm_security import (
     coerce_llm_runtime_probe_timeout,
     is_llm_local_network_base_url,
@@ -1453,7 +1454,13 @@ def load_public_config(config_path: Path | None = None, *, allow_legacy_v1: bool
                 _store_public_config_snapshot(signature, requested_allow_legacy_v1, copy.deepcopy(cached))
                 return cached
         # 快照/签名缓存未命中：保持原语义，默认路径先 ensure init 再读。
-        ensure_global_config_initialized(CONFIG_PATH)
+        # 但初始化要抢 config-edit.lock：另一个进程正在写配置时，只读加载
+        # 不该等满 10s 再抛错（2026-11-09 重启期间，每个新的 bridge 进程都
+        # 在这里超时，freshness/status 全部失败）。锁忙时直接按磁盘内容读。
+        try:
+            ensure_global_config_initialized(CONFIG_PATH)
+        except (TimeoutError, OSError, ConfigEditLockBusy):
+            pass
         signature = _public_config_file_signature(resolved)
         if signature is not None:
             snapshot = _PUBLIC_CONFIG_SNAPSHOT
@@ -3021,7 +3028,7 @@ def _config_edit_lock_unfenced(config_path: Path, *, timeout_seconds: float = 10
             except OSError:
                 pass
             if time.monotonic() >= deadline:
-                raise RuntimeError(f"Config edit lock is busy: {lock_path}")
+                raise ConfigEditLockBusy(f"Config edit lock is busy: {lock_path}")
             time.sleep(0.05)
     depths[key] = 1
     try:

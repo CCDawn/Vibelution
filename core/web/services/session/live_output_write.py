@@ -599,7 +599,35 @@ def _set_session_llm_status_live_output(
     feedback_error = ""
     failure_class = ""
 
-    if status_key == "retrying":
+    if status_key == "concurrency_waiting":
+        # 显式限流时的排队提示：用户必须知道"没反应"是因为在等槽位，而不是
+        # 模型在思考。字段来自 client 的 llm_status payload。
+        waited_ms = s._coerce_nonnegative_int(data.get("waitedMs") or data.get("waited_ms"))
+        limit = s._coerce_nonnegative_int(data.get("limit"))
+        budget_ms = s._coerce_nonnegative_int(data.get("waitBudgetMs") or data.get("wait_budget_ms"))
+        waited_seconds = max(0, int(waited_ms // 1000))
+        remaining_seconds = max(0, int(budget_ms // 1000) - waited_seconds)
+        limit_line = (
+            s.text_for(language, zh=f"当前通道上限 {limit} 个并发。", en=f"Route limit: {limit} concurrent. ")
+            if limit
+            else ""
+        )
+        budget_line = (
+            s.text_for(language, zh=f"最多再等 {remaining_seconds} 秒。", en=f"Up to {remaining_seconds}s left. ")
+            if budget_ms
+            else ""
+        )
+        content = s.text_for(
+            language,
+            zh=f"正在排队等待模型通道...\n已等待 {waited_seconds} 秒。{limit_line}{budget_line}本轮请求尚未发出。",
+            en=(
+                f"Waiting for a model route slot...\n{waited_seconds}s elapsed. "
+                f"{limit_line}{budget_line}The request has not been sent yet."
+            ),
+        )
+        stage = "model_queue"
+        feedback_name = "model_queue"
+    elif status_key == "retrying":
         attempt_line = (
             s.text_for(language, zh=f"第 {attempt}/{max_attempts} 次", en=f"attempt {attempt}/{max_attempts}")
             if attempt and max_attempts

@@ -169,6 +169,14 @@ def _prepare_bulk_archive_references(
     """Remove archive references while compensating every completed stage on failure."""
 
     mode_restore_token = _timed(timings, "snapshot_mode_bindings", get_mode_bindings_payload)
+    # 快照里已经带了这份 Agent 索引；后面的 repair / 返回 payload 直接复用，
+    # 不再各自重扫一遍 Agent 目录（成员多时这是最大的单项开销）。
+    agent_options = list(mode_restore_token.get("agents") or [])
+    direct_session_ids_by_agent_id = {
+        agent_id: str((snapshots_by_agent_id.get(agent_id) or {}).get("directSessionId") or "").strip()
+        for agent_id in candidate_ids
+        if str((snapshots_by_agent_id.get(agent_id) or {}).get("directSessionId") or "").strip()
+    }
     team_cleanup: dict[str, Any] = {}
     room_cleanup: dict[str, Any] = {}
     try:
@@ -186,6 +194,7 @@ def _prepare_bulk_archive_references(
                 dissolve_empty_rooms=dissolve_empty_rooms,
                 include_chat_rooms=False,
                 include_restore_token=True,
+                direct_session_ids_by_agent_id=direct_session_ids_by_agent_id,
             ),
         )
         mode_cleanup = _timed(
@@ -194,6 +203,7 @@ def _prepare_bulk_archive_references(
             lambda: remove_agents_from_mode_bindings(
                 candidate_ids,
                 agent_snapshots_by_agent_id=snapshots_by_agent_id,
+                agent_options=agent_options,
             ),
         )
     except Exception as exc:

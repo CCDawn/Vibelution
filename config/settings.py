@@ -41,6 +41,7 @@ NetworkConfig,
     SkinConfig,
     SoundConfig,
     PromptConfig,)
+from .lock_errors import ConfigEditLockBusy
 from .paths import ensure_global_config_initialized, resolve_config_path
 from .providers import (
     MODEL_PRESETS,
@@ -646,7 +647,11 @@ class ConfigLoader:
                 return path.resolve()
             return None
 
-        ensure_global_config_initialized()
+        try:
+            ensure_global_config_initialized()
+        except (TimeoutError, OSError, ConfigEditLockBusy):
+            # 只读探测：配置文件被其他进程持锁编辑时按现有文件读取，不因锁忙失败。
+            pass
         config_path = resolve_config_path()
         return config_path if config_path.exists() else None
 

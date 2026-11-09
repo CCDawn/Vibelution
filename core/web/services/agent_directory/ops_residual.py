@@ -35,6 +35,13 @@ DEFAULT_AGENT_PRIMARY_MODE = "chat"
 _source_authority_ref_fn = None
 _projection_edit_contract_fn = None
 
+# Memo for ``_active_chat_session_id``: value -> (monotonic read time, write
+# epoch, active session id), keyed by project root. Every chat-state write
+# bumps the epoch, so the TTL only bounds staleness from another process.
+_ACTIVE_CHAT_SESSION_CACHE: dict[str, tuple[float, int, str]] = {}
+_ACTIVE_CHAT_SESSION_CACHE_LOCK = threading.Lock()
+_ACTIVE_CHAT_SESSION_CACHE_TTL_SECONDS = 5.0
+
 # Workspace event JSONL files (inbox, group context, proposals, ...) have two
 # writer shapes: delivery appends one row, consume / read-receipt / revoke /
 # promote rewrite the whole file from an in-memory snapshot. Both go through
@@ -122,13 +129,38 @@ def _active_agent_prompt_template_id(agent: dict[str, Any]) -> str:
 
 def _active_chat_session_id() -> str:
     s = _service()
+    project_root = s._active_project_root()
+    # Mode-binding repair asks this once per Agent per mode, and every read
+    # reopens the conversation store (plus its file lock). The active session
+    # only changes on a chat-state write, so key the memo on the write epoch and
+    # keep a short TTL as the cross-process safety net.
+    cache_key = str(project_root)
     try:
-        payload = s.load_chat_state(s._active_project_root())
+        from core.ui import chat_state as _chat_state
+
+        epoch = _chat_state.chat_state_write_epoch()
+    except Exception:
+        epoch = -1
+    now = time.monotonic()
+    with _ACTIVE_CHAT_SESSION_CACHE_LOCK:
+        cached = _ACTIVE_CHAT_SESSION_CACHE.get(cache_key)
+        if (
+            cached is not None
+            and cached[1] == epoch
+            and (now - cached[0]) < _ACTIVE_CHAT_SESSION_CACHE_TTL_SECONDS
+        ):
+            return cached[2]
+    try:
+        payload = s.load_chat_state(project_root)
     except Exception:
         return ""
     if not isinstance(payload, dict):
-        return ""
-    return str(payload.get("active_conversation_id") or "").strip()
+        value = ""
+    else:
+        value = str(payload.get("active_conversation_id") or "").strip()
+    with _ACTIVE_CHAT_SESSION_CACHE_LOCK:
+        _ACTIVE_CHAT_SESSION_CACHE[cache_key] = (now, epoch, value)
+    return value
 
 
 def _agent_context_window_limit(
