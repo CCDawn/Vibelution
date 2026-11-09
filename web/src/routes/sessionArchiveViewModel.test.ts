@@ -158,7 +158,7 @@ describe("session archive UI wiring", () => {
     expect(archiveCopySource).toContain("关闭归档");
   });
 
-  it("replaces the live directory with a flat archived rail", () => {
+  it("keeps the archived view wired without a separate rail", () => {
     expect(workbenchSource).toContain("sessionArchiveMutation");
     expect(sessionMutationsSource).toContain("archiveChatSession");
     expect(sessionMutationsSource).toContain("unarchiveChatSession");
@@ -167,7 +167,7 @@ describe("session archive UI wiring", () => {
     expect(workbenchSource).toContain("rawSessionsWithArchived");
     expect(indexPanelSource).toContain("onArchive={handleArchiveSession}");
     expect(workbenchSource).toContain('queryKey: queryKeys.sessionArchive()');
-    expect(indexPanelSource).toContain("<ArchivedSessionRail");
+    expect(indexPanelSource).not.toContain("<ArchivedSessionRail");
     expect(indexPanelSource).toContain("showArchivedSessions ? null : <>");
     expect(workbenchSource).not.toContain("readOnly: variables.archive");
     expect(toolbarSource).toContain('data-vui="chat-session-timeline-toggle"');
