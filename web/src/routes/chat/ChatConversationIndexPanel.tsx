@@ -436,49 +436,9 @@ export function ChatConversationIndexPanel({
       sessionsTransientError={sessionsTransientError}
       sessionsBlockingError={sessionsBlockingError}
       conversationIndexLoading={conversationIndexLoading}
-      isEmpty={
-        showArchivedSessions
-          ? !archivedSessionsPending
-            && archivedSessions.length === 0
-            && allVisibleSessions.every((session) => !isSessionArchived(session) && !(Number(session.pinnedAtMs ?? 0) > 0))
-          : filteredConversations.length === 0
-            && archiveVisibleAgents.length === 0
-            && filteredTeams.length === 0
-            && filteredStandaloneGroupConversations.length === 0
-            && allVisibleSessions.length === 0
-      }
+        isEmpty={archiveVisibleAgents.length === 0}
       emptyTitle={showArchivedSessions ? t("noArchivedSessions") : t("noSessionsYet")}
     >
-          {sessionListRail.groups}
-          {showArchivedSessions ? (
-            <ArchivedSessionRail
-              sessions={archivedRailSessions}
-              totalCount={Math.max(archivedTotalEstimate, archivedRailSessions.length)}
-              sortBy={sessionListPrefs.sortBy}
-              loading={archivedSessionsPending}
-              archivePendingSessionIds={sessionArchiveMutation.pendingIds}
-              archivePendingSessionId={
-                sessionArchiveMutation.isPending
-                  ? String(sessionArchiveMutation.variables?.sessionId || "")
-                  : ""
-              }
-              deletePendingSessionId={
-                deleteSessionMutation.isPending
-                  ? String(deleteSessionMutation.variables?.sessionId || "")
-                  : ""
-              }
-              deleteAllPending={bulkDeleteSessionsMutation.isPending}
-              lang={lang}
-              t={t}
-              onUnarchive={(session) => sessionArchiveMutation.mutate({
-                sessionId: session.id,
-                archive: false,
-              })}
-              onDelete={handleDeleteArchivedSession}
-              onDeleteAll={handleDeleteAllArchivedSessions}
-              renderSessions={sessionListRail.renderSessionList}
-            />
-          ) : null}
           {showArchivedSessions ? null : <>
           <AgentConversationDirectory
             activeAgentId={selectedChatAgentId}
@@ -536,62 +496,6 @@ export function ChatConversationIndexPanel({
           {sessionBulkNotice ? (
             <div className={styles.panelNotice} role="status">{sessionBulkNotice.text}</div>
           ) : null}
-          <SessionBulkOperationsPanel
-            copy={sessionBulkCopy}
-            selectedCount={selectedBulkSessions.length}
-            visibleCount={visibleDirectSessionIds.length}
-            allVisibleSelected={allVisibleSessionsSelected}
-            pending={bulkSessionPending}
-            onSelectVisible={selectVisibleBulkSessions}
-            onClearSelection={clearBulkSessions}
-            onRemove={() => { void bulkRemoveSessions(); }}
-          />
-          <ConversationIndexTree
-            activeGroupRoomId={activeGroupRoomId}
-            activeSessionId={activeSessionId}
-            addToReviewSucceededLabel={t("addSessionToReviewSucceeded")}
-            agentsById={agentsById}
-            avatarImageUrlFrom={avatarImageUrlFrom}
-            avatarInitials={avatarInitials}
-            buildSessionReferencePayload={buildSessionReferencePayload}
-            collapsedConversationGroups={collapsedConversationGroups}
-            contextMenuSessionId={contextMenuSessionId}
-            conversationGroupLabel={conversationGroupLabel}
-            deleteBusyLabel={t("deleteSessionBusy")}
-            editingSessionId={editingSessionId}
-            editingSessionTitle={editingSessionTitle}
-            filteredConversationsCount={groupedGroupConversationCount}
-            filteredStandaloneGroupConversations={filteredStandaloneGroupConversations}
-            filteredTeams={filteredTeams}
-            formatTime={formatConversationIndexTime}
-            groupPanelActive={groupPanelActive}
-            groupedConversations={groupedGroupConversations}
-            lang={lang}
-            renamePending={renameSessionMutation.isPending}
-            renameSessionId={renameSessionMutation.variables?.sessionId ?? ""}
-            resolveModelLabel={resolveModelLabel}
-            runtimeRunningSessionIds={runtimeRunningSessionIds}
-            searchHasTerm={searchHasTerm}
-            sessionComposerErrors={sessionComposerErrors}
-            sessionIdsNeedingApproval={sessionIdsNeedingApproval}
-            sessionsById={sessionsById}
-            teams={teams}
-            statusLabel={statusLabel}
-            t={t}
-            onCancelRename={cancelRenameSession}
-            onContextMenu={openSessionContextMenu}
-            onDragReference={startSessionReferenceDrag}
-            onOpenDirectSession={handleOpenDirectSession}
-            onPrefetchDirectSession={handlePrefetchDirectSession}
-            onOpenGroupRoom={handleOpenGroupRoom}
-            onRenameTitleChange={setEditingSessionTitle}
-            onSubmitRename={submitRenameSession}
-            onToggleConversationGroup={toggleConversationGroup}
-            bulkSelectionEnabled
-            selectedBulkSessionIds={selectedBulkSessionIds}
-            bulkSelectLabel={lang === "zh" ? "选择会话" : "Select session"}
-            onToggleBulk={toggleBulkSession}
-          />
           </>}
           {sessionContextMenu && contextMenuSession ? (
             <Suspense fallback={null}>
