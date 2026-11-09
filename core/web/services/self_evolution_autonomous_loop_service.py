@@ -603,6 +603,10 @@ class SelfEvolutionAutonomousLoopService:
     def _load_skipping_corrupt(self, snapshot: Any, *, surface: str) -> dict[str, Any] | None:
         """Fail soft: one corrupt record must never 500 an active/latest read."""
 
+        # A missing active/latest record is a valid empty state, not damage;
+        # work_run_snapshot_shape_error(None) would misreport it as corrupt.
+        if snapshot is None:
+            return None
         shape_error = work_run_snapshot_shape_error(snapshot)
         if not shape_error:
             return snapshot
