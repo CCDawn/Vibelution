@@ -107,6 +107,18 @@ def _new_summary() -> dict[str, Any]:
     }
 
 
+def _load_restart_resume_pending(s: Any) -> dict[str, set[str]]:
+    """Turns a graceful restart interrupted, keyed by session id."""
+
+    from .restart_resume_pending import load_pending_restart_resume
+
+    try:
+        pending = load_pending_restart_resume(getattr(s, "_WORK_RUN_STORE", None))
+    except Exception:  # noqa: BLE001 - a bad marker must not break the sweep
+        return {}
+    return pending if isinstance(pending, dict) else {}
+
+
 def _active_chat_turn_session_ids(s: Any) -> set[str] | None:
     """Session ids owning a still-active chat_turn work-run after a restart.
 
@@ -165,7 +177,11 @@ def _companion_session_ids(s: Any) -> set[str] | None:
     return session_ids
 
 
-def _open_turn_work_run_is_interrupted(s: Any, turn_id: str) -> bool:
+def _open_turn_work_run_is_interrupted(
+    s: Any,
+    turn_id: str,
+    pending_turn_ids: set[str] | None = None,
+) -> bool:
     """Whether the open turn's chat_turn work-run snapshot is still active.
 
     A finished or missing snapshot means the runtime's own reconcile path owns
@@ -175,9 +191,13 @@ def _open_turn_work_run_is_interrupted(s: Any, turn_id: str) -> bool:
     """
 
     snapshot = s._WORK_RUN_STORE.load_active_snapshot_for_run("chat_turn", turn_id)
-    if not isinstance(snapshot, dict):
-        return False
-    return work_run_has_execution(snapshot)
+    if isinstance(snapshot, dict):
+        return work_run_has_execution(snapshot)
+    # A graceful restart writes the same terminal ``stopped`` state a manual
+    # stop writes, so the snapshot cannot prove which one happened. The
+    # shutdown marker is the only evidence that a restart interrupted this
+    # turn instead of the operator cancelling it.
+    return bool(pending_turn_ids and turn_id in pending_turn_ids)
 
 
 def _interrupted_turn_prompt(events: list[Any], turn_id: str) -> str:
@@ -413,6 +433,7 @@ def _resume_interrupted_turn(
     events: list[Any],
     summary: dict[str, Any],
     should_stop: Callable[[], bool] | None = None,
+    pending_turn_ids: set[str] | None = None,
 ) -> None:
     if _shutdown_requested(should_stop):
         return
@@ -420,7 +441,7 @@ def _resume_interrupted_turn(
     if conversation is None or s._conversation_is_read_only(conversation):
         summary["noInterruptedTurnCount"] += 1
         return
-    if not _open_turn_work_run_is_interrupted(s, open_turn_id):
+    if not _open_turn_work_run_is_interrupted(s, open_turn_id, pending_turn_ids):
         summary["noInterruptedTurnCount"] += 1
         return
     prompt = _interrupted_turn_prompt(events, open_turn_id)
@@ -547,6 +568,7 @@ def _recover_session_on_startup(
     summary: dict[str, Any],
     should_stop: Callable[[], bool] | None = None,
     active_turn_session_ids: set[str] | None = None,
+    pending_turn_ids: set[str] | None = None,
 ) -> None:
     if _shutdown_requested(should_stop):
         return
@@ -597,6 +619,7 @@ def _recover_session_on_startup(
         events=events,
         summary=summary,
         should_stop=should_stop,
+        pending_turn_ids=pending_turn_ids,
     )
 
 
@@ -630,7 +653,18 @@ def recover_interrupted_session_turns_on_startup(
         if _shutdown_requested(should_stop):
             summary["stopped"] = True
             return summary
+        restart_pending_map = _load_restart_resume_pending(s)
+        restart_pending_session_ids = set(restart_pending_map)
+        restart_pending_turn_ids = {
+            turn_id
+            for turn_ids in restart_pending_map.values()
+            for turn_id in turn_ids
+        }
         active_turn_session_ids = _active_chat_turn_session_ids(s)
+        if active_turn_session_ids is not None and restart_pending_session_ids:
+            active_turn_session_ids = (
+                set(active_turn_session_ids) | restart_pending_session_ids
+            )
         summary["activeTurnCandidateCount"] = (
             len(active_turn_session_ids) if active_turn_session_ids is not None else -1
         )
@@ -649,6 +683,7 @@ def recover_interrupted_session_turns_on_startup(
                     summary=summary,
                     should_stop=should_stop,
                     active_turn_session_ids=active_turn_session_ids,
+                    pending_turn_ids=restart_pending_turn_ids,
                 )
             except Exception as exc:  # noqa: BLE001 - one bad session never blocks startup
                 summary["errorCount"] += 1

@@ -1427,9 +1427,36 @@ def stop_session_service_admission() -> None:
             _SESSION_EXECUTOR_DRAIN_THREADS.append(joiner)
 
 
+def _record_restart_resume_pending() -> None:
+    """Record turns this graceful stop interrupts so startup can resume them.
+
+    A restart and an operator pressing stop both end in the same terminal
+    ``stopped`` state, so the snapshot alone cannot tell them apart later.
+    """
+
+    from core.web.services.session import restart_resume_pending
+
+    try:
+        snapshots = _WORK_RUN_STORE.load_active_snapshots("chat_turn")
+    except Exception:  # noqa: BLE001 - losing the marker restores manual resume
+        return
+    if not isinstance(snapshots, list):
+        return
+    entries = [
+        {
+            "sessionId": str(snapshot.get("sessionId") or "").strip(),
+            "turnId": str(snapshot.get("runId") or "").strip(),
+        }
+        for snapshot in snapshots
+        if isinstance(snapshot, dict)
+    ]
+    restart_resume_pending.record_pending_restart_resume(_WORK_RUN_STORE, entries)
+
+
 def shutdown_session_service(*, deadline: float) -> dict[str, Any]:
     """Drain accepted session/projection work using the lifespan deadline."""
 
+    _record_restart_resume_pending()
     stop_session_service_admission()
     with _SESSION_EXECUTOR_LIFECYCLE_LOCK:
         joiners = tuple(_SESSION_EXECUTOR_DRAIN_THREADS)
