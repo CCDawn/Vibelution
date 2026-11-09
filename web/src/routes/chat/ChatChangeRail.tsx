@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useState } from "react";
 
 import type { FileContent, GitFileDiff } from "../../api/types";
 import { VButton, VStateSurface } from "../../components/vui";
@@ -62,6 +62,7 @@ export function ChatChangeRail({
   sourceLabel,
   onSelect,
 }: ChatChangeRailProps) {
+  const [collapsed, setCollapsed] = useState(false);
   const resolvedTitle = title || (lang === "zh" ? "本轮改动" : "Changes");
   const loadingLabel = lang === "zh" ? "正在打开文件" : "Opening the file";
   const resolvedPendingLabel = pendingLabel || loadingLabel;
@@ -84,14 +85,27 @@ export function ChatChangeRail({
     />
   ) : null;
 
-  const showBody = !stacked || paths.length === 0 || pending || Boolean(unavailableLabel) || Boolean(selectedPath);
+  const showList = !collapsed && paths.length > 0;
+  const showBody = !collapsed
+    && (!stacked || paths.length === 0 || pending || Boolean(unavailableLabel) || Boolean(selectedPath));
   return (
     <aside id={embedded ? undefined : "chat-status-pane"} className={`${stacked ? styles.railStacked : styles.rail} ${className}`} aria-label={resolvedTitle}>
       <div className={styles.header}>
-        <h2 className={styles.title}>{resolvedTitle}</h2>
+        <button
+          type="button"
+          className={styles.headerToggle}
+          aria-expanded={!collapsed}
+          onClick={() => setCollapsed((value) => !value)}
+        >
+          <span
+            className={collapsed ? `${styles.chevron} ${styles.chevronCollapsed}` : styles.chevron}
+            aria-hidden="true"
+          >▾</span>
+          <span className={styles.title}>{resolvedTitle}</span>
+        </button>
         {paths.length > 0 ? <span className={styles.count}>{paths.length}</span> : null}
       </div>
-      {paths.length > 0 ? <ul className={stacked ? styles.listStacked : styles.list}>
+      {showList ? <ul className={stacked ? styles.listStacked : styles.list}>
         {paths.map((path) => {
           const selected = path === selectedPath;
           const detail = detailByPath?.[path];
