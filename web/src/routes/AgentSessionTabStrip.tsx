@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { AgentInstance, SessionReferenceAttachment, SessionSummary, Team } from "../api/types";
 import { VButton, VIconButton, VNativeInput } from "../components/vui";
-import { recentAgentSessions } from "./agentSessionHistory";
 import type { TranslationKey } from "../i18n/dictionary";
 import { sessionAgentDisplayInfo } from "./agentDisplay";
 import {
@@ -245,7 +244,11 @@ export function AgentSessionTabStrip({
   onRailRowTabSelect,
   onRailRowTabClose,
 }: AgentSessionTabStripProps) {
-  const visibleSessions = recentAgentSessions(sessions, [activeSessionId, editingSessionId, contextMenuSessionId]);
+  // The strip scrolls horizontally, so every session of the selected agent
+  // stays reachable. Truncating to a recent window silently hid older rows
+  // (they vanished from the strip with no overflow entry); the active / edit
+  // ids no longer need pinning because nothing is dropped anymore.
+  const visibleSessions = sessions;
   const tabGroupRef = useRef<HTMLDivElement>(null);
   // Two-stage inline confirm for tab close: at most one armed control at a time.
   const [armedCloseSessionId, setArmedCloseSessionId] = useState<string | null>(null);
