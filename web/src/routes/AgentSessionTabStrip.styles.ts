@@ -59,7 +59,7 @@ const styles = {
     "vui-routes-chatcodingroute agentSessionTabTitleBlock min-w-0 max-w-[9.5rem] flex-1 overflow-hidden",
   // Fixed status slot between title and close: keeps tab geometry stable with/without activity.
   agentSessionTabDragHandle:
-    "shrink-0 cursor-grab self-stretch px-0.5 text-[color:var(--fg-tertiary)] opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100 active:cursor-grabbing",
+    "shrink-0 cursor-grab self-stretch -ml-0.5 px-1 text-[color:var(--fg-tertiary)] opacity-60 transition-opacity duration-150 hover:opacity-100 focus-visible:opacity-100 active:cursor-grabbing",
   agentSessionTabDragging:
     "vui-routes-chatcodingroute agentSessionTabDragging opacity-40 transition-opacity duration-150",
   // Inset shadows draw the insertion line, so no positioned parent is required.
