@@ -735,6 +735,15 @@ def _record_sweep_scene_event(s: Any, summary: dict[str, Any]) -> None:
                 "queuedDrainScheduledCount": max(
                     0, int(summary.get("queuedDrainScheduledCount") or 0)
                 ),
+                "noActiveTurnSkipCount": max(
+                    0, int(summary.get("noActiveTurnSkipCount") or 0)
+                ),
+                "externalTaskSkipCount": max(
+                    0, int(summary.get("externalTaskSkipCount") or 0)
+                ),
+                "activeTurnCandidateCount": int(
+                    summary.get("activeTurnCandidateCount") or -1
+                ),
                 "errorCount": max(0, int(summary.get("errorCount") or 0)),
                 "durationMs": max(0, int(summary.get("durationMs") or 0)),
             },
