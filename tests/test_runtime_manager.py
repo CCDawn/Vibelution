@@ -6694,6 +6694,10 @@ def test_run_launcher_action_routes_active_electron_session_to_desktop_action(mo
         "_latest_active_electron_desktop_session",
         lambda: {"desktopSessionId": "electron-session-1"},
     )
+    # ``inspect_desktop_shell`` shells out to git; the FakeProcess below replaces
+    # the shared subprocess.Popen, so pin the packaged probe instead of letting a
+    # git child land in the fake.
+    monkeypatch.setattr(workbench_controller, "_packaged_electron_desktop_executable", lambda: None)
     monkeypatch.setattr(workbench_controller, "_electron_main_orchestrates_windows", lambda: False)
     monkeypatch.setattr(workbench_controller, "_live_electron_owner_pid", lambda: 0)
     monkeypatch.setattr(
