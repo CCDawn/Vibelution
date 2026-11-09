@@ -18,6 +18,8 @@ function metadataNumber(message: ConversationMessage, key: string) {
   return undefined;
 }
 
+const UNSEQUENCED_ORDER_BASE = 1e9;
+
 function clientSubmissionId(message: ConversationMessage) {
   const value = message.metadata?.clientSubmissionId ?? message.metadata?.client_submission_id;
   return typeof value === "string" ? value.trim() : "";
@@ -50,6 +52,17 @@ function hasFiniteSequence(order: number) {
 }
 
 /**
+ * Rows without a journal sequence park after every sequenced row while keeping
+ * their append order, so one sequence axis decides every comparison. Comparing
+ * "has a sequence" against "matches position N" let a durable row jump any
+ * unsequenced neighbour, which reordered freshly sent user messages as soon as
+ * a detail refresh replaced the optimistic row with the journal row.
+ */
+function sequencedOrderOrTail(order: number, index: number) {
+  return hasFiniteSequence(order) ? order : UNSEQUENCED_ORDER_BASE + index;
+}
+
+/**
  * Order messages for the conversation timeline.
  *
  * Primary key is journal sequence (messageIndex / seq / id), matching backend
@@ -73,7 +86,7 @@ export function chronologicalConversationMessages(messages: ConversationMessage[
       // on its metadata. It still represents the growing tail, not that segment.
       sequenceOrder: isLiveOverlayMessage(message)
         ? Number.POSITIVE_INFINITY
-        : messageSequenceOrder(message),
+        : sequencedOrderOrTail(messageSequenceOrder(message), index),
       timestampOrder: timestampOrder(message.timestamp),
       clientSubmissionId: clientSubmissionId(message),
     }))
@@ -85,23 +98,9 @@ export function chronologicalConversationMessages(messages: ConversationMessage[
       ) {
         return left.message.role === "user" ? -1 : 1;
       }
-      const leftHasSeq = hasFiniteSequence(left.sequenceOrder);
-      const rightHasSeq = hasFiniteSequence(right.sequenceOrder);
-      if (leftHasSeq && rightHasSeq) {
-        return left.sequenceOrder - right.sequenceOrder
-          || left.timestampOrder - right.timestampOrder
-          || left.index - right.index;
-      }
-      if (leftHasSeq !== rightHasSeq) {
-        // Prefer journal-keyed messages over unsequenced noise in the same batch.
-        return leftHasSeq ? -1 : 1;
-      }
-      // Both lack a journal sequence. The input order is already the append
-      // order (canonical timeline plus the active turn layer appended last).
-      // Sorting by wall-clock here is wrong: optimistic user messages carry a
-      // client clock timestamp while live assistant layers carry the server
-      // clock, so a small skew swaps them. Keep the stable input order.
-      return left.index - right.index;
+      return left.sequenceOrder - right.sequenceOrder
+        || left.timestampOrder - right.timestampOrder
+        || left.index - right.index;
     })
     .map((item) => item.message);
 }
