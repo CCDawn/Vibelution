@@ -102,7 +102,10 @@ def test_desktop_action_acceptance_without_ack_fails_bounded(monkeypatch):
     from core.launcher import desktop_session_store, lifecycle_intent_store
 
     clock = iter([0.0, 0.0, 0.2])
-    monkeypatch.setattr(workbench_controller.time, "monotonic", lambda: next(clock))
+    # The default keeps later readers (including autouse fixture teardown) alive:
+    # a bare ``next`` turns the exhausted iterator into a StopIteration/RuntimeError
+    # that aborts teardown instead of failing the assertion under test.
+    monkeypatch.setattr(workbench_controller.time, "monotonic", lambda: next(clock, 999.0))
     monkeypatch.setattr(workbench_controller.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(
         lifecycle_intent_store,
@@ -214,8 +217,16 @@ def test_first_open_uses_packaged_electron_after_headless_backend_start(monkeypa
     ]
 
 
-def test_first_open_fails_when_packaged_electron_is_missing(monkeypatch):
+def test_first_open_degrades_to_backend_only_when_packaged_electron_is_missing(monkeypatch):
+    """2026-10/11 contract change: no shell must not mean no backend.
+
+    The visible window stays Electron's job (Edge is never spawned), but a start
+    with no reachable shell now keeps the backend running and records why the
+    window was skipped instead of failing the whole request.
+    """
+
     launcher_calls: list[dict] = []
+    events: list[str] = []
 
     monkeypatch.setattr(workbench_controller, "_latest_active_electron_desktop_session", lambda: {})
     monkeypatch.setattr(workbench_controller, "_packaged_electron_desktop_executable", lambda: None)
@@ -228,12 +239,19 @@ def test_first_open_fails_when_packaged_electron_is_missing(monkeypatch):
         lambda *args, **kwargs: launcher_calls.append({"args": args, "kwargs": kwargs})
         or subprocess.CompletedProcess(args=["launcher"], returncode=0, stdout="", stderr=""),
     )
-    monkeypatch.setattr(workbench_controller, "_record_launcher_action_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        workbench_controller,
+        "_record_launcher_action_event",
+        lambda event_type, *_args, **_kwargs: events.append(event_type),
+    )
 
-    with pytest.raises(RuntimeError, match="Refusing Edge fallback"):
-        workbench_controller.run_launcher_action("internal-start")
+    result = workbench_controller.run_launcher_action("internal-start")
 
-    assert launcher_calls == []
+    assert result.returncode == 0
+    assert "--no-browser" in launcher_calls[0]["args"][0]
+    assert "launcher.action.electron_window_degraded" in events
+    assert result.startup_telemetry["electronWindowDegraded"] is True
+    assert result.startup_telemetry["electronWindowGuardReason"] == "packaged_entry_missing"
 
 
 def test_first_open_uses_checkout_electron_when_packaged_is_missing(monkeypatch):
