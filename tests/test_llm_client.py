@@ -3648,7 +3648,7 @@ def test_stream_waiting_for_route_slot_can_be_cancelled(monkeypatch):
     assert first_future_result == ["text_delta", "done"]
 
 
-def test_llm_route_concurrency_defaults_to_four_without_override(monkeypatch):
+def test_llm_route_concurrency_defaults_to_unlimited_without_override(monkeypatch):
     monkeypatch.setattr("core.llm.client._LLM_ROUTE_CONCURRENCY_LIMIT", None)
     config = make_config(
         **{
@@ -3660,11 +3660,45 @@ def test_llm_route_concurrency_defaults_to_four_without_override(monkeypatch):
         }
     )
 
-    assert config.llm.route_concurrency == 4
-    assert _resolve_llm_route_concurrency_limit(config) == 4
+    # 0 = 不限制同路由并发，调用不会因为抢不到槽位被 gate_timeout 拒绝。
+    assert config.llm.route_concurrency == 0
+    assert _resolve_llm_route_concurrency_limit(config) == 0
 
 
-@pytest.mark.parametrize("invalid_value", [0, -3, "abc", None, 2.5, True])
+def test_llm_route_concurrency_zero_skips_route_gate(monkeypatch):
+    from core.llm import client as client_module
+
+    monkeypatch.setattr("core.llm.client._LLM_ROUTE_CONCURRENCY_LIMIT", None)
+    monkeypatch.setattr("core.llm.client._LLM_ROUTE_CONCURRENCY_GATES", {})
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen-32b-awq",
+            "llm.route_concurrency": 0,
+        }
+    )
+
+    assert _resolve_llm_route_concurrency_limit(config) == 0
+    with client_module._reserve_llm_route_slot(
+        "route-key",
+        limit=0,
+        role="primary",
+        profile_id="primary",
+        provider="local",
+        model="qwen-32b-awq",
+        phase="stream",
+        message_count=1,
+        tool_count=0,
+    ) as waited_ms:
+        assert waited_ms == 0
+    # 不建闸门：没有任何 semaphore 被创建或占用。
+    assert "route-key" not in client_module._LLM_ROUTE_CONCURRENCY_GATES
+
+
+@pytest.mark.parametrize("invalid_value", [-3, "abc", None, 2.5, True])
 def test_llm_route_concurrency_invalid_values_fall_back_to_default(monkeypatch, invalid_value):
     monkeypatch.setattr("core.llm.client._LLM_ROUTE_CONCURRENCY_LIMIT", None)
     config = make_config(
@@ -3678,8 +3712,8 @@ def test_llm_route_concurrency_invalid_values_fall_back_to_default(monkeypatch, 
         }
     )
 
-    assert config.llm.route_concurrency == 4
-    assert _resolve_llm_route_concurrency_limit(config) == 4
+    assert config.llm.route_concurrency == 0
+    assert _resolve_llm_route_concurrency_limit(config) == 0
 
 
 @pytest.mark.slow

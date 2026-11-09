@@ -600,7 +600,14 @@ PROFILE_LABELS: Dict[str, Dict[str, str]] = {
 }
 
 
-DEFAULT_LLM_ROUTE_CONCURRENCY = 4
+# 0 = 不限制同路由并发（不建闸门，也不做有界等待）；N>=1 = 显式限流。
+#
+# 曾经默认 4，但多会话并行时（工作台重启会一次恢复多个历史会话）第 5 个
+# 起永远抢不到槽位：每 120s 抛一次可重试 gate_timeout，重试预算叠乘后单轮
+# 空转 20-30 分钟且零输出，界面只剩“已工作 N 秒”。默认不再限制；需要限流
+# 时显式配置 [llm] route_concurrency = N，排队过程会通过 llm_status
+# ``concurrency_waiting`` 在会话里给出可见提示。
+DEFAULT_LLM_ROUTE_CONCURRENCY = 0
 
 # LLM 流式调用活性治理的运行时旋钮（env 惰性逐请求解析，见 core/llm/client.py；
 # 这里只登记默认值与安全范围，不进 operator config 文件）：
@@ -646,7 +653,7 @@ class LLMConfig(BaseModel):
     decision_handoff_model_id: str = ""
     route_concurrency: int = Field(
         default=DEFAULT_LLM_ROUTE_CONCURRENCY,
-        description="单条 LLM 路由（provider|base_url|model|profile）的最大并发请求数",
+        description="单条 LLM 路由（provider|base_url|model|profile）的最大并发请求数；0 = 不限制",
     )
     # Startup warmup (import preload + one minimal probe per active provider)
     # runs on the deferred background channel; see core.llm.warmup. The env
@@ -666,10 +673,11 @@ class LLMConfig(BaseModel):
     @field_validator("route_concurrency", mode="before")
     @classmethod
     def _fallback_invalid_route_concurrency(cls, value: Any) -> int:
-        # 非法值（0/负数/bool/浮点/字符串/None）不阻断启动，统一回退缺省。
+        # 非法值（负数/bool/浮点/字符串/None）不阻断启动，统一回退缺省。
+        # 0 是合法值：显式关闭同路由并发闸门（不排队、不拒绝调用）。
         if isinstance(value, bool) or not isinstance(value, int):
             return DEFAULT_LLM_ROUTE_CONCURRENCY
-        return value if value >= 1 else DEFAULT_LLM_ROUTE_CONCURRENCY
+        return value if value >= 0 else DEFAULT_LLM_ROUTE_CONCURRENCY
 
     @field_validator("http_keepalive_expiry_seconds", mode="before")
     @classmethod
