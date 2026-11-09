@@ -172,6 +172,7 @@ import { CompanionDesktopAttention } from "../routes/companions/CompanionDesktop
 import { SpecialistAgentMenu } from "./SpecialistAgentMenu";
 import { HumanAttentionNotifier } from "../routes/personalAssistant/HumanAttentionNotifier";
 import { WorkbenchConnectionNotice } from "./WorkbenchConnectionNotice";
+import { connectionNoticeVisible, EMPTY_HEALTH_FAILURE_STREAK, nextHealthFailureStreak } from "./connectionHealthStreak";
 
 const ShellProjectUtilities = lazy(() => import("./ShellProjectUtilities").then((module) => ({ default: module.ShellProjectUtilities })));
 const LazyAppShellSettingsMenu = lazy(() =>
@@ -1150,6 +1151,14 @@ export function AppShell() {
     retry: false,
     // Ignore fetchStatus churn so background health polls do not re-render the whole shell.
     notifyOnChangeProps: ["data", "error", "isError", "isPending", "isSuccess", "isRefetchError"],
+  });
+  // A single failed poll is a slow response, not a stopped workbench: the
+  // notice waits for a repeated failure so one 8s timeout cannot cover the page.
+  const backendHealthUnavailable = backendHealthQuery.isError || backendHealthQuery.isRefetchError;
+  const healthFailureStreakRef = useRef(EMPTY_HEALTH_FAILURE_STREAK);
+  healthFailureStreakRef.current = nextHealthFailureStreak(healthFailureStreakRef.current, {
+    healthy: Boolean(backendHealthQuery.data) && !backendHealthUnavailable,
+    errorAt: backendHealthQuery.errorUpdatedAt ?? 0,
   });
   // Older backends omit routesReady; preserve compatibility for those hosts.
   const shellOptionalReady = shellBackgroundReady && backendHealthQuery.data?.routesReady !== false;
@@ -3158,7 +3167,12 @@ export function AppShell() {
             </section>
           </VPopover>
           <WorkbenchConnectionNotice
-            unavailable={(backendHealthQuery.isError || backendHealthQuery.isRefetchError) && !startupOverlayActive && !shutdownOpen}
+            unavailable={connectionNoticeVisible({
+              unavailable: backendHealthUnavailable,
+              failureCount: healthFailureStreakRef.current.count,
+              startupOverlayActive,
+              shutdownOpen,
+            })}
             lang={lang}
             desktopShell={desktopShell}
             recovering={restartRequested || shutdownRequested}

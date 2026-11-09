@@ -80,7 +80,9 @@ describe("workbench connection recovery", () => {
   });
 
   it("keeps connection health in the top bar aligned with the Tasks slot, not over the content", () => {
-    expect(shellSource).toContain("(backendHealthQuery.isError || backendHealthQuery.isRefetchError) && !startupOverlayActive && !shutdownOpen");
+    // One failed poll is jitter, not an outage: the notice sits behind the streak.
+    expect(shellSource).toContain("const backendHealthUnavailable = backendHealthQuery.isError || backendHealthQuery.isRefetchError");
+    expect(shellSource).toContain("unavailable={connectionNoticeVisible({");
     expect(shellSource).toContain("onRecover={() => { void beginRestart(); }}");
     expect(shellSource).toContain("const routeContent = useMemo(() => <Outlet />, []);");
     expect(shellSource).toContain('<CompanionDesktopAttention startupReady={shellOptionalReady} /><VWorkbenchFrame flush={location.pathname === "/chat" || location.pathname === "/teams"}><WorkbenchStartupReadyContext.Provider value={reportRouteStartupReady}>{routeContent}</WorkbenchStartupReadyContext.Provider></VWorkbenchFrame>');
