@@ -58,6 +58,8 @@ const styles = {
   agentSessionTabTitleBlock:
     "vui-routes-chatcodingroute agentSessionTabTitleBlock min-w-0 max-w-[9.5rem] flex-1 overflow-hidden",
   // Fixed status slot between title and close: keeps tab geometry stable with/without activity.
+  agentSessionTabDragHandle:
+    "shrink-0 cursor-grab self-stretch px-0.5 text-[color:var(--fg-tertiary)] opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100 active:cursor-grabbing",
   agentSessionTabStatusSlot:
     "vui-routes-chatcodingroute agentSessionTabStatusSlot inline-grid h-3.5 w-3.5 shrink-0 place-items-center self-center",
   agentSessionTabStatus:

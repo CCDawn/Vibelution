@@ -1,4 +1,4 @@
-import { Bot, Check, LoaderCircle, Plus, SquareTerminal, X } from "lucide-react";
+import { Bot, Check, GripVertical, LoaderCircle, Plus, SquareTerminal, X } from "lucide-react";
 import type { DragEvent, KeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -6,6 +6,11 @@ import type { AgentInstance, SessionReferenceAttachment, SessionSummary, Team } 
 import { VButton, VIconButton, VNativeInput } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import { sessionAgentDisplayInfo } from "./agentDisplay";
+import {
+  applyAgentSessionTabOrder,
+  persistAgentSessionTabOrder,
+  reorderSessionIds,
+} from "./agentSessionTabOrder";
 import {
   resolveSessionActivityTone,
   sessionActivityLabel,
@@ -248,7 +253,30 @@ export function AgentSessionTabStrip({
   // stays reachable. Truncating to a recent window silently hid older rows
   // (they vanished from the strip with no overflow entry); the active / edit
   // ids no longer need pinning because nothing is dropped anymore.
-  const visibleSessions = sessions;
+  const agentTabScopeId = String(sessions[0]?.agentId || "").trim();
+  // Manual drag order wins over server order. localStorage is not reactive, so a
+  // tick forces a recompute after each drop.
+  const [manualOrderTick, setManualOrderTick] = useState(0);
+  const [dragOrderSessionId, setDragOrderSessionId] = useState<string | null>(null);
+  const visibleSessions = (() => {
+    void manualOrderTick;
+    return applyAgentSessionTabOrder(sessions, agentTabScopeId);
+  })();
+  const commitTabOrderDrop = useCallback((targetId: string, position: "before" | "after") => {
+    if (!dragOrderSessionId || dragOrderSessionId === targetId) {
+      setDragOrderSessionId(null);
+      return;
+    }
+    const next = reorderSessionIds(
+      visibleSessions.map((session) => session.id),
+      dragOrderSessionId,
+      targetId,
+      position,
+    );
+    persistAgentSessionTabOrder(agentTabScopeId, next);
+    setDragOrderSessionId(null);
+    setManualOrderTick((tick) => tick + 1);
+  }, [agentTabScopeId, dragOrderSessionId, visibleSessions]);
   const tabGroupRef = useRef<HTMLDivElement>(null);
   // Two-stage inline confirm for tab close: at most one armed control at a time.
   const [armedCloseSessionId, setArmedCloseSessionId] = useState<string | null>(null);
@@ -524,8 +552,38 @@ export function AgentSessionTabStrip({
             data-selected={tabActive ? "true" : undefined}
             data-agent-session-tab-container
             {...dragReferenceProps}
+            onDragOver={(event) => {
+              if (!dragOrderSessionId || event.dataTransfer?.types.includes("text/plain")) {
+                return;
+              }
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+            }}
+            onDrop={(event) => {
+              if (!dragOrderSessionId) {
+                return;
+              }
+              event.preventDefault();
+              const bounds = event.currentTarget.getBoundingClientRect();
+              const position = event.clientX < bounds.left + bounds.width / 2 ? "before" : "after";
+              commitTabOrderDrop(session.id, position);
+            }}
             onContextMenu={(event) => onContextMenu(event, session)}
           >
+              <span
+                className={styles.agentSessionTabDragHandle}
+                aria-hidden="true"
+                draggable
+                title={lang === "zh" ? "拖拽调整会话顺序" : "Drag to reorder session"}
+                onDragStart={(event) => {
+                  setDragOrderSessionId(session.id);
+                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.setData("text/plain", "");
+                }}
+                onDragEnd={() => setDragOrderSessionId(null)}
+              >
+                <GripVertical size={12} aria-hidden="true" />
+              </span>
             <VButton
               type="button"
               contentLayout="plain"
