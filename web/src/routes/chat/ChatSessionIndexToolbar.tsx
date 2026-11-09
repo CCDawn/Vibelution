@@ -1,5 +1,6 @@
 import { Archive, ArrowLeft, ChevronDown, Ellipsis, PanelLeftClose, Plus, Search } from "lucide-react";
 import { useId, type Ref } from "react";
+
 import { VButton, VCheckbox, VDropdownMenu, VIconButton, VNativeInput, VPopover, type VDropdownMenuItem } from "../../components/vui";
 import type { SessionListPreferences } from "./sessionListPreferences";
 import styles from "./ChatSessionIndexToolbar.styles";
@@ -12,6 +13,10 @@ export type ChatSessionIndexToolbarProps = {
   onToggleArchive: () => void;
   onSearch: () => void;
   onCollapse: () => void;
+  /** Primary action: create a session directly, without opening a menu first. */
+  onCreateSession: () => void;
+  createSessionPending?: boolean;
+  /** Secondary creation shapes (Agent / group) stay in the caret menu. */
   createItems: VDropdownMenuItem[];
   createOpen: boolean;
   onCreateOpenChange: (open: boolean) => void;
@@ -21,19 +26,24 @@ export type ChatSessionIndexToolbarProps = {
 };
 
 export function ChatSessionIndexToolbar({ lang, archived, preferences, onPreferencesChange, onToggleArchive,
-  onSearch, onCollapse, createItems, createOpen, onCreateOpenChange, createButtonRef, optionsOpen,
-  onOptionsOpenChange }: ChatSessionIndexToolbarProps) {
+  onSearch, onCollapse, onCreateSession, createSessionPending = false, createItems, createOpen, onCreateOpenChange,
+  createButtonRef, optionsOpen, onOptionsOpenChange }: ChatSessionIndexToolbarProps) {
   const zh = lang === "zh";
   const sortId = useId();
   return <div className={styles.root} data-vui="chat-session-index-toolbar">
-    <h2 className={styles.title}>{archived ? (zh ? "已归档" : "Archived") : (zh ? "会话" : "Chats")}</h2>
     {archived ? <VButton variant="ghost" className={styles.back} icon={<ArrowLeft size={16} aria-hidden="true" />}
       onPress={onToggleArchive} aria-label={zh ? "返回会话" : "Back to chats"}>{zh ? "返回" : "Back"}</VButton> :
-      <VDropdownMenu aria-label={zh ? "新建" : "Create"} align="start" open={createOpen} onOpenChange={onCreateOpenChange}
-        items={createItems} trigger={<VButton ref={createButtonRef} id="chat-agent-create-trigger" variant="primary"
-          className={styles.create} aria-label={zh ? "新建" : "Create"} aria-keyshortcuts="Control+N Meta+N"
-          title={zh ? "新建（Ctrl+N）" : "Create (Ctrl+N)"} icon={<Plus size={16} aria-hidden="true" />}
-          trailingIcon={<ChevronDown size={14} aria-hidden="true" />}>{zh ? "新建" : "New"}</VButton>} />}
+      <div className={styles.createGroup}>
+        <VButton ref={createButtonRef} id="chat-agent-create-trigger" variant="primary"
+          className={styles.create} aria-label={zh ? "新建会话" : "New session"} aria-keyshortcuts="Control+N Meta+N"
+          title={zh ? "新建会话（Ctrl+N）" : "New session (Ctrl+N)"} icon={<Plus size={16} aria-hidden="true" />}
+          isDisabled={createSessionPending} onPress={onCreateSession}>{zh ? "新建会话" : "New session"}</VButton>
+        <VDropdownMenu aria-label={zh ? "更多新建方式" : "More create options"} align="start" open={createOpen}
+          onOpenChange={onCreateOpenChange} items={createItems}
+          trigger={<VIconButton tooltip="" className={styles.createCaret}
+            label={zh ? "更多新建方式" : "More create options"} icon={<ChevronDown size={14} aria-hidden="true" />} />} />
+      </div>}
+    <div className={styles.spacer} aria-hidden="true" />
     <VIconButton className={styles.icon} tooltip="" label={zh ? "搜索会话、Agent 或团队" : "Search chats, Agents or teams"}
       title={zh ? "搜索（Ctrl+K）" : "Search (Ctrl+K)"} data-vui="session-catalog-entry"
       aria-keyshortcuts="Control+K Meta+K" icon={<Search size={16} aria-hidden="true" />} onClick={onSearch} />

@@ -1,7 +1,6 @@
 import {
   Bot,
   ChevronRight,
-  MessageSquarePlus,
   MessageCircleHeart,
   UsersRound,
 } from "lucide-react";
@@ -212,14 +211,9 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
+  // Session creation is the primary button action; the caret menu only carries
+  // the shapes that need a choice (Agent / group).
   const createItems = useMemo<VDropdownMenuItem[]>(() => [
-    {
-      id: "new-session",
-      icon: <MessageSquarePlus size={14} />,
-      label: lang === "zh" ? "新建会话" : "New session",
-      disabled: createSessionPending,
-      onSelect: onCreateSession,
-    },
     {
       id: "new-agent",
       icon: <Bot size={14} />,
@@ -233,7 +227,7 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
       disabled: createGroupRoomPending,
       onSelect: onToggleGroupComposer,
     },
-  ], [createGroupRoomPending, createSessionPending, lang, onCreateAgent, onCreateSession, onToggleGroupComposer]);
+  ], [createGroupRoomPending, lang, onCreateAgent, onToggleGroupComposer]);
 
   useEffect(() => {
     const openIndexSearch = (event: Event) => {
@@ -250,8 +244,9 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
       if (key === "n") {
         event.preventDefault();
         setOptionsOpen(false);
+        setCreateMenuOpen(false);
         if (showArchivedSessions) onToggleShowArchivedSessions();
-        setCreateMenuOpen(true);
+        onCreateSession();
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -277,6 +272,7 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
             lang={lang} archived={showArchivedSessions} preferences={sessionListPreferences}
             onPreferencesChange={onSessionListPreferencesChange} onToggleArchive={onToggleShowArchivedSessions}
             onSearch={() => { setOptionsOpen(false); setCreateMenuOpen(false); setSearchOpen(true); }} onCollapse={onCollapseConversationIndex}
+            onCreateSession={onCreateSession} createSessionPending={createSessionPending}
             createItems={createItems} createOpen={createMenuOpen} onCreateOpenChange={setCreateMenuOpen}
             createButtonRef={createAgentButtonRef} optionsOpen={optionsOpen} onOptionsOpenChange={setOptionsOpen}
           />
