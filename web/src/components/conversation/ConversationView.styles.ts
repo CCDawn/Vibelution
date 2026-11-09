@@ -497,7 +497,7 @@ backToBottomButton:
   // Thought title keeps a fixed label so the rolling summary owns the leftover
   // width instead of squeezing the status text into multiple lines.
   codexTranscriptReasoningTitle:
-    "vui-components-conversationview codexTranscriptReasoningTitle shrink-0 whitespace-nowrap text-vui-xs font-normal leading-[1.4] text-[var(--fg-quaternary)]",
+    "vui-components-conversationview codexTranscriptReasoningTitle shrink-0 whitespace-nowrap text-vui-xs font-medium leading-[1.4] text-[var(--fg-quaternary)]",
   codexTranscriptReasoningText:
     "vui-components-conversationview codexTranscriptReasoningText min-w-0 max-w-[min(100%,128ch)] whitespace-pre-wrap break-words [overflow-wrap:anywhere] border-0 bg-transparent p-0 text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   // Collapsed thought summary: one nowrap line that hides overflow and rolls
