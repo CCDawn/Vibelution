@@ -1831,6 +1831,7 @@ def _stop_active_chat_turns_before_shutdown(
 
     stopped: list[dict[str, object]] = []
     seen_session_ids: set[str] = set()
+    targets: list[tuple[str, str]] = []
     for run in active_value or []:
         if not isinstance(run, dict):
             continue
@@ -1838,45 +1839,65 @@ def _stop_active_chat_turns_before_shutdown(
         if not session_id or session_id in seen_session_ids:
             continue
         seen_session_ids.add(session_id)
-        run_id = str(run.get("runId") or "").strip()
-        stop_completed, _, stop_error = _run_with_bounded_wait(
-            lambda target_session_id=session_id: (
-                _stop_and_persist_chat_turn_for_restart(target_session_id, stop_reason=stop_reason)
-                if persist_partials
-                else request_stop_session_turn(target_session_id, stop_reason=stop_reason)
-            ),
-            timeout_seconds=_remaining_harvest_seconds(deadline),
+        targets.append((session_id, str(run.get("runId") or "").strip()))
+    if not targets:
+        return []
+
+    # Stop every turn concurrently. Waiting on each turn in sequence let one
+    # wedged turn drain the shared harvest budget, so healthy turns behind it
+    # timed out too (2026-11-09 restart 503: 3 of 5 turns recorded
+    # chat_turn_stop_wait_timeout while the whole harvest spent its 12s budget).
+    results: dict[str, dict[str, object]] = {}
+    results_lock = threading.Lock()
+
+    def _stop_one(session_id: str, run_id: str) -> None:
+        entry: dict[str, object] = {
+            "kind": "chat_turn",
+            "sessionId": session_id,
+            "runId": run_id,
+        }
+        try:
+            if persist_partials:
+                _stop_and_persist_chat_turn_for_restart(session_id, stop_reason=stop_reason)
+            else:
+                request_stop_session_turn(session_id, stop_reason=stop_reason)
+        except BaseException as exc:  # noqa: BLE001 - one turn must not hide the rest
+            entry.update({"status": "failed", "error": f"{type(exc).__name__}: {exc}"})
+        else:
+            entry.update({"status": "stopped"})
+        with results_lock:
+            results[session_id] = entry
+
+    workers = [
+        threading.Thread(
+            target=_stop_one,
+            args=(session_id, run_id),
+            name="runtime-lifecycle-harvest-stop",
+            daemon=True,
         )
-        if not stop_completed:
-            stopped.append(
-                {
-                    "kind": "chat_turn",
-                    "sessionId": session_id,
-                    "runId": run_id,
-                    "status": "timeout",
-                    "error": "chat_turn_stop_wait_timeout",
-                }
-            )
-            continue
-        if stop_error is not None:
-            stopped.append(
-                {
-                    "kind": "chat_turn",
-                    "sessionId": session_id,
-                    "runId": run_id,
-                    "status": "failed",
-                    "error": f"{type(stop_error).__name__}: {stop_error}",
-                }
-            )
-            continue
-        stopped.append(
-            {
+        for session_id, run_id in targets
+    ]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        worker.join(timeout=remaining)
+
+    with results_lock:
+        settled = dict(results)
+    for session_id, run_id in targets:
+        entry = settled.get(session_id)
+        if entry is None:
+            entry = {
                 "kind": "chat_turn",
                 "sessionId": session_id,
                 "runId": run_id,
-                "status": "stopped",
+                "status": "timeout",
+                "error": "chat_turn_stop_wait_timeout",
             }
-        )
+        stopped.append(entry)
     return stopped
 
 

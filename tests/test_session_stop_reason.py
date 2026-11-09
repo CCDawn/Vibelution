@@ -471,3 +471,55 @@ def test_harvest_context_stop_yields_recoverable_dead_turn_evidence(
         "terminalStatus": "stopped",
         "terminalReason": "stopped_by_user",
     })
+
+
+def test_restart_harvest_stops_turns_concurrently(monkeypatch):
+    """一个慢 turn 不能吃掉其他 turn 的收割预算（2026-11-09 restart 503 回归）。"""
+    import time as _time
+
+    monkeypatch.setattr(
+        runtime_service,
+        "list_active_session_work_runs",
+        lambda **kwargs: [
+            {"sessionId": "session-a", "runId": "run-a"},
+            {"sessionId": "session-b", "runId": "run-b"},
+        ],
+    )
+
+    def slow_stop(session_id, **kwargs):
+        _time.sleep(0.6)
+
+    monkeypatch.setattr(runtime_service, "request_stop_session_turn", slow_stop)
+    started = _time.monotonic()
+    result = runtime_service._stop_active_chat_turns_before_shutdown(
+        deadline=_time.monotonic() + 5.0,
+    )
+    elapsed = _time.monotonic() - started
+    assert [row["status"] for row in result] == ["stopped", "stopped"]
+    assert elapsed < 1.1
+
+
+def test_restart_harvest_times_out_only_the_wedged_turn(monkeypatch):
+    """卡住的 turn 记 timeout，健康的 turn 仍按时完成。"""
+    import time as _time
+
+    monkeypatch.setattr(
+        runtime_service,
+        "list_active_session_work_runs",
+        lambda **kwargs: [
+            {"sessionId": "session-fast", "runId": "run-fast"},
+            {"sessionId": "session-wedged", "runId": "run-wedged"},
+        ],
+    )
+
+    def stop(session_id, **kwargs):
+        if session_id == "session-wedged":
+            _time.sleep(5)
+
+    monkeypatch.setattr(runtime_service, "request_stop_session_turn", stop)
+    result = runtime_service._stop_active_chat_turns_before_shutdown(
+        deadline=_time.monotonic() + 0.5,
+    )
+    statuses = {row["sessionId"]: row["status"] for row in result}
+    assert statuses["session-fast"] == "stopped"
+    assert statuses["session-wedged"] == "timeout"
