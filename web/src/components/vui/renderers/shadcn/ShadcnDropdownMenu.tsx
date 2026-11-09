@@ -10,6 +10,8 @@ export type ShadcnDropdownMenuItem = {
   disabled?: boolean;
   danger?: boolean;
   title?: string;
+  /** Keep the surface mounted after select so the item can report inline feedback. */
+  keepOpen?: boolean;
   onSelect?: () => void;
 };
 
@@ -160,6 +162,10 @@ export function ShadcnDropdownMenu({
                 if (item.disabled) {
                   event.preventDefault();
                   return;
+                }
+                if (item.keepOpen) {
+                  // Inline feedback (e.g. "Copied") needs the surface to stay mounted.
+                  event.preventDefault();
                 }
                 item.onSelect?.();
               }}
