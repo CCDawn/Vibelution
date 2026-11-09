@@ -186,6 +186,7 @@ export function activeTurnStageBarPhase(stage: string): ActiveTurnStageBarPhase 
       return "sent";
     case "context_prepare":
     case "queued":
+    case "model_queue":
     case "agent_prepare":
     case "history_restore":
     case "followup_prepare":
@@ -243,6 +244,8 @@ export function activeTurnStageLabel(stage: string, lang: "zh" | "en" | string) 
       return zh ? "准备上下文" : "Preparing context";
     case "queued":
       return zh ? "排队中" : "Queued";
+    case "model_queue":
+      return zh ? "等待模型通道" : "Waiting for model slot";
     case "agent_prepare":
       return zh ? "准备 Agent" : "Preparing agent";
     case "history_restore":

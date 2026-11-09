@@ -310,6 +310,10 @@ import { startOrFocusWorkbenchFromProductEntry } from "./windows/productEntryWor
 import { waitForWorkbenchHttp, workbenchLoopbackUrl } from "./windows/workbenchHttpReady.js";
 import { ensureWorkbenchBackendReady } from "./windows/workbenchOpenBackendGate.js";
 import {
+  buildShellRelaunchArgs,
+  shouldEnsureResidentBackend
+} from "./process/residentBackendStartup.js";
+import {
   startWorkbenchBackendWatchdog,
   type WorkbenchBackendWatchdogHandle
 } from "./windows/workbenchBackendWatchdog.js";
@@ -2685,6 +2689,75 @@ async function openWorkbenchAtCurrentLauncherUrlImpl(
   }
 }
 
+/** Bounded attempts for the resident shell's own backend start. */
+const RESIDENT_BACKEND_START_ATTEMPTS = 3;
+const RESIDENT_BACKEND_RETRY_MS = 6_000;
+
+/**
+ * Keep the resident shell usable when the user never asked for a window.
+ *
+ * Every backend start used to hang off `openWorkbenchAtCurrentLauncherUrl`,
+ * so a relaunch that lost `--open-workbench` (2026-11-09 forced close) brought
+ * up the tray and the assistant window with nothing listening on the Workbench
+ * port: the assistant waited forever and every Launcher read failed. The gate
+ * is idempotent — it returns immediately when the backend is already serving —
+ * and it never opens a window, so it only repairs the missing backend.
+ */
+async function ensureResidentWorkbenchBackendOnStartup(): Promise<void> {
+  const bootstrap = launcherBootstrap;
+  if (bootstrap === null) return;
+  const paths = createDesktopPathsForApp();
+  let workbenchUrl = "";
+  try {
+    workbenchUrl = resolveWorkbenchUrl(desktopEnvironment(), bootstrap.workbenchUrl);
+  } catch (error: unknown) {
+    void recordElectronSupervisorEvent(bootstrap, {
+      eventCode: "electron.resident_backend.unresolved",
+      message: "Resident shell backend was not started because no Workbench URL is resolvable.",
+      fields: {
+        workspaceRoot: paths.workspaceRoot,
+        error: (error instanceof Error ? error.message : String(error)).slice(0, 300)
+      }
+    });
+    return;
+  }
+  for (let attempt = 1; attempt <= RESIDENT_BACKEND_START_ATTEMPTS; attempt += 1) {
+    if (shutdownApproved) return;
+    try {
+      const gate = await ensureWorkbenchBackendReady({
+        workspaceRoot: paths.workspaceRoot,
+        workbenchUrl,
+        startLifecycle: async () => {
+          const started = await orchestrateLauncherLifecycle("start",
+            { schemaVersion: 1, path: "resident-backend" }, "operator");
+          if (!started.accepted) {
+            throw new Error(started.message || started.code || "Workbench start was not accepted.");
+          }
+          return started;
+        }
+      });
+      void recordElectronSupervisorEvent(bootstrap, {
+        eventCode: "electron.resident_backend.ready",
+        message: "Resident shell backend is serving without an explicit workbench open.",
+        fields: { workspaceRoot: paths.workspaceRoot, started: gate.started, attempts: attempt }
+      });
+      return;
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : String(error);
+      if (attempt >= RESIDENT_BACKEND_START_ATTEMPTS) {
+        void recordElectronSupervisorEvent(bootstrap, {
+          eventCode: "electron.resident_backend.failed",
+          message: "Resident shell backend could not be started; the assistant stays unavailable.",
+          fields: { workspaceRoot: paths.workspaceRoot, attempts: attempt, error: detail.slice(0, 300) }
+        });
+        return;
+      }
+      console.warn(`Resident backend start attempt ${attempt} failed: ${detail.slice(0, 300)}`);
+      await new Promise<void>((resolve) => setTimeout(resolve, RESIDENT_BACKEND_RETRY_MS));
+    }
+  }
+}
+
 async function reportManagedWindowState(
   paths: DesktopPaths,
   bootstrap: LauncherBootstrapResult | null,
@@ -4999,6 +5072,22 @@ async function currentLauncherUpdateFreshness(): Promise<Record<string, unknown>
   });
 }
 
+/**
+ * A shell restart must not silently demote the user to a tray-only shell.
+ * `app.relaunch()` replays the original argv, so a restart that started from a
+ * tray-only launch stays tray-only even when the user had the Workbench open.
+ * Read the intent from the live window observation at the moment of restart.
+ */
+function workbenchIntentAtShellRestart(): boolean {
+  if (pendingOpenWorkbenchRequest) return true;
+  try {
+    return windowProvider?.snapshot().workbench.open === true;
+  } catch {
+    // Observation only: an unreadable snapshot must not block a restart.
+    return false;
+  }
+}
+
 async function exitAndRelaunchLauncherShell(options: { forceShellRefresh?: boolean } = {}): Promise<void> {
   const forceRefresh = options.forceShellRefresh === true;
   let launchBlocking = false;
@@ -5014,6 +5103,11 @@ async function exitAndRelaunchLauncherShell(options: { forceShellRefresh?: boole
     launchBlocking,
     forceRefresh
   });
+  // Capture the intent before any teardown clears the window observation.
+  const relaunchArgs = buildShellRelaunchArgs({
+    argv: process.argv.slice(1),
+    restoreWorkbench: workbenchIntentAtShellRestart()
+  });
   if (decision === "rebuild-and-exit") {
     shellRefreshInFlight = true;
     try {
@@ -5024,7 +5118,7 @@ async function exitAndRelaunchLauncherShell(options: { forceShellRefresh?: boole
       shellRefreshInFlight = false;
       const detail = error instanceof Error ? error.message : String(error);
       notifyDesktopTray("Vibelution", `无法安排桌面壳更新，继续使用当前壳重启：${detail.slice(0, 220)}`, "warning");
-      app.relaunch();
+      app.relaunch({ args: relaunchArgs });
       shutdownApproved = true;
       await exitDesktopShellProcess();
       return;
@@ -5057,7 +5151,7 @@ async function exitAndRelaunchLauncherShell(options: { forceShellRefresh?: boole
       notifyDesktopTray("Vibelution", `无法重建最新前端，仍将重启当前壳：${detail.slice(0, 220)}`, "warning");
     }
   }
-  app.relaunch();
+  app.relaunch({ args: relaunchArgs });
   shutdownApproved = true;
   await exitDesktopShellProcess();
 }
@@ -7982,7 +8076,10 @@ app.whenReady()
     await flushPendingPublicDeepLinks();
     const firstLifecycle = String(desktopCliArgs.lifecycleCommand || "").trim().toLowerCase();
     const deferWorkbenchOpen = shouldDeferWorkbenchOpenUntilLifecycleStart(firstLifecycle);
-    if (pendingOpenWorkbenchRequest && !desktopCliArgs.workbenchCloseCanary && !deferWorkbenchOpen) {
+    const openWorkbenchIntent = pendingOpenWorkbenchRequest
+      && !desktopCliArgs.workbenchCloseCanary
+      && !deferWorkbenchOpen;
+    if (openWorkbenchIntent) {
       electronStartupStage = "workbench_window_ready";
       await startOrFocusWorkbenchFromProductEntryOnShell();
     }
@@ -7995,6 +8092,18 @@ app.whenReady()
       }
       await openWorkbenchForCloseCanary(paths, launcherBootstrap, windowProvider);
       return;
+    }
+    // A resident shell with a project must serve the assistant even when no
+    // window was requested: only the open path runs the backend gate, so a
+    // relaunch without `--open-workbench` used to leave port 8000 empty.
+    if (!pendingProjectRoot && shouldEnsureResidentBackend({
+      smoke: desktopCliArgs.smoke,
+      assistantOnly: desktopCliArgs.assistant === true,
+      pendingOpenWorkbench: openWorkbenchIntent,
+      lifecycleCommand: firstLifecycle,
+      controlPlaneReady: launcherBootstrap !== null
+    })) {
+      void ensureResidentWorkbenchBackendOnStartup();
     }
     if (pendingProjectRoot) {
       await applyPendingProjectSlot(pendingProjectRoot, firstLifecycle, desktopLifecycleProvenance, {

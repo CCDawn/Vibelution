@@ -372,8 +372,19 @@ def remove_agent_from_teams(agent_id: str, *, include_restore_token: bool = Fals
     return result
 
 
-def remove_agents_from_teams(agent_ids: list[str] | None, *, include_restore_token: bool = False) -> dict[str, Any]:
-    """Remove multiple unavailable Agents from active Team membership in one index update."""
+def remove_agents_from_teams(
+    agent_ids: list[str] | None,
+    *,
+    include_restore_token: bool = False,
+    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
+) -> dict[str, Any]:
+    """Remove multiple unavailable Agents from active Team membership in one index update.
+
+    ``agent_refs`` 为可选的 Agent 索引快照（``_agent_reference_maps()`` 的产物）。
+    每个团队的群聊链接同步都要按成员查 Agent，缺省会退化成每成员一次
+    ``get_agent``（含 repair + 完整 API 投影）。批量归档一次要移除多个团队时，
+    调用方传一份快照即可把「成员数 × 团队数」次全量投影压成一次轻量读。
+    """
 
     s = _service()
     requested = [str(item or "").strip() for item in list(agent_ids or []) if str(item or "").strip()]
@@ -391,6 +402,9 @@ def remove_agents_from_teams(agent_ids: list[str] | None, *, include_restore_tok
     restore_canvases: dict[str, dict[str, Any] | None] = {}
     removed_by_agent_id: dict[str, list[str]] = {agent_id: [] for agent_id in normalized_agent_ids}
     agent_id_set = set(normalized_agent_ids)
+    # 成员查表只在锁外取一次；循环里每个团队复用同一份快照。
+    resolved_agent_refs = agent_refs if agent_refs is not None else s._agent_reference_maps()
+    s._sync_chat_room_root()
     with s._TEAM_LOCK:
         state = s._load_index()
         teams = [item for item in list(state.get("teams") or []) if isinstance(item, dict)]
@@ -422,8 +436,7 @@ def remove_agents_from_teams(agent_ids: list[str] | None, *, include_restore_tok
             for removed_agent_id in sorted(removed_agent_ids_for_team):
                 s._remove_agent_from_team_canvas(team, removed_agent_id)
                 removed_by_agent_id.setdefault(removed_agent_id, []).append(team_id)
-            s._sync_chat_room_root()
-            s._ensure_team_chat_room_link(team)
+            s._ensure_team_chat_room_link(team, agent_refs=resolved_agent_refs)
             changed_team_ids.append(team_id)
         if changed_team_ids:
             state["updatedAt"] = now
