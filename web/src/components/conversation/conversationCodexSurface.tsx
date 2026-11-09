@@ -473,6 +473,18 @@ export function createConversationCodexSurface({
       ? resolveConversationTurnWorkSummary(message)
       : null;
     const hasWorkDisclosure = processCells.length > 0 || Boolean(transcriptWorkSummary);
+    // Commentary is body text (Codex parity): split it out of the collapsible
+    // work trail so a collapsed record never hides what the agent said mid-turn.
+    const processSegments: Array<{ key: string; kind: "work" | "narration"; cells: CodexTranscriptCell[] }> = [];
+    for (const cell of processCells) {
+      const kind: "work" | "narration" = cell.phase === "commentary" ? "narration" : "work";
+      const last = processSegments[processSegments.length - 1];
+      if (last && last.kind === kind) {
+        last.cells.push(cell);
+      } else {
+        processSegments.push({ key: `${kind}:${cell.id}`, kind, cells: [cell] });
+      }
+    }
     const node = (
       <div
         className={styles.codexTranscriptSurface}
@@ -498,12 +510,17 @@ export function createConversationCodexSurface({
             turnStartedAt={(message as ConversationMessage & { turnStartedAt?: string }).turnStartedAt || message.timestamp}
             activeStage={phase === "stopping" ? "stopping" : resolveActiveTurnProgressStage(message)}
             workSummary={transcriptWorkSummary}
+            segments={processSegments.map((segment) => ({
+              key: segment.key,
+              kind: segment.kind,
+              node: renderTimelineNodes(segment.cells, {
+                // Approvals stay composer-adjacent only (toolApprovalFallback).
+                attachToolApproval: false,
+                reasoningPresentation: "flow",
+              }),
+            }))}
           >
-            {renderTimelineNodes(
-              processCells,
-              // Approvals stay composer-adjacent only (toolApprovalFallback).
-              { attachToolApproval: false, reasoningPresentation: "flow" },
-            )}
+            {null}
           </ConversationProcessDisclosure>
         ) : null}
         {finalCells.length > 0 ? (

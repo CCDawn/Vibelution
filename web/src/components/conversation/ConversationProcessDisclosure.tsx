@@ -62,6 +62,12 @@ type ConversationProcessDisclosureProps = {
    * when no duration is derivable.
    */
   workSummary?: ConversationTurnWorkSummary | null;
+  /**
+   * Pre-split flow rows. Mid-turn narration (commentary) is body text: it stays
+   * visible when the work trail collapses, so only reasoning and tool rows
+   * belong to the collapsible record.
+   */
+  segments?: ReadonlyArray<{ key: string; kind: "work" | "narration"; node: ReactNode }>;
 };
 
 const PROCESS_ROW_STAGGER_MS = 28;
@@ -286,6 +292,7 @@ export function ConversationProcessDisclosure({
   turnStartedAt,
   activeStage,
   workSummary = null,
+  segments,
 }: ConversationProcessDisclosureProps) {
   const state = processState(cells, messageOrder, turnStreaming);
   const running = state === "running";
@@ -384,10 +391,28 @@ export function ConversationProcessDisclosure({
           }
         }}
       >
-        <div className={styles.flowWorkContent} ref={workContentRef} id={`${contentId}-work`} hidden={!workExpanded} inert={!workExpanded} aria-hidden={!workExpanded}>
-          <div ref={contentRef} id={contentId} className={styles.flowContent}>
-            {content}
-          </div>
+        <div className={styles.flowWorkContent} ref={workContentRef} id={`${contentId}-work`}>
+          {segments ? segments.map((segment) => (
+            segment.kind === "narration" ? (
+              <div key={segment.key} data-codex-narration-row="true" className={styles.flowContent}>
+                {segment.node}
+              </div>
+            ) : (
+              <div
+                key={segment.key}
+                className={styles.flowContent}
+                hidden={!workExpanded}
+                inert={!workExpanded}
+                aria-hidden={!workExpanded}
+              >
+                {segment.node}
+              </div>
+            )
+          )) : (
+            <div ref={contentRef} id={contentId} className={styles.flowContent} hidden={!workExpanded} inert={!workExpanded} aria-hidden={!workExpanded}>
+              {content}
+            </div>
+          )}
         </div>
         <div className={[
           styles.flowStatusRow,
