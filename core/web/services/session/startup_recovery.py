@@ -100,10 +100,38 @@ def _new_summary() -> dict[str, Any]:
         "retryLimitSkipCount": 0,
         "companionSkipCount": 0,
         "noInterruptedTurnCount": 0,
+        "noActiveTurnSkipCount": 0,
         "queuedDrainScheduledCount": 0,
         "errorCount": 0,
         "durationMs": 0,
     }
+
+
+def _active_chat_turn_session_ids(s: Any) -> set[str] | None:
+    """Session ids owning a still-active chat_turn work-run after a restart.
+
+    Reading every session's journal is the expensive half of the sweep. A
+    session with no active chat_turn snapshot cannot own a turn this process
+    died inside, so it never needs that read.
+
+    Returns ``None`` when the store cannot be read: narrowing on a failed
+    query would silently drop recovery, so callers fall back to the full scan.
+    """
+
+    try:
+        snapshots = s._WORK_RUN_STORE.load_active_snapshots("chat_turn")
+    except Exception:  # noqa: BLE001 - unknown store failure must not narrow
+        return None
+    if not isinstance(snapshots, list):
+        return None
+    session_ids: set[str] = set()
+    for snapshot in snapshots:
+        if not isinstance(snapshot, dict):
+            continue
+        session_id = str(snapshot.get("sessionId") or "").strip()
+        if session_id:
+            session_ids.add(session_id)
+    return session_ids
 
 
 def _companion_session_ids(s: Any) -> set[str] | None:
@@ -518,6 +546,7 @@ def _recover_session_on_startup(
     companion_session_ids: set[str],
     summary: dict[str, Any],
     should_stop: Callable[[], bool] | None = None,
+    active_turn_session_ids: set[str] | None = None,
 ) -> None:
     if _shutdown_requested(should_stop):
         return
@@ -551,6 +580,11 @@ def _recover_session_on_startup(
     if s._is_session_running(session_id):
         return
     if _shutdown_requested(should_stop):
+        return
+    if active_turn_session_ids is not None and session_id not in active_turn_session_ids:
+        # No live chat_turn snapshot for this session: nothing died inside a
+        # turn here, so the journal read below would only spend startup time.
+        summary["noActiveTurnSkipCount"] += 1
         return
     events = s._load_session_conversation_events_cached(session_id)
     open_turn_id = latest_open_turn_id(events)
@@ -596,6 +630,10 @@ def recover_interrupted_session_turns_on_startup(
         if _shutdown_requested(should_stop):
             summary["stopped"] = True
             return summary
+        active_turn_session_ids = _active_chat_turn_session_ids(s)
+        summary["activeTurnCandidateCount"] = (
+            len(active_turn_session_ids) if active_turn_session_ids is not None else -1
+        )
         for session_id in list(s.list_session_runtime_ids(s.PROJECT_ROOT) or []):
             if _shutdown_requested(should_stop):
                 summary["stopped"] = True
@@ -610,6 +648,7 @@ def recover_interrupted_session_turns_on_startup(
                     companion_session_ids=companion_session_ids,
                     summary=summary,
                     should_stop=should_stop,
+                    active_turn_session_ids=active_turn_session_ids,
                 )
             except Exception as exc:  # noqa: BLE001 - one bad session never blocks startup
                 summary["errorCount"] += 1
