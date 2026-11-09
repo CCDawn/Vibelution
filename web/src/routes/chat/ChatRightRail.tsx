@@ -781,6 +781,7 @@ export function ChatRightRail({
             <ChatChangeRail
               embedded
               stacked
+              surface="panel"
               className=""
               lang={lang}
               title={review.gitTitle}

@@ -19,6 +19,8 @@ const styles = {
   body: "vui-routes-chatchangerail body min-h-0 flex-1 overflow-hidden",
   railStacked:
     "vui-routes-chatchangerail railStacked flex h-auto min-h-0 shrink-0 flex-col overflow-hidden",
+  railStackedPanel:
+    "vui-routes-chatchangerail railStackedPanel flex h-auto min-h-0 shrink-0 flex-col overflow-hidden rounded-vui-panel border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-card)]",
   listStacked: "vui-routes-chatchangerail listStacked m-0 flex max-h-40 min-h-0 shrink-0 list-none flex-col gap-1 overflow-auto px-2 pb-2",
   bodyStacked: "vui-routes-chatchangerail bodyStacked max-h-64 min-h-0 overflow-auto pt-1",
 } as const;

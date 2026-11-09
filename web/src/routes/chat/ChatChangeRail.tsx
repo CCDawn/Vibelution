@@ -16,6 +16,8 @@ type ChatChangeRailProps = {
   embedded?: boolean;
   /** Size to the list so a review tab can stack this chat and the repository. */
   stacked?: boolean;
+  /** Give the rail its own surface; use for a full repository panel. */
+  surface?: "flat" | "panel";
   title?: string;
   emptyLabel?: string;
   pending?: boolean;
@@ -44,6 +46,7 @@ export function ChatChangeRail({
   lang,
   embedded = false,
   stacked = false,
+  surface = "flat",
   title,
   emptyLabel,
   pending = false,
@@ -89,7 +92,7 @@ export function ChatChangeRail({
   const showBody = !collapsed
     && (!stacked || paths.length === 0 || pending || Boolean(unavailableLabel) || Boolean(selectedPath));
   return (
-    <aside id={embedded ? undefined : "chat-status-pane"} className={`${stacked ? styles.railStacked : styles.rail} ${className}`} aria-label={resolvedTitle}>
+    <aside id={embedded ? undefined : "chat-status-pane"} className={`${stacked ? (surface === "panel" ? styles.railStackedPanel : styles.railStacked) : styles.rail} ${className}`} aria-label={resolvedTitle}>
       <div className={styles.header}>
         <button
           type="button"
