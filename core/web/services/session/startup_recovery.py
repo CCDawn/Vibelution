@@ -107,6 +107,17 @@ def _new_summary() -> dict[str, Any]:
     }
 
 
+def _clear_restart_resume_pending(s: Any) -> None:
+    """Drop the marker once a clean sweep has consumed it."""
+
+    from .restart_resume_pending import clear_pending_restart_resume
+
+    try:
+        clear_pending_restart_resume(getattr(s, "_WORK_RUN_STORE", None))
+    except Exception:  # noqa: BLE001 - a stale marker is retried next startup
+        return
+
+
 def _load_restart_resume_pending(s: Any) -> dict[str, set[str]]:
     """Turns a graceful restart interrupted, keyed by session id."""
 
@@ -696,6 +707,10 @@ def recover_interrupted_session_turns_on_startup(
         summary["durationMs"] = s._elapsed_ms(started_at)
         if not _shutdown_requested(should_stop):
             _record_sweep_scene_event(s, summary)
+            # Only a clean sweep may retire the marker: an interrupted or
+            # failing sweep must leave it for the next startup to retry.
+            if not summary.get("errorCount"):
+                _clear_restart_resume_pending(s)
         with _SWEEP_LOCK:
             _SWEEP_IN_FLIGHT = False
     return summary
