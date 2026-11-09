@@ -691,6 +691,36 @@ def list_chat_rooms_compact() -> list[dict[str, Any]]:
     return rooms
 
 
+def list_team_chat_room_refs(team_id: str) -> list[dict[str, Any]]:
+    """Return minimal ``{roomId, status}`` refs for rooms bound to one Team.
+
+    Duplicate-team-room cleanup only needs identity and status, so this skips
+    the full ``_room_to_api`` projection (round transcripts, participant
+    hydration, avatars). Listing every room that way made each Team link sync
+    scale with the total transcript volume of the whole workspace.
+    """
+
+    normalized_team_id = str(team_id or "").strip()
+    if not normalized_team_id:
+        return []
+    _reconcile_chat_room_round_state()
+    state = _store().load()
+    refs: list[dict[str, Any]] = []
+    for item in list(state.get("rooms") or []):
+        if not isinstance(item, dict):
+            continue
+        config = item.get("config") if isinstance(item.get("config"), dict) else {}
+        if str(config.get("source") or "").strip() != "team":
+            continue
+        if str(config.get("teamId") or "").strip() != normalized_team_id:
+            continue
+        room_id = str(item.get("roomId") or "").strip()
+        if not room_id:
+            continue
+        refs.append({"roomId": room_id, "status": str(item.get("status") or "").strip()})
+    return refs
+
+
 def _question_owned_rooms(
     team_id: str, question_id: str
 ) -> list[dict[str, Any]]:

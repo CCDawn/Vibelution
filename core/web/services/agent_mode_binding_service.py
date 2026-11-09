@@ -272,8 +272,14 @@ def remove_agents_from_mode_bindings(
     agent_ids: list[str] | None,
     *,
     agent_snapshots_by_agent_id: dict[str, dict[str, Any]] | None = None,
+    agent_options: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Remove multiple Agents from all mode binding references in one binding update."""
+    """Remove multiple Agents from all mode binding references in one binding update.
+
+    ``agent_options`` 可传入调用方已算好的 Agent 索引；缺省回落到
+    ``_agent_options()``。批量归档里 repair 与返回 payload 各自都要一次这份
+    索引，调用方传一次即可省掉重复的全量投影。
+    """
 
     requested = [str(item or "").strip() for item in list(agent_ids or []) if str(item or "").strip()]
     normalized_agent_ids: list[str] = []
@@ -284,7 +290,7 @@ def remove_agents_from_mode_bindings(
         seen_agent_ids.add(agent_id)
         normalized_agent_ids.append(agent_id)
     if not normalized_agent_ids:
-        payload = get_mode_bindings_payload()
+        payload = get_mode_bindings_payload(agent_options=agent_options)
         payload["removedAgentIds"] = []
         return payload
 
@@ -302,7 +308,7 @@ def remove_agents_from_mode_bindings(
         agent_id: _fixed_role_tombstone_slots(snapshots.get(agent_id))
         for agent_id in normalized_agent_ids
     }
-    payload = repair_mode_bindings()
+    payload = repair_mode_bindings(agent_options=agent_options)
     bindings = list(payload.get("bindings") or [])
     changed_modes: list[str] = []
     removal_warnings: list[dict[str, str]] = []
@@ -398,7 +404,7 @@ def remove_agents_from_mode_bindings(
             outcome="updated",
             fields={"agentIds": normalized_agent_ids, "agentCount": len(normalized_agent_ids), "changedModes": changed_modes},
         )
-    result = get_mode_bindings_payload()
+    result = get_mode_bindings_payload(agent_options=agent_options)
     result["removedAgentIds"] = normalized_agent_ids
     return result
 
