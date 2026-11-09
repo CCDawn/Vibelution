@@ -1830,6 +1830,10 @@ def test_launcher_startup_settings_reports_launcher_control_port_env_override(tm
 
 
 def test_launcher_startup_settings_avoids_launcher_control_port_workbench_collision(tmp_path, monkeypatch):
+    # The collision rule compares the effective backend port with the
+    # configured control port; an inherited live port would mask the rule.
+    monkeypatch.delenv("VIBELUTION_PORT", raising=False)
+    monkeypatch.delenv("AGENT_WORKBENCH_BACKEND_PORT", raising=False)
     config_path = tmp_path / "config.toml"
     config_path.write_text("[launcher]\ncontrol_port = 8765\n[workbench]\nbackend_port = 8765\n", encoding="utf-8")
     monkeypatch.setattr(launcher_service, "CONFIG_PATH", config_path)

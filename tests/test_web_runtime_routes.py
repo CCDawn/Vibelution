@@ -5902,7 +5902,12 @@ def test_summary_request_self_observation_marks_backend_open():
     assert observed["backendObservedSource"] == "summary_request"
 
 
-def test_summary_request_self_observation_keeps_closed_and_conflict_snapshots():
+def test_summary_request_self_observation_keeps_closed_and_conflict_snapshots(monkeypatch):
+    # A pytest run started by the live product inherits that backend's bound
+    # port, and the observer treats a bound port as first-hand evidence for
+    # the snapshot. Drop it so the snapshots stay exactly as passed in.
+    monkeypatch.delenv("VIBELUTION_PORT", raising=False)
+    monkeypatch.delenv("AGENT_WORKBENCH_BACKEND_PORT", raising=False)
     closed = runtime_service._observe_backend_from_summary_request(
         {"desiredState": "closed", "backendObserved": False}
     )
