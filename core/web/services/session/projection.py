@@ -15,6 +15,7 @@ from core.runtime_manager.work_run_status import resolve_work_run_activity, work
 import json
 import logging
 import threading
+import time
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -407,6 +408,8 @@ def get_session_detail(
     child sessions are gated, so normal sessions are unchanged.
     """
     s = _service()
+    detail_started_at = time.perf_counter()
+    timings: dict[str, int] = {}
 
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
@@ -421,6 +424,7 @@ def get_session_detail(
     # Exact deep links are allowed to recover a real, non-deleted session
     # workspace.  A missing row must not make the client silently switch to an
     # unrelated active conversation.
+    row_read_started_at = time.perf_counter()
     conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
     if conversation is None:
         s._ensure_session_conversation_record(
@@ -428,6 +432,7 @@ def get_session_detail(
             source="session.detail",
         )
         conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
+    _accumulate_session_detail_stage_ms(timings, "rowReadMs", row_read_started_at)
     bound_agent_ids = tuple(dict.fromkeys(
         str((conversation or {}).get(key) or "").strip()
         for key in ("agent_id", "agentId")
@@ -436,6 +441,7 @@ def get_session_detail(
     # A bound detail needs its declared identities and every competing direct
     # binding, not avatar/policy projections for the entire Agent directory.
     # Unbound legacy/recovery reads retain the complete lookup.
+    agent_lookup_started_at = time.perf_counter()
     agent_by_id = (
         s._agent_lookup_for_conversations(
             session_id=normalized_session_id,
@@ -444,6 +450,7 @@ def get_session_detail(
         if bound_agent_ids
         else s._agent_lookup_for_conversations()
     )
+    _accumulate_session_detail_stage_ms(timings, "agentLookupMs", agent_lookup_started_at)
     if conversation is None:
         fallback = s._agent_directory_session_stub_for_id(normalized_session_id, agent_by_id=agent_by_id)
         if fallback is None:
@@ -469,6 +476,7 @@ def get_session_detail(
     # directory write and follow-up persisted-state reload for that path while
     # preserving idle recovery and full-detail behavior.
     light_running_poll = not include_secondary_lists and session_running
+    reconcile_started_at = time.perf_counter()
     s._reconcile_stale_session_ledger(
         normalized_session_id,
         active_turn_id=active_turn_id if session_running else "",
@@ -476,6 +484,7 @@ def get_session_detail(
     )
     if not light_running_poll:
         conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id) or conversation
+    _accumulate_session_detail_stage_ms(timings, "reconcileMs", reconcile_started_at)
     target = s._load_conversation_detail_target(
         normalized_session_id,
         payload={"conversations": [conversation]},
@@ -491,16 +500,74 @@ def get_session_detail(
 
             # Sync only after the reload-repair pass so the directory row
             # follows the conversation state that pass produced.
+            directory_sync_started_at = time.perf_counter()
             repaired = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
             directory_bridge.sync_conversation_record(repaired or conversation, touch_recency=False)
-        return s._build_session_detail(
+            _accumulate_session_detail_stage_ms(timings, "directorySyncMs", directory_sync_started_at)
+        projection_started_at = time.perf_counter()
+        detail = s._build_session_detail(
             target,
             message_limit=message_limit,
             before_message_index=before_message_index,
             transcript_scope=transcript_scope,
             include_secondary=include_secondary_lists,
         )
+        _accumulate_session_detail_stage_ms(timings, "projectionMs", projection_started_at)
+        _record_session_detail_timing(
+            s,
+            started_at=detail_started_at,
+            timings=timings,
+            session_id=normalized_session_id,
+            include_secondary=include_secondary_lists,
+            session_running=session_running,
+            window_requested=window_requested,
+        )
+        return detail
     return None
+
+
+def _accumulate_session_detail_stage_ms(
+    timings: dict[str, int],
+    name: str,
+    started_at: float,
+) -> None:
+    timings[name] = timings.get(name, 0) + max(
+        0,
+        int((time.perf_counter() - started_at) * 1000),
+    )
+
+
+def _record_session_detail_timing(
+    s: Any,
+    *,
+    started_at: float,
+    timings: dict[str, int],
+    session_id: str = "",
+    include_secondary: bool = True,
+    session_running: bool = False,
+    window_requested: bool = False,
+) -> None:
+    """Publish one bounded detail-GET timing sample (switch latency probe)."""
+
+    try:
+        s.record_runtime_scene_event(
+            "conversation",
+            "session_lifecycle",
+            "conversation.session.detail.timing",
+            outcome="succeeded",
+            message="Session detail request timing.",
+            fields={
+                "sessionId": str(session_id or "").strip(),
+                "includeSecondary": bool(include_secondary),
+                "sessionRunning": bool(session_running),
+                "windowRequested": bool(window_requested),
+                "stageDurationsMs": dict(timings),
+                "totalMs": max(0, int((time.perf_counter() - started_at) * 1000)),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        pass
 
 
 def _coerce_include_secondary(value: Any) -> bool:

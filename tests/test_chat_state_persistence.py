@@ -1218,7 +1218,7 @@ def test_latest_unfinished_task_goal_loads_one_row(tmp_path, monkeypatch):
 
 def _stub_compat_shell_side_effects(monkeypatch) -> None:
     monkeypatch.setattr(session_service, "_sync_agent_directory_project_root", lambda: None)
-    monkeypatch.setattr(session_service, "_agent_lookup_for_conversations", lambda: {})
+    monkeypatch.setattr(session_service, "_agent_lookup_for_conversations", lambda **_kwargs: {})
     monkeypatch.setattr(session_service, "_is_session_workspace_intentionally_deleted", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(session_service, "_conversation_is_read_only", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(session_service, "_invalidate_session_list_cache", lambda: None)

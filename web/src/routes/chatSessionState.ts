@@ -631,6 +631,28 @@ function withPreservedSecondaryLists(
   };
 }
 
+/**
+ * Fold a trailing full hydration onto an already painted detail. The switch
+ * path fetches light (includeSecondary=false) so inbox / governance / group /
+ * next-state reads never gate first paint; this writes only those side lists
+ * back and leaves the transcript and window untouched.
+ */
+export function mergeSessionDetailSecondaryLists(
+  previous: SessionDetail | undefined,
+  hydrated: SessionDetail,
+): SessionDetail | undefined {
+  if (!previous || previous.id !== hydrated.id) return previous;
+  return {
+    ...previous,
+    nextStateSignals: hydrated.nextStateSignals ?? previous.nextStateSignals,
+    groupContextEvents: hydrated.groupContextEvents ?? previous.groupContextEvents,
+    agentInboxMessages: hydrated.agentInboxMessages ?? previous.agentInboxMessages,
+    pendingToolGovernanceRequests:
+      hydrated.pendingToolGovernanceRequests ?? previous.pendingToolGovernanceRequests,
+    secondaryHydrated: hydrated.secondaryHydrated === true ? true : previous.secondaryHydrated,
+  };
+}
+
 export function mergeSessionDetailMessageWindow(
   previous: SessionDetail | undefined,
   next: SessionDetail,
