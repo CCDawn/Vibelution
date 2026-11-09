@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import React, {
   DragEvent,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -474,6 +475,11 @@ export function useConversationComposer({
   );
   // Escape dismisses the list for the exact draft that produced it; any edit
   // (including the builtin clearing the draft) re-arms suggestions.
+  // The draft is read by ref inside callbacks that must keep a stable identity:
+  // a value captured from props would change on every keystroke and defeat the
+  // memo boundary that keeps keystrokes out of the timeline render.
+  const composerValueRef = useRef(composerValue);
+  composerValueRef.current = composerValue;
   const [slashDismissedAtValue, setSlashDismissedAtValue] = useState<string | null>(null);
   const [slashActiveIndex, setSlashActiveIndex] = useState(-1);
   useEffect(() => {
@@ -672,7 +678,7 @@ export function useConversationComposer({
    * ChatGPT/Claude: sending always re-pins the viewport to the latest turn.
    * Do this before onSubmit so optimistic user + active-turn paint under followLatest.
    */
-  function pinFollowLatestForSubmit() {
+  const pinFollowLatestForSubmit = useCallback(() => {
     userScrollIntentRef.current = "none";
     userScrollIntentAtRef.current = 0;
     followLatestRef.current = true;
@@ -694,12 +700,12 @@ export function useConversationComposer({
         }
       });
     });
-  }
+  }, [scrollTimelineToBottom, setIsAtBottom]);
 
-  function exitComposerPromptHistoryBrowse() {
+  const exitComposerPromptHistoryBrowse = useCallback(() => {
     promptHistoryIndexRef.current = null;
     promptHistoryDraftRef.current = null;
-  }
+  }, []);
 
   /**
    * ZCode parity: ArrowUp/ArrowDown on an empty draft (or while already
@@ -749,30 +755,35 @@ export function useConversationComposer({
     return true;
   }
 
-  function handleSideChatCommand(): boolean {
-    const sideCommand = onOpenSideChat ? parseSideSlashCommand(composerValue) : null;
+  const handleSideChatCommand = useCallback((): boolean => {
+    const sideCommand = onOpenSideChat ? parseSideSlashCommand(composerValueRef.current) : null;
     if (sideCommand) {
       onComposerChange("");
       onOpenSideChat?.(sideCommand.prompt, Boolean(sideCommand.prompt));
       return true;
     }
     return false;
-  }
+  }, [onComposerChange, onOpenSideChat]);
 
-  function handleQueueSubmit() {
+  const handleQueueSubmit = useCallback(() => {
     if (!handleSideChatCommand()) {
       onSubmit();
     }
-  }
+  }, [handleSideChatCommand, onSubmit]);
 
-  function handleSendAndFollowLatest() {
+  const handleSendAndFollowLatest = useCallback(() => {
     if (handleSideChatCommand()) {
       return;
     }
     exitComposerPromptHistoryBrowse();
     pinFollowLatestForSubmit();
     onSubmit();
-  }
+  }, [
+    exitComposerPromptHistoryBrowse,
+    handleSideChatCommand,
+    onSubmit,
+    pinFollowLatestForSubmit,
+  ]);
 
   function handlePrimaryAction() {
     if (primaryDisabled) return;
