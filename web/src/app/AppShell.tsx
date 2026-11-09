@@ -3157,6 +3157,16 @@ export function AppShell() {
                     : t("activeWorkEmpty")}</p> : null}
             </section>
           </VPopover>
+          <WorkbenchConnectionNotice
+            unavailable={(backendHealthQuery.isError || backendHealthQuery.isRefetchError) && !startupOverlayActive && !shutdownOpen}
+            lang={lang}
+            desktopShell={desktopShell}
+            recovering={restartRequested || shutdownRequested}
+            lastHealthyAt={backendHealthQuery.dataUpdatedAt}
+            failedAt={backendHealthQuery.errorUpdatedAt}
+            onRecover={() => { void beginRestart(); }}
+            onRetry={() => { void backendHealthQuery.refetch(); }}
+          />
         </div>
       <div className={styles.settingsSlot} data-shell-group="settings">
         <VButton variant="ghost" className={styles.settingsTrigger} aria-label={lang === "en" ? "Changes" : "变更"} title={shellGitTriggerTitle}
@@ -3278,16 +3288,6 @@ export function AppShell() {
 
       <div className={styles.mainArea}>
       <div className={styles.contentFrame} data-testid="workbench-content-frame">
-      <div><WorkbenchConnectionNotice
-        unavailable={(backendHealthQuery.isError || backendHealthQuery.isRefetchError) && !startupOverlayActive && !shutdownOpen}
-        lang={lang}
-        desktopShell={desktopShell}
-        recovering={restartRequested || shutdownRequested}
-        lastHealthyAt={backendHealthQuery.dataUpdatedAt}
-        failedAt={backendHealthQuery.errorUpdatedAt}
-        onRecover={() => { void beginRestart(); }}
-        onRetry={() => { void backendHealthQuery.refetch(); }}
-      /></div>
         <VSplitWorkspace className={styles.projectWorkspace} main={<><CompanionDesktopAttention startupReady={shellOptionalReady} /><VWorkbenchFrame flush={location.pathname === "/chat" || location.pathname === "/teams"}><WorkbenchStartupReadyContext.Provider value={reportRouteStartupReady}>{routeContent}</WorkbenchStartupReadyContext.Provider></VWorkbenchFrame></>}
           aside={projectUtilityFallback && !projectUtilityOverlay ? <Suspense fallback={null}><ShellProjectUtilities lang={lang} onOpenSession={(id) => chatRoute.openSession(id, { surface: "chat", telemetrySource: "shell_project_utility" })} /></Suspense> : undefined}
           resize={{ layoutId: WORKBENCH_LAYOUT_IDS.projectUtilities, aside: { defaultWidth: 420, minWidth: 320, maxWidth: 640 } }} />
