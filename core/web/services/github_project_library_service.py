@@ -333,10 +333,18 @@ def parse_github_spec(spec: str) -> tuple[str, str]:
 def fetch_github_repo_metadata(owner: str, repo: str) -> dict[str, Any]:
     url = f"https://api.github.com/repos/{owner}/{repo}"
     try:
-        with httpx.Client(timeout=GITHUB_API_TIMEOUT_SECONDS) as client:
+        # A renamed or transferred repository answers 301 on this endpoint, so the
+        # lookup must follow redirects or every old owner/repo fails as transport.
+        with httpx.Client(
+            timeout=GITHUB_API_TIMEOUT_SECONDS, follow_redirects=True
+        ) as client:
             response = client.get(url, headers={"Accept": "application/vnd.github+json", "User-Agent": USER_AGENT})
             response.raise_for_status()
             payload = response.json()
+    except httpx.HTTPStatusError as exc:
+        raise GithubProjectLibraryError(
+            f"GitHub metadata lookup failed: HTTP {exc.response.status_code} for {url}"
+        ) from exc
     except Exception as exc:
         raise GithubProjectLibraryError(f"GitHub metadata lookup failed: {type(exc).__name__}") from exc
     if not isinstance(payload, dict):
