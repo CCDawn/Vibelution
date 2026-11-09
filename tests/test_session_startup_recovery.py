@@ -26,6 +26,7 @@ import pytest
 from core.chat.turn_journal import (
     EVENT_ASSISTANT_PARTIAL,
     EVENT_SESSION_RECOVERY_RESUMED,
+    EVENT_TURN_INTERRUPTED,
     EVENT_TURN_STARTED,
     EVENT_USER_MESSAGE,
     append_turn_event,
@@ -805,3 +806,85 @@ def test_explicit_write_intent_metadata_wins_over_lease_derivation(
 
     assert summary["resumedCount"] == 1
     assert submit_calls[0]["write_intent"] is False
+
+
+def _seed_restart_interrupted_turn(
+    tmp_path,
+    *,
+    session_id: str = SESSION_ID,
+    turn_id: str = ORIGINAL_TURN_ID,
+    prompt: str = ORIGINAL_PROMPT,
+    reason: str = "process_restarted",
+    interrupted_at: str = "",
+) -> None:
+    """A turn the runtime itself closed as ``turn_interrupted`` after a restart.
+
+    This is the state a hard kill leaves behind: the shutdown marker was never
+    written and the chat_turn snapshot is no longer active, so the journal stamp
+    is the only surviving evidence that the turn died mid-flight.
+    """
+
+    _seed_interrupted_turn(
+        tmp_path, session_id=session_id, turn_id=turn_id, prompt=prompt
+    )
+    extra: dict[str, Any] = {}
+    if interrupted_at:
+        extra["timestamp"] = interrupted_at
+    append_turn_event(
+        tmp_path,
+        session_id,
+        turn_id,
+        EVENT_TURN_INTERRUPTED,
+        payload={"reason": reason},
+        source="turn_journal_reconcile",
+        **extra,
+    )
+
+
+def test_hard_kill_restart_resumes_from_journal_interrupt_evidence(
+    recovery_env, tmp_path, submit_calls, drain_calls
+) -> None:
+    """No marker, no active snapshot: the journal stamp alone must resume."""
+
+    _seed_conversation(tmp_path)
+    _seed_restart_interrupted_turn(tmp_path)
+
+    summary = startup_recovery.recover_interrupted_session_turns_on_startup()
+
+    assert summary["resumedCount"] == 1
+    assert summary["journalInterruptResumeCount"] == 1
+    assert summary["noActiveTurnSkipCount"] == 0
+    assert [call["content"] for call in submit_calls] == [ORIGINAL_PROMPT]
+    assert submit_calls[0]["turn_mode"] == "hot_restart_resume"
+    assert submit_calls[0]["client_submission_id"] == f"resume:{ORIGINAL_TURN_ID}"
+
+
+def test_stale_restart_interrupt_is_not_replayed(
+    recovery_env, tmp_path, submit_calls, monkeypatch
+) -> None:
+    """An old interrupted turn must not be resumed at every startup."""
+
+    monkeypatch.setattr(startup_recovery, "_resume_age_window_seconds", lambda: 60.0)
+    _seed_conversation(tmp_path)
+    _seed_restart_interrupted_turn(tmp_path, interrupted_at="2020-01-01T00:00:00+00:00")
+
+    summary = startup_recovery.recover_interrupted_session_turns_on_startup()
+
+    assert summary["resumedCount"] == 0
+    assert summary["journalInterruptResumeCount"] == 0
+    assert submit_calls == []
+
+
+def test_operator_cancelled_turn_is_not_resumed_from_journal(
+    recovery_env, tmp_path, submit_calls
+) -> None:
+    """Only ``process_restarted`` interruptions are resumable."""
+
+    _seed_conversation(tmp_path)
+    _seed_restart_interrupted_turn(tmp_path, reason="operator_cancelled")
+
+    summary = startup_recovery.recover_interrupted_session_turns_on_startup()
+
+    assert summary["resumedCount"] == 0
+    assert summary["journalInterruptResumeCount"] == 0
+    assert submit_calls == []

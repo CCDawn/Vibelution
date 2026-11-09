@@ -20,9 +20,13 @@ This sweep runs once after the workbench lifespan is ready and:
 Companion (virtual-human) sessions are skipped entirely — Companion chains
 keep their own delivery path and must never be touched by this sweep. The
 runtime's own 120s stale-turn reconciliation path is left exactly as it was;
-this sweep only covers turns whose chat_turn work-run snapshot is still
-active (status queued/running/stopping/paused with no finishedAt) at startup,
-which no live process can own right after a restart.
+this sweep covers turns whose chat_turn work-run snapshot is still active
+(status queued/running/stopping/paused with no finishedAt) at startup, which
+no live process can own right after a restart, plus — as an age-bounded
+fallback — turns the runtime itself stamped ``turn_interrupted`` with
+``reason=process_restarted``. A hard kill never reaches the graceful shutdown
+hook that writes the marker, so without that fallback those turns waited for
+the operator to press continue.
 
 The sweep is best-effort: any failure is counted and logged, never raised, so
 backend startup never blocks on recovery.
@@ -30,18 +34,21 @@ backend startup never blocks on recovery.
 
 from __future__ import annotations
 
-from core.runtime_manager.work_run_status import work_run_has_execution
-
 import logging
+import os
 import threading
+import time
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from core.chat.turn_journal import (
     EVENT_SESSION_RECOVERY_RESUMED,
+    EVENT_TURN_INTERRUPTED,
     EVENT_TURN_STARTED,
     EVENT_USER_MESSAGE,
     latest_open_turn_id,
 )
+from core.runtime_manager.work_run_status import work_run_has_execution
 from core.session_recovery_flags import (
     is_session_recovery_enabled,
     session_recovery_max_auto_retries,
@@ -101,6 +108,7 @@ def _new_summary() -> dict[str, Any]:
         "companionSkipCount": 0,
         "noInterruptedTurnCount": 0,
         "noActiveTurnSkipCount": 0,
+        "journalInterruptResumeCount": 0,
         "queuedDrainScheduledCount": 0,
         "errorCount": 0,
         "durationMs": 0,
@@ -188,10 +196,93 @@ def _companion_session_ids(s: Any) -> set[str] | None:
     return session_ids
 
 
+# Hard-kill restarts never reach the graceful shutdown hook, so neither the
+# shutdown marker nor an active chat_turn snapshot survives them. The runtime's
+# own reconcile still stamps the abandoned turn with ``turn_interrupted`` and
+# ``reason=process_restarted``; that journal fact is the only durable evidence
+# left after a hard kill, and this sweep falls back to it. The age window keeps
+# a stale interrupted turn from being replayed at every startup.
+_RESTART_INTERRUPT_REASON = "process_restarted"
+_RESTART_INTERRUPT_MAX_AGE_SECONDS = 30 * 60.0
+_RESTART_INTERRUPT_MAX_AGE_ENV = "VIBELUTION_SESSION_RECOVERY_MAX_AGE_SECONDS"
+
+
+def _resume_age_window_seconds() -> float:
+    """Bounded age window for the journal-only restart-interrupt fallback."""
+
+    raw = str(os.environ.get(_RESTART_INTERRUPT_MAX_AGE_ENV) or "").strip()
+    if not raw:
+        return _RESTART_INTERRUPT_MAX_AGE_SECONDS
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return _RESTART_INTERRUPT_MAX_AGE_SECONDS
+    return value if value > 0 else _RESTART_INTERRUPT_MAX_AGE_SECONDS
+
+
+def _within_resume_age_window(timestamp: str, *, now: float | None = None) -> bool:
+    """Whether an interrupted turn is recent enough to resume automatically."""
+
+    raw = str(timestamp or "").strip()
+    if not raw:
+        return False
+    try:
+        stamped = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if stamped.tzinfo is None:
+        stamped = stamped.replace(tzinfo=timezone.utc)
+    observed = time.time() if now is None else float(now)
+    return (observed - stamped.timestamp()) <= _resume_age_window_seconds()
+
+
+def _latest_restart_interrupted_turn(events: list[Any]) -> tuple[str, str]:
+    """Latest turn the runtime stamped ``turn_interrupted`` because of a restart.
+
+    Returns ``(turn_id, timestamp)`` or ``("", "")``. Only interruptions whose
+    payload reason is ``process_restarted`` qualify: a turn the operator
+    cancelled carries a different reason and must stay cancelled. Turns an
+    earlier sweep already resumed are skipped so one crash is not replayed
+    forever.
+    """
+
+    raw_events = list(events or [])
+    started_turn_ids = {
+        str(getattr(event, "turn_id", "") or "").strip()
+        for event in raw_events
+        if str(getattr(event, "event_type", "") or "").strip() == EVENT_TURN_STARTED
+    }
+    already_resumed: set[str] = set()
+    for event in raw_events:
+        if str(getattr(event, "event_type", "") or "").strip() != EVENT_SESSION_RECOVERY_RESUMED:
+            continue
+        payload = getattr(event, "payload", None)
+        if not isinstance(payload, dict):
+            continue
+        for key in ("recoveredTurnId", "originalTurnId", "openTurnId"):
+            recovered = str(payload.get(key) or "").strip()
+            if recovered:
+                already_resumed.add(recovered)
+    for event in reversed(raw_events):
+        if str(getattr(event, "event_type", "") or "").strip() != EVENT_TURN_INTERRUPTED:
+            continue
+        turn_id = str(getattr(event, "turn_id", "") or "").strip()
+        if not turn_id or turn_id not in started_turn_ids or turn_id in already_resumed:
+            continue
+        payload = getattr(event, "payload", None)
+        reason = str(payload.get("reason") or "").strip() if isinstance(payload, dict) else ""
+        if reason != _RESTART_INTERRUPT_REASON:
+            continue
+        return turn_id, str(getattr(event, "timestamp", "") or "").strip()
+    return "", ""
+
+
 def _open_turn_work_run_is_interrupted(
     s: Any,
     turn_id: str,
     pending_turn_ids: set[str] | None = None,
+    *,
+    journal_interrupt_evidence: bool = False,
 ) -> bool:
     """Whether the open turn's chat_turn work-run snapshot is still active.
 
@@ -206,9 +297,14 @@ def _open_turn_work_run_is_interrupted(
         return work_run_has_execution(snapshot)
     # A graceful restart writes the same terminal ``stopped`` state a manual
     # stop writes, so the snapshot cannot prove which one happened. The
-    # shutdown marker is the only evidence that a restart interrupted this
+    # shutdown marker is the evidence that a graceful restart interrupted this
     # turn instead of the operator cancelling it.
-    return bool(pending_turn_ids and turn_id in pending_turn_ids)
+    if pending_turn_ids and turn_id in pending_turn_ids:
+        return True
+    # Hard kill: no marker was ever written. The journal's own
+    # ``turn_interrupted`` stamp with ``reason=process_restarted`` is then the
+    # only surviving evidence, and the caller already bounded it by age.
+    return bool(journal_interrupt_evidence)
 
 
 def _interrupted_turn_prompt(events: list[Any], turn_id: str) -> str:
@@ -445,6 +541,7 @@ def _resume_interrupted_turn(
     summary: dict[str, Any],
     should_stop: Callable[[], bool] | None = None,
     pending_turn_ids: set[str] | None = None,
+    journal_interrupt_evidence: bool = False,
 ) -> None:
     if _shutdown_requested(should_stop):
         return
@@ -452,7 +549,12 @@ def _resume_interrupted_turn(
     if conversation is None or s._conversation_is_read_only(conversation):
         summary["noInterruptedTurnCount"] += 1
         return
-    if not _open_turn_work_run_is_interrupted(s, open_turn_id, pending_turn_ids):
+    if not _open_turn_work_run_is_interrupted(
+        s,
+        open_turn_id,
+        pending_turn_ids,
+        journal_interrupt_evidence=journal_interrupt_evidence,
+    ):
         summary["noInterruptedTurnCount"] += 1
         return
     prompt = _interrupted_turn_prompt(events, open_turn_id)
@@ -614,15 +716,29 @@ def _recover_session_on_startup(
         return
     if _shutdown_requested(should_stop):
         return
+    journal_interrupt_evidence = False
     if active_turn_session_ids is not None and session_id not in active_turn_session_ids:
-        # No live chat_turn snapshot for this session: nothing died inside a
-        # turn here, so the journal read below would only spend startup time.
-        summary["noActiveTurnSkipCount"] += 1
-        return
-    events = s._load_session_conversation_events_cached(session_id)
-    open_turn_id = latest_open_turn_id(events)
-    if not open_turn_id:
-        return
+        # A hard kill leaves neither an active chat_turn snapshot nor a shutdown
+        # marker, so this branch used to skip the session without reading its
+        # journal at all and the turn waited for the operator to press continue.
+        # Fall back to the journal's own restart-interrupt stamp, bounded by age
+        # so a stale turn is never replayed at every startup.
+        events = s._load_session_conversation_events_cached(session_id)
+        open_turn_id = latest_open_turn_id(events)
+        if not open_turn_id:
+            candidate_turn_id, interrupted_at = _latest_restart_interrupted_turn(events)
+            if candidate_turn_id and _within_resume_age_window(interrupted_at):
+                open_turn_id = candidate_turn_id
+                journal_interrupt_evidence = True
+                summary["journalInterruptResumeCount"] += 1
+        if not open_turn_id:
+            summary["noActiveTurnSkipCount"] += 1
+            return
+    else:
+        events = s._load_session_conversation_events_cached(session_id)
+        open_turn_id = latest_open_turn_id(events)
+        if not open_turn_id:
+            return
     _resume_interrupted_turn(
         s,
         session_id,
@@ -631,6 +747,7 @@ def _recover_session_on_startup(
         summary=summary,
         should_stop=should_stop,
         pending_turn_ids=pending_turn_ids,
+        journal_interrupt_evidence=journal_interrupt_evidence,
     )
 
 
