@@ -19,6 +19,37 @@ export type ChatToolApprovalLabel = {
   label: string;
 };
 
+/** Facts a tool-governance request must show; the generic tool-approval
+ *  layout collapses them into a bare tool name. */
+export type ChatToolGovernanceApproval = {
+  targetAgentLabel: string;
+  proposedByLabel: string;
+  grantTools: string[];
+  revokeTools: string[];
+  reason: string;
+  riskTags: string[];
+};
+
+/** The panel contract stays untouched: the bridge carries governance facts
+ *  through the existing sessionGrantScope channel under a reserved key. */
+export function toolGovernanceFromScope(
+  scope: Record<string, unknown> | undefined,
+): ChatToolGovernanceApproval | undefined {
+  const raw = scope?.__toolGovernance;
+  if (!raw || typeof raw !== "object") return undefined;
+  const facts = raw as Partial<ChatToolGovernanceApproval>;
+  const strings = (value: unknown): string[] =>
+    Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  return {
+    targetAgentLabel: typeof facts.targetAgentLabel === "string" ? facts.targetAgentLabel : "",
+    proposedByLabel: typeof facts.proposedByLabel === "string" ? facts.proposedByLabel : "",
+    grantTools: strings(facts.grantTools),
+    revokeTools: strings(facts.revokeTools),
+    reason: typeof facts.reason === "string" ? facts.reason : "",
+    riskTags: strings(facts.riskTags),
+  };
+}
+
 type ChatToolApprovalDialogProps = {
   lang: "zh" | "en";
   pending: boolean;
@@ -39,6 +70,8 @@ type ChatToolApprovalDialogProps = {
   toolName?: string;
   /** b3: assistant manage action-window projection (remaining delegation time). */
   assistantActionWindow?: SessionToolApprovalRequest["assistantActionWindow"];
+  /** Tool-governance requests: render the policy delta instead of a bare tool name. */
+  governance?: ChatToolGovernanceApproval;
   /** banner: composer-adjacent bar; inline: under tool activity in transcript. */
   variant?: "banner" | "inline" | "composer";
   onApprove: () => void;
@@ -77,6 +110,7 @@ export function ChatToolApprovalDialog({
   sessionGrantScope,
   toolName,
   assistantActionWindow,
+  governance,
   variant = "banner",
   onApprove,
   onApproveForSession,
@@ -85,6 +119,7 @@ export function ChatToolApprovalDialog({
   onApproveForDevelopmentBundle,
   onReject,
 }: ChatToolApprovalDialogProps) {
+  const governanceFacts = governance ?? toolGovernanceFromScope(sessionGrantScope);
   const dialogId = useId();
   const titleId = `${dialogId}-title`;
   const scopeId = `${dialogId}-scope`;
@@ -182,13 +217,36 @@ export function ChatToolApprovalDialog({
         <div className={styles.icon} aria-hidden="true">
           <ShieldAlert size={16} />
         </div>
-        <div className={styles.body}>
+        <div className={styles.body} aria-busy={pending || undefined}>
           <div className={styles.header}>
-            <strong id={titleId} className={styles.headerTitle}>{toolApprovalCodexTitle(lang)}</strong>
+            <strong id={titleId} className={styles.headerTitle}>{governanceFacts
+              ? (lang === "zh" ? "修改 Agent 工具权限？" : "Update agent tool permissions?")
+              : toolApprovalCodexTitle(lang)}</strong>
             {riskText ? <span id={riskId} className={styles.scopeBadge}>{riskText}</span> : <span id={riskId} className="sr-only" />}
             {scopeText ? <span className={styles.scopeBadge} id={scopeId}>{scopeText}</span> : <span id={scopeId} className="sr-only" />}
             {displayName ? <span className={styles.scopeBadge}>{displayName}</span> : null}
           </div>
+          {governanceFacts ? (
+            <div className={styles.grantDescription} data-chat-approval-governance="true">
+              {governanceFacts.targetAgentLabel ? (
+                <p>{lang === "zh" ? "目标 Agent：" : "Target agent: "}{governanceFacts.targetAgentLabel}</p>
+              ) : null}
+              {governanceFacts.grantTools.length ? (
+                <p>{lang === "zh" ? "授予：" : "Grant: "}
+                  {governanceFacts.grantTools.map((name) => toolApprovalDisplayName(name, lang)).join("、")}</p>
+              ) : null}
+              {governanceFacts.revokeTools.length ? (
+                <p>{lang === "zh" ? "撤销：" : "Revoke: "}
+                  {governanceFacts.revokeTools.map((name) => toolApprovalDisplayName(name, lang)).join("、")}</p>
+              ) : null}
+              {governanceFacts.reason ? (
+                <p>{lang === "zh" ? "理由：" : "Reason: "}{governanceFacts.reason}</p>
+              ) : null}
+              {governanceFacts.proposedByLabel ? (
+                <p>{lang === "zh" ? "提议方：" : "Proposed by: "}{governanceFacts.proposedByLabel}</p>
+              ) : null}
+            </div>
+          ) : null}
           <pre id={previewId} className={fullActionPreview ? styles.commandPreviewFull : styles.commandPreview}
             title={preview} tabIndex={fullActionPreview ? 0 : undefined}>
             {preview || (lang === "zh" ? "（无命令预览）" : "(no command preview)")}
@@ -234,7 +292,11 @@ export function ChatToolApprovalDialog({
             isDisabled={pending || approveDisabled}
             title={lang === "zh" ? "仅批准本次（Y）" : "Allow this once (Y)"}
           >
-            <span>{pending ? buttons.resolving : buttons.yes}</span>
+            <span>{pending
+              ? buttons.resolving
+              : governanceFacts
+                ? (lang === "zh" ? "批准" : "Approve")
+                : buttons.yes}</span>
           </VButton>
           {onApproveForSession ? (
             <VButton

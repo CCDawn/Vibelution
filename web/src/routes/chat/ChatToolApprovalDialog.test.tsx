@@ -207,3 +207,58 @@ describe("ChatToolApprovalDialog", () => {
     expect(markup).not.toContain("data-chat-approval-accept-action-window");
   });
 });
+
+describe("ChatToolApprovalDialog governance card", () => {
+  it("shows the policy delta instead of a bare tool name", () => {
+    const markup = renderToStaticMarkup(createElement(ChatToolApprovalDialog, {
+      lang: "zh",
+      pending: false,
+      rawTitle: "agent_tool_policy_update",
+      riskLabel: "高风险",
+      scopeLabel: "长期策略",
+      toolLabels: [{ id: "agent_message_tool", label: "助手消息" }],
+      governance: {
+        targetAgentLabel: "opencode go dsv4.1f · A034",
+        proposedByLabel: "A034",
+        grantTools: ["agent_message_tool"],
+        revokeTools: [],
+        reason: "让主 Agent 能跨会话发消息",
+        riskTags: ["cross_agent_message"],
+      },
+      onApprove: () => undefined,
+      onReject: () => undefined,
+    }));
+
+    expect(markup).toContain("修改 Agent 工具权限？");
+    expect(markup).toContain("目标 Agent：");
+    expect(markup).toContain("opencode go dsv4.1f · A034");
+    expect(markup).toContain("授予：");
+    expect(markup).toContain("理由：让主 Agent 能跨会话发消息");
+    expect(markup).toContain("批准");
+    expect(markup).not.toContain("允许执行？");
+  });
+
+  it("keeps the governance approve button busy while the decision is in flight", () => {
+    const markup = renderToStaticMarkup(createElement(ChatToolApprovalDialog, {
+      lang: "zh",
+      pending: true,
+      rawTitle: "agent_tool_policy_update",
+      riskLabel: "高风险",
+      scopeLabel: "长期策略",
+      toolLabels: [{ id: "agent_message_tool", label: "助手消息" }],
+      governance: {
+        targetAgentLabel: "A034",
+        proposedByLabel: "A034",
+        grantTools: ["agent_message_tool"],
+        revokeTools: [],
+        reason: "链路验证",
+        riskTags: [],
+      },
+      onApprove: () => undefined,
+      onReject: () => undefined,
+    }));
+
+    expect(markup).toContain('aria-busy="true"');
+    expect(markup).not.toContain(">批准<");
+  });
+});
