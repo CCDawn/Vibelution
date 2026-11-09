@@ -427,26 +427,48 @@ export function buildChatSessionStateViewModel(options: {
 
 type AgentSessionTabOrderFields = Pick<SessionSummary, "id"> & {
   createdAt?: string;
+  updatedAt?: string;
+  lastActive?: string;
 };
+
+/** First parseable epoch-ms among the ordered candidates; 0 when none parse. */
+function parseSessionTabOrderMs(...values: Array<string | undefined>): number {
+  for (const value of values) {
+    const parsed = Date.parse(String(value || "").trim());
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  return 0;
+}
 
 /**
  * Tab order is a viewing affordance. Running activity (`updatedAt` / `lastActive`)
  * must not reshuffle tabs or the selected highlight looks stolen.
+ *
+ * Compare parsed epoch milliseconds, never the raw timestamp strings. The
+ * optimistic create shell writes `toISOString()` (UTC, `Z`, milliseconds) while
+ * the session index writes local-offset timestamps; string comparison orders
+ * those by character code instead of by time, so a just-created tab jumps around
+ * the strip until every source agrees on one format. `createdAt` stays the
+ * primary key (activity must not reorder tabs); `updatedAt` / `lastActive` are
+ * only fallbacks for a row that has no `createdAt`, and a row with no parseable
+ * timestamp at all sorts last so an unfinished shell cannot steal the head.
  */
 export function compareAgentSessionTabOrder(
   left: AgentSessionTabOrderFields,
   right: AgentSessionTabOrderFields,
 ): number {
-  const leftCreated = String(left.createdAt || "").trim();
-  const rightCreated = String(right.createdAt || "").trim();
-  if (leftCreated !== rightCreated) {
-    if (!leftCreated) {
+  const leftMs = parseSessionTabOrderMs(left.createdAt, left.updatedAt, left.lastActive);
+  const rightMs = parseSessionTabOrderMs(right.createdAt, right.updatedAt, right.lastActive);
+  if (leftMs !== rightMs) {
+    if (!leftMs) {
       return 1;
     }
-    if (!rightCreated) {
+    if (!rightMs) {
       return -1;
     }
-    return leftCreated.localeCompare(rightCreated);
+    return leftMs - rightMs;
   }
   return String(left.id || "").localeCompare(String(right.id || ""));
 }

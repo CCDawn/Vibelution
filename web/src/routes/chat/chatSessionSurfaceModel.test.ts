@@ -238,5 +238,27 @@ describe("chatSessionSurfaceModel", () => {
     });
     expect(first.map((item) => item.id)).toEqual(["alpha", "beta"]);
     expect(afterBackgroundActivity.map((item) => item.id)).toEqual(["alpha", "beta"]);
+    });
+
+  it("orders created tabs by time when createdAt formats differ across sources", () => {
+    const tabs = buildAgentSessionTabs({
+      sessions: [
+        // Optimistic create shell: UTC ISO instant with milliseconds.
+        { id: "shell-utc", createdAt: "2026-11-09T01:00:00.000Z" } as never,
+        // Session index: local offset, one hour earlier than the shell above.
+        { id: "index-local", createdAt: "2026-11-09T08:00:00+08:00" } as never,
+        // No createdAt: falls back to updatedAt instead of jumping to the end.
+        { id: "no-created-at", updatedAt: "2026-11-08T23:59:00Z" } as never,
+        // Nothing parseable: sorts last, never steals the head of the strip.
+        { id: "no-timestamps" } as never,
+      ],
+      selectedChatAgentDirectSessionId: "shell-utc",
+    });
+    expect(tabs.map((item) => item.id)).toEqual([
+      "no-created-at",
+      "index-local",
+      "shell-utc",
+      "no-timestamps",
+    ]);
   });
 });
