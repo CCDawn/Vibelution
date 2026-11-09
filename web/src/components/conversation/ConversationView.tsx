@@ -143,6 +143,11 @@ import {
   type TurnAvatarResolution,
 } from "./conversationTurnAvatar";
 import type { ConversationViewProps } from "./conversationViewTypes";
+import { createComposerDraftStore } from "./composerDraftStore";
+import {
+  ConversationComposerIsland,
+  type ConversationComposerIslandOutputs,
+} from "./ConversationComposerIsland";
 import { compactConversationPreview } from "./conversationOperationPresentation";
 import {
   completedToolPresentationSummary,
@@ -213,6 +218,9 @@ async function copyTextToClipboard(text: string) {
 // model + composer bridge) unrelated parent re-renders stop here. Streaming
 // frames still re-render this component because the active-turn message prop
 // changes per committed frame.
+const NOOP_STARTER = (_starter: unknown) => {};
+const NOOP_HANDLER = () => {};
+
 export const ConversationView = React.memo(function ConversationView({
   runtimeApi,
   sessionId,
@@ -252,7 +260,8 @@ export const ConversationView = React.memo(function ConversationView({
   earlierMessagesLoading = false,
   onStreamingFramePaint,
   onVisibleTimelineMessageIds,
-  composerValue,
+  composerDraftStore,
+  composerValue: composerValueProp,
   composerPlaceholder,
   composerDisabled,
   promptSuggestionEnabled = false,
@@ -335,6 +344,21 @@ export const ConversationView = React.memo(function ConversationView({
   followupQueueSteerLabel,
 }: ConversationViewProps) {
   const { lang, t, statusLabel } = useAppI18n({ domains: ["chat"] });
+  // The draft is a store subscription rather than a prop: passing it here
+  // re-rendered the whole timeline for every keystroke.
+  // Read the current draft without subscribing: the composer island owns the
+  // live value, and subscribing here would re-render the timeline per keystroke.
+  const fallbackDraftStore = useMemo(
+    () => createComposerDraftStore(composerValueProp ?? ""),
+    [],
+  );
+  const draftStore = composerDraftStore ?? fallbackDraftStore;
+  useEffect(() => {
+    if (!composerDraftStore && composerValueProp !== undefined) {
+      fallbackDraftStore.set(composerValueProp);
+    }
+  }, [composerValueProp, composerDraftStore, fallbackDraftStore]);
+  const composerValue = draftStore.getSnapshot();
   // Model labels for the turn-envelope switch dividers. Uses the lightweight
   // configuration bootstrap summary (modelLabels id→label map) instead of the full
   // /api/config/workspace payload: this mount only needs labels, and the heavy
@@ -420,7 +444,7 @@ export const ConversationView = React.memo(function ConversationView({
     }
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
-  }, [composerVariant, composerValue, composerDisabled]);
+  }, [composerVariant, composerDisabled]);
   const inlineEditInputRef = useRef<HTMLTextAreaElement | null>(null);
   const initializedSessionRef = useRef("");
   const pinnedLatestUserMessageIdRef = useRef("");
@@ -963,99 +987,17 @@ export const ConversationView = React.memo(function ConversationView({
     renderComputerUseResult,
   } = useComputerUseResults({ lang, openImagePreview });
 
-  const {
-    composerSurface,
-    composerStarters,
-    handleStarterCardActivate,
-    handleSendAndFollowLatest,
-    resolvedSafeGuidanceLabel,
-  } = useConversationComposer({
-    sessionId,
-    messages,
-    transcriptPending,
-    showComposer,
-    composerVariant,
-    composerValue,
-    composerPlaceholder,
-    composerDisabled,
-    promptSuggestionEnabled: promptSuggestionEnabled && !runtimeApi,
-    composerFocusSignal,
-    onComposerFocusRequestSettled,
-    composerActionDisabled,
-    composerActionMode,
-    composerPending,
-    composerStopPending,
-    composerSubmitPending,
-    composerSafeGuidancePending,
-    composerInterruptGuidancePending,
-    composerError,
-    composerGuidance,
-    followupQueue,
-    composerAttachments,
-    composerReferences,
-    slashCommandSuggestions,
-    slashSkillsCatalogState,
-    composerReferenceOptions,
-    composerAttachmentInputDisabled,
-    composerLeadingControl,
-    composerModelControl,
-    // Native hosts supply scoped reads; they have no ordinary Session prompt
-    // endpoint. Keep examples local until the runtime API supports that read.
-    composerExamplesEnabled: !runtimeApi,
-    permissionControl,
-    llmControl,
-    turnModelControl,
-    onOpenAgentModelConfig,
-    composerContextRing,
-    composerCacheUsage,
-    onOpenComposerContextDetail,
-    onCreateSession,
-    onOpenSideChat,
-    turnError,
-    submitLabel,
-    submitPendingLabel,
-    stopLabel,
-    stopPendingLabel,
-    safeGuidanceLabel,
-    safeGuidancePendingLabel,
-    interruptGuidanceLabel,
-    interruptGuidancePendingLabel,
-    editingMessageId,
-    composerModeNotice,
-    composerModeTargetPreview,
-    onComposerChange,
-    onAddComposerAttachments,
-    onRemoveComposerAttachment,
-    onRetryComposerAttachment,
-    onRetryComposerAttachmentUploads,
-    onAddComposerReference,
-    onRemoveComposerReference,
-    onSubmit,
-    onStop,
-    onContinueTurn,
-    onSafeGuidance,
-    onInterruptGuidance,
-    onFollowupQueueUpdate,
-    onFollowupQueueRemove,
-    onFollowupQueueMove,
-    onFollowupQueueSteer,
-    onFollowupQueueSendNow,
-    followupQueueSteerLabel,
-    composerInputRef,
-    inlineEditInputRef,
-    lang,
-    t,
-    timelineRef,
-    followLatestRef,
-    atBottomRef,
-    userScrollIntentRef,
-    userScrollIntentAtRef,
-    setIsAtBottom,
-    scrollTimelineToBottom,
-    conversationFindOpen,
-    closeConversationFind,
-    openImagePreview,
-  });
+  // The draft never enters this component any more: the island subscribes to
+  // the store, so a keystroke re-renders the composer subtree and nothing else.
+  const [composerOutputs, setComposerOutputs] =
+    useState<ConversationComposerIslandOutputs | null>(null);
+  // One frame without these is harmless: they drive clicks and labels, not paint.
+  const composerStarters = composerOutputs?.starters ?? [];
+  const handleStarterCardActivate = composerOutputs?.activateStarter ?? NOOP_STARTER;
+  const handleSendAndFollowLatest =
+    composerOutputs?.handleSendAndFollowLatest ?? NOOP_HANDLER;
+  const resolvedSafeGuidanceLabel =
+    composerOutputs?.resolvedSafeGuidanceLabel ?? safeGuidanceLabel ?? t("safeGuidance");
 
 
   function closeImagePreview() {
@@ -1843,7 +1785,92 @@ export const ConversationView = React.memo(function ConversationView({
       {composerPrecedingContent != null ? <div className={styles.composerPrecedingContent} data-conversation-composer-preceding>{composerPrecedingContent}</div> : null}
       <div hidden={composerHidden} aria-hidden={composerHidden || undefined}
         className={composerHidden ? "hidden" : "contents"} data-conversation-composer-host>
-        {composerSurface}
+        <ConversationComposerIsland
+          sessionId={sessionId}
+          messages={messages}
+          transcriptPending={transcriptPending}
+          showComposer={showComposer}
+          composerVariant={composerVariant}
+          composerPlaceholder={composerPlaceholder}
+          composerDisabled={composerDisabled}
+          promptSuggestionEnabled={promptSuggestionEnabled && !runtimeApi}
+          composerFocusSignal={composerFocusSignal}
+          onComposerFocusRequestSettled={onComposerFocusRequestSettled}
+          composerActionDisabled={composerActionDisabled}
+          composerActionMode={composerActionMode}
+          composerPending={composerPending}
+          composerStopPending={composerStopPending}
+          composerSubmitPending={composerSubmitPending}
+          composerSafeGuidancePending={composerSafeGuidancePending}
+          composerInterruptGuidancePending={composerInterruptGuidancePending}
+          composerError={composerError}
+          composerGuidance={composerGuidance}
+          followupQueue={followupQueue}
+          composerAttachments={composerAttachments}
+          composerReferences={composerReferences}
+          slashCommandSuggestions={slashCommandSuggestions}
+          slashSkillsCatalogState={slashSkillsCatalogState}
+          composerReferenceOptions={composerReferenceOptions}
+          composerAttachmentInputDisabled={composerAttachmentInputDisabled}
+          composerLeadingControl={composerLeadingControl}
+          composerModelControl={composerModelControl}
+          composerExamplesEnabled={!runtimeApi}
+          permissionControl={permissionControl}
+          llmControl={llmControl}
+          turnModelControl={turnModelControl}
+          onOpenAgentModelConfig={onOpenAgentModelConfig}
+          composerContextRing={composerContextRing}
+          composerCacheUsage={composerCacheUsage}
+          onOpenComposerContextDetail={onOpenComposerContextDetail}
+          onCreateSession={onCreateSession}
+          onOpenSideChat={onOpenSideChat}
+          turnError={turnError}
+          submitLabel={submitLabel}
+          submitPendingLabel={submitPendingLabel}
+          stopLabel={stopLabel}
+          stopPendingLabel={stopPendingLabel}
+          safeGuidanceLabel={safeGuidanceLabel}
+          safeGuidancePendingLabel={safeGuidancePendingLabel}
+          interruptGuidanceLabel={interruptGuidanceLabel}
+          interruptGuidancePendingLabel={interruptGuidancePendingLabel}
+          editingMessageId={editingMessageId}
+          composerModeNotice={composerModeNotice}
+          composerModeTargetPreview={composerModeTargetPreview}
+          onComposerChange={onComposerChange}
+          onAddComposerAttachments={onAddComposerAttachments}
+          onRemoveComposerAttachment={onRemoveComposerAttachment}
+          onRetryComposerAttachment={onRetryComposerAttachment}
+          onRetryComposerAttachmentUploads={onRetryComposerAttachmentUploads}
+          onAddComposerReference={onAddComposerReference}
+          onRemoveComposerReference={onRemoveComposerReference}
+          onSubmit={onSubmit}
+          onStop={onStop}
+          onContinueTurn={onContinueTurn}
+          onSafeGuidance={onSafeGuidance}
+          onInterruptGuidance={onInterruptGuidance}
+          onFollowupQueueUpdate={onFollowupQueueUpdate}
+          onFollowupQueueRemove={onFollowupQueueRemove}
+          onFollowupQueueMove={onFollowupQueueMove}
+          onFollowupQueueSteer={onFollowupQueueSteer}
+          onFollowupQueueSendNow={onFollowupQueueSendNow}
+          followupQueueSteerLabel={followupQueueSteerLabel}
+          composerInputRef={composerInputRef}
+          inlineEditInputRef={inlineEditInputRef}
+          lang={lang}
+          t={t}
+          timelineRef={timelineRef}
+          followLatestRef={followLatestRef}
+          atBottomRef={atBottomRef}
+          userScrollIntentRef={userScrollIntentRef}
+          userScrollIntentAtRef={userScrollIntentAtRef}
+          setIsAtBottom={setIsAtBottom}
+          scrollTimelineToBottom={scrollTimelineToBottom}
+          conversationFindOpen={conversationFindOpen}
+          closeConversationFind={closeConversationFind}
+          openImagePreview={openImagePreview}
+          draftStore={draftStore}
+          onOutputsChange={setComposerOutputs}
+        />
       </div>
       {previewImage ? (
         <React.Suspense fallback={null}>

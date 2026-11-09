@@ -4,6 +4,7 @@ import type { SessionReferenceAttachment } from "../../api/types";
 import { postBrowserTelemetry } from "../../app/browserTelemetry";
 import { useChatStartupPresentation } from "./useChatStartupPresentation";
 import { LazyConversationView } from "../../components/conversation/LazyConversationView";
+import { createComposerDraftStore } from "../../components/conversation/composerDraftStore";
 import type { ComposerQueueItem } from "../../components/conversation/composerFollowupQueueModel";
 import type {
   ConversationComposerAttachment,
@@ -279,6 +280,14 @@ export const ChatConversationComposerBridge = memo(function ChatConversationComp
       },
     });
   }, [terminalActivityRetained, streamedActiveTurnLayer, activeTurnAuthority, sessionId]);
+  // The draft lives in a store the composer subscribes to, so typing no longer
+  // re-renders this bridge or the session view behind it. It is rebuilt when the
+  // edit target changes, because the upstream draft is a different string then.
+  const draftStore = useMemo(
+    () => createComposerDraftStore(composer.value),
+    [sessionId, composer.editingMessageId],
+  );
+
   return (
     <LazyConversationView
       key={sessionId}
@@ -289,7 +298,7 @@ export const ChatConversationComposerBridge = memo(function ChatConversationComp
       activeTurnMessage={streamedActiveTurnMessage}
       composerVariant="codex"
       slashCommandSuggestions={slashCommandSuggestions}
-      composerValue={composer.value}
+      composerDraftStore={draftStore}
       composerPlaceholder={composer.placeholder}
       composerDisabled={composer.disabled}
       regenerateDisabled={composer.disabled || props.regenerateDisabled}

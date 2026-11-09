@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { COMPOSER_SESSION_REFERENCE_MIME } from "./conversationConstants";
 import conversationViewSource from "./ConversationView.tsx?raw";
+import conversationComposerIslandSource from "./ConversationComposerIsland.tsx?raw";
 import conversationComposerSource from "./useConversationComposer.tsx?raw";
 import {
   extractComposerImageDropFiles,
@@ -12,7 +13,7 @@ import {
 
 describe("conversation composer drop payload", () => {
   it("keeps composer drop helpers outside the React component file", () => {
-    expect(conversationViewSource).toContain("useConversationComposer(");
+    expect(conversationComposerIslandSource).toContain("useConversationComposer(");
     expect(conversationComposerSource).toContain("from \"./conversationComposerDropPayload\"");
     expect(conversationViewSource).not.toContain("export { COMPOSER_SESSION_REFERENCE_MIME } from \"./conversationConstants\"");
     expect(conversationComposerSource).not.toContain("export function extractComposerImageDropFiles");

@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+import type { ComposerDraftStore } from "./composerDraftStore";
+
 import type {
   ChatNextStateSignalSummary,
   ConversationMessage,
@@ -143,7 +145,17 @@ export type ConversationViewProps = {
   hasEarlierMessages?: boolean;
   earlierMessagesLoading?: boolean;
   onStreamingFramePaint?: (metrics: ConversationStreamingFramePaintMetrics) => void;
-  composerValue: string;
+  /**
+   * The draft lives outside this component on purpose: it changes on every
+   * keystroke, and passing it here re-rendered the whole session view.
+   */
+  /**
+   * Live draft store. When a caller does not pass one (static previews,
+   * storybook-style fixtures), the view falls back to `composerValue`.
+   */
+  composerDraftStore?: ComposerDraftStore;
+  /** @deprecated Prefer composerDraftStore; kept for static fixtures. */
+  composerValue?: string;
   composerPlaceholder: string;
   composerDisabled: boolean;
   /** Per-session AI "next prompt" suggestion (Tab to complete) for the idle composer. */

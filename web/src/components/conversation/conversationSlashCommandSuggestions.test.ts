@@ -11,6 +11,7 @@ import chatSessionWorkspacePanelSource from "../../routes/chat/ChatSessionWorksp
 import chatConversationSurfaceModelSource from "../../routes/chat/useChatConversationSurfaceModel.tsx?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
 import conversationComposerSource from "./useConversationComposer.tsx?raw";
+import conversationComposerIslandSource from "./ConversationComposerIsland.tsx?raw";
 import {
   composerSlashCommandQuery,
   filterSlashCommandSuggestions,
@@ -230,7 +231,9 @@ describe("conversation slash command suggestions", () => {
     expect(chatSessionWorkspacePanelSource).toContain("{...conversation.turnActions}");
     expect(chatSessionWorkspacePanelSource).toContain("<ChatConversationComposerBridge");
     expect(chatConversationComposerBridgeSource).toContain("slashCommandSuggestions={slashCommandSuggestions}");
-    expect(conversationViewSource).toContain("useConversationComposer(");
+    // The hook moved into the composer island so a keystroke no longer
+    // re-renders the session view; the wiring assertion follows it there.
+    expect(conversationComposerIslandSource).toContain("useConversationComposer(");
     expect(conversationComposerSource).toContain("mergeSlashCommandSuggestions(");
     expect(conversationComposerSource).toContain("insertSlashCommandSuggestion(composerValue, suggestion.skill.command)");
     expect(conversationComposerSource).toContain('role="listbox"');

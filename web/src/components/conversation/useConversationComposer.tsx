@@ -327,9 +327,14 @@ export function useConversationComposer({
   ], [t]);
   // Backend starters win; without them the dictionary keeps generic research
   // starters so the empty session still offers a clickable first step.
-  const composerStarters = composerPromptSuggestion.starters.length > 0
-    ? composerPromptSuggestion.starters.slice(0, MAX_COMPOSER_STARTERS)
-    : fallbackComposerStarters;
+  // Stable identity matters: the composer island reports these to the timeline,
+  // and a fresh array per keystroke would re-render the parent on every character.
+  const composerStarters = useMemo(
+    () => (composerPromptSuggestion.starters.length > 0
+      ? composerPromptSuggestion.starters.slice(0, MAX_COMPOSER_STARTERS)
+      : fallbackComposerStarters),
+    [composerPromptSuggestion.starters],
+  );
   const hasComposerAttachments = composerAttachments.length > 0;
   const hasComposerReferences = composerReferences.length > 0;
   const attachmentInputDisabled = composerAttachmentInputDisabled ?? composerDisabled;
@@ -615,11 +620,16 @@ export function useConversationComposer({
     setSlashActiveIndex(-1);
   }
 
-  function handleStarterCardActivate(starter: ComposerStarter) {
-    // Fill the composer for editing; the starter is never auto-submitted.
-    onComposerChange(starter.command);
-    requestAnimationFrame(() => composerInputRef.current?.focus());
-  }
+  // Stable identity is load-bearing: the island reports this upward, and a new
+  // function per render would loop renders between island and parent.
+  const handleStarterCardActivate = useCallback(
+    (starter: ComposerStarter) => {
+      // Fill the composer for editing; the starter is never auto-submitted.
+      onComposerChange(starter.command);
+      requestAnimationFrame(() => composerInputRef.current?.focus());
+    },
+    [onComposerChange, composerInputRef],
+  );
 
   function handleComposerDragEnter(event: DragEvent<HTMLDivElement>) {
     const acceptsImage = composerCanAcceptImageDrop && hasComposerImageDragPayload(event.dataTransfer);

@@ -2,7 +2,7 @@
  * Draft text for one conversation composer, held outside React state.
  *
  * The draft changes on every keystroke, so keeping it in the session view's
- * props re-renders the whole timeline (virtualizer, row projections, markdown)
+ * props re-rendered the whole timeline (virtualizer, row projections, markdown)
  * for one character. A composer island subscribes to this store instead, which
  * keeps the keystroke cost inside the composer subtree.
  *
@@ -20,7 +20,6 @@ export type ComposerDraftStore = {
 export function createComposerDraftStore(initial = ""): ComposerDraftStore {
   let value = initial;
   const listeners = new Set<() => void>();
-
   return {
     getSnapshot: () => value,
     subscribe: (listener) => {

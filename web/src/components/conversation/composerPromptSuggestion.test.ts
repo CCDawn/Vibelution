@@ -5,6 +5,7 @@ import chatConversationSurfaceModelSource from "../../routes/chat/useChatConvers
 import chatComposerPlusMenuSource from "../../routes/chat/ChatComposerPlusMenu.tsx?raw";
 import chatComposerSubmitModelSource from "../../routes/chat/chatComposerSubmitModel.ts?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
+import conversationComposerIslandSource from "./ConversationComposerIsland.tsx?raw";
 import conversationComposerSource from "./useConversationComposer.tsx?raw";
 import {
   MAX_COMPOSER_STARTERS,
@@ -157,7 +158,7 @@ describe("composer prompt suggestion wiring", () => {
     expect(chatRouteSource).toContain("writeStoredPromptSuggestionToggle");
     expect(chatRouteSource).toContain("promptSuggestionEnabled={activePromptSuggestionEnabled}");
     expect(chatConversationSurfaceModelSource).toContain("promptSuggestionEnabled: !verifiedCompanionMode && activePromptSuggestionEnabled,");
-    expect(conversationViewSource).toContain("useConversationComposer(");
+    expect(conversationComposerIslandSource).toContain("useConversationComposer(");
     expect(conversationComposerSource).toContain("useComposerPromptSuggestion(");
     expect(conversationComposerSource).toContain("shouldAcceptComposerGhost(");
     expect(conversationComposerSource).toContain("data-composer-prompt-suggestion");

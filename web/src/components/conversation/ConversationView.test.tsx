@@ -22,6 +22,7 @@ import conversationTurnAvatarContentSource from "./ConversationTurnAvatarContent
 import navigatorSource from "./ConversationTurnNavigator.tsx?raw";
 import navigatorStylesSource from "./ConversationTurnNavigator.styles.ts?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
+import conversationComposerIslandSource from "./ConversationComposerIsland.tsx?raw";
 import conversationOperationGroupsSource from "./conversationOperationGroups.tsx?raw";
 import conversationOperationRowsSource from "./conversationOperationRows.tsx?raw";
 import conversationReActRowsSource from "./conversationReActRows.tsx?raw";
@@ -49,7 +50,7 @@ describe("composer leading control contract", () => {
     expect(html).toMatch(/<p[^>]*role="alert"[^>]*>Attachment limit reached<\/p>/);
   });
   it("lets Chat replace the legacy image button without changing other routes", () => {
-    expect(conversationViewSource).toContain("useConversationComposer(");
+    expect(conversationComposerIslandSource).toContain("useConversationComposer(");
     expect(conversationComposerSource).toContain("composerLeadingControl ?? (");
     expect(conversationComposerSource).toContain("attachmentInputRef.current?.click()");
   });
@@ -1242,9 +1243,9 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(conversationViewSource).not.toContain("scheduleTimelineHeightVersionBump");
     expect(conversationViewSource).toContain("streamingPaintMetricsRef");
     // ChatGPT/Claude: send always re-pins stick-to-bottom even after user scrolled up.
-    expect(conversationViewSource).toContain("scrollTimelineToBottom,");
-    expect(conversationComposerSource).toContain("function pinFollowLatestForSubmit");
-    expect(conversationComposerSource).toContain("function handleSendAndFollowLatest");
+    expect(conversationViewSource).toContain("scrollTimelineToBottom");
+    expect(conversationComposerSource).toContain("const pinFollowLatestForSubmit = useCallback(");
+    expect(conversationComposerSource).toContain("const handleSendAndFollowLatest = useCallback(");
     expect(conversationComposerSource).toContain("handleSendAndFollowLatest()");
     expect(conversationViewSource).toContain("handleSendAndFollowLatest,");
     expect(conversationTimelineRowsSource).toContain("ref={rowPlan.virtualStartPx === null ? undefined : measureTimelineVirtualRow}");
