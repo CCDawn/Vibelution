@@ -477,10 +477,14 @@ def get_session_detail(
     # preserving idle recovery and full-detail behavior.
     light_running_poll = not include_secondary_lists and session_running
     reconcile_started_at = time.perf_counter()
+    # The hydration path only *notices* the abandoned ledger entry; the
+    # interruption cause is a process restart. Keeping the cause inside the
+    # restart whitelist is what lets startup recovery resume this turn.
     s._reconcile_stale_session_ledger(
         normalized_session_id,
         active_turn_id=active_turn_id if session_running else "",
-        reason="detail_loaded_after_restart",
+        reason="process_restarted",
+        trigger="detail_loaded_after_restart",
     )
     if not light_running_poll:
         conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id) or conversation
