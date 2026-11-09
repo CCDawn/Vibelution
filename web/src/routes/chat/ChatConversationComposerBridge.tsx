@@ -281,6 +281,7 @@ export const ChatConversationComposerBridge = memo(function ChatConversationComp
   }, [terminalActivityRetained, streamedActiveTurnLayer, activeTurnAuthority, sessionId]);
   return (
     <LazyConversationView
+      key={sessionId}
       {...props}
       turnModelControl={composer.readOnly ? undefined : props.turnModelControl}
       sessionId={sessionId}
