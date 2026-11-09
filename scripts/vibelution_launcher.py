@@ -2143,18 +2143,70 @@ def _ensure_frontend_build(
         "requireCurrent": bool(require_current),
     }
 
+def _desktop_shell_visible_window_route() -> dict:
+    """Ask Runtime Manager which desktop shell can own a visible Workbench window."""
+
+    try:
+        from core.runtime_manager.workbench_controller import desktop_shell_visible_window_route
+
+        route = desktop_shell_visible_window_route()
+    except Exception as exc:  # noqa: BLE001 - probe failure must not crash the start path
+        return {
+            "available": False,
+            "reason": f"route_probe_failed:{type(exc).__name__}",
+            "executable": "",
+        }
+    return dict(route) if isinstance(route, dict) else {"available": False, "reason": "route_probe_invalid"}
+
+
+def _open_workbench_window_via_desktop_shell() -> dict:
+    """Hand the visible window to Electron after a fresh backend is healthy."""
+
+    try:
+        from core.runtime_manager.workbench_controller import open_workbench_window_via_desktop_shell
+
+        result = open_workbench_window_via_desktop_shell()
+    except Exception as exc:  # noqa: BLE001 - the backend is already up; report, never raise
+        return {"opened": False, "reason": f"window_signal_failed:{type(exc).__name__}", "detail": str(exc)[:300]}
+    return dict(result) if isinstance(result, dict) else {"opened": False, "reason": "window_signal_invalid"}
+
+
+def _print_workbench_window_outcome(state: dict) -> None:
+    if not bool(state.get("visibleWindowRequested")):
+        return
+    executable = str(state.get("workbenchWindowExecutable") or "").strip()
+    if bool(state.get("workbenchWindowOpened")):
+        print(f"Workbench window opened by the Electron desktop shell ({executable or 'desktop shell'}).")
+        return
+    print(
+        "Workbench window not opened: "
+        f"{str(state.get('workbenchWindowReason') or 'desktop shell unavailable')}. "
+        "The backend is running; open the window from the tray, or rebuild "
+        "dist/desktop/win-unpacked/Vibelution.exe."
+    )
+
+
 def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
     """Always start a **fresh** workbench instance for this project.
 
     Previous project-owned process handles (backend + managed browser) are retired
     first. Start never attaches to an already-running workbench PID.
-    Visible windows belong to Electron; this adapter must not spawn Edge.
+    Visible windows belong to Electron; this adapter must not spawn Edge. A visible
+    start therefore needs a reachable desktop shell up front (live session or a
+    bootstrappable packaged entry) but -- once the backend is healthy -- treats a
+    refused window as a reported degradation, not as a failed start.
     """
-    if not no_browser:
-        raise RuntimeError(
-            "Electron desktop shell is unavailable. Refusing Edge fallback. "
-            "Start or rebuild dist/desktop/win-unpacked/Vibelution.exe."
-        )
+    visible_window_requested = not no_browser
+    window_route: dict = {"available": True, "reason": "headless", "executable": ""}
+    if visible_window_requested:
+        window_route = _desktop_shell_visible_window_route()
+        if not bool(window_route.get("available")):
+            raise RuntimeError(
+                "Electron desktop shell is unavailable. Refusing Edge fallback. "
+                f"reason={str(window_route.get('reason') or 'unknown')}. "
+                "Start or rebuild dist/desktop/win-unpacked/Vibelution.exe, "
+                "or pass --no-browser to start only the backend."
+            )
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     previous_state = _read_state()
     preferred_port = int(port or DEFAULT_PORT)
@@ -2242,6 +2294,11 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
         raise
     open_timings_ms["totalOpenMs"] = round((time.monotonic() - open_started) * 1000.0, 1)
     open_timings_ms["retiredHandleCount"] = float(len(retired_handles))
+    window_result: dict = {"opened": False, "reason": "not_requested", "executable": ""}
+    if visible_window_requested:
+        window_started = time.monotonic()
+        window_result = _open_workbench_window_via_desktop_shell()
+        open_timings_ms["desktopWindowSignalMs"] = round((time.monotonic() - window_started) * 1000.0, 1)
     _append_frontend_build_log(
         {
             "event": "workbench.open.timings",
@@ -2251,6 +2308,9 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
             "noBrowser": bool(no_browser),
             "freshStart": True,
             "retiredHandles": list(retired_handles),
+            "visibleWindowRequested": bool(visible_window_requested),
+            "workbenchWindowOpened": bool(window_result.get("opened")),
+            "workbenchWindowReason": str(window_result.get("reason") or ""),
         }
     )
     previous_generation = int(previous_state.get("instanceGeneration") or 0)
@@ -2290,6 +2350,11 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
             else "Workbench is running."
         ),
         "failureMessage": "",
+        "visibleWindowRequested": bool(visible_window_requested),
+        "workbenchWindowOpened": bool(window_result.get("opened")),
+        "workbenchWindowReason": str(window_result.get("reason") or ""),
+        "workbenchWindowExecutable": str(window_result.get("executable") or ""),
+        "windowRouteReason": str(window_route.get("reason") or ""),
         "lastReason": "python_launcher_fresh_start",
         "lastSource": "python_launcher",
         "pythonExecutable": python_command,
@@ -2585,6 +2650,7 @@ def main(argv: list[str] | None = None) -> int:
                 "Workbench started (fresh instance"
                 f"{f', retired handles {retired}' if retired else ''})."
             )
+            _print_workbench_window_outcome(state)
             return 0
         if action == "stop":
             _stop_backend()
@@ -2606,6 +2672,7 @@ def main(argv: list[str] | None = None) -> int:
                 "Workbench restarted (fresh instance"
                 f", generation={state.get('instanceGeneration')})."
             )
+            _print_workbench_window_outcome(state)
             return 0
         raise RuntimeError(
             "Unsupported launcher action: "

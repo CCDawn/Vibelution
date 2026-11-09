@@ -63,6 +63,76 @@ _STATIC_CONTEXT_FREEZE_MAX_ENTRIES = 512
 _STATIC_CONTEXT_FREEZE_TTL_SECONDS = 0.0
 _STATIC_CONTEXT_FREEZE_CACHE: "OrderedDict[tuple[str, ...], dict[str, Any]]" = OrderedDict()
 
+def _context_stage_parallel_enabled() -> bool:
+    """Escape hatch: VIBELUTION_CONTEXT_PARALLEL_STAGES=0 restores serial order."""
+    import os
+
+    raw = str(os.environ.get("VIBELUTION_CONTEXT_PARALLEL_STAGES", "1") or "1").strip().lower()
+    return raw not in {"0", "false", "off", "no"}
+
+
+class _ContextStageResult:
+    """Future-shaped holder backed by one short-lived daemon thread.
+
+    Daemon threads keep the process-exit contract intact (a prefetched block is
+    an optional optimization and can be abandoned at shutdown) and avoid
+    leaking a process-wide executor's non-daemon workers into test sessions.
+    ``.result()`` re-raises the original exception so the collection order
+    still decides which failure surfaces first.
+    """
+
+    __slots__ = ("_done", "_exception", "_value")
+
+    def __init__(self, produce: Any) -> None:
+        self._done = threading.Event()
+        self._value: Any = None
+        self._exception: BaseException | None = None
+
+        def run() -> None:
+            try:
+                started_at = time.perf_counter()
+                value = produce()
+                elapsed_ms = int(max(0, (time.perf_counter() - started_at) * 1000))
+                self._value = (value, elapsed_ms)
+            except BaseException as exc:  # noqa: BLE001 - re-raised verbatim on the collecting thread
+                self._exception = exc
+            finally:
+                self._done.set()
+
+        threading.Thread(target=run, name="context-stage", daemon=True).start()
+
+    def result(self) -> tuple[Any, int]:
+        self._done.wait()
+        if self._exception is not None:
+            raise self._exception
+        return self._value
+
+
+class _ImmediateStageResult:
+    """Future-shaped holder for the serial (fallback) path."""
+
+    __slots__ = ("_value",)
+
+    def __init__(self, value: Any) -> None:
+        self._value = value
+
+    def result(self) -> Any:
+        return self._value
+
+
+def _submit_context_stage(produce: Any) -> Any:
+    """Start ``produce`` and return a holder of ``(value, elapsedMs)``.
+
+    The elapsed value is measured inside the stage itself, so overlap with
+    other stages cannot inflate an individual timing field.
+    """
+    if not _context_stage_parallel_enabled():
+        started_at = time.perf_counter()
+        value = produce()
+        elapsed_ms = int(max(0, (time.perf_counter() - started_at) * 1000))
+        return _ImmediateStageResult((value, elapsed_ms))
+    return _ContextStageResult(produce)
+
 
 class AgentContextInterrupted(RuntimeError):
     """Raised when a turn stop is observed during context assembly."""
@@ -459,6 +529,95 @@ def build_agent_context(
     stage_started_at = _perf_counter()
     memory_policy = agent_directory_service.resolve_memory_policy_for_agent(normalized_agent_id)
     timings["memoryPolicyMs"] = _elapsed_ms(stage_started_at)
+
+    # ---- Cache-prefix block prefetch ---------------------------------------
+    # The four cache-prefix blocks below read only disk-backed services and
+    # are disjoint from the data stages that follow. Their serial cost used to
+    # be added on top of episodic memory / runtime rendering (context assembly
+    # p90 ~2.2s). Prefetch them on daemon threads now, collect them at their
+    # original positions below. The data stages and every interrupt checkpoint
+    # stay strictly serial, so stop semantics and stage ordering are unchanged.
+    # VIBELUTION_CONTEXT_PARALLEL_STAGES=0 restores the fully serial path.
+    prompt_template_id = _coerce_text(
+        _mapping_get(agent, "promptTemplateId", "prompt_template_id")
+    ).strip()
+    research_org_probe: dict[str, Any] = {}
+
+    def _produce_research_org_context() -> tuple[str, bool]:
+        if not _agent_needs_research_organization_context(agent):
+            return "", False
+
+        def produce() -> str:
+            result = _build_research_organization_context_block(
+                normalized_agent_id, limit=bounded_limit
+            )
+            research_org_probe.update(result)
+            return str(result.get("contextBlock") or "")
+
+        return _session_frozen_context_block(
+            "research_organization",
+            agent_id=normalized_agent_id,
+            session_id=session_id,
+            produce=produce,
+        )
+
+    def _produce_prompt_template_context() -> tuple[str, bool]:
+        if not include_prompt_template_context:
+            return "", False
+
+        def produce() -> str:
+            return _build_prompt_template_context_block(
+                prompt_template_id,
+                project_root=agent_directory_service.PROJECT_ROOT,
+                agent_id=normalized_agent_id,
+                session_id=session_id,
+                run_id=run_id,
+                include_chat_base=_coerce_text(
+                    _mapping_get(agent, "primaryMode", "primary_mode")
+                ).strip().lower()
+                == "chat",
+            )
+
+        return _session_frozen_context_block(
+            "prompt_template",
+            agent_id=normalized_agent_id,
+            session_id=session_id,
+            produce=produce,
+        )
+
+    def _produce_project_agent_registry_context() -> str:
+        if not _agent_allows_project_agent_registry_context(agent):
+            return ""
+        return _build_project_agent_registry_context_block(
+            agent_directory_service.PROJECT_ROOT,
+            current_agent=agent,
+            session_id=str(session_id or "").strip(),
+            run_id=str(run_id or "").strip(),
+        )
+
+    def _produce_public_structure_context() -> tuple[str, bool]:
+        if not _agent_allows_public_structure_context(agent):
+            return "", False
+
+        def produce() -> str:
+            result = _build_public_structure_context_block(
+                agent_directory_service.PROJECT_ROOT,
+                agent_id=normalized_agent_id,
+            )
+            return str(result.get("contextBlock") or "")
+
+        return _session_frozen_context_block(
+            "public_structure",
+            agent_id=normalized_agent_id,
+            session_id=session_id,
+            produce=produce,
+        )
+
+    f_research_org = _submit_context_stage(_produce_research_org_context)
+    f_prompt_template = _submit_context_stage(_produce_prompt_template_context)
+    f_project_agent_registry = _submit_context_stage(_produce_project_agent_registry_context)
+    f_public_structure = _submit_context_stage(_produce_public_structure_context)
+
     _stop("episodic_events")
     stage_started_at = _perf_counter()
     from core.web.services.agent_perception.access import allows_personal_prefetch
@@ -543,27 +702,13 @@ def build_agent_context(
         if line is not None
     ).strip()
     timings["runtimeContextBlockMs"] = _elapsed_ms(stage_started_at)
+
     research_org_context_block = ""
     research_org_frozen = False
     if _agent_needs_research_organization_context(agent):
         _stop("research_organization")
-        stage_started_at = _perf_counter()
-        research_org_probe: dict[str, Any] = {}
-
-        def _produce_research_org_block() -> str:
-            research_org_result = _build_research_organization_context_block(
-                normalized_agent_id,
-                limit=bounded_limit,
-            )
-            research_org_probe.update(research_org_result)
-            return str(research_org_result.get("contextBlock") or "")
-
-        research_org_context_block, research_org_frozen = _session_frozen_context_block(
-            "research_organization",
-            agent_id=normalized_agent_id,
-            session_id=session_id,
-            produce=_produce_research_org_block,
-        )
+        research_result, elapsed_ms = f_research_org.result()
+        research_org_context_block, research_org_frozen = research_result
         timings["researchOrgContextFrozen"] = bool(research_org_frozen)
         if research_org_frozen:
             timings["researchOrgContextCacheHit"] = True
@@ -571,40 +716,18 @@ def build_agent_context(
         elif "cacheHit" in research_org_probe:
             timings["researchOrgContextCacheHit"] = bool(research_org_probe.get("cacheHit"))
             timings["researchOrgContextCacheAgeMs"] = research_org_probe.get("cacheAgeMs")
-        timings["researchOrgContextMs"] = _elapsed_ms(stage_started_at)
+        timings["researchOrgContextMs"] = elapsed_ms
     else:
         timings["researchOrgContextMs"] = 0
         timings["researchOrgContextSkipped"] = True
-    prompt_template_id = _coerce_text(
-        _mapping_get(agent, "promptTemplateId", "prompt_template_id")
-    ).strip()
     prompt_context_block = ""
     prompt_template_frozen = False
     if include_prompt_template_context:
         _stop("prompt_template")
-        stage_started_at = _perf_counter()
-
-        def _produce_prompt_template_block() -> str:
-            return _build_prompt_template_context_block(
-                prompt_template_id,
-                project_root=agent_directory_service.PROJECT_ROOT,
-                agent_id=normalized_agent_id,
-                session_id=session_id,
-                run_id=run_id,
-                include_chat_base=_coerce_text(
-                    _mapping_get(agent, "primaryMode", "primary_mode")
-                ).strip().lower()
-                == "chat",
-            )
-
-        prompt_context_block, prompt_template_frozen = _session_frozen_context_block(
-            "prompt_template",
-            agent_id=normalized_agent_id,
-            session_id=session_id,
-            produce=_produce_prompt_template_block,
-        )
+        template_result, elapsed_ms = f_prompt_template.result()
+        prompt_context_block, prompt_template_frozen = template_result
         timings["promptTemplateContextFrozen"] = bool(prompt_template_frozen)
-        timings["promptTemplateContextMs"] = _elapsed_ms(stage_started_at)
+        timings["promptTemplateContextMs"] = elapsed_ms
     else:
         timings["promptTemplateContextMs"] = 0
         timings["promptTemplateContextSkipped"] = True
@@ -615,14 +738,8 @@ def build_agent_context(
     project_agent_registry_context_block = ""
     if _agent_allows_project_agent_registry_context(agent):
         _stop("project_agent_registry")
-        stage_started_at = _perf_counter()
-        project_agent_registry_context_block = _build_project_agent_registry_context_block(
-            agent_directory_service.PROJECT_ROOT,
-            current_agent=agent,
-            session_id=str(session_id or "").strip(),
-            run_id=str(run_id or "").strip(),
-        )
-        timings["projectAgentRegistryContextMs"] = _elapsed_ms(stage_started_at)
+        project_agent_registry_context_block, elapsed_ms = f_project_agent_registry.result()
+        timings["projectAgentRegistryContextMs"] = elapsed_ms
     else:
         timings["projectAgentRegistryContextMs"] = 0
         timings["projectAgentRegistryContextSkipped"] = True
@@ -630,23 +747,10 @@ def build_agent_context(
     public_structure_frozen = False
     if _agent_allows_public_structure_context(agent):
         _stop("public_structure")
-        stage_started_at = _perf_counter()
-
-        def _produce_public_structure_block() -> str:
-            public_structure_result = _build_public_structure_context_block(
-                agent_directory_service.PROJECT_ROOT,
-                agent_id=normalized_agent_id,
-            )
-            return str(public_structure_result.get("contextBlock") or "")
-
-        public_structure_context_block, public_structure_frozen = _session_frozen_context_block(
-            "public_structure",
-            agent_id=normalized_agent_id,
-            session_id=session_id,
-            produce=_produce_public_structure_block,
-        )
+        structure_result, elapsed_ms = f_public_structure.result()
+        public_structure_context_block, public_structure_frozen = structure_result
         timings["publicStructureContextFrozen"] = bool(public_structure_frozen)
-        timings["publicStructureContextMs"] = _elapsed_ms(stage_started_at)
+        timings["publicStructureContextMs"] = elapsed_ms
     else:
         timings["publicStructureContextMs"] = 0
         timings["publicStructureContextSkipped"] = True

@@ -21,6 +21,7 @@
 import json
 import logging
 import os
+import threading
 import time
 from typing import Optional, List, Dict, Any, Tuple, Callable
 from dataclasses import dataclass, field
@@ -680,12 +681,81 @@ def _estimate_cache_store(signature: tuple, messages: list, rough: int, precise)
         _estimate_cache.popitem(last=False)
 
 
+# 逐消息 token 贡献的有界 memo。
+#
+# 会话主循环每轮都会 upsert 一条新的状态栏尾消息（iteration / token budget
+# 变化），整表内容签名随之必 miss，于是 ``_scan_messages_tokens`` 会对整条
+# 历史重新做逐字符精确扫描：历史越长，每轮估算越贵（运行日志里
+# contextEstimateMs / thresholdEstimateMs 中位 ~42ms）。但历史里的消息对象
+# 本身是追加后不再修改的共享对象，只有尾消息与新增的助手/工具消息是新的。
+# 因此把每条消息的 (precise, rough) 贡献按 (id(message), id(content),
+# len(content)) 缓存，整表扫描变成 O(本轮新增消息) 的查表求和。
+#
+# 条目同时钉住 message 与 content 对象，避免对象被 GC 后 id 复用造成错配；
+# 逐出时同步释放引用。与整表签名缓存一致，对「原地改写 content 内部元素且
+# 长度不变」不做探测——本项目的 messages 约定为追加后不可变。
+# 命中路径只做一次原子的 dict.get，不加锁；miss 路径的写入与逐出由锁保护，
+# 并发的 worker 线程最多重复计算同一条消息一次，结果逐位相同。
+_MESSAGE_TOKEN_MEMO_MAX_ENTRIES = 2048
+_MESSAGE_TOKEN_MEMO_MAX_CHARS = 4_000_000
+_MESSAGE_TOKEN_MEMO_LOCK = threading.Lock()
+_message_token_memo: "OrderedDict[tuple, tuple[Any, Any, int, int, int]]" = OrderedDict()
+_message_token_memo_chars = 0
+
+
+def reset_message_token_memo() -> None:
+    """Drop every per-message token contribution (test / maintenance seam)."""
+
+    global _message_token_memo_chars
+    with _MESSAGE_TOKEN_MEMO_LOCK:
+        _message_token_memo.clear()
+        _message_token_memo_chars = 0
+
+
+def _message_token_cost(message: Any, content: Any) -> tuple[int, int]:
+    """Return ``(precise, rough_with_overhead)`` for one message.
+
+    ``rough`` already includes the per-message ``+50`` structure floor used by
+    ``_scan_messages_tokens`` and ``rough_upper_bound_messages_tokens``.
+    """
+
+    global _message_token_memo_chars
+
+    key = (
+        id(message),
+        id(content),
+        len(content) if isinstance(content, (str, list)) else 0,
+    )
+    cached = _message_token_memo.get(key)
+    if cached is not None:
+        return cached[2], cached[3]
+    precise = _estimate_message_content_tokens(content)
+    rough = _content_char_upper_bound(content) + 50  # matches precise structure floor
+    weight = max(0, rough - 50)
+    with _MESSAGE_TOKEN_MEMO_LOCK:
+        raced = _message_token_memo.get(key)
+        if raced is not None:
+            return raced[2], raced[3]
+        _message_token_memo[key] = (message, content, precise, rough, weight)
+        _message_token_memo.move_to_end(key)
+        _message_token_memo_chars += weight
+        while _message_token_memo and (
+            len(_message_token_memo) > _MESSAGE_TOKEN_MEMO_MAX_ENTRIES
+            or _message_token_memo_chars > _MESSAGE_TOKEN_MEMO_MAX_CHARS
+        ):
+            _, evicted = _message_token_memo.popitem(last=False)
+            _message_token_memo_chars -= evicted[4]
+    return precise, rough
+
+
 def _scan_messages_tokens(messages: list) -> tuple[int, int]:
     """One pass over contents returning (precise_tokens, rough_upper_bound).
 
     rough 与 precise 共享这次遍历：需要 precise 时 rough 免费得到，避免
     同一列表在一次判定里被完整走两遍。每 N 条消息做一次协作让出（见
     ``_SCAN_YIELD_EVERY_MESSAGES``），求和算术与整表扫描逐位相同。
+    历史消息的贡献走 ``_message_token_cost`` 增量复用，求和顺序与逐字符
+    扫描完全一致，因此结果与未优化版本逐位相同。
     """
     precise_total = 0
     rough_total = 0
@@ -693,8 +763,9 @@ def _scan_messages_tokens(messages: list) -> tuple[int, int]:
         if index % _SCAN_YIELD_EVERY_MESSAGES == 0 and index:
             _cooperative_yield()
         content = _message_content(message)
-        precise_total += _estimate_message_content_tokens(content)
-        rough_total += _content_char_upper_bound(content) + 50  # matches precise structure floor
+        precise, rough = _message_token_cost(message, content)
+        precise_total += precise
+        rough_total += rough
     return precise_total, int(rough_total)
 
 

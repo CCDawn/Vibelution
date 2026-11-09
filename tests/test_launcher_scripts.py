@@ -77,8 +77,127 @@ def test_python_launcher_visible_start_refuses_edge_fallback(monkeypatch, tmp_pa
 
     with pytest.raises(RuntimeError, match="Refusing Edge fallback"):
         launcher._start_managed_browser("http://127.0.0.1:8002")
-    with pytest.raises(RuntimeError, match="Refusing Edge fallback"):
+
+    # Visible start never falls back to Edge. It needs a reachable desktop shell
+    # and names the probe reason when there is none (2026-11-10: the old
+    # unconditional refusal made `-Action start` fail even when a live shell was
+    # ready to own the window).
+    monkeypatch.setattr(
+        launcher,
+        "_desktop_shell_visible_window_route",
+        lambda: {"available": False, "reason": "packaged_shell_launch_blocking", "executable": ""},
+    )
+    with pytest.raises(RuntimeError, match="packaged_shell_launch_blocking"):
         launcher._start_backend(8000, "127.0.0.1", no_browser=False)
+
+
+def _stub_fresh_start(launcher, monkeypatch, tmp_path, *, call_order):
+    """Minimal stand-ins so a fresh start runs end to end without real processes."""
+
+    previous = {"backendPid": 111, "backendPort": 8000, "instanceGeneration": 3}
+    monkeypatch.setattr(launcher, "RUNTIME_DIR", tmp_path)
+    monkeypatch.setattr(launcher, "PORTS_PATH", tmp_path / "ports.json")
+    monkeypatch.setattr(launcher, "BACKEND_STDOUT_PATH", tmp_path / "backend.stdout.log")
+    monkeypatch.setattr(launcher, "BACKEND_STDERR_PATH", tmp_path / "backend.stderr.log")
+    monkeypatch.setattr(launcher, "ACTIVE_RUNTIME_SCENE_PATH", tmp_path / "active-runtime-scene.json")
+    monkeypatch.setattr(launcher, "RUNTIME_SCENE_ROOT", tmp_path / "scenes")
+    monkeypatch.setattr(launcher, "_read_state", lambda: dict(previous))
+    monkeypatch.setattr(launcher, "_listening_pid_for_port", lambda port: 0)
+    monkeypatch.setattr(launcher, "_is_project_workbench_pid", lambda pid: False)
+    monkeypatch.setattr(launcher, "_terminate_pid", lambda pid: None)
+    monkeypatch.setattr(launcher, "_wait_for_port_release", lambda port: True)
+    monkeypatch.setattr(launcher, "_runtime_source_identity", lambda: {
+        "projectRoot": str(tmp_path.resolve()),
+        "branch": "main",
+        "commit": "a" * 40,
+        "frontendTree": "tree",
+        "trackedClean": True,
+    })
+    monkeypatch.setattr(launcher, "_ensure_frontend_build", lambda identity, **kwargs: {"rebuilt": False})
+    monkeypatch.setattr(launcher, "_assert_runtime_source_identity", lambda identity, light=False: identity)
+    monkeypatch.setattr(launcher, "_start_runtime_scene", lambda trigger: {
+        "runtimeSceneId": "scene",
+        "runtimeSceneDir": str(tmp_path / "scene"),
+        "startedAt": "t0",
+    })
+    monkeypatch.setattr(launcher, "_select_background_python", lambda runtime: {
+        "pythonExecutable": str(tmp_path / "pythonw.exe"),
+        "sourcePythonExecutable": str(tmp_path / "python.exe"),
+        "noConsolePythonExecutable": str(tmp_path / "pythonw.exe"),
+        "consoleWindowSuppressed": True,
+        "consoleSuppressionMode": "creation_flags",
+        "consoleFallbackReason": "",
+        "pythonLaunchPolicy": "pythonw",
+        "creationFlagNames": ["CREATE_NO_WINDOW"],
+    })
+    monkeypatch.setattr(launcher, "_ensure_project_python_runtime", lambda: {})
+    monkeypatch.setattr(launcher, "_backend_environment", lambda host: {})
+    monkeypatch.setattr(launcher, "_windows_creation_flags", lambda *, detach=False: 0)
+    monkeypatch.setattr(launcher, "_hidden_startup_info", lambda: None)
+    monkeypatch.setattr(launcher, "_append_frontend_build_log", lambda payload: None)
+    monkeypatch.setattr(launcher, "_remember_project_backend_port", lambda port, *, reason="": None)
+    monkeypatch.setattr(launcher, "_write_state", lambda state: None)
+    monkeypatch.setattr(launcher, "_preserved_launcher_control_state", lambda state: {})
+
+    class FakeProc:
+        pid = 5000
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", lambda *a, **k: FakeProc())
+
+    def fake_wait(process, port, host):
+        call_order.append("backend_healthy")
+        return 5001
+
+    monkeypatch.setattr(launcher, "_wait_for_started_backend", fake_wait)
+    (tmp_path / "backend.stdout.log").write_bytes(b"")
+    (tmp_path / "backend.stderr.log").write_bytes(b"")
+
+
+def test_python_launcher_visible_start_opens_window_after_the_backend_is_healthy(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+    call_order: list[str] = []
+    _stub_fresh_start(launcher, monkeypatch, tmp_path, call_order=call_order)
+    monkeypatch.setattr(
+        launcher,
+        "_desktop_shell_visible_window_route",
+        lambda: {"available": True, "reason": "live_desktop_shell", "executable": r"D:\shell\Vibelution.exe"},
+    )
+
+    def fake_open():
+        call_order.append("window_signal")
+        return {"opened": True, "reason": "live_desktop_shell", "executable": r"D:\shell\Vibelution.exe"}
+
+    monkeypatch.setattr(launcher, "_open_workbench_window_via_desktop_shell", fake_open)
+
+    state = launcher._start_backend(8000, "127.0.0.1", no_browser=False)
+
+    assert call_order == ["backend_healthy", "window_signal"]
+    assert state["backendPid"] == 5001
+    assert state["visibleWindowRequested"] is True
+    assert state["workbenchWindowOpened"] is True
+    assert state["windowRouteReason"] == "live_desktop_shell"
+
+
+def test_python_launcher_start_reports_a_refused_window_without_failing_the_start(monkeypatch, capsys):
+    launcher = _load_python_launcher()
+    monkeypatch.setattr(launcher, "_assert_internal_action_authorized", lambda action: None)
+    monkeypatch.setattr(launcher, "_start_backend", lambda port, host, *, no_browser: {
+        "backendPid": 1001,
+        "previousInstanceHandles": [],
+        "instanceGeneration": 1,
+        "visibleWindowRequested": True,
+        "workbenchWindowOpened": False,
+        "workbenchWindowReason": "desktop_shell_signal_failed:RuntimeError",
+        "workbenchWindowExecutable": r"D:\shell\Vibelution.exe",
+    })
+
+    result = launcher.main(["--action", "start", "--host", "127.0.0.1", "--port", "8000"])
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "Workbench started" in out
+    assert "Workbench window not opened" in out
+    assert "desktop_shell_signal_failed:RuntimeError" in out
 
 
 def test_python_launcher_pid_probe_without_psutil_uses_shared_liveness(monkeypatch):

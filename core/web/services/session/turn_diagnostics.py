@@ -42,7 +42,21 @@ def _service():
     return session_service
 
 
-def _reconcile_stale_session_ledger(session_id: str, *, active_turn_id: str = "", reason: str = "process_restarted") -> None:
+def _reconcile_stale_session_ledger(
+    session_id: str,
+    *,
+    active_turn_id: str = "",
+    reason: str = "process_restarted",
+    trigger: str = "",
+) -> None:
+    """Close a stale ledger turn and stamp why it was abandoned.
+
+    ``reason`` is the interruption cause and must stay inside
+    ``startup_recovery._RESTART_INTERRUPT_REASONS`` for the turn to be
+    resumable. ``trigger`` records which read path noticed the abandoned
+    ledger entry (detail hydration, submit, proactive dequeue) and is
+    diagnostics only — it never feeds the resume decision.
+    """
     s = _service()
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
@@ -140,6 +154,7 @@ def _reconcile_stale_session_ledger(session_id: str, *, active_turn_id: str = ""
                 "sessionId": normalized_session_id,
                 "turnId": event_turn_id,
                 "reason": reason,
+                "trigger": str(trigger or "").strip(),
                 "recoveredFromCheckpointOnly": recovered_from_checkpoint_only,
             },
             lifecycle=True,
