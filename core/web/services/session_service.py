@@ -991,6 +991,7 @@ from core.web.services.session.projection import (
     get_active_session_summary,
     _build_session_detail,
     _build_session_detail_from_summary,
+    _pending_receipt_projection_messages,
     _build_session_summary,
     _session_runtime_metrics,
     _normalize_conversation,

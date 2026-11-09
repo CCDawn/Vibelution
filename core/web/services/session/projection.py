@@ -707,6 +707,64 @@ def _build_session_detail(
     )
 
 
+_PENDING_RECEIPT_PROJECTION_LIMIT = 5
+_PENDING_RECEIPT_BODY_LIMIT = 400
+
+
+def _pending_receipt_projection_messages(inbox_messages: Any) -> list[dict[str, Any]]:
+    """Project pending dispatch receipts as read-only tail messages.
+
+    Only covers the window where a receipt already arrived but the personal
+    assistant patrol has not woken to digest it yet. The projection is read
+    time only: nothing is written to the journal, nothing enters the model
+    context, and the rows disappear once the receipt is consumed. The web
+    client already renders ``metadata.kind == "agent_inbox_message"`` rows.
+    """
+
+    if not isinstance(inbox_messages, list):
+        return []
+    projected: list[dict[str, Any]] = []
+    for row in inbox_messages:
+        if not isinstance(row, dict):
+            continue
+        message_id = str(row.get("messageId") or row.get("eventId") or "").strip()
+        if not message_id:
+            continue
+        body = str(row.get("content") or row.get("summary") or "").strip()
+        if not body:
+            continue
+        if len(body) > _PENDING_RECEIPT_BODY_LIMIT:
+            body = f"{body[: _PENDING_RECEIPT_BODY_LIMIT - 1]}…"
+        source = str(row.get("sourceAgentName") or row.get("sourceAgentId") or "").strip()
+        prefix = "[Agent 私信"
+        if source:
+            prefix += f"·{source}"
+        prefix += "·待处理] "
+        projected.append(
+            {
+                "id": f"pending-receipt:{message_id}",
+                "role": "assistant",
+                "content": prefix + body,
+                "createdAt": str(row.get("createdAt") or "").strip(),
+                "turnId": "",
+                "metadata": {
+                    "kind": "agent_inbox_message",
+                    "pendingReceipt": True,
+                    "messageId": message_id,
+                    # The web client prefers ``metadata.summary`` and otherwise
+                    # skips lines that start with the "[Agent 私信" label, so the
+                    # body has to travel here as well as in the content line.
+                    "summary": body,
+                    "sourceAgentId": str(row.get("sourceAgentId") or "").strip(),
+                    "sourceAgentName": source,
+                },
+            }
+        )
+        if len(projected) >= _PENDING_RECEIPT_PROJECTION_LIMIT:
+            break
+    return projected
+
+
 def _build_session_detail_from_summary(
     conversation: dict[str, Any],
     summary: dict[str, Any],
@@ -800,6 +858,15 @@ def _build_session_detail_from_summary(
         available_agent_id,
         hydrate_agent=hydrate_agent,
     )
+    # Pending dispatch receipts are visible in the transcript tail while the
+    # patrol has not woken to digest them: read-time projection only, so the
+    # journal, the model context and the consumed state all stay untouched.
+    agent_inbox_messages = (
+        s.list_agent_inbox_messages_for_agent(available_agent_id, limit=8, status="pending")
+        if available_agent_id and hydrate_agent and include_secondary
+        else []
+    )
+    pending_receipt_messages = s._pending_receipt_projection_messages(agent_inbox_messages)
     detail = {
         **summary,
         # Keep terminal outcome fields explicit on every detail projection.
@@ -837,7 +904,7 @@ def _build_session_detail_from_summary(
         "activePreviewPath": active_preview_path,
         "changedFiles": changed_files,
         "readFiles": read_files,
-        "messages": detail_messages,
+        "messages": [*detail_messages, *pending_receipt_messages],
         "runtimeNotices": s._visible_session_runtime_notices(
             s._normalize_session_runtime_notices(
                 conversation.get("runtime_notices") or conversation.get("runtimeNotices") or []
@@ -870,9 +937,7 @@ def _build_session_detail_from_summary(
         "groupContextEvents": s.list_group_context_events_for_agent(available_agent_id, limit=8)
         if available_agent_id and hydrate_agent and include_secondary
         else [],
-        "agentInboxMessages": s.list_agent_inbox_messages_for_agent(available_agent_id, limit=8, status="pending")
-        if available_agent_id and hydrate_agent and include_secondary
-        else [],
+        "agentInboxMessages": agent_inbox_messages,
         "pendingToolGovernanceRequests": s._pending_tool_governance_requests_for_session(available_agent_id)
         if available_agent_id and hydrate_agent and include_secondary
         else [],
