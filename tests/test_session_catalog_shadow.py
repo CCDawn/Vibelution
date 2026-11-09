@@ -473,6 +473,7 @@ def test_read_preferred_serves_catalog_without_loading_legacy_projection(monkeyp
             "sessionKind": "",
             "state": "",
             "sort": "updatedAt_desc",
+            "teamId": "",
             "limit": 1,
             "cursor": "",
         },
@@ -486,6 +487,7 @@ def test_read_preferred_serves_catalog_without_loading_legacy_projection(monkeyp
             "session_kind": "",
             "state": "",
             "sort": "updatedAt_desc",
+            "team_id": "",
         }
     ]
     assert observed_reads[-1]["source"] == "catalog"
