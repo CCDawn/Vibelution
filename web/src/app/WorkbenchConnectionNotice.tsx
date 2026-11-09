@@ -17,7 +17,10 @@ type Props = {
 
 /** Health failure is a connection observation, not proof that the service stopped. */
 export function connectionFailureIsPersistent(lastHealthyAt: number, failedAt: number): boolean {
-  return lastHealthyAt === 0 || failedAt - lastHealthyAt >= 15_000;
+  // A restart republishes the frontend release and replaces the backend, which
+  // takes far longer than one poll timeout. Treating that window as an outage
+  // made every automatic restart look like a disconnect.
+  return lastHealthyAt === 0 || failedAt - lastHealthyAt >= 45_000;
 }
 
 /**
@@ -37,8 +40,8 @@ export function WorkbenchConnectionNotice({ unavailable, lang, desktopShell, rec
   // Proactive expand: open when health breaks, close when it recovers. A panel
   // the user closed stays closed until the next episode.
   useEffect(() => {
-    setOpen(Boolean(unavailable));
-  }, [unavailable]);
+    setOpen(Boolean(unavailable) && persistent);
+  }, [unavailable, persistent]);
 
   if (!unavailable) return null;
 
