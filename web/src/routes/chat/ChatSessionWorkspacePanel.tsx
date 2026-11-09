@@ -209,6 +209,7 @@ export function ChatSessionWorkspacePanel({
     }
     return (
       <VStateSurface
+        bodyScrollable
         density="compact"
         tone="info"
         title={dictionaryChat[lang].pendingQuestionLabel}

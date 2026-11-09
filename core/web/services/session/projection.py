@@ -1862,6 +1862,17 @@ def _normalize_messages(
             and not is_context_compression_marker
         ):
             continue
+        if (
+            role == "user"
+            and isinstance(raw_metadata, dict)
+            and str(raw_metadata.get("kind") or "").strip() == "hot_restart_resume"
+        ):
+            # Startup recovery re-journals the interrupted turn text so the
+            # retry chain can re-read the open turn across restarts, and the
+            # model replay already omits it. The display projection drops it
+            # here as well: the timeline keeps the one real user row even when
+            # a client misses the display-layer predicate.
+            continue
         # Mature chat list: one process host per turn (timeline target). Intermediate
         # tool_result shells are process data, not empty avatar bubbles.
         turn_id = s._message_turn_id(raw)

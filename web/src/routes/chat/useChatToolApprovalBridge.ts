@@ -275,7 +275,22 @@ export function useChatToolApprovalBridge({
       scopeLabel: pendingToolApprovalScope,
       toolLabels: pendingToolApprovalLabels,
       actionPreview: pendingToolApprovalActionPreview,
-      sessionGrantScope: pendingSessionToolApproval?.sessionGrantScope,
+      sessionGrantScope: pendingToolGovernanceApproval
+        ? {
+          ...(pendingSessionToolApproval?.sessionGrantScope ?? {}),
+          __toolGovernance: {
+            targetAgentLabel: [pendingToolGovernanceApproval.targetAgentName,
+              pendingToolGovernanceApproval.targetAgentCode].filter(Boolean).join(" · "),
+            proposedByLabel: pendingToolGovernanceApproval.proposedByAgentCode
+              || pendingToolGovernanceApproval.proposedByAgentName
+              || "",
+            grantTools: pendingToolGovernanceApproval.policyDelta?.grantTools ?? [],
+            revokeTools: pendingToolGovernanceApproval.policyDelta?.revokeTools ?? [],
+            reason: pendingToolGovernanceApproval.reason || "",
+            riskTags: pendingToolGovernanceApproval.riskTags ?? [],
+          },
+        }
+        : pendingSessionToolApproval?.sessionGrantScope,
       toolName: pendingSessionToolApproval?.toolName || pendingToolApprovalLabels[0]?.id,
       assistantActionWindow: pendingSessionToolApproval?.assistantActionWindow,
       onApprove: handleApproveToolApproval,
