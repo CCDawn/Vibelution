@@ -402,7 +402,10 @@ describe("thought duration client-clock label", () => {
     expect(thoughtToggle(0)?.getAttribute("aria-expanded")).toBe("true");
     expect(thoughtToggle(1)?.getAttribute("aria-expanded")).toBe("false");
     expect(container?.querySelector('[data-codex-final-response="true"]')?.textContent).toBe(answerText);
-    expect(narration()?.closest('[hidden][inert]')).not.toBeNull();
+    // Codex parity: settling collapses the work trail (reasoning + tool rows) but
+    // mid-turn narration is body text, so it must stay visible.
+    expect(narration()?.closest('[hidden], [inert]')).toBeNull();
+    expect(tool()?.closest('[hidden], [inert]')).not.toBeNull();
     const workToggle = container?.querySelector<HTMLButtonElement>('[data-codex-process-work-toggle]')!;
     expect(workToggle.getAttribute("aria-expanded")).toBe("false");
     expect(document.activeElement).toBe(workToggle);
