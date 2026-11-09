@@ -6742,6 +6742,106 @@ def test_run_launcher_action_routes_active_electron_session_to_desktop_action(mo
     ]
 
 
+def test_desktop_shell_visible_window_route_prefers_live_shell_then_packaged_entry(monkeypatch, tmp_path):
+    exe = tmp_path / "Vibelution.exe"
+    exe.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(workbench_controller, "_latest_active_electron_desktop_session", lambda: {})
+    monkeypatch.setattr(workbench_controller, "_live_electron_owner_pid", lambda: 4321)
+    monkeypatch.setattr(workbench_controller, "_resolve_live_electron_executable", lambda _session=None: exe)
+
+    route = workbench_controller.desktop_shell_visible_window_route()
+    assert route["available"] is True
+    assert route["reason"] == "live_desktop_shell"
+    assert route["executable"] == str(exe)
+
+    monkeypatch.setattr(workbench_controller, "_live_electron_owner_pid", lambda: 0)
+    monkeypatch.setattr(workbench_controller, "_packaged_electron_desktop_executable", lambda: exe)
+    monkeypatch.setattr(workbench_controller, "_packaged_electron_is_current_checkout", lambda: True)
+
+    route = workbench_controller.desktop_shell_visible_window_route()
+    assert route["available"] is True
+    assert route["reason"] == "packaged_shell_bootstrap"
+    assert route["executable"] == str(exe)
+
+    monkeypatch.setattr(workbench_controller, "_packaged_electron_is_current_checkout", lambda: False)
+
+    route = workbench_controller.desktop_shell_visible_window_route()
+    assert route["available"] is False
+    assert route["reason"] == "packaged_shell_launch_blocking"
+
+    monkeypatch.setattr(workbench_controller, "_packaged_electron_desktop_executable", lambda: None)
+
+    route = workbench_controller.desktop_shell_visible_window_route()
+    assert route["available"] is False
+    assert route["reason"] == "packaged_entry_missing"
+
+
+def test_open_workbench_window_via_desktop_shell_reports_a_refused_signal(monkeypatch, tmp_path):
+    exe = tmp_path / "Vibelution.exe"
+    exe.write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        workbench_controller,
+        "desktop_shell_visible_window_route",
+        lambda: {"available": True, "reason": "live_desktop_shell", "executable": str(exe)},
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_signal_live_electron_open_workbench",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("exit code 3")),
+    )
+
+    result = workbench_controller.open_workbench_window_via_desktop_shell()
+
+    assert result["opened"] is False
+    assert result["reason"] == "desktop_shell_signal_failed:RuntimeError"
+    assert result["executable"] == str(exe)
+
+
+def test_run_launcher_action_degrades_to_headless_when_no_desktop_shell_can_own_a_window(
+    monkeypatch,
+    no_active_electron_desktop_session,
+):
+    """2026-11-10: a missing/stale shell used to abort the whole start.
+
+    ``internal-start`` must still bring the backend up and record why the visible
+    window was skipped: the tray and the assistant window poll that backend, and
+    failing closed here is what left the product unable to run at all.
+    """
+
+    events: list[tuple[str, dict]] = []
+    captured: dict = {}
+
+    class FakeProcess:
+        def __init__(self, *args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            kwargs["stdout"].write(b"ok\n")
+            kwargs["stdout"].flush()
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(workbench_controller.subprocess, "Popen", FakeProcess)
+    monkeypatch.setattr(
+        workbench_controller,
+        "append_runtime_manager_file_event",
+        lambda event_type, payload, **_kwargs: events.append((event_type, payload)),
+    )
+
+    result = workbench_controller.run_launcher_action("internal-start")
+
+    assert result.returncode == 0
+    assert "--no-browser" in captured["args"][0]
+    degraded = _event_payload(events, "launcher.action.electron_window_degraded")
+    assert degraded["electronWindowGuardReason"] == "packaged_entry_missing"
+    summary = _event_payload(events, "launcher.action.startup_summary")
+    assert summary["electronWindowDegraded"] is True
+    assert summary["electronWindowGuardReason"] == "packaged_entry_missing"
+    assert summary["outcome"] == "succeeded"
+    assert result.startup_telemetry["electronWindowDegraded"] is True
+
+
 def test_run_launcher_action_preserves_explicit_port_env_override(monkeypatch, no_active_electron_desktop_session):
     captured = {}
     events: list[tuple[str, dict]] = []
