@@ -11,9 +11,9 @@ const styles = {
   flowStatusRow: cx("flow-status-row", "flex min-w-0 items-center py-1 text-vui-xs text-[var(--fg-tertiary)]"),
   flowStatusIcon: cx("flow-status-icon", "shrink-0"),
   flowWorkToggle: cx("flow-work-toggle", "!inline-flex !h-auto !min-h-0 !min-w-0 !justify-start !gap-2 !rounded-none !border-0 !bg-transparent !bg-none !p-0 !text-left !shadow-none !text-vui-xs !leading-[1.4] !font-normal text-[var(--fg-tertiary)] hover:!bg-transparent hover:!bg-none hover:text-[var(--fg-secondary)]"),
-  // Live status reads above the trail visually while the DOM keeps the historical
-  // status-after-trail order (contract tests pin that order).
-  flowStatusRowRunning: cx("flow-status-row-running", "order-first text-[var(--accent-cool)]"),
+  // Live status stays inline with the trail tail: the row already follows the
+  // last tool row in DOM order, so it reads as what is running now.
+  flowStatusRowRunning: cx("flow-status-row-running", "text-[var(--accent-cool)]"),
   flowStatusRowFailed: cx("flow-status-row-failed", "text-[var(--state-error)]"),
   flowWorkToggleLive: cx("flow-work-toggle-live", "!text-[var(--accent-cool)] hover:!text-[var(--accent-cool)]"),
   flowWorkToggleFailed: cx("flow-work-toggle-failed", "!text-[var(--state-error)] hover:!text-[var(--state-error)]"),
