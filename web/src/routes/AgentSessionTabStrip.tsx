@@ -6,6 +6,9 @@ import type { AgentInstance, SessionReferenceAttachment, SessionSummary, Team } 
 import { VButton, VIconButton, VNativeInput } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import { sessionAgentDisplayInfo } from "./agentDisplay";
+
+/** Dedicated drag type so tab reordering never collides with reference dragging. */
+const SESSION_TAB_ORDER_MIME = "application/x-vibelution-session-order";
 import {
   applyAgentSessionTabOrder,
   persistAgentSessionTabOrder,
@@ -258,6 +261,7 @@ export function AgentSessionTabStrip({
   // tick forces a recompute after each drop.
   const [manualOrderTick, setManualOrderTick] = useState(0);
   const [dragOrderSessionId, setDragOrderSessionId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ sessionId: string; position: "before" | "after" } | null>(null);
   const visibleSessions = (() => {
     void manualOrderTick;
     return applyAgentSessionTabOrder(sessions, agentTabScopeId);
@@ -455,6 +459,8 @@ export function AgentSessionTabStrip({
           tabActive ? styles.agentSessionTabActive : "",
           tabContextTarget && !tabActive ? styles.agentSessionTabContextTarget : "",
           tabEditing ? styles.agentSessionTabEditing : "",
+          dragOrderSessionId === session.id ? styles.agentSessionTabDragging : "",
+          dropTarget && dropTarget.sessionId === session.id ? styles.agentSessionTabDropTarget : "",
         ].filter(Boolean).join(" ");
         const tabMainActionClassName = [
           styles.agentSessionTabMainAction,
@@ -553,20 +559,31 @@ export function AgentSessionTabStrip({
             data-agent-session-tab-container
             {...dragReferenceProps}
             onDragOver={(event) => {
-              if (!dragOrderSessionId || event.dataTransfer?.types.includes("text/plain")) {
+              if (!dragOrderSessionId || !event.dataTransfer?.types.includes(SESSION_TAB_ORDER_MIME)) {
                 return;
               }
               event.preventDefault();
               event.dataTransfer.dropEffect = "move";
+              const bounds = event.currentTarget.getBoundingClientRect();
+              const position = event.clientX < bounds.left + bounds.width / 2 ? "before" : "after";
+              setDropTarget((current) => (
+                current && current.sessionId === session.id && current.position === position
+                  ? current
+                  : { sessionId: session.id, position }
+              ));
             }}
             onDrop={(event) => {
-              if (!dragOrderSessionId) {
+              if (!dragOrderSessionId || !event.dataTransfer?.types.includes(SESSION_TAB_ORDER_MIME)) {
                 return;
               }
               event.preventDefault();
               const bounds = event.currentTarget.getBoundingClientRect();
               const position = event.clientX < bounds.left + bounds.width / 2 ? "before" : "after";
               commitTabOrderDrop(session.id, position);
+              setDropTarget(null);
+            }}
+            onDragLeave={() => {
+              setDropTarget((current) => (current?.sessionId === session.id ? null : current));
             }}
             onContextMenu={(event) => onContextMenu(event, session)}
           >
@@ -576,11 +593,15 @@ export function AgentSessionTabStrip({
                 draggable
                 title={lang === "zh" ? "拖拽调整会话顺序" : "Drag to reorder session"}
                 onDragStart={(event) => {
+                  event.stopPropagation();
                   setDragOrderSessionId(session.id);
                   event.dataTransfer.effectAllowed = "move";
-                  event.dataTransfer.setData("text/plain", "");
+                  event.dataTransfer.setData(SESSION_TAB_ORDER_MIME, session.id);
                 }}
-                onDragEnd={() => setDragOrderSessionId(null)}
+                onDragEnd={() => {
+                  setDragOrderSessionId(null);
+                  setDropTarget(null);
+                }}
               >
                 <GripVertical size={12} aria-hidden="true" />
               </span>
