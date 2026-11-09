@@ -1716,6 +1716,43 @@ def test_settle_stale_chat_turn_writes_only_target_session_row(tmp_path, monkeyp
     assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
 
 
+
+def test_delete_chat_session_cascades_deepest_descendants_before_parent(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "load_chat_state",
+        lambda _root: {
+            "conversations": [
+                {"conversation_id": "child-a", "parent_session_id": "parent"},
+                {"conversation_id": "grandchild", "parent_session_id": "child-a"},
+                {"conversation_id": "child-b", "parent_session_id": "parent"},
+                {"conversation_id": "unrelated", "parent_session_id": "other"},
+            ]
+        },
+    )
+    delete_calls: list[str] = []
+    monkeypatch.setattr(
+        session_service,
+        "_delete_chat_session_state",
+        lambda session_id, **_kwargs: delete_calls.append(str(session_id))
+        or {"nextActiveSessionId": "replacement"},
+    )
+    from core.web.services.session import session_index_stream
+
+    monkeypatch.setattr(
+        session_index_stream,
+        "publish_session_index_change_safely",
+        lambda *_args, **_kwargs: None,
+    )
+
+    result = session_service.delete_chat_session_lightweight("parent")
+
+    assert result["deleted"] is True
+    # Deepest first: a grandchild must never outlive the child that owns it,
+    # and the parent stays reachable until every descendant is gone.
+    assert delete_calls == ["grandchild", "child-b", "child-a", "parent"]
+
 def test_reset_agent_direct_session_saves_replacement_without_full_replace(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     _seed_two_runtime_rows(tmp_path, status_a="ready")

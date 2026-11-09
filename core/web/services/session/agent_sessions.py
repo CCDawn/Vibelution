@@ -3166,16 +3166,74 @@ def delete_chat_session(session_id: str) -> dict[str, Any]:
     return delete_chat_session_lightweight(session_id)
 
 
+def _descendant_session_ids(s: Any, root_session_id: str) -> list[str]:
+    """Every transitive child of ``root_session_id``, parents before children.
+
+    A child session has no standalone meaning once its parent is gone: the
+    surviving row still renders an empty tree node and keeps its workspace and
+    journal alive forever. Reads a snapshot without holding the chat-state lock
+    so the caller can delete each id through the normal single-session path.
+    """
+
+    normalized_root = str(root_session_id or "").strip()
+    if not normalized_root:
+        return []
+    try:
+        payload = s.load_chat_state(s.PROJECT_ROOT)
+    except Exception:  # noqa: BLE001 - a read failure must not block the parent delete
+        return []
+    conversations = payload.get("conversations")
+    if not isinstance(conversations, list):
+        return []
+    children_by_parent: dict[str, list[str]] = {}
+    for raw in conversations:
+        if not isinstance(raw, dict):
+            continue
+        child_id = str(raw.get("conversation_id") or "").strip()
+        parent_id = str(
+            raw.get("parent_session_id") or raw.get("parentSessionId") or ""
+        ).strip()
+        if not child_id or not parent_id or child_id == parent_id:
+            continue
+        children_by_parent.setdefault(parent_id, []).append(child_id)
+    ordered: list[str] = []
+    seen: set[str] = {normalized_root}
+    frontier = [normalized_root]
+    while frontier:
+        next_frontier: list[str] = []
+        for parent_id in frontier:
+            for child_id in children_by_parent.get(parent_id, ()):
+                if child_id in seen:
+                    continue
+                seen.add(child_id)
+                ordered.append(child_id)
+                next_frontier.append(child_id)
+        frontier = next_frontier
+    return ordered
+
+
 def delete_chat_session_lightweight(session_id: str, *, activate_replacement: bool = False) -> dict[str, Any]:
     """Delete one chat session and return a lightweight UI handoff payload."""
     s = _service()
 
     deleted_session_id = str(session_id or "").strip()
+    from core.web.services.session import session_index_stream
+
+    # Children first: the parent row stays reachable while the cascade runs, so
+    # an interrupted cascade never leaves a child pointing at a missing parent.
+    # A child that refuses to delete must not keep the parent alive.
+    failed_descendant_ids: list[str] = []
+    for descendant_id in reversed(_descendant_session_ids(s, deleted_session_id)):
+        try:
+            s._delete_chat_session_state(descendant_id)
+        except Exception:  # noqa: BLE001 - isolate one stuck child from the cascade
+            failed_descendant_ids.append(descendant_id)
+            continue
+        session_index_stream.publish_session_index_change_safely(descendant_id, "remove")
+
     delete_result = s._delete_chat_session_state(deleted_session_id, activate_replacement=activate_replacement)
     # The row is gone for good, so every rail drops it now instead of
     # waiting for the next index read to notice.
-    from core.web.services.session import session_index_stream
-
     session_index_stream.publish_session_index_change_safely(deleted_session_id, "remove")
     return {
         "deleted": True,
