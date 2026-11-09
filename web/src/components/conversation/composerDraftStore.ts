@@ -40,3 +40,27 @@ export function createComposerDraftStore(initial = ""): ComposerDraftStore {
     },
   };
 }
+
+/**
+ * Follow an upstream draft reset the store cannot observe on its own.
+ *
+ * The store owns the keystroke text so the timeline never re-renders per
+ * character. That also means a submit which clears the upstream draft leaves
+ * the sent text sitting in the composer, because the store is only rebuilt
+ * when the session or the edit target changes. Only an empty upstream value
+ * is a reset: every other upstream change is a keystroke echo the store
+ * already holds.
+ */
+export function syncComposerDraftStoreFromUpstream(
+  store: ComposerDraftStore,
+  upstream: string,
+): boolean {
+  if (upstream !== "") {
+    return false;
+  }
+  if (store.getSnapshot() === "") {
+    return false;
+  }
+  store.set("");
+  return true;
+}
