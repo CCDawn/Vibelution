@@ -1243,8 +1243,8 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(conversationViewSource).toContain("streamingPaintMetricsRef");
     // ChatGPT/Claude: send always re-pins stick-to-bottom even after user scrolled up.
     expect(conversationViewSource).toContain("scrollTimelineToBottom,");
-    expect(conversationComposerSource).toContain("function pinFollowLatestForSubmit");
-    expect(conversationComposerSource).toContain("function handleSendAndFollowLatest");
+    expect(conversationComposerSource).toContain("const pinFollowLatestForSubmit = useCallback");
+    expect(conversationComposerSource).toContain("const handleSendAndFollowLatest = useCallback");
     expect(conversationComposerSource).toContain("handleSendAndFollowLatest()");
     expect(conversationViewSource).toContain("handleSendAndFollowLatest,");
     expect(conversationTimelineRowsSource).toContain("ref={rowPlan.virtualStartPx === null ? undefined : measureTimelineVirtualRow}");

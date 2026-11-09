@@ -1,4 +1,5 @@
-import { Archive, ArchiveRestore, BookPlus, Eraser, Library, Pencil, Pin, PinOff, Settings2, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, BookPlus, Copy, Eraser, Library, Pencil, Pin, PinOff, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 
 import type { SessionSummary } from "../api/types";
@@ -105,6 +106,47 @@ export function SessionContextMenu({
       ? (archived ? t("unarchiveSessionBusy") : t("archiveSessionBusy"))
       : archiveLabel;
 
+  // The menu no longer offers an Agent-config shortcut; keep the prop for callers.
+  void onOpenAgentConfig;
+  const [linkCopied, setLinkCopied] = useState(false);
+  const linkCopiedTimer = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (linkCopiedTimer.current !== null) {
+      window.clearTimeout(linkCopiedTimer.current);
+    }
+  }, []);
+  const copySessionLink = useCallback(async () => {
+    const params = new URLSearchParams({ session: session.id });
+    if (session.agentId) {
+      params.set("agent", session.agentId);
+    }
+    const link = `/chat?${params.toString()}`;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(link);
+      } else {
+        const area = document.createElement("textarea");
+        area.value = link;
+        area.style.position = "fixed";
+        area.style.opacity = "0";
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand("copy");
+        document.body.removeChild(area);
+      }
+      setLinkCopied(true);
+      if (linkCopiedTimer.current !== null) {
+        window.clearTimeout(linkCopiedTimer.current);
+      }
+      linkCopiedTimer.current = window.setTimeout(() => {
+        setLinkCopied(false);
+        onDismiss?.();
+      }, 1400);
+    } catch {
+      setLinkCopied(false);
+    }
+  }, [onDismiss, session.agentId, session.id]);
+
   return (
     <VDropdownMenu
       open
@@ -148,15 +190,20 @@ export function SessionContextMenu({
           label: t("renameSession"),
           onSelect: () => onRename(session),
         },
-        ...(session.agentId && onOpenAgentConfig
-          ? [{
-              id: "open-agent-config",
-              icon: <Settings2 size={14} />,
-              title: lang === "zh" ? "打开当前 Agent 配置" : "Open current Agent configuration",
-              label: lang === "zh" ? "打开 Agent 配置" : "Open Agent config",
-              onSelect: () => onOpenAgentConfig(session),
-            }]
-          : []),
+        {
+          id: "copy-link",
+          icon: <Copy size={14} />,
+          keepOpen: true,
+          title: linkCopied
+            ? (lang === "zh" ? "会话链接已复制" : "Session link copied")
+            : (lang === "zh" ? "复制该会话的链接，便于在别的会话里定位" : "Copy this session link so another session can locate it"),
+          label: linkCopied
+            ? (lang === "zh" ? "已复制" : "Copied")
+            : (lang === "zh" ? "复制会话链接" : "Copy session link"),
+          onSelect: () => {
+            void copySessionLink();
+          },
+        },
         ...(session.agentId && onOpenReportLibrary
           ? [{
               id: "open-report-library",
