@@ -62,9 +62,11 @@ const styles = {
     "shrink-0 cursor-grab self-stretch px-0.5 text-[color:var(--fg-tertiary)] opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100 active:cursor-grabbing",
   agentSessionTabDragging:
     "vui-routes-chatcodingroute agentSessionTabDragging opacity-40 transition-opacity duration-150",
-  // Ring marks the drop target so a drag has visible feedback before release.
-  agentSessionTabDropTarget:
-    "vui-routes-chatcodingroute agentSessionTabDropTarget ring-2 ring-[var(--accent-cool)] ring-offset-0",
+  // Inset shadows draw the insertion line, so no positioned parent is required.
+  agentSessionTabDropBefore:
+    "vui-routes-chatcodingroute agentSessionTabDropBefore shadow-[-3px_0_0_0_var(--accent-cool)]",
+  agentSessionTabDropAfter:
+    "vui-routes-chatcodingroute agentSessionTabDropAfter shadow-[3px_0_0_0_var(--accent-cool)]",
   agentSessionTabStatusSlot:
     "vui-routes-chatcodingroute agentSessionTabStatusSlot inline-grid h-3.5 w-3.5 shrink-0 place-items-center self-center",
   agentSessionTabStatus:

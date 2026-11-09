@@ -460,7 +460,11 @@ export function AgentSessionTabStrip({
           tabContextTarget && !tabActive ? styles.agentSessionTabContextTarget : "",
           tabEditing ? styles.agentSessionTabEditing : "",
           dragOrderSessionId === session.id ? styles.agentSessionTabDragging : "",
-          dropTarget && dropTarget.sessionId === session.id ? styles.agentSessionTabDropTarget : "",
+          dropTarget && dropTarget.sessionId === session.id
+            ? dropTarget.position === "before"
+              ? styles.agentSessionTabDropBefore
+              : styles.agentSessionTabDropAfter
+            : "",
         ].filter(Boolean).join(" ");
         const tabMainActionClassName = [
           styles.agentSessionTabMainAction,
