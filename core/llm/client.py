@@ -2233,7 +2233,20 @@ def _named_unsupported_params_present_in_payload(
 # ---------------------------------------------------------------------------
 _LLM_ROUTE_UNSUPPORTED_PARAMS_MAX_ENTRIES = 512
 _LLM_ROUTE_UNSUPPORTED_PARAMS_LOCK = threading.Lock()
-_LLM_ROUTE_UNSUPPORTED_PARAMS: Dict[str, frozenset] = {}
+#: 负缓存有效期（秒）。缓存是「最近一次观测」，不是永久事实：通道或池节点恢复
+#: 后如果一直预剥，参数就永远到不了模型，用户的设置静默失效（2026-11-09 事件：
+#: 一次 2026-10-02 的 400 让 reasoning_effort 被剥了整整一个进程生命周期，日志里
+#: 616 次 cache hit，实测该端点当前接受该参数且思考量随强度单调变化）。过期即
+#: 淘汰，下一次请求重新带参探测；通道仍拒绝时会再次 400 并刷新时间戳，代价是
+#: 每 TTL 一次的探测，而不是永久静默降级。
+_LLM_ROUTE_UNSUPPORTED_PARAMS_TTL_SECONDS = 600.0
+#: route_key -> (已确认被拒的顶层参数, 记录时刻)。时刻用 monotonic，避免墙钟跳变。
+_LLM_ROUTE_UNSUPPORTED_PARAMS: Dict[str, Tuple[frozenset, float]] = {}
+
+
+def _llm_route_unsupported_params_now() -> float:
+    """负缓存时钟（测试可注入）：只用于 TTL 判断，不参与业务时间。"""
+    return time.monotonic()
 
 
 def _reset_llm_route_unsupported_params_cache() -> None:
@@ -2243,10 +2256,35 @@ def _reset_llm_route_unsupported_params_cache() -> None:
 
 
 def _cached_route_unsupported_params(route_key: str) -> Tuple[str, ...]:
-    """读取某 route 已确认被拒的参数名（排序返回，保证事件字段稳定）。"""
+    """读取某 route 已确认被拒的参数名（排序返回，保证事件字段稳定）。
+
+    超过 TTL 的记录视为过期：就地淘汰并返回空，让下一次请求重新带参探测。
+    """
+    now = _llm_route_unsupported_params_now()
+    expired: Tuple[str, ...] = ()
     with _LLM_ROUTE_UNSUPPORTED_PARAMS_LOCK:
-        cached = _LLM_ROUTE_UNSUPPORTED_PARAMS.get(route_key)
-    return tuple(sorted(cached)) if cached else ()
+        record = _LLM_ROUTE_UNSUPPORTED_PARAMS.get(route_key)
+        if record is None:
+            return ()
+        params, recorded_at = record
+        if now - recorded_at >= _LLM_ROUTE_UNSUPPORTED_PARAMS_TTL_SECONDS:
+            _LLM_ROUTE_UNSUPPORTED_PARAMS.pop(route_key, None)
+            expired = tuple(sorted(params))
+            params = frozenset()
+    if expired:
+        _record_llm_scene_event(
+            "llm",
+            "llm.route_unsupported_params.expired",
+            message="route 不支持参数负缓存已过期，下一次请求重新带参探测",
+            outcome="observed",
+            fields={
+                "routeKey": route_key,
+                "params": list(expired),
+                "ttlSeconds": _LLM_ROUTE_UNSUPPORTED_PARAMS_TTL_SECONDS,
+            },
+        )
+        return ()
+    return tuple(sorted(params)) if params else ()
 
 
 def _remember_route_unsupported_params(route_key: str, params: Tuple[str, ...]) -> None:
@@ -2254,11 +2292,13 @@ def _remember_route_unsupported_params(route_key: str, params: Tuple[str, ...]) 
     known = frozenset(name for name in params if str(name or "").strip())
     if not known:
         return
+    now = _llm_route_unsupported_params_now()
     with _LLM_ROUTE_UNSUPPORTED_PARAMS_LOCK:
-        merged = _LLM_ROUTE_UNSUPPORTED_PARAMS.get(route_key, frozenset()) | known
+        previous = _LLM_ROUTE_UNSUPPORTED_PARAMS.get(route_key)
+        merged = (previous[0] if previous else frozenset()) | known
         # 重新插入刷新新旧序：更新过的 route 视为最新，淘汰从最旧开始。
         _LLM_ROUTE_UNSUPPORTED_PARAMS.pop(route_key, None)
-        _LLM_ROUTE_UNSUPPORTED_PARAMS[route_key] = merged
+        _LLM_ROUTE_UNSUPPORTED_PARAMS[route_key] = (merged, now)
         while len(_LLM_ROUTE_UNSUPPORTED_PARAMS) > _LLM_ROUTE_UNSUPPORTED_PARAMS_MAX_ENTRIES:
             oldest = next(iter(_LLM_ROUTE_UNSUPPORTED_PARAMS))
             _LLM_ROUTE_UNSUPPORTED_PARAMS.pop(oldest, None)
