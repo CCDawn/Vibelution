@@ -13,6 +13,7 @@ from __future__ import annotations
 import base64
 import binascii
 import copy
+import logging
 import re
 import secrets
 import stat as stat_module
@@ -22,13 +23,16 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import quote
 
-from ..agent_config_authority import (
-    materialize_agent_config_identity,
-    normalize_permission_preset,
-)
+logger = logging.getLogger(__name__)
+
 from core.llm.agent_model_parameters import (
     resolve_agent_model_parameters,
     sync_dialogue_reasoning_effort_to_model,
+)
+
+from ..agent_config_authority import (
+    materialize_agent_config_identity,
+    normalize_permission_preset,
 )
 from .avatar_model_defaults import model_default_avatar_filename
 from .parameter_snapshot import save_parameter_update
@@ -49,7 +53,10 @@ def _validate_launcher_management_metadata(agent_id: str, metadata: dict | None)
         return
     if not isinstance(metadata, dict):
         raise _service().AgentDirectoryError("Agent metadata must be an object.")
-    from ..local_assistant.management_permissions import assert_metadata_write_allowed, ManagementPermissionError
+    from ..local_assistant.management_permissions import (
+        ManagementPermissionError,
+        assert_metadata_write_allowed,
+    )
     try:
         assert_metadata_write_allowed(agent_id, metadata)
     except ManagementPermissionError:
@@ -139,7 +146,9 @@ def update_agent_instance(
     updated_task_profile: dict[str, Any] | None = None
     parameter_snapshot_refreshed = False
     update_started = time.perf_counter()
+    lock_wait_started = time.perf_counter()
     with s._STATE_LOCK:
+        lock_wait_ms = (time.perf_counter() - lock_wait_started) * 1000.0
         state = s.load_state()
         agent = s._find_agent(state, agent_id)
         if agent is None:
@@ -401,6 +410,7 @@ def update_agent_instance(
             parameter_snapshot_refreshed = save_parameter_update(state, agent, previous_agent, kind="compression")
         else:
             s.save_state(state)
+    locked_ms = (time.perf_counter() - lock_wait_started) * 1000.0
     s._record_agent_event("agent.updated", agent)
     if context_compression_policy is not None:
         _record_compression_parameter_update(agent, refreshed=parameter_snapshot_refreshed, started=update_started)
@@ -416,6 +426,13 @@ def update_agent_instance(
         s._record_agent_persona_profile_event(agent, updated_persona_profile)
     if updated_task_profile is not None:
         s._record_agent_task_profile_event(agent, updated_task_profile)
+    logger.info(
+        "agent_directory.update_agent_instance timing agentId=%s lockWaitMs=%.1f lockedMs=%.1f totalMs=%.1f",
+        agent_id,
+        lock_wait_ms,
+        locked_ms,
+        (time.perf_counter() - update_started) * 1000.0,
+    )
     return s._agent_to_api(agent)
 
 
