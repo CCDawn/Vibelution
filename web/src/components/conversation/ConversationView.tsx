@@ -696,6 +696,18 @@ export const ConversationView = React.memo(function ConversationView({
     },
     [timelineVirtualizer],
   );
+  // 会话切换（Codex/ZCode parity）：行 key 在历史行上可能退化为按 index 的兜底 key，
+  // 两个会话的第 N 行会撞同一个测高缓存条目。切换 session 时先清空测量缓存并重排，
+  // 让随后的 per-session 滚动恢复（useConversationTimelineFollow）落在干净布局上，
+  // 否则旧会话的实测高度会把新内容按错误的绝对定位起点叠在一起（文字重叠）。
+  const timelineMeasuredSessionRef = useRef(sessionId);
+  useLayoutEffect(() => {
+    if (timelineMeasuredSessionRef.current === sessionId) {
+      return;
+    }
+    timelineMeasuredSessionRef.current = sessionId;
+    timelineVirtualizer.measure();
+  }, [sessionId, timelineVirtualizer]);
   // Find-in-transcript（对话内查找）：状态、索引、导航、高亮与跳转全部在
   // useConversationFind 内，不跨 route 边界。
   const {
