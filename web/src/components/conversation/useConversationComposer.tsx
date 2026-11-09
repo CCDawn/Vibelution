@@ -477,8 +477,11 @@ export function useConversationComposer({
   const [slashDismissedAtValue, setSlashDismissedAtValue] = useState<string | null>(null);
   const [slashActiveIndex, setSlashActiveIndex] = useState(-1);
   useEffect(() => {
-    setSlashActiveIndex(-1);
-    setReferenceActiveIndex(-1);
+    // Returning the current value lets React skip the re-render, so an ordinary
+    // keystroke no longer forces two extra renders of the whole conversation
+    // tree just to reset an index that nothing is showing.
+    setSlashActiveIndex((prev) => (prev === -1 ? prev : -1));
+    setReferenceActiveIndex((prev) => (prev === -1 ? prev : -1));
   }, [composerValue]);
   const showSlashSuggestions = !composerDisabled
     && slashDismissedAtValue !== composerValue
