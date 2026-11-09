@@ -316,6 +316,60 @@ def _accumulate_session_create_stage_ms(
     )
 
 
+@contextmanager
+def _timed_session_select_state_lock(s: Any, timings: dict[str, int]):
+    """Chat-state transaction that reports lock wait separately from lock hold.
+
+    Session switching and running-turn persistence serialize on the same
+    cross-process ``.chat_state.lock``. Only splitting wait from hold can tell
+    "the switch is queued behind a live turn" from "the locked body is slow".
+    """
+
+    waiting_started = time.perf_counter()
+    with s._CHAT_STATE_LOCK:
+        acquired_at = time.perf_counter()
+        timings["chatStateLockWaitMs"] = timings.get("chatStateLockWaitMs", 0) + max(
+            0, int((acquired_at - waiting_started) * 1000)
+        )
+        try:
+            yield
+        finally:
+            timings["chatStateLockHoldMs"] = timings.get("chatStateLockHoldMs", 0) + max(
+                0, int((time.perf_counter() - acquired_at) * 1000)
+            )
+
+
+def _record_session_switch_timing(
+    s: Any,
+    *,
+    started_at: float,
+    timings: dict[str, int],
+    session_id: str = "",
+    surface: str = "select",
+    outcome: str = "succeeded",
+) -> None:
+    """Publish one bounded switch-timing sample for the switch latency probe."""
+
+    try:
+        s.record_runtime_scene_event(
+            "conversation",
+            "session_lifecycle",
+            "conversation.session.switch.timing",
+            level="warning" if outcome != "succeeded" else "info",
+            outcome=outcome,
+            message="Session switch request timing.",
+            fields={
+                "sessionId": str(session_id or "").strip(),
+                "surface": str(surface or "")[:40],
+                "stageDurationsMs": dict(timings),
+                "totalMs": max(0, int((time.perf_counter() - started_at) * 1000)),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        pass
+
+
 def _commit_session_create_idempotency_record(
     path: Path,
     *,
@@ -1622,6 +1676,8 @@ def select_chat_session(session_id: str, *, lightweight: bool = False) -> dict:
     without rebuilding a full windowed transcript (UI Prefer: respond-async).
     """
     s = _service()
+    switch_started_at = time.perf_counter()
+    timings: dict[str, int] = {}
 
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
@@ -1632,18 +1688,37 @@ def select_chat_session(session_id: str, *, lightweight: bool = False) -> dict:
             source="s.select_chat_session",
         )
         raise s.SessionNotFoundError("Session not found")
+    agent_lookup_started_at = time.perf_counter()
     s._sync_agent_directory_project_root()
-    agent_by_id = s._agent_lookup_for_conversations()
-    if s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id) is None:
+    # Read the row once, then resolve only this session's identity closure: the
+    # argument-less lookup deep-copies every Agent row on every switch. Declared
+    # bound ids plus the direct-session owner cover both binding shapes, and an
+    # empty closure still falls back to the full registry so an unbound legacy
+    # row resolves exactly as before.
+    initial_conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
+    if initial_conversation is None:
         s._ensure_session_conversation_record(
             normalized_session_id,
             source="s.select_chat_session",
         )
+        initial_conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
+    bound_agent_ids = tuple(dict.fromkeys(
+        str((initial_conversation or {}).get(key) or "").strip()
+        for key in ("agent_id", "agentId")
+        if str((initial_conversation or {}).get(key) or "").strip()
+    ))
+    agent_by_id = s._agent_lookup_for_conversations(
+        session_id=normalized_session_id,
+        agent_ids=bound_agent_ids,
+    )
+    if not agent_by_id and not bound_agent_ids:
+        agent_by_id = s._agent_lookup_for_conversations()
+    _accumulate_session_create_stage_ms(timings, "agentLookupMs", agent_lookup_started_at)
     missing_after_lock = False
     selected_conversation: dict[str, Any] | None = None
     metadata_changed = False
     read_only = False
-    with s._CHAT_STATE_LOCK:
+    with _timed_session_select_state_lock(s, timings):
         conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
         changed = False
         if conversation is None:
@@ -1679,7 +1754,9 @@ def select_chat_session(session_id: str, *, lightweight: bool = False) -> dict:
     # Viewing a session is not session activity: the directory list must keep
     # ordering by last activity, so a select must not touch recency.
     if not read_only:
+        directory_sync_started_at = time.perf_counter()
         directory_bridge.sync_conversation_record(selected_conversation, touch_recency=False)
+        _accumulate_session_create_stage_ms(timings, "directorySyncMs", directory_sync_started_at)
     if metadata_changed:
         # Plain view switches keep the index signature stable; invalidating on
         # every select forced the next poll to rebuild the whole projection.
@@ -1696,17 +1773,33 @@ def select_chat_session(session_id: str, *, lightweight: bool = False) -> dict:
             detail.setdefault("id", normalized_session_id)
             detail.setdefault("messages", [])
             detail["selectedLightweight"] = True
+            _record_session_switch_timing(
+                s,
+                started_at=switch_started_at,
+                timings=timings,
+                session_id=normalized_session_id,
+                surface="select_lightweight",
+            )
             return detail
         raise s.SessionNotFoundError("Session not found")
     # Match the chat-switch window contract so /select does not rebuild a full
     # unwindowed transcript (historically the same cost as a heavy GET detail).
+    projection_started_at = time.perf_counter()
     detail = s.get_session_detail(
         normalized_session_id,
         message_limit=s._SESSION_STREAM_DETAIL_MESSAGE_LIMIT,
         transcript_scope=s._SESSION_STREAM_DETAIL_TRANSCRIPT_SCOPE,
     )
+    _accumulate_session_create_stage_ms(timings, "detailProjectionMs", projection_started_at)
     if detail is None:
         raise s.SessionNotFoundError("Session not found")
+    _record_session_switch_timing(
+        s,
+        started_at=switch_started_at,
+        timings=timings,
+        session_id=normalized_session_id,
+        surface="select_full",
+    )
     return detail
 
 

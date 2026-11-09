@@ -77,6 +77,9 @@ export const queryKeys = {
   sessionMessageCuration: (id: string) => ["sessions", id, "message-curation"] as const,
   sessionChildSessions: (id: string) => ["sessions", id, "child-sessions"] as const,
   sessionRightRail: (id: string) => ["sessions", id, "right-rail"] as const,
+  // Trailing secondary side lists (inbox / governance / group / next-state).
+  // Nested under session(id) so session-scoped invalidations reach it by prefix.
+  sessionSecondary: (id: string) => ["sessions", id, "secondary"] as const,
   chatRooms: () => ["chat-rooms"] as const,
   chatRoom: (id: string) => ["chat-rooms", id] as const,
   // Group-room transcript authority. The key nests under chatRoom(id) so

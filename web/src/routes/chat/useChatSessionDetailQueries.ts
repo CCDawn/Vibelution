@@ -18,6 +18,7 @@ import {
   type ChatLiveQueryPolicy,
   type ChatLiveQueryPolicyInput,
 } from "../chatLiveQueryPolicy";
+import { mergeSessionDetailSecondaryLists } from "../chatSessionState";
 import { fetchSessionDetailWindow, isProvisionalSessionTranscript } from "./chatSessionDetailHelpers";
 import {
   sessionDetailStructuralSharing,
@@ -106,9 +107,10 @@ export function useChatSessionDetailQueries({
     enabled: Boolean(activeSessionId) && !isTempSessionId(activeSessionId),
     queryFn: ({ signal }) => fetchSessionDetailWindow(activeSessionId, {
       signal,
-      // When SSE owns live transcript, skip expensive secondary lists on poll/refetch.
-      // First paint still hydrates fully until stream ownership is true.
-      includeSecondary: !chatLiveQueryPolicy.directSessionStreamOwnsLiveQueries,
+      // Switching is a paint-first path: inbox / governance / group / next-state
+      // reads are the expensive side lists and must never gate first paint.
+      // They arrive from the trailing hydration query below.
+      includeSecondary: false,
     }),
     // Select + GET often race on switch; brief freshness avoids immediate double rebuild
     // when /select already wrote a windowed detail into the same query key.
@@ -120,6 +122,31 @@ export function useChatSessionDetailQueries({
       : false,
     refetchIntervalInBackground: chatLiveQueryPolicy.directRefetchIntervalInBackground,
   });
+  // Trailing secondary hydration: first paint stays light, side lists land one
+  // round trip later instead of blocking the switch.
+  const sessionSecondaryQuery = useQuery<SessionDetail>({
+    queryKey: queryKeys.sessionSecondary(activeSessionId ?? "none"),
+    enabled: Boolean(activeSessionId)
+      && !isTempSessionId(activeSessionId)
+      && secondaryChatDataEnabled,
+    queryFn: ({ signal }) => fetchSessionDetailWindow(activeSessionId, {
+      signal,
+      // Only the side lists are consumed here, so keep the transcript
+      // projection and payload as small as the detail route allows.
+      transcriptScope: "none",
+      messageLimit: 1,
+      includeSecondary: true,
+    }),
+    staleTime: 30_000,
+    refetchInterval: false,
+  });
+  useEffect(() => {
+    const hydrated = sessionSecondaryQuery.data;
+    if (!hydrated || !activeSessionId || hydrated.id !== activeSessionId) return;
+    queryClient.setQueryData<SessionDetail>(queryKeys.session(activeSessionId), (previous) =>
+      mergeSessionDetailSecondaryLists(previous, hydrated),
+    );
+  }, [activeSessionId, queryClient, sessionSecondaryQuery.data]);
   useEffect(() => {
     if (!activeSessionId) {
       setStartupDetailSettledSessionId("");
