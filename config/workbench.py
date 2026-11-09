@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 import tomllib
+from .lock_errors import ConfigEditLockBusy
 from .paths import ensure_global_config_initialized, resolve_config_path
 from vibelution_storage import ProjectIdentityError, resolve_active_project_storage_paths
 
@@ -30,7 +31,17 @@ def parse_port(value: object) -> int | None:
 
 
 def _configured_workbench_port(key: str, default: int) -> int:
-    ensure_global_config_initialized(CONFIG_PATH)
+    # Port resolution runs at import time (runtime_manager.constants) and inside
+    # every short-lived Launcher bridge. Bootstrap takes the shared config edit
+    # lock, so a longer-running config writer made port resolution raise after
+    # its 10s timeout and the whole bridge process died before it could answer
+    # (2026-11-09: freshness/status bridges failed while a test run held the
+    # lock). A read must never be decided by a busy lock: skip initialization
+    # and read what is on disk, falling back to the default.
+    try:
+        ensure_global_config_initialized(CONFIG_PATH)
+    except (TimeoutError, OSError, ConfigEditLockBusy):
+        pass
     try:
         payload = tomllib.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError):

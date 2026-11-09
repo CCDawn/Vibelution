@@ -336,3 +336,37 @@ def test_ensure_global_config_initialized_concurrent_calls_serialize(tmp_path, m
     assert external_config.exists()
     tomllib.loads(external_config.read_text(encoding="utf-8"))
     assert not resolve_config_lock_path(external_config).exists()
+
+
+def _raise_busy_config_lock(*_args, **_kwargs):
+    from config.lock_errors import ConfigEditLockBusy
+
+    raise ConfigEditLockBusy("Config edit lock is busy: config-edit.lock")
+
+
+def test_workbench_port_read_survives_a_busy_config_edit_lock(tmp_path, monkeypatch):
+    """Port resolution runs at import time in every Launcher bridge.
+
+    2026-11-09: a concurrent test run held the config edit lock, so bootstrap
+    raised after ten seconds inside the import of ``runtime_manager.constants``
+    and short-lived bridges (freshness/status) died before answering. A busy
+    lock must degrade to the value already on disk instead.
+    """
+
+    from config import workbench
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[workbench]\nbackend_port = 9241\n", encoding="utf-8")
+    monkeypatch.setattr(workbench, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(workbench, "ensure_global_config_initialized", _raise_busy_config_lock)
+
+    assert workbench._configured_workbench_port("backend_port", 8000) == 9241
+
+
+def test_workbench_port_read_falls_back_to_default_when_config_is_unreadable(tmp_path, monkeypatch):
+    from config import workbench
+
+    monkeypatch.setattr(workbench, "CONFIG_PATH", tmp_path / "missing" / "config.toml")
+    monkeypatch.setattr(workbench, "ensure_global_config_initialized", _raise_busy_config_lock)
+
+    assert workbench._configured_workbench_port("backend_port", 8317) == 8317
