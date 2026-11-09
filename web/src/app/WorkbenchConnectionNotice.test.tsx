@@ -67,15 +67,20 @@ describe("workbench connection recovery", () => {
     expect(recover).not.toHaveBeenCalled();
   });
 
-  it("offers connection checking first after a transient timeout with previously healthy data", async () => {
+  it("stays collapsed inside a restart window and offers connection checking first", async () => {
     await act(async () => root.render(<WorkbenchConnectionNotice unavailable lang="zh" desktopShell recovering={false} lastHealthyAt={1000} failedAt={4000} onRecover={recover} onRetry={retry} />));
+    // A restart republishes the frontend and replaces the backend; that window
+    // outlasts a poll timeout, so the panel must not cover the page yet.
+    const trigger = host.querySelector<HTMLButtonElement>("[data-testid=workbench-connection-notice]")!;
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    await act(async () => trigger.click());
     expect(panelText()).toContain("连接检查暂未成功");
     expect(button("恢复工作台")).toBeUndefined();
     await act(async () => button("检查连接")!.click());
     expect(retry).toHaveBeenCalledOnce();
     expect(recover).not.toHaveBeenCalled();
-    expect(connectionFailureIsPersistent(1000, 15_999)).toBe(false);
-    expect(connectionFailureIsPersistent(1000, 16_000)).toBe(true);
+    expect(connectionFailureIsPersistent(1000, 45_999)).toBe(false);
+    expect(connectionFailureIsPersistent(1000, 46_000)).toBe(true);
     expect(connectionFailureIsPersistent(0, 4000)).toBe(true);
   });
 
