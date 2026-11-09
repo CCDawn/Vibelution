@@ -47,6 +47,7 @@ import {
 } from "./chatRoutePresentation";
 import {
   groupSessionsByTimeline,
+  sortSessionsStableRecency,
   splitPinnedSessions,
   type SessionListDateBucket,
 } from "./sessionListGrouping";
@@ -326,12 +327,17 @@ export function ChatConversationIndexPanel({
   };
   // Pinned-first split plus optional day buckets over the loaded page; the
   // backend already orders pinned first, the split only isolates the section.
+  // Unpinned sessions get a deterministic client order (updatedAt DESC, id
+  // DESC tiebreak) so cache head-inserts, create pins, and server refetches
+  // cannot scramble the rail; the create-pin layer (mergePreservedCreatedSessions)
+  // stays upstream of this sort and keeps newly created sessions re-attached.
   const sessionListRail = (() => {
     const railSessions = allVisibleSessions.filter((session) => !isSessionArchived(session));
     const { pinned, unpinned } = splitPinnedSessions(railSessions);
+    const orderedUnpinned = sortSessionsStableRecency(unpinned);
     const timelineGroups = showArchivedSessions || !sessionListPrefs.timelineGrouping
       ? []
-      : groupSessionsByTimeline(unpinned, Date.now());
+      : groupSessionsByTimeline(orderedUnpinned, Date.now());
     const renderSessionList = (
       sessions: SessionSummary[],
       renderTrailingActions?: (session: SessionSummary) => ReactNode,

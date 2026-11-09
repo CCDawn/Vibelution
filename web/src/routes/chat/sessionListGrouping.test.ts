@@ -4,6 +4,7 @@ import type { SessionSummary } from "../../api/types";
 import {
   groupSessionsByTimeline,
   sessionListDateBucket,
+  sortSessionsStableRecency,
   splitPinnedSessions,
 } from "./sessionListGrouping";
 
@@ -53,6 +54,86 @@ describe("splitPinnedSessions", () => {
     const { pinned, unpinned } = splitPinnedSessions(sessions);
     expect(pinned.map((item) => item.id)).toEqual(["c", "d", "a"]);
     expect(unpinned.map((item) => item.id)).toEqual(["b"]);
+  });
+});
+
+describe("sortSessionsStableRecency", () => {
+  it("orders unpinned sessions by updatedAt descending", () => {
+    const loaded = [
+      session("older", daysAgo(2)),
+      session("newest", daysAgo(0)),
+      session("middle", daysAgo(1)),
+    ];
+    expect(sortSessionsStableRecency(loaded).map((item) => item.id))
+      .toEqual(["newest", "middle", "older"]);
+  });
+
+  it("falls back to lastActive when updatedAt is missing", () => {
+    const withLastActive = { ...session("b", daysAgo(1)), updatedAt: "" };
+    const sorted = sortSessionsStableRecency([
+      session("a", daysAgo(3)),
+      withLastActive,
+    ]);
+    expect(sorted.map((item) => item.id)).toEqual(["b", "a"]);
+    expect(Date.parse(withLastActive.lastActive)).toBe(Date.parse(daysAgo(1)));
+  });
+
+  it("breaks same-timestamp ties by id descending regardless of loaded order", () => {
+    const sameTs = daysAgo(1);
+    const forward = sortSessionsStableRecency([
+      session("s-a", sameTs),
+      session("s-b", sameTs),
+      session("s-c", sameTs),
+    ]);
+    const backward = sortSessionsStableRecency([
+      session("s-c", sameTs),
+      session("s-b", sameTs),
+      session("s-a", sameTs),
+    ]);
+    expect(forward.map((item) => item.id)).toEqual(["s-c", "s-b", "s-a"]);
+    expect(backward.map((item) => item.id)).toEqual(["s-c", "s-b", "s-a"]);
+  });
+
+  it("sorts unparsable timestamps last in id descending order", () => {
+    const sorted = sortSessionsStableRecency([
+      session("bad-2", "not-a-date"),
+      session("dated", daysAgo(1)),
+      session("bad-1", "not-a-date"),
+    ]);
+    expect(sorted.map((item) => item.id)).toEqual(["dated", "bad-2", "bad-1"]);
+  });
+
+  it("does not mutate the input array", () => {
+    const loaded = [session("b", daysAgo(1)), session("a", daysAgo(0))];
+    sortSessionsStableRecency(loaded);
+    expect(loaded.map((item) => item.id)).toEqual(["b", "a"]);
+  });
+
+  it("keeps pinned tier order while cache reordering cannot change display order", () => {
+    const build = (headInserted: boolean) => {
+      const rows = [
+        session("pinned-new", daysAgo(0), 500),
+        session("pinned-old", daysAgo(1), 900),
+        session("u-1", daysAgo(2)),
+        session("u-2", daysAgo(3)),
+      ];
+      const { pinned, unpinned } = splitPinnedSessions(
+        headInserted ? [session("u-temp", daysAgo(0)), ...rows] : rows,
+      );
+      return {
+        pinned: pinned.map((item) => item.id),
+        unpinned: sortSessionsStableRecency(unpinned).map((item) => item.id),
+      };
+    };
+    expect(build(false)).toEqual({
+      pinned: ["pinned-old", "pinned-new"],
+      unpinned: ["u-1", "u-2"],
+    });
+    // A head-inserted row (cache merge order) must not reshuffle the others.
+    expect(build(true)).toEqual({
+      pinned: ["pinned-old", "pinned-new"],
+      unpinned: ["u-temp", "u-1", "u-2"],
+    });
   });
 });
 

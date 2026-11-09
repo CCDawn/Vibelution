@@ -229,4 +229,32 @@ describe("ChatSessionBrowser", () => {
       await preview.unmount();
     }
   });
+
+  it("keeps rendered rows mounted with an inline refreshing banner during loading pulses", async () => {
+    const preview = await mount(props());
+    try {
+      expect(preview.host.querySelector('[data-session-browser-id="session-a"]')).not.toBeNull();
+      await preview.update(props({ loading: true }));
+      expect(preview.host.querySelector('[data-session-browser-id="session-a"]')).not.toBeNull();
+      expect(preview.host.textContent).toContain("正在更新会话列表…");
+      // The full-surface loading state must not replace the rendered list.
+      expect(preview.host.textContent).not.toContain("正在加载会话…");
+    } finally {
+      await preview.unmount();
+    }
+  });
+
+  it("shows the empty state only after loading completes without sessions", async () => {
+    const preview = await mount(props({ sessions: [], loading: true }));
+    try {
+      // Loading with no sessions: loading surface, never the empty state.
+      expect(preview.host.querySelector('[data-tone="loading"]')).not.toBeNull();
+      expect(preview.host.querySelector('[data-tone="empty"]')).toBeNull();
+      // Loading completed and still empty: now the empty state may show.
+      await preview.update(props({ sessions: [] }));
+      expect(preview.host.querySelector('[data-tone="empty"]')).not.toBeNull();
+    } finally {
+      await preview.unmount();
+    }
+  });
 });

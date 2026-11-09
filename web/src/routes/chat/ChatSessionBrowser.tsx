@@ -4,7 +4,11 @@ import { Clock3, MessageSquareText, Plus, Search, SearchX, UsersRound } from "lu
 import type { AgentInstance, SessionSummary } from "../../api/types";
 import { VButton, VInput, VStateSurface } from "../../components/vui";
 import { sessionAgentDisplayInfo } from "../agentDisplay";
-import { groupSessionsByTimeline, type SessionListDateBucket } from "./sessionListGrouping";
+import {
+  groupSessionsByTimeline,
+  sortSessionsStableRecency,
+  type SessionListDateBucket,
+} from "./sessionListGrouping";
 import { formatRelativeTime } from "../chatShellFormat";
 import { avatarImageUrlFrom, avatarInitials, renderAgentAvatar } from "./chatRoutePresentation";
 import {
@@ -192,9 +196,11 @@ export function ChatSessionBrowser({
       sessions: group.sessions,
     }));
     const datedIds = new Set(groups.flatMap((group) => group.sessions.map((session) => session.id)));
-    const undated = filteredSessions
-      .filter((session) => !datedIds.has(session.id))
-      .sort((left, right) => String(left.title || left.id).localeCompare(String(right.title || right.id)));
+    // Same deterministic key as the rail (updatedAt DESC, id DESC); undated
+    // rows have no parsable timestamp, so they fall back to the id DESC order.
+    const undated = sortSessionsStableRecency(
+      filteredSessions.filter((session) => !datedIds.has(session.id)),
+    );
     if (undated.length) groups.push({ bucket: "undated", sessions: undated });
     return groups;
   }, [filteredSessions, nowMs]);
