@@ -16,6 +16,14 @@ vi.mock("./LazyConversationMarkdownRenderer", async () => {
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+/**
+ * Long enough to stay folded. The short-thought rule expands settled units under
+ * 240 characters, so these duration assertions keep their collapsed precondition
+ * by using a genuinely long thought.
+ */
+const LONG_THOUGHT_TEXT = "先确认这个函数的两条来源路径，再看函数体。"
+  + "然后核对调用方是否已经在别处做了同样的兜底判断，避免重复改造。".repeat(8);
+
 function reasoningMessage(status: "running" | "completed"): ConversationMessage {
   return {
     id: "assistant-thought-duration",
@@ -34,7 +42,7 @@ function reasoningMessage(status: "running" | "completed"): ConversationMessage 
       revision: 1,
       sequence: 1,
       terminal: status === "completed",
-      text: "先确认这个函数的两条来源路径，再看函数体。",
+      text: LONG_THOUGHT_TEXT,
     }],
   } as ConversationMessage;
 }
@@ -216,7 +224,7 @@ describe("thought duration client-clock label", () => {
     const thoughts = container?.querySelectorAll('[data-thought-section]');
     expect(thoughts).toHaveLength(1);
     expect(thoughts?.[0].querySelector('[data-thought-scroll-body="true"]')?.textContent)
-      .toBe("先确认这个函数的两条来源路径，再看函数体。");
+      .toBe(LONG_THOUGHT_TEXT);
   }
 
   it("ticks per second only while expanded and live, then freezes when the unit settles", async () => {
@@ -225,7 +233,7 @@ describe("thought duration client-clock label", () => {
     expect(header).toBeTruthy();
     expect(header?.getAttribute("aria-expanded")).toBe("false");
     expect(thoughtSection().querySelector('[data-thought-streaming-summary="true"]')?.textContent)
-      .toBe("先确认这个函数的两条来源路径，再看函数体。");
+      .toContain("避免重复改造");
     expect(container?.querySelector('[data-thought-duration="live"]')).toBeNull();
     expectCollapsedThought();
 
@@ -341,7 +349,8 @@ describe("thought duration client-clock label", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const base = reasoningMessage("running");
     const thought = base.turnItems![0];
-    const completedText = "已经完成的第一段完整思考。";
+    const completedText = "已经完成的第一段完整思考。"
+      + "这段思考记录了对齐调用链的过程，确认每条来源路径都会经过同一处兜底判断。".repeat(7);
     const narrationText = "先读取配置。";
     const answerText = "配置已经核对完成。";
     const mixed: ConversationMessage = { ...base, turnItems: [
@@ -368,7 +377,7 @@ describe("thought duration client-clock label", () => {
     expectCollapsedThought(0);
     expectCollapsedThought(1);
     expect(thoughtSection(1).querySelector('[data-thought-streaming-summary="true"]')?.textContent)
-      .toBe("先确认这个函数的两条来源路径，再看函数体。");
+      .toContain("避免重复改造");
     expectVisibleNarrationAndTool();
     const narrationNode = narration();
     const toolNode = tool();
@@ -381,7 +390,7 @@ describe("thought duration client-clock label", () => {
     expect(thoughts[0].textContent).not.toContain("思考中");
     expect(thoughts[1].textContent).toContain("思考中");
     expect(thoughts.map(section => section.querySelector('[data-thought-scroll-body="true"]')?.textContent))
-      .toEqual([completedText, "先确认这个函数的两条来源路径，再看函数体。"]);
+      .toEqual([completedText, LONG_THOUGHT_TEXT]);
     expect(thoughts[0].compareDocumentPosition(narration()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(narration()!.compareDocumentPosition(tool()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(tool()!.compareDocumentPosition(thoughts[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

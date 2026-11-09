@@ -10,6 +10,10 @@ import { dictionary } from "../../i18n/dictionary";
 import { ConversationView } from "./ConversationView";
 import { resetToolExpandPersistenceForTests } from "./conversationToolExpandPersistence";
 
+// These cases pin the long-thought contract: settled units stay folded.
+// Short-thought expansion is covered by its own dedicated test.
+vi.mock("./thoughtExpansionPolicy", () => ({ SHORT_THOUGHT_MAX_CHARS: 0 }));
+
 vi.mock("./LazyConversationMarkdownRenderer", () => ({
   LazyConversationMarkdownRenderer: ({ content }: { content: string }) => <div data-test-markdown="true">{content}</div>,
 }));

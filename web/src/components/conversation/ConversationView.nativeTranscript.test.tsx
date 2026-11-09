@@ -2,13 +2,16 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Window } from "happy-dom";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
-
+import { describe, expect, it, vi } from "vitest";
 import type { ConversationMessage } from "../../api/types";
 import { ConversationView } from "./ConversationView";
 import conversationViewSource from "./ConversationView.tsx?raw";
 import toolActivityStyles from "./ConversationToolActivity.styles";
 import styles from "./ConversationView.styles";
+
+// These cases pin the long-thought contract: settled units stay folded.
+// Short-thought expansion is covered by its own dedicated test.
+vi.mock("./thoughtExpansionPolicy", () => ({ SHORT_THOUGHT_MAX_CHARS: 0 }));
 
 function renderConversation(
   messages: ConversationMessage[],

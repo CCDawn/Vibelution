@@ -64,6 +64,13 @@ function mountExpansionHook(initial: UseConversationProcessExpansionInput) {
   };
 }
 
+/**
+ * Long enough to stay folded. The short-thought rule expands settled units under
+ * 240 characters, and these cases depend on a folded starting point.
+ */
+const FIXTURE_THOUGHT_TEXT = "Thought"
+  + "先确认这条来源路径是否已经被上游兜底过，再决定要不要在这里重复判断。".repeat(12);
+
 function assistantFrame(id: string, completed = false, turnId = "turn-atomic"): ConversationMessage {
   const status = completed ? "completed" : "running";
   const common = { version: 3, sessionId: "session-overlay-alias", turnId, revision: 1, status, terminal: completed } as const;
@@ -75,7 +82,7 @@ function assistantFrame(id: string, completed = false, turnId = "turn-atomic"): 
     timestamp: "2026-11-03T10:00:00Z",
     metadata: { turnId, ...(completed ? {} : { kind: "session_live_overlay" }) },
     turnItems: [
-      { ...common, id: "thought-1:1", itemId: "thought-1", type: "reasoning", sequence: 1, text: "Thought" },
+      { ...common, id: "thought-1:1", itemId: "thought-1", type: "reasoning", sequence: 1, text: FIXTURE_THOUGHT_TEXT },
       { ...common, id: "answer-1:1", itemId: "answer-1", type: "agent_message", phase: "final_answer", sequence: 2, text: "Answer" },
     ],
   };
@@ -102,7 +109,7 @@ function mountProjectedExpansion(initial: ConversationMessage[], companionMode: 
     const renderers = createCodexTranscriptCellRenderers({ lang: "en", t: (key) => key, ...expansion });
     return projection.messages.map((message, index) => {
       const agentMessage = projection.agentMessages[index];
-      const operations = buildAgentMessageOperations(agentMessage, { thought: "Thought", mental: "Mental", status: "Status" });
+      const operations = buildAgentMessageOperations(agentMessage, { thought: FIXTURE_THOUGHT_TEXT, mental: "Mental", status: "Status" });
       const timelineItems = buildAgentMessageTimelineItems(agentMessage, operations, { lang: "en" });
       const cells = buildCodexTranscriptCells(agentMessage, { operations, timelineItems });
       return (
