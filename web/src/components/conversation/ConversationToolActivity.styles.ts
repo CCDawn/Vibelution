@@ -19,10 +19,10 @@ const styles = {
   groupSummary: cx(
     "groupSummary",
     // list-none + empty ::marker: kill native <details> disclosure (Edge shows a lone ">")
-    "flex w-full max-w-full min-w-0 list-none cursor-pointer items-baseline gap-x-1.5 py-1 text-left text-vui-xs leading-[1.45] text-[var(--fg-tertiary)] [&::-webkit-details-marker]:hidden [&::marker]:hidden [&::marker]:content-none hover:text-[var(--fg-secondary)] focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
+    "flex w-full max-w-full min-w-0 list-none cursor-pointer items-baseline gap-x-1.5 py-1 text-left text-vui-xs leading-[1.45] text-[var(--fg-quaternary)] [&::-webkit-details-marker]:hidden [&::marker]:hidden [&::marker]:content-none hover:text-[var(--fg-secondary)] focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
   ),
-  groupTitle: cx("groupTitle", "min-w-0 font-normal text-[var(--fg-tertiary)]"),
-  groupMeta: cx("groupMeta", "shrink-0 text-[color-mix(in_srgb,var(--fg-tertiary)_82%,transparent)]"),
+  groupTitle: cx("groupTitle", "min-w-0 font-normal text-[var(--fg-quaternary)]"),
+  groupMeta: cx("groupMeta", "shrink-0 text-[var(--fg-quaternary)]"),
   groupDetails: cx("groupDetails", "min-w-0"),
   approvalSlot: cx(
     "approvalSlot",

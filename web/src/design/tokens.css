@@ -176,6 +176,7 @@
   --fg-primary: #f1f1f3;
   --fg-secondary: #c5c6cb;
   --fg-tertiary: #999ba1;
+  --fg-quaternary: #7c7e85;
 
   --accent-warm: #5b8def;
   --accent-warm-2: #8fb4ff;
@@ -506,6 +507,7 @@
   --fg-primary: #1d1d1f;
   --fg-secondary: #626266;
   --fg-tertiary: #66676b;
+  --fg-quaternary: #86878c;
 
   --accent-warm: #2563eb;
   --accent-warm-2: #1d4ed8;
