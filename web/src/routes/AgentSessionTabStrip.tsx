@@ -563,10 +563,11 @@ export function AgentSessionTabStrip({
             data-agent-session-tab-container
             {...dragReferenceProps}
             onDragOver={(event) => {
-              if (!dragOrderSessionId || !event.dataTransfer?.types.includes(SESSION_TAB_ORDER_MIME)) {
+              if (!dragOrderSessionId) {
                 return;
               }
               event.preventDefault();
+              event.stopPropagation();
               event.dataTransfer.dropEffect = "move";
               const bounds = event.currentTarget.getBoundingClientRect();
               const position = event.clientX < bounds.left + bounds.width / 2 ? "before" : "after";
@@ -577,10 +578,11 @@ export function AgentSessionTabStrip({
               ));
             }}
             onDrop={(event) => {
-              if (!dragOrderSessionId || !event.dataTransfer?.types.includes(SESSION_TAB_ORDER_MIME)) {
+              if (!dragOrderSessionId) {
                 return;
               }
               event.preventDefault();
+              event.stopPropagation();
               const bounds = event.currentTarget.getBoundingClientRect();
               const position = event.clientX < bounds.left + bounds.width / 2 ? "before" : "after";
               commitTabOrderDrop(session.id, position);
