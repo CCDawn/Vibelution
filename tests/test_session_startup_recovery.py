@@ -376,11 +376,10 @@ def test_interrupted_partial_gets_recovery_superseded_marker(
     assert normalized_partials[0]["metadata"]["recoverySuperseded"] is True
 
 
-def test_already_settled_turn_is_not_recovered(
+def test_settled_restart_interrupted_turn_is_recovered(
     recovery_env, tmp_path, submit_calls
 ) -> None:
-    """A turn with an interrupted marker is terminal; the sweep skips it."""
-
+    """A restart-stamped settled turn stays continuable, like the continue button."""
     _seed_conversation(tmp_path)
     _seed_interrupted_turn(tmp_path)
     _seed_active_work_run(recovery_env)
@@ -396,7 +395,33 @@ def test_already_settled_turn_is_not_recovered(
 
     summary = startup_recovery.recover_interrupted_session_turns_on_startup()
 
+    assert summary["resumedCount"] == 1
+    assert summary["continuableResumeCount"] == 1
+    assert len(submit_calls) == 1
+    assert len(_recovery_events(tmp_path)) == 1
+
+
+def test_settled_operator_close_turn_is_not_recovered(
+    recovery_env, tmp_path, submit_calls
+) -> None:
+    """Closing the window stays a deliberate stop even though the outcome is continuable."""
+    _seed_conversation(tmp_path)
+    _seed_interrupted_turn(tmp_path)
+    _seed_active_work_run(recovery_env)
+    append_turn_event(
+        tmp_path,
+        SESSION_ID,
+        ORIGINAL_TURN_ID,
+        "turn_interrupted",
+        status="interrupted",
+        payload={"reason": "electron_user_close"},
+        source="turn_journal_reconcile",
+    )
+
+    summary = startup_recovery.recover_interrupted_session_turns_on_startup()
+
     assert summary["resumedCount"] == 0
+    assert summary["continuableResumeCount"] == 0
     assert submit_calls == []
     assert _recovery_events(tmp_path) == []
 

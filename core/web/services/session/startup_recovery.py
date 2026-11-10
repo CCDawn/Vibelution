@@ -50,6 +50,7 @@ from core.chat.turn_journal import (
     EVENT_USER_MESSAGE,
     latest_open_turn_id,
 )
+from core.chat.session_activity import activity_can_continue
 from core.runtime_manager.work_run_status import work_run_has_execution
 from core.session_recovery_flags import (
     is_session_recovery_enabled,
@@ -117,6 +118,7 @@ def _new_summary() -> dict[str, Any]:
         "noInterruptedTurnCount": 0,
         "noActiveTurnSkipCount": 0,
         "journalInterruptResumeCount": 0,
+        "continuableResumeCount": 0,
         "alreadyResumedSkipCount": 0,
         "unreadableSessionSkipCount": 0,
         "queuedDrainScheduledCount": 0,
@@ -223,6 +225,29 @@ def _companion_session_ids(s: Any) -> set[str] | None:
 # stay excluded so a deliberate stop is never auto-resumed. The age window
 # keeps a stale interrupted turn from being replayed at every startup.
 _RESTART_INTERRUPT_REASONS = frozenset({"process_restarted", "electron_user_restart"})
+
+# Journal interrupt reasons map onto the shared Session activity contract so
+# the sweep and the composer continue button judge "continuable" identically.
+# A deliberate operator stop carries no mapping and therefore stays stopped.
+_INTERRUPT_REASON_ACTIVITY_OUTCOME = {
+    "process_restarted": "stopped",
+    "electron_user_restart": "stopped",
+}
+# Continuable as an outcome, but the operator closed the window or shut the
+# runtime down on purpose: never auto-resume these.
+_AUTO_RESUME_EXCLUDED_REASONS = frozenset({"electron_user_close", "runtime_shutdown"})
+
+
+def _interrupt_reason_can_continue(reason: str) -> bool:
+    """Whether a journal interrupt reason stays continuable under the contract."""
+
+    normalized = str(reason or "").strip()
+    if not normalized or normalized in _AUTO_RESUME_EXCLUDED_REASONS:
+        return False
+    outcome = _INTERRUPT_REASON_ACTIVITY_OUTCOME.get(normalized)
+    if outcome is None:
+        return False
+    return activity_can_continue(outcome)
 _RESTART_INTERRUPT_MAX_AGE_SECONDS = 30 * 60.0
 _RESTART_INTERRUPT_MAX_AGE_ENV = "VIBELUTION_SESSION_RECOVERY_MAX_AGE_SECONDS"
 
@@ -306,6 +331,56 @@ def _latest_restart_interrupted_turn(events: list[Any]) -> tuple[str, str]:
         payload = getattr(event, "payload", None)
         reason = str(payload.get("reason") or "").strip() if isinstance(payload, dict) else ""
         if reason not in _RESTART_INTERRUPT_REASONS:
+            continue
+        return turn_id, str(getattr(event, "timestamp", "") or "").strip(), already_resumed_skips
+    return "", "", already_resumed_skips
+
+
+def _latest_continuable_turn(events: list[Any]) -> tuple[str, str, int]:
+    """Latest settled turn the shared activity contract still lets continue.
+
+    Journal twin of the composer's continue button: the turn's terminal
+    outcome must be continuable (``continuableOutcomes``) and no earlier sweep
+    may already have resumed it. Interruptions the operator caused deliberately
+    carry a reason outside ``_INTERRUPT_REASON_ACTIVITY_OUTCOME`` and stay
+    stopped.
+    """
+
+    raw_events = list(events or [])
+    started_turn_ids = {
+        str(getattr(event, "turn_id", "") or "").strip()
+        for event in raw_events
+        if str(getattr(event, "event_type", "") or "").strip() == EVENT_TURN_STARTED
+    }
+    already_resumed: set[str] = set()
+    for event in raw_events:
+        if str(getattr(event, "event_type", "") or "").strip() != EVENT_SESSION_RECOVERY_RESUMED:
+            continue
+        payload = getattr(event, "payload", None)
+        if not isinstance(payload, dict):
+            continue
+        sources = [payload]
+        nested = payload.get("recovery")
+        if isinstance(nested, dict):
+            sources.append(nested)
+        for source in sources:
+            for key in ("recoveredTurnId", "originalTurnId", "openTurnId"):
+                recovered = str(source.get(key) or "").strip()
+                if recovered:
+                    already_resumed.add(recovered)
+    already_resumed_skips = 0
+    for event in reversed(raw_events):
+        if str(getattr(event, "event_type", "") or "").strip() != EVENT_TURN_INTERRUPTED:
+            continue
+        turn_id = str(getattr(event, "turn_id", "") or "").strip()
+        if not turn_id or turn_id not in started_turn_ids:
+            continue
+        if turn_id in already_resumed:
+            already_resumed_skips += 1
+            continue
+        payload = getattr(event, "payload", None)
+        reason = str(payload.get("reason") or "").strip() if isinstance(payload, dict) else ""
+        if not _interrupt_reason_can_continue(reason):
             continue
         return turn_id, str(getattr(event, "timestamp", "") or "").strip(), already_resumed_skips
     return "", "", already_resumed_skips
@@ -404,7 +479,7 @@ def _tail_may_need_resume(s: Any, session_id: str) -> tuple[bool | None, int]:
                 if isinstance(payload, dict)
                 else ""
             )
-            return reason in _RESTART_INTERRUPT_REASONS, 0
+            return _interrupt_reason_can_continue(reason), 0
         if event_type in _TAIL_TERMINAL_EVENT_TYPES:
             return False, 0
         if event_type == "turn_started":
@@ -885,6 +960,17 @@ def _recover_session_on_startup(
                 journal_interrupt_evidence = True
                 summary["journalInterruptResumeCount"] += 1
         if not open_turn_id:
+            (
+                continuable_turn_id,
+                continuable_at,
+                continuable_skips,
+            ) = _latest_continuable_turn(events)
+            summary["alreadyResumedSkipCount"] += continuable_skips
+            if continuable_turn_id and _within_resume_age_window(continuable_at):
+                open_turn_id = continuable_turn_id
+                journal_interrupt_evidence = True
+                summary["continuableResumeCount"] += 1
+        if not open_turn_id:
             summary["noInterruptedTurnCount"] += 1
             summary["noActiveTurnSkipCount"] += 1
             return
@@ -897,7 +983,18 @@ def _recover_session_on_startup(
         events = s._load_session_conversation_events_cached(session_id)
         open_turn_id = latest_open_turn_id(events)
         if not open_turn_id:
-            return
+            (
+                continuable_turn_id,
+                continuable_at,
+                continuable_skips,
+            ) = _latest_continuable_turn(events)
+            summary["alreadyResumedSkipCount"] += continuable_skips
+            if continuable_turn_id and _within_resume_age_window(continuable_at):
+                open_turn_id = continuable_turn_id
+                journal_interrupt_evidence = True
+                summary["continuableResumeCount"] += 1
+            else:
+                return
     _resume_interrupted_turn(
         s,
         session_id,
@@ -918,6 +1015,7 @@ _SWEEP_COUNTER_FIELDS = (
     "noInterruptedTurnCount",
     "noActiveTurnSkipCount",
     "journalInterruptResumeCount",
+    "continuableResumeCount",
     "alreadyResumedSkipCount",
     "unreadableSessionSkipCount",
     "queuedDrainScheduledCount",
@@ -1201,6 +1299,9 @@ def _record_sweep_scene_event(s: Any, summary: dict[str, Any]) -> None:
                 ),
                 "journalInterruptResumeCount": max(
                     0, int(summary.get("journalInterruptResumeCount") or 0)
+                ),
+                "continuableResumeCount": max(
+                    0, int(summary.get("continuableResumeCount") or 0)
                 ),
                 "alreadyResumedSkipCount": max(
                     0, int(summary.get("alreadyResumedSkipCount") or 0)
