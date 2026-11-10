@@ -502,7 +502,7 @@ describe("sessionToolApprovals refetchInterval stability", () => {
 });
 
 describe("useStableSessionDetailPaint sticky-paint stability", () => {
-  it("reproduces the pre-fix churn where resolveStickySessionDetailPaint rebuilds detail/messages references for identical inputs", () => {
+  it("keeps the message array identity when sticky paint re-resolves identical inputs", () => {
     rememberSessionDetailPaint(stickyDetailFor("s1", 4));
     const live = stickyDetailFor("s1", 2);
 
@@ -510,11 +510,11 @@ describe("useStableSessionDetailPaint sticky-paint stability", () => {
     const second = resolveStickySessionDetailPaint({ activeSessionId: "s1", detail: live });
 
     expect(first).toBeDefined();
-    // Pre-fix: the merged sticky+live paint is rebuilt on every call, so a no-op
-    // parent rerender hands downstream effects a brand-new detail/messages pair
-    // and the token-speed effect re-fires setTokenSpeedTracker endlessly.
-    expect(second).not.toBe(first);
-    expect(second?.messages).not.toBe(first?.messages);
+    // The merged sticky+live paint used to rebuild its message array on every
+    // call, so a no-op parent rerender handed downstream effects a brand-new
+    // messages pair and the token-speed effect re-fired setTokenSpeedTracker
+    // endlessly. Identical inputs must now resolve to the same array.
+    expect(second?.messages).toBe(first?.messages);
   });
 
   it("keeps a stable sticky paint detail/messages reference across no-op parent rerenders", () => {
