@@ -101,6 +101,60 @@ function makeWindow(overrides: Partial<SessionMessageWindow> = {}): SessionMessa
   };
 }
 
+function simpleMessage(id: string, content: string): ConversationMessage {
+  return {
+    id,
+    role: "assistant",
+    status: "completed",
+    timestamp: "2026-05-22T10:00:00Z",
+    content,
+  } as ConversationMessage;
+}
+
+describe("poll merge keeps painted message identity", () => {
+  it("reuses the painted message objects and array when a poll repeats the transcript", () => {
+    const painted = mergeSessionDetailMessageWindow(
+      undefined,
+      makeDetail({
+        messages: [simpleMessage("m1", "第一段"), simpleMessage("m2", "第二段")],
+        messageWindow: makeWindow(),
+      }),
+    );
+    // A poll lands as freshly parsed JSON: same content, brand new objects.
+    const repolled = makeDetail({
+      messages: [simpleMessage("m1", "第一段"), simpleMessage("m2", "第二段")],
+      messageWindow: makeWindow(),
+    });
+
+    const merged = mergeSessionDetailMessageWindow(painted, repolled);
+
+    expect(merged.messages).toBe(painted.messages);
+    expect(merged.messages[0]).toBe(painted.messages[0]);
+    expect(merged.messages[1]).toBe(painted.messages[1]);
+  });
+
+  it("swaps in a fresh object only for the message the poll actually changed", () => {
+    const painted = mergeSessionDetailMessageWindow(
+      undefined,
+      makeDetail({
+        messages: [simpleMessage("m1", "第一段"), simpleMessage("m2", "第二段")],
+        messageWindow: makeWindow(),
+      }),
+    );
+    const repolled = makeDetail({
+      messages: [simpleMessage("m1", "第一段"), simpleMessage("m2", "第二段还在写")],
+      messageWindow: makeWindow(),
+    });
+
+    const merged = mergeSessionDetailMessageWindow(painted, repolled);
+
+    expect(merged.messages).not.toBe(painted.messages);
+    expect(merged.messages[0]).toBe(painted.messages[0]);
+    expect(merged.messages[1]).not.toBe(painted.messages[1]);
+    expect(merged.messages[1]).toEqual(repolled.messages[1]);
+  });
+});
+
 function assistantTerminalTurn(id: string, turnId: string, timestamp: string): ConversationMessage {
   return {
     id,

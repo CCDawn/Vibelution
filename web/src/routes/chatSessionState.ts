@@ -560,12 +560,40 @@ function reconcileAuthoritativeTailMessages(
   });
 }
 
+/**
+ * Whether two poll snapshots describe the same message.
+ *
+ * Every poll lands as freshly parsed JSON, so an unchanged message still
+ * arrives as a brand new object. Comparing content lets the merge keep the
+ * object that is already painted, which is the identity the transcript memo
+ * compares - without it every row re-renders on every tick.
+ */
+function sameMessageContent(left: ConversationMessage, right: ConversationMessage): boolean {
+  if (left === right) {
+    return true;
+  }
+  // Serialized comparison is the only shape-safe option here: the message
+  // union carries assistant turns in turnItems and user turns in content.
+  try {
+    return JSON.stringify(left) === JSON.stringify(right);
+  } catch {
+    return false;
+  }
+}
+
 function mergeConversationMessageWindows(
   previousMessages: ConversationMessage[],
   nextMessages: ConversationMessage[],
   sessionId?: string,
 ): ConversationMessage[] {
   const orderById = new Map<string, number>();  const mergedById = new Map<string, ConversationMessage>();
+  const previousById = new Map<string, ConversationMessage>();
+  for (const message of previousMessages) {
+    const id = String(message.id || "").trim();
+    if (id) {
+      previousById.set(id, message);
+    }
+  }
   for (const message of [...previousMessages, ...nextMessages]) {
     const id = String(message.id || "").trim();
     if (!id) {
@@ -574,17 +602,25 @@ function mergeConversationMessageWindows(
     if (!orderById.has(id)) {
       orderById.set(id, orderById.size);
     }
-    mergedById.set(id, message);
+    const previous = previousById.get(id);
+    mergedById.set(id, previous && sameMessageContent(previous, message) ? previous : message);
   }
 const settledMessages = removeSettledOptimisticUserMessages([...mergedById.values()]);
   reportUnsettledOptimisticUserWindow(settledMessages, sessionId);
-  return settledMessages.sort((left, right) => {
+  const ordered = settledMessages.sort((left, right) => {
     const leftIndex = messageWindowIndex(left);    const rightIndex = messageWindowIndex(right);
     if (leftIndex !== rightIndex) {
       return leftIndex - rightIndex;
     }
     return (orderById.get(left.id) ?? 0) - (orderById.get(right.id) ?? 0);
   });
+  // Element identity alone is not enough: a fresh array reference still
+  // invalidates every consumer that memoizes on the transcript array.
+  if (ordered.length === previousMessages.length
+    && ordered.every((message, index) => message === previousMessages[index])) {
+    return previousMessages;
+  }
+  return ordered;
 }
 
 function mergedMessageWindow(
@@ -914,10 +950,17 @@ mergeConversationMessageWindows(previous.messages ?? [], merged.messages ?? [], 
     authoritativeTail,
   );
   const base = merged.messageWindow.hasLater ? previous : merged;
+  // The reconcilers above rebuild the array through filter(), so element
+  // identity alone does not survive. Hand back the painted array when nothing
+  // in it actually moved: the transcript memo compares this reference, and a
+  // fresh array re-renders every row on a poll that changed nothing.
+  const previousMessages = previous.messages ?? [];
+  const messagesUnchanged = messages.length === previousMessages.length
+    && messages.every((message, index) => message === previousMessages[index]);
   return {
     ...base,
     ...merged,
-    messages,
+    messages: messagesUnchanged ? previousMessages : messages,
     provisionalTranscript,
     messageWindow: mergedMessageWindow(previous.messageWindow, merged.messageWindow, messages, {
       authoritativeTotal: authoritativeTail,
