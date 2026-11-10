@@ -2183,8 +2183,13 @@ export async function executeMainLineWorkbench(
           const current = readRetirementState();
           return current.backgroundRetirementId === retirementId && current.phase === "stopping"
             && current.desiredState === "closed"
+            // Same port resolution as the outer ``port`` above: without a
+            // targetEnvironment both sides fall back to VIBELUTION_PORT, so
+            // the fence cannot disagree with the port it is fencing.
             && preferredWorkbenchPort({ workspaceRoot: input.workspaceRoot, state: current,
-              envPort: input.targetEnvironment?.VIBELUTION_PORT ?? "" }) === port
+              envPort: input.targetEnvironment === undefined
+                ? undefined
+                : input.targetEnvironment.VIBELUTION_PORT ?? "" }) === port
             && identityFields.every((field) => current[field] === previous[field]);
         };
         await writeState({ ...previous, desiredState: "closed", phase: "stopping",
