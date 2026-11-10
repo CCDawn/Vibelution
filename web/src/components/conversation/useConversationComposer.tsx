@@ -402,6 +402,11 @@ export function useConversationComposer({
   const resolvedInterruptGuidanceHint = t("interruptGuidanceHint");
   const primaryPending = Boolean(composerPending || composerSubmitPending || composerStopPending
     || composerSafeGuidancePending || composerInterruptGuidancePending);
+  // ZCode keeps the prompt editable while the send is being acknowledged; only
+  // the primary button spins. Stop/guidance confirmations still lock the input
+  // because the draft is already riding that mutation.
+  const composerInputDisabled = (primaryPending && !composerSubmitPending)
+    || (composerDisabled && resolvedActionMode !== "stop");
   const primaryPendingLabel = composerStopPending ? (stopPendingLabel ?? t("stopPending"))
     : composerSubmitPending ? (submitPendingLabel ?? t("sendPending"))
     : composerInterruptGuidancePending ? resolvedInterruptGuidancePendingLabel
@@ -1253,7 +1258,7 @@ export function useConversationComposer({
             rows={composerVariant === "codex" ? 1 : undefined}
             className={composerVariant === "codex" ? styles.inputCodex : styles.input}
             value={composerValue}
-            disabled={primaryPending || (composerDisabled && resolvedActionMode !== "stop")}
+            disabled={composerInputDisabled}
             placeholder={resolvedComposerPlaceholder}
             data-composer-prompt-suggestion={composerPromptSuggestion.ghost ? "true" : undefined}
             aria-label={lang === "zh" ? "发送消息" : "Message"}

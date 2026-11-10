@@ -85,6 +85,16 @@ describe("one composer action across native hosts", () => {
     expect(view.primary().dataset.composerAction).toBe("stop");
   });
 
+  it("keeps the prompt editable while a send awaits acknowledgement", async () => {
+    const view = await composer({ composerValue: "你好", composerActionMode: "stop" });
+    await view.render({ composerPending: true, composerSubmitPending: true });
+    expect(view.primary().getAttribute("aria-label")).toBe("发送中");
+    expect(container.querySelector<HTMLTextAreaElement>("textarea")?.disabled).toBe(false);
+    // Stop/guidance confirmations still lock the input; only send ACK is exempt.
+    await view.render({ composerPending: false, composerSubmitPending: false, composerStopPending: true });
+    expect(container.querySelector<HTMLTextAreaElement>("textarea")?.disabled).toBe(true);
+  });
+
   it("keeps stop confirmation dominant over a simultaneous submit", async () => {
     const view = await composer({ composerActionMode: "stop", composerPending: true, composerSubmitPending: true, composerStopPending: true });
     expect(view.primary().getAttribute("aria-label")).toBe("终止中");
