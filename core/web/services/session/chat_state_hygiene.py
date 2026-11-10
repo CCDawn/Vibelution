@@ -30,21 +30,42 @@ def _payload_message_count(payload: Mapping[str, Any]) -> int:
     return 1 if messages else 0
 
 
+# Session-runtime bookkeeping that lives at the workspace root. A ghost keeps
+# one of these after its last admission, and it must not read as content, or
+# the prune can never retire a session that only ever admitted a turn.
+_RUNTIME_WORKSPACE_ROOT_FILES = frozenset({"session_admission.lock"})
+
+
+def _is_runtime_workspace_file(path: Path, workspace_dir: Path) -> bool:
+    """Whether a file is session-runtime bookkeeping rather than content."""
+
+    if path.name in _RUNTIME_WORKSPACE_ROOT_FILES:
+        return True
+    # Locks and temp markers directly under the workspace root are re-created
+    # on demand. A lock the user (or a tool) dropped deeper in the tree is not
+    # ours to judge, so it still counts as content.
+    return path.suffix == ".lock" and path.parent == workspace_dir
+
+
 def _workspace_has_files(workspace_dir: Path | None) -> bool:
     """Whether a session workspace carries any file worth keeping.
 
     Every session materializes the same empty skeleton (``artifacts``, ``logs``,
     ``memory``, ``mental_model``, ``notes``, ``tmp``), so counting directory
     entries answers yes for every ghost and the prune would never fire. Only
-    a real file inside the tree counts as content.
+    a real file inside the tree counts as content, and the session's own
+    runtime bookkeeping at the workspace root does not.
     """
 
     if workspace_dir is None:
         return False
     try:
         for path in workspace_dir.rglob("*"):
-            if path.is_file():
-                return True
+            if not path.is_file():
+                continue
+            if _is_runtime_workspace_file(path, workspace_dir):
+                continue
+            return True
     except OSError:
         # An unreadable directory is not proof of emptiness; keep the row.
         return True

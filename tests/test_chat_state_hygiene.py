@@ -116,3 +116,48 @@ def test_prunes_row_whose_workspace_is_only_an_empty_skeleton(
     assert summary["prunedCount"] == 1
     assert summary["keptWithContentCount"] == 0
     assert store.repository.list_session_runtime_ids() == []
+
+
+def test_prunes_row_whose_workspace_holds_only_the_admission_lock(
+    tmp_path: Path, store: ConversationStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The admission lock is re-created on demand, so on its own it is not content."""
+
+    _write_chat_state(store, [{"conversation_id": "locked", "title": "locked"}])
+    workspace = tmp_path / "workspace" / "sessions" / "locked"
+    workspace.mkdir(parents=True)
+    (workspace / "session_admission.lock").write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        conversation_index,
+        "_session_workspace_dir_if_present",
+        lambda session_id: workspace if session_id == "locked" else None,
+    )
+
+    summary = chat_state_hygiene.prune_orphan_chat_state_sessions(tmp_path)
+
+    assert summary["orphanCandidateCount"] == 1
+    assert summary["prunedCount"] == 1
+    assert summary["keptWithContentCount"] == 0
+    assert store.repository.list_session_runtime_ids() == []
+
+
+def test_keeps_row_whose_lock_sits_deeper_in_the_tree(
+    tmp_path: Path, store: ConversationStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only root-level runtime bookkeeping is ours to ignore."""
+
+    _write_chat_state(store, [{"conversation_id": "nested", "title": "nested"}])
+    workspace = tmp_path / "workspace" / "sessions" / "nested"
+    (workspace / "artifacts").mkdir(parents=True)
+    (workspace / "artifacts" / "build.lock").write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        conversation_index,
+        "_session_workspace_dir_if_present",
+        lambda session_id: workspace if session_id == "nested" else None,
+    )
+
+    summary = chat_state_hygiene.prune_orphan_chat_state_sessions(tmp_path)
+
+    assert summary["prunedCount"] == 0
+    assert summary["keptWithContentCount"] == 1
+    assert store.repository.list_session_runtime_ids() == ["nested"]
