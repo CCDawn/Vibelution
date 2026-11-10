@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { clearLiveComposerDraft } from "./composerLiveDraft";
 import type { QueryClient } from "@tanstack/react-query";
 
 import { queryKeys } from "../../api/queryKeys";
@@ -63,10 +64,12 @@ export function useChatComposerTransientState({
       setActiveTurnLayersBySession((current) =>
         setActiveTurnLayerForSession(current, normalizedSessionId, undefined)
       );
+      clearLiveComposerDraft(normalizedSessionId);
       setSessionDrafts((current) => {
         const { [normalizedSessionId]: _removed, ...remaining } = current;
         return remaining;
       });
+      clearLiveComposerDraft(normalizedSessionId);
       removeStoredSessionDraft(normalizedSessionId);
       setSessionImageAttachments((current) => clearSessionImageAttachments(current, normalizedSessionId));
       setSessionReferenceAttachments((current) => clearSessionReferenceAttachments(current, normalizedSessionId));

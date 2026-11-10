@@ -1,4 +1,5 @@
 import { useMutation, type QueryClient, type UseMutationResult } from "@tanstack/react-query";
+import { clearLiveComposerDraft, clearLiveComposerDraftIfEquals, readLiveComposerDraft, writeLiveComposerDraft } from "./composerLiveDraft";
 import {
   useRef,
   type Dispatch,
@@ -126,6 +127,12 @@ export function restoreSubmittedDraftAfterFailure(
   // functional updater. The guard rejects late failures after newer input.
   if (recoveryGuard && !scheduleSessionDraftRecoverySave(recoveryGuard, content)) {
     return;
+  }
+  // Restore only into a composer that is still empty. Text typed while the
+  // request was in flight is newer than the failed submission and must win.
+  const liveDraft = readLiveComposerDraft(sessionId);
+  if (liveDraft === null || liveDraft === "") {
+    writeLiveComposerDraft(sessionId, content);
   }
   setSessionDrafts((current) => restoreSubmittedDraftIfComposerStillEmpty(current, sessionId, content));
 }
@@ -849,10 +856,12 @@ export function useChatComposerTurnMutations({
         ...current,
         [variables.sessionId]: "",
       }));
+      clearLiveComposerDraftIfEquals(variables.sessionId, variables.content);
       setSessionDrafts((current) => ({
         ...current,
         [variables.sessionId]: "",
       }));
+      clearLiveComposerDraftIfEquals(variables.sessionId, variables.content);
       removeStoredSessionDraft(variables.sessionId);
       setSessionImageAttachments((current) => clearSessionImageAttachments(current, variables.sessionId));
       setSessionReferenceAttachments((current) => clearSessionReferenceAttachments(current, variables.sessionId));
@@ -1223,10 +1232,12 @@ export function useChatComposerTurnMutations({
         ...current,
         [variables.sessionId]: "",
       }));
+      clearLiveComposerDraftIfEquals(variables.sessionId, variables.content);
       setSessionDrafts((current) => ({
         ...current,
         [variables.sessionId]: "",
       }));
+      clearLiveComposerDraftIfEquals(variables.sessionId, variables.content);
       removeStoredSessionDraft(variables.sessionId);
       syncSessionDetail(nextDetail);
       if (variables.steeredQueuedTurnId) {
