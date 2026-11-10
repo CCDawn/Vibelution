@@ -784,8 +784,12 @@ export type RuntimeSummary = {
 
 export type BackendHealth = {
   status: string;
+  /** Process identity changes only when the backend is actually replaced. */
+  pid?: number;
   /** Existing health contract: feature requests can wait without occupying HTTP connections. */
   routesReady?: boolean;
+  /** Readiness of the shell-facing route surface after a restart. */
+  shellReady?: boolean;
 };
 
 export type RuntimeControlResponse = {

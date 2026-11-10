@@ -700,6 +700,12 @@ describe("AppShell layout contract", () => {
     expect(restartRegion).toContain("updateBannerRestartReloadsDocument(payload.code, payload.accepted, payload.operation)");
     expect(restartRegion).toContain('payload.code === "user_restart_pause_failed"');
     expect(restartRegion).toContain("重启前未能保存任务状态，已有记录仍保留");
+    expect(restartRegion).toContain("waitForRestartedBackend");
+    expect(restartRegion).toContain("previousBackendPid");
+    expect(restartRegion).toContain("RESTART_READY_TIMEOUT");
+    expect(restartRegion).toContain('restartPhaseRef.current = mode === "update" ? "preparing" : "restarting"');
+    expect(restartRegion).toContain("updatePreparingTitle");
+    expect(restartRegion).toContain("restartSwitchingBody");
     expect(restartRegion).toContain("window.location.reload()");
     // A control-plane-not-ready failure never started a restart: the overlay
     // must say so honestly and tag the unconfirmed telemetry with a reason.

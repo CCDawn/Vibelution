@@ -173,6 +173,7 @@ import { SpecialistAgentMenu } from "./SpecialistAgentMenu";
 import { HumanAttentionNotifier } from "../routes/personalAssistant/HumanAttentionNotifier";
 import { WorkbenchConnectionNotice } from "./WorkbenchConnectionNotice";
 import { connectionNoticeVisible, EMPTY_HEALTH_FAILURE_STREAK, nextHealthFailureStreak } from "./connectionHealthStreak";
+import { waitForRestartedBackend } from "./workbenchRestartReadiness";
 
 const ShellProjectUtilities = lazy(() => import("./ShellProjectUtilities").then((module) => ({ default: module.ShellProjectUtilities })));
 const LazyAppShellSettingsMenu = lazy(() =>
@@ -1088,6 +1089,9 @@ export function AppShell() {
   // stays "open and healthy" for the whole request, so it must not count as
   // a finished restart.
   const restartWaitsForDocumentReloadRef = useRef(false);
+  // "preparing" covers the update transaction (builds happen before any
+  // switch); "switching" starts only after an update request was accepted.
+  const restartPhaseRef = useRef<"idle" | "preparing" | "switching" | "restarting">("idle");
   const lifecycleRequestSeqRef = useRef(0);
   const lifecycleOverlayDismissedRef = useRef(false);
 
@@ -1351,6 +1355,10 @@ export function AppShell() {
   }, [location, navigationType]);
 
   const workbench = runtimeQuery.data?.workbench;
+  // Capture the serving backend before a restart request so the reload waits
+  // for the replacement PID, not the old one that is still draining work.
+  const backendPidAtRestartRef = useRef(0);
+  backendPidAtRestartRef.current = Number(backendHealthQuery.data?.pid || workbench?.backendPid || 0);
   const shutdownInFlight = workbench?.desiredState === "closed" && workbench?.observedState !== "closed";
   const chatEnabled = isWorkbenchDomainEnabled(configQuery.data, "chat");
   const supervisedEvolutionEnabled = isWorkbenchModeEnabled(configQuery.data, "supervised_evolution");
@@ -1428,7 +1436,18 @@ export function AppShell() {
   const shutdownLocallyCompleteTitle = lang === "en" ? "Workbench backend stopped" : "工作台后端已停止";
   const shutdownLocallyCompleteDetail = shutdownLocallyCompleteBody(lang);
   const restartHeading = lang === "en" ? "Restarting workbench" : "正在重启工作台";
+  const updatePreparingTitle = lang === "en" ? "Preparing update" : "正在准备更新";
+  const updatePreparingBody = lang === "en"
+    ? "Building the latest interface and desktop app while this window stays usable. The workbench switches only after preparation finishes."
+    : "正在构建最新界面和桌面程序，当前窗口保持可用。准备完成后才会切换工作台。";
+  const restartSwitchingBody = lang === "en"
+    ? "Preparation is complete. Switching to the new workbench now; this window reloads automatically once it is ready."
+    : "更新已准备完成，正在切换工作台；新工作台就绪后这个窗口会自动重新加载。";
   const restartUnconfirmedTitle = lang === "en" ? "Restart not confirmed" : "重启未确认";
+  const restartTimedOutTitle = lang === "en" ? "Restart timed out" : "重启超时";
+  const restartTimedOutBody = lang === "en"
+    ? "The updated workbench did not become ready in time. Your task records were saved; check the Launcher or retry."
+    : "更新后的工作台没有在时限内就绪。任务记录已保存，请检查 Launcher 或重试。";
   const restartBody = lang === "en"
     ? "Please keep this window open. The runtime manager is stopping the old backend and starting a fresh workbench."
     : "请先保持这个窗口打开。运行时管理器正在停稳旧后端并重新拉起工作台。";
@@ -1938,6 +1957,7 @@ export function AppShell() {
       clearRestartCompletionDismissTimer();
       lifecycleOverlayDismissedRef.current = false;
       restartWaitsForDocumentReloadRef.current = true;
+      restartPhaseRef.current = mode === "update" ? "preparing" : "restarting";
       setRestartRequested(true);
       setShutdownRequested(false);
       setShutdownSettled(false);
@@ -1945,8 +1965,10 @@ export function AppShell() {
       setLifecycleAction("restart");
       setLifecycleCommandId("");
       setLifecycleCancelPending(false);
-      setShutdownTitle(restartHeading);
-      setShutdownDetail(restartDetailWithActiveWorkNotice(restartBody, activeWorkRestartNotice));
+      setShutdownTitle(mode === "update" ? updatePreparingTitle : restartHeading);
+      setShutdownDetail(mode === "update"
+        ? updatePreparingBody
+        : restartDetailWithActiveWorkNotice(restartBody, activeWorkRestartNotice));
       emitBrowserTelemetry(buildRestartRequestedTelemetry(), { preferBeacon: true });
 
       // Resolve the update owner inside the serialized action. The initial
@@ -1957,6 +1979,7 @@ export function AppShell() {
         : mode;
       updateVersionConfirmed = true;
       if (requestSeq !== lifecycleRequestSeqRef.current) return;
+      const previousBackendPid = backendPidAtRestartRef.current;
       const payload = target === "shell"
         ? await requestWorkbenchShellUpdate()
         : await requestLifecycle("restart");
@@ -1996,9 +2019,18 @@ export function AppShell() {
       if (payload.commandId) {
         setLifecycleCommandId(payload.commandId);
       }
-      // The launcher restart already published the current frontend release
-      // and replaced the backend. Reload this document onto it. The overlay
-      // stays on "正在重启" until the navigation clears this page.
+      // The accepted command starts saving active work first. Reloading now
+      // would land this document on the closing server and surface a bogus
+      // connection failure. Keep the restart overlay up until a different,
+      // ready backend PID is serving the published release.
+      restartPhaseRef.current = "switching";
+      setShutdownTitle(restartHeading);
+      setShutdownDetail(restartDetailWithActiveWorkNotice(restartSwitchingBody, activeWorkRestartNotice));
+      await waitForRestartedBackend({
+        previousPid: previousBackendPid,
+        shouldContinue: () => requestSeq === lifecycleRequestSeqRef.current,
+      });
+      if (requestSeq !== lifecycleRequestSeqRef.current) return;
       allowNextWorkbenchWindowUnload();
       window.location.reload();
     })().catch((error) => {
@@ -2006,6 +2038,7 @@ export function AppShell() {
         return;
       }
       restartWaitsForDocumentReloadRef.current = false;
+      restartPhaseRef.current = "idle";
       const blocked = parseRuntimeControlBlockedDetail(error);
       if (isActiveWorkRestartBlocked(blocked)) {
         lifecycleOverlayDismissedRef.current = false;
@@ -2037,6 +2070,7 @@ export function AppShell() {
       }
       const errorMessage = error instanceof Error ? error.message : String(error || "");
       const updateCheckFailed = mode === "update" && !updateVersionConfirmed;
+      const restartTimedOut = errorMessage === "RESTART_READY_TIMEOUT";
       // A control-plane-not-ready failure is deterministic: the request never
       // reached the desktop control channel, so the honest overlay says the
       // restart did not start instead of claiming it may already be running.
@@ -2046,7 +2080,7 @@ export function AppShell() {
       setShutdownOpen(true);
       setShutdownSettled(true);
       setLifecycleAction("restart");
-      setShutdownTitle(restartUnconfirmedTitle);
+      setShutdownTitle(restartTimedOut ? restartTimedOutTitle : restartUnconfirmedTitle);
       const taskCleanupFailed = /explicit user restart.*not confirmed|user_restart_pause_failed/i.test(errorMessage);
       setShutdownDetail(updateCheckFailed
         ? (lang === "en" ? "The update version could not be confirmed. Nothing was restarted; close this notice and retry." : "暂时无法确认更新版本，尚未重启。关闭提示后重试。")
@@ -2054,13 +2088,15 @@ export function AppShell() {
         ? (lang === "en"
           ? "Task state could not be saved before restart. Existing records are retained; close this notice and retry."
           : "重启前未能保存任务状态，已有记录仍保留。关闭此提示后可以重试。")
-        : restartNotDelivered
-          ? restartNotDeliveredBody
-          : errorMessage.includes("MAIN_LINE_EXCLUSIVE_BUSY")
-            ? (lang === "en"
-              ? "Another update or start/stop operation is already running. This request was not submitted; close this notice to view the workbench."
-              : "已有更新或启停操作正在进行，本次请求未提交。可关闭此提示查看工作台。")
-          : restartUnconfirmedBody);
+        : restartTimedOut
+          ? restartTimedOutBody
+          : restartNotDelivered
+            ? restartNotDeliveredBody
+            : errorMessage.includes("MAIN_LINE_EXCLUSIVE_BUSY")
+              ? (lang === "en"
+                ? "Another update or start/stop operation is already running. This request was not submitted; close this notice to view the workbench."
+                : "已有更新或启停操作正在进行，本次请求未提交。可关闭此提示查看工作台。")
+              : restartUnconfirmedBody);
       emitBrowserTelemetry(
         buildRestartRequestUnconfirmedTelemetry(
           errorMessage,
@@ -2714,6 +2750,19 @@ export function AppShell() {
       && workbench.observedState === "open"
       && workbench.backendHealthy
       && workbench.browserWindowAlive;
+    const preparing = restartPhaseRef.current === "preparing";
+    const switching = restartPhaseRef.current === "switching";
+    const waitingTitle = preparing ? updatePreparingTitle : restartHeading;
+    const waitingBody = preparing
+      ? updatePreparingBody
+      : switching
+        ? restartSwitchingBody
+        : restartBody;
+    // Update copy owns the overlay: a generic "workbench is running" status
+    // line must not replace "preparing" or "switching" mid-update.
+    const waitingDetail = restartPhaseRef.current === "restarting"
+      ? (workbench.statusLine || waitingBody)
+      : waitingBody;
 
     if (failed && restartWaitsForDocumentReloadRef.current) {
       if (lifecycleOverlayDismissedRef.current) {
@@ -2721,8 +2770,8 @@ export function AppShell() {
       }
       setShutdownOpen(true);
       setShutdownSettled(false);
-      setShutdownTitle(restartHeading);
-      setShutdownDetail(restartDetailWithActiveWorkNotice(workbench.statusLine || restartBody, activeWorkRestartNotice));
+      setShutdownTitle(waitingTitle);
+      setShutdownDetail(restartDetailWithActiveWorkNotice(waitingDetail, activeWorkRestartNotice));
       return;
     }
 
@@ -2730,6 +2779,7 @@ export function AppShell() {
       if (lifecycleOverlayDismissedRef.current) {
         return;
       }
+      restartPhaseRef.current = "idle";
       setRestartRequested(false);
       setShutdownOpen(true);
       setShutdownSettled(true);
@@ -2744,13 +2794,14 @@ export function AppShell() {
       }
       setShutdownOpen(true);
       setShutdownSettled(false);
-      setShutdownTitle(restartHeading);
-      setShutdownDetail(restartDetailWithActiveWorkNotice(workbench.statusLine || restartBody, activeWorkRestartNotice));
+      setShutdownTitle(waitingTitle);
+      setShutdownDetail(restartDetailWithActiveWorkNotice(waitingDetail, activeWorkRestartNotice));
       return;
     }
 
     if (ready) {
       lifecycleOverlayDismissedRef.current = false;
+      restartPhaseRef.current = "idle";
       setRestartRequested(false);
       setShutdownOpen(true);
       setShutdownSettled(true);
@@ -3170,13 +3221,15 @@ export function AppShell() {
             unavailable={connectionNoticeVisible({
               unavailable: backendHealthUnavailable,
               failureCount: healthFailureStreakRef.current.count,
+              failureStartedAt: healthFailureStreakRef.current.startedAt,
+              failedAt: backendHealthQuery.errorUpdatedAt ?? 0,
               startupOverlayActive,
               shutdownOpen,
             })}
             lang={lang}
             desktopShell={desktopShell}
             recovering={restartRequested || shutdownRequested}
-            lastHealthyAt={backendHealthQuery.dataUpdatedAt}
+            failureStartedAt={healthFailureStreakRef.current.startedAt}
             failedAt={backendHealthQuery.errorUpdatedAt}
             onRecover={() => { void beginRestart(); }}
             onRetry={() => { void backendHealthQuery.refetch(); }}

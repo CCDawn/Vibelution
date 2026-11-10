@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Bell, ChevronDown } from "lucide-react";
 
 import { VButton, VPopover } from "../components/vui";
+import { CONNECTION_FAILURE_PERSISTENCE_MS } from "./connectionHealthStreak";
 import styles from "./WorkbenchConnectionNotice.styles";
 
 type Props = {
@@ -9,18 +10,20 @@ type Props = {
   lang: string;
   desktopShell: boolean;
   recovering: boolean;
-  lastHealthyAt?: number;
+  failureStartedAt?: number;
   failedAt?: number;
   onRecover: () => void;
   onRetry: () => void;
 };
 
 /** Health failure is a connection observation, not proof that the service stopped. */
-export function connectionFailureIsPersistent(lastHealthyAt: number, failedAt: number): boolean {
+export function connectionFailureIsPersistent(failureStartedAt: number, failedAt: number): boolean {
   // A restart republishes the frontend release and replaces the backend, which
-  // takes far longer than one poll timeout. Treating that window as an outage
-  // made every automatic restart look like a disconnect.
-  return lastHealthyAt === 0 || failedAt - lastHealthyAt >= 45_000;
+  // takes far longer than one poll timeout. Measure from the first failed poll,
+  // not the last successful one: after a long idle gap the last success can be
+  // minutes old, so a single post-restart failure used to look like an outage.
+  if (!failureStartedAt || !failedAt) return false;
+  return failedAt - failureStartedAt >= CONNECTION_FAILURE_PERSISTENCE_MS;
 }
 
 /**
@@ -29,9 +32,9 @@ export function connectionFailureIsPersistent(lastHealthyAt: number, failedAt: n
  * page. It expands on its own once so the cause and the two actions are visible
  * without hunting for the trigger, and it collapses back when health returns.
  */
-export function WorkbenchConnectionNotice({ unavailable, lang, desktopShell, recovering, lastHealthyAt = 0, failedAt = 0, onRecover, onRetry }: Props) {
+export function WorkbenchConnectionNotice({ unavailable, lang, desktopShell, recovering, failureStartedAt = 0, failedAt = 0, onRecover, onRetry }: Props) {
   const zh = lang !== "en";
-  const persistent = connectionFailureIsPersistent(lastHealthyAt, failedAt);
+  const persistent = connectionFailureIsPersistent(failureStartedAt, failedAt);
   const title = persistent
     ? (zh ? "工作台服务未连接" : "Workbench service disconnected")
     : (zh ? "连接检查暂未成功" : "Connection check failed");

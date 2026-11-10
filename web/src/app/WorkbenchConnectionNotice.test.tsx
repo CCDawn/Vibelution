@@ -14,7 +14,7 @@ const recover = vi.fn();
 const retry = vi.fn();
 
 async function render(unavailable = true, desktopShell = true, recovering = false) {
-  await act(async () => root.render(<><WorkbenchConnectionNotice unavailable={unavailable} lang="zh" desktopShell={desktopShell} recovering={recovering} onRecover={recover} onRetry={retry} /><textarea aria-label="draft" defaultValue="未发送的草稿" /></>));
+  await act(async () => root.render(<><WorkbenchConnectionNotice unavailable={unavailable} lang="zh" desktopShell={desktopShell} recovering={recovering} failureStartedAt={1_000} failedAt={60_000} onRecover={recover} onRetry={retry} /><textarea aria-label="draft" defaultValue="未发送的草稿" /></>));
 }
 // The panel is portalled, so panel assertions read document.body, not the host.
 function panelText() { return document.body.textContent ?? ""; }
@@ -68,7 +68,7 @@ describe("workbench connection recovery", () => {
   });
 
   it("stays collapsed inside a restart window and offers connection checking first", async () => {
-    await act(async () => root.render(<WorkbenchConnectionNotice unavailable lang="zh" desktopShell recovering={false} lastHealthyAt={1000} failedAt={4000} onRecover={recover} onRetry={retry} />));
+    await act(async () => root.render(<WorkbenchConnectionNotice unavailable lang="zh" desktopShell recovering={false} failureStartedAt={1000} failedAt={4000} onRecover={recover} onRetry={retry} />));
     // A restart republishes the frontend and replaces the backend; that window
     // outlasts a poll timeout, so the panel must not cover the page yet.
     const trigger = host.querySelector<HTMLButtonElement>("[data-testid=workbench-connection-notice]")!;
@@ -81,13 +81,22 @@ describe("workbench connection recovery", () => {
     expect(recover).not.toHaveBeenCalled();
     expect(connectionFailureIsPersistent(1000, 45_999)).toBe(false);
     expect(connectionFailureIsPersistent(1000, 46_000)).toBe(true);
-    expect(connectionFailureIsPersistent(0, 4000)).toBe(true);
+    // No first-failure stamp is not evidence of a long outage.
+    expect(connectionFailureIsPersistent(0, 60_000)).toBe(false);
+  });
+
+  it("does not turn a restart after a long idle gap into a disconnect", () => {
+    // Last success was minutes ago; the first failed poll starts the outage.
+    expect(connectionFailureIsPersistent(600_000, 605_000)).toBe(false);
+    expect(connectionFailureIsPersistent(600_000, 646_000)).toBe(true);
   });
 
   it("keeps connection health in the top bar aligned with the Tasks slot, not over the content", () => {
     // One failed poll is jitter, not an outage: the notice sits behind the streak.
     expect(shellSource).toContain("const backendHealthUnavailable = backendHealthQuery.isError || backendHealthQuery.isRefetchError");
     expect(shellSource).toContain("unavailable={connectionNoticeVisible({");
+    expect(shellSource).toContain("failureStartedAt: healthFailureStreakRef.current.startedAt");
+    expect(shellSource).toContain("failedAt: backendHealthQuery.errorUpdatedAt ?? 0");
     expect(shellSource).toContain("onRecover={() => { void beginRestart(); }}");
     expect(shellSource).toContain("const routeContent = useMemo(() => <Outlet />, []);");
     expect(shellSource).toContain('<CompanionDesktopAttention startupReady={shellOptionalReady} /><VWorkbenchFrame flush={location.pathname === "/chat" || location.pathname === "/teams"}><WorkbenchStartupReadyContext.Provider value={reportRouteStartupReady}>{routeContent}</WorkbenchStartupReadyContext.Provider></VWorkbenchFrame>');
@@ -100,7 +109,8 @@ describe("workbench connection recovery", () => {
     expect(shellSource).not.toContain("<div><WorkbenchConnectionNotice");
     expect(shellSource).toContain("className={styles.contentFrame}");
     expect(shellStylesSource).toContain("grid-rows-[minmax(0,1fr)]");
-    expect(shellSource).toContain("lastHealthyAt={backendHealthQuery.dataUpdatedAt}");
+    expect(shellSource).toContain("failureStartedAt={healthFailureStreakRef.current.startedAt}");
+    expect(shellSource).not.toContain("lastHealthyAt={backendHealthQuery.dataUpdatedAt}");
     expect(shellSource).toContain("failedAt={backendHealthQuery.errorUpdatedAt}");
   });
 });
