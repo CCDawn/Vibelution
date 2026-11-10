@@ -270,7 +270,7 @@ def test_projection_source_failure_leaves_failed_event(tmp_path, monkeypatch) ->
         broken_query_service,
     )
 
-    with pytest.raises(state_v2.HypothesisFirstStateSourceError):
+    with pytest.raises(state_v2.HypothesisFirstStateSourceError) as excinfo:
         state_v2.project_hypothesis_first_state_v2(team_id, "SCI-096")
 
     failed = recorder.find("state_projection.failed")
@@ -278,3 +278,17 @@ def test_projection_source_failure_leaves_failed_event(tmp_path, monkeypatch) ->
     assert failed["phase"] == "hypothesis_first_state"
     assert failed["fields"]["questionId"] == "SCI-096"
     assert failed["fields"]["sourceErrorType"] == "RuntimeError"
+    # The exception type alone left repeated failures unattributable, so the
+    # bounded original message now rides along on the same event and wrapper.
+    assert failed["fields"]["sourceErrorDetail"] == "ledger connection lost"
+    assert "ledger connection lost" in str(excinfo.value)
+
+
+def test_projection_error_detail_is_bounded_and_single_line() -> None:
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_state_v2 as state_v2,
+    )
+
+    assert state_v2._bounded_error_detail(RuntimeError("a" * 500)) == "a" * 200
+    assert state_v2._bounded_error_detail(RuntimeError("bad\nline\tfield")) == "bad line field"
+    assert state_v2._bounded_error_detail(RuntimeError()) == ""

@@ -191,12 +191,33 @@ class HypothesisFirstStateSourceError(RuntimeError):
         super().__init__(message)
 
 
+_PROJECTION_ERROR_DETAIL_LIMIT = 200
+
+
+def _bounded_error_detail(
+    exc: BaseException,
+    *,
+    limit: int = _PROJECTION_ERROR_DETAIL_LIMIT,
+) -> str:
+    """Collapse one failing exception message into a bounded diagnostic field.
+
+    The wrapper raised below carries only the exception type, so the original
+    message never reached the scene package and repeated failures stayed
+    unattributable. Keep the text single-line and bounded: this runs inside a
+    failing projection and must not copy a whole payload into diagnostics.
+    """
+
+    text = " ".join(str(exc or "").split())
+    return text[:limit]
+
+
 def _record_projection_scene_event(
     event_code: str,
     *,
     team_id: str,
     question_id: str,
     source_error_type: str = "",
+    source_error_detail: str = "",
 ) -> None:
     """Best-effort projection observability; never blocks the failing read."""
     from core.web.services.runtime_scene_service import (
@@ -213,6 +234,7 @@ def _record_projection_scene_event(
             "teamId": str(team_id or ""),
             "questionId": str(question_id or ""),
             "sourceErrorType": source_error_type,
+            "sourceErrorDetail": source_error_detail,
         },
     )
 
@@ -5136,14 +5158,17 @@ def _scope_records(
     except HypothesisFirstStateScopeError:
         raise
     except Exception as exc:
+        detail = _bounded_error_detail(exc)
         _record_projection_scene_event(
             "state_projection.failed",
             team_id=team_id,
             question_id=normalized,
             source_error_type=type(exc).__name__,
+            source_error_detail=detail,
         )
         raise HypothesisFirstStateSourceError(
             f"无法读取科研流程权威状态：{type(exc).__name__}"
+            + (f"：{detail}" if detail else "")
         ) from exc
 
     return {
