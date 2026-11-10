@@ -170,9 +170,20 @@ def _recover_interrupted_session_turns_on_startup(
     startup). Companion sessions are skipped by the sweep itself.
     """
 
+    from .routes.runtime import PROJECT_ROOT
+    from .services.session.chat_state_hygiene import prune_orphan_chat_state_sessions
     from .services.session.startup_recovery import (
         recover_interrupted_session_turns_on_startup,
     )
+
+    # Drop chat-state ghosts before the sweep walks them. A retired session can
+    # leave its session_runtime_state row behind (the table has no foreign key
+    # onto the sessions projection), and every save_chat_state read-modify-write
+    # carries that row forward, so the sweep would re-scan it on every boot.
+    try:
+        prune_orphan_chat_state_sessions(PROJECT_ROOT)
+    except Exception:  # noqa: BLE001 - a failed prune never blocks recovery
+        pass
 
     return recover_interrupted_session_turns_on_startup(should_stop=should_stop)
 

@@ -83,6 +83,28 @@ describe("sessionActivityIndicator", () => {
     expect(resolveSessionActivityTone(session)).toBe("none");
   });
 
+  it("reuses one parse for repeated reads and still honors external writes", () => {
+    const session = { id: "s-cache", status: "completed", taskSummary: "reply-a" };
+    const stamp = sessionActivityStamp(session);
+    const key = "vibelution.session-activity-seen.v1";
+    globalThis.localStorage.setItem(key, JSON.stringify({ [session.id]: stamp }));
+
+    const parseSpy = vi.spyOn(JSON, "parse");
+    expect(isSessionActivitySeen(session.id, stamp)).toBe(true);
+    const firstReadParses = parseSpy.mock.calls.length;
+    for (let index = 0; index < 25; index += 1) {
+      expect(isSessionActivitySeen(session.id, stamp)).toBe(true);
+      expect(resolveSessionActivityTone(session)).toBe("none");
+    }
+    // Every row repaint used to re-parse the whole map; the parse now happens once.
+    expect(parseSpy.mock.calls.length).toBe(firstReadParses);
+    parseSpy.mockRestore();
+
+    // A write from anywhere still wins over the cached parse.
+    globalThis.localStorage.setItem(key, JSON.stringify({}));
+    expect(isSessionActivitySeen(session.id, stamp)).toBe(false);
+  });
+
   it("shows completed until marked seen, then none", () => {
     const session = { id: "s-done", status: "completed", updatedAt: "2026-01-01T00:00:00.000Z" };
     expect(resolveSessionActivityTone(session)).toBe("completed");

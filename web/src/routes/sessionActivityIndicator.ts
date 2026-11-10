@@ -24,6 +24,13 @@ const SEEN_STORAGE_KEY = "vibelution.session-activity-seen.v1";
 
 type SeenMap = Record<string, string | string[]>;
 const MAX_SEEN_STAMPS_PER_SESSION = 12;
+/**
+ * Parsed-map cache. Session rows call `isSessionActivitySeen` and
+ * `hasPriorSessionActivitySeen` on every paint; re-parsing the stored map per
+ * call dominated keystroke cost (localStorage read + JSON.parse per row).
+ * The cache is validated against the raw string so writes from anywhere win.
+ */
+let seenMapCache: { raw: string; map: SeenMap } | null = null;
 
 function activityStorage() {
   try {
@@ -41,12 +48,18 @@ function readSeenMap(): SeenMap {
   try {
     const raw = storage.getItem(SEEN_STORAGE_KEY);
     if (!raw) {
+      seenMapCache = null;
       return {};
     }
+    if (seenMapCache && seenMapCache.raw === raw) {
+      return seenMapCache.map;
+    }
     const parsed = JSON.parse(raw) as unknown;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+    const map = parsed && typeof parsed === "object" && !Array.isArray(parsed)
       ? parsed as SeenMap
       : {};
+    seenMapCache = { raw, map };
+    return map;
   } catch {
     return {};
   }
@@ -58,7 +71,9 @@ function writeSeenMap(map: SeenMap): boolean {
     return false;
   }
   try {
-    storage.setItem(SEEN_STORAGE_KEY, JSON.stringify(map));
+    const raw = JSON.stringify(map);
+    storage.setItem(SEEN_STORAGE_KEY, raw);
+    seenMapCache = { raw, map };
     return true;
   } catch {
     // ignore quota / private mode; callers must not report a persisted mutation
