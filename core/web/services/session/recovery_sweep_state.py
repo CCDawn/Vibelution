@@ -12,6 +12,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from collections.abc import Iterable
 from typing import Any
 
 WATERMARK_FILENAME = "session-recovery-sweep.json"
@@ -51,14 +52,19 @@ def record_sweep_watermark(
     store: Any,
     *,
     started_at_ns: int,
+    completed_at_ns: int | None = None,
+    dirty_session_ids: Iterable[str] = (),
     scanned_session_count: int,
     resumed_count: int,
 ) -> None:
-    """Record the start of a clean sweep.
+    """Record the *completion* of a clean sweep.
 
-    The sweep *start* is deliberate: anything a session writes while the sweep
-    is still running keeps its ledger newer than the watermark, so the next
-    restart inspects it again instead of trusting a half-finished pass.
+    Storing the start made every write during the pass look newer than the
+    watermark, so each restart re-inspected everything the previous pass had
+    already touched and the candidate list never shrank. The watermark now
+    names the moment the pass finished; sessions written while it was running
+    are named in ``inFlightSessionIds`` and forced into the next candidate set
+    one by one instead of dragging every untouched session along.
     """
 
     path = watermark_path_for_store(store)
@@ -66,7 +72,12 @@ def record_sweep_watermark(
         return
     payload = {
         "schemaVersion": WATERMARK_SCHEMA_VERSION,
-        "completedAtNs": int(started_at_ns),
+        "completedAtNs": int(
+            completed_at_ns if completed_at_ns is not None else started_at_ns
+        ),
+        "inFlightSessionIds": sorted(
+            {str(item) for item in dirty_session_ids if str(item)}
+        ),
         "scannedSessionCount": int(scanned_session_count),
         "resumedCount": int(resumed_count),
     }
@@ -81,3 +92,23 @@ def record_sweep_watermark(
         _logger.warning(
             "Failed to record recovery sweep watermark (%s).", type(exc).__name__
         )
+
+
+def load_watermark_dirty_session_ids(store: Any) -> set[str]:
+    """Sessions written while the last clean sweep was still running."""
+
+    path = watermark_path_for_store(store)
+    if path is None or not path.exists():
+        return set()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    if not isinstance(payload, dict):
+        return set()
+    if payload.get("schemaVersion") != WATERMARK_SCHEMA_VERSION:
+        return set()
+    raw = payload.get("inFlightSessionIds")
+    if not isinstance(raw, list):
+        return set()
+    return {str(item) for item in raw if str(item)}
