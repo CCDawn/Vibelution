@@ -704,7 +704,11 @@ export const ConversationView = React.memo(function ConversationView({
     count: timelineHistoryMessages.length,
     getScrollElement: getTimelineScrollElement,
     estimateSize: () => CONVERSATION_VIRTUAL_ROW_ESTIMATE_PX,
-    getItemKey: (index) => timelineHistoryRowKeys[index] ?? `timeline-row-${index}`,
+    // The fallback key is namespaced by session: react-virtual caches measured
+    // heights per key, and a bare `timeline-row-<index>` fallback collides across
+    // conversations that share row indexes.
+    getItemKey: (index) =>
+      timelineHistoryRowKeys[index] ?? `timeline-row-${sessionId}-${index}`,
     overscan: TIMELINE_VIRTUAL_OVERSCAN,
     gap: narrowTimelineViewport ? TIMELINE_NARROW_ROW_GAP_PX : TIMELINE_VIRTUAL_ROW_GAP_PX,
     scrollMargin: narrowTimelineViewport ? TIMELINE_NARROW_SCROLL_MARGIN_PX : TIMELINE_VIRTUAL_SCROLL_MARGIN_PX,

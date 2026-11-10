@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import re
 import inspect
+import difflib
 import threading
 import time
 import json
@@ -306,6 +307,33 @@ def _record_current_agent_tool_observation(
         return
 
 
+# 模型高频写错的参数名 → 当前工具签名里的真实参数名。
+# 只在“目标参数确实存在且原参数不存在”时才改写，避免掩盖真正的
+# 参数错误；改写发生在执行入口，模型不会再因为同义参数名丢一次往返。
+_TOOL_ARGUMENT_ALIASES = {
+    "max_output_tokens": "max_output_chars",
+    "max_output_length": "max_output_chars",
+    "max_chars": "max_output_chars",
+    "output_chars": "max_output_chars",
+    "timeout_seconds": "timeout",
+}
+
+
+def _normalize_tool_argument_aliases(func: Callable, tool_args: Any) -> dict[str, Any]:
+    """把已知同义参数名归一到真实签名参数名。"""
+    if not isinstance(tool_args, dict):
+        return {}
+    try:
+        declared = set(inspect.signature(func).parameters)
+    except (TypeError, ValueError):
+        return dict(tool_args)
+    normalized = dict(tool_args)
+    for alias, canonical in _TOOL_ARGUMENT_ALIASES.items():
+        if alias in normalized and canonical in declared and canonical not in normalized:
+            normalized[canonical] = normalized.pop(alias)
+    return normalized
+
+
 def _format_tool_argument_error(
     tool_name: str,
     func: Callable,
@@ -355,18 +383,31 @@ def _format_tool_argument_error(
                 value = f"<{param.name}>"
         example_items.append(f'"{param.name}": {json.dumps(value, ensure_ascii=False)}')
     example = "{" + ", ".join(example_items[:8]) + "}"
+    declared = {param.name for param in parameters}
+    suggestions: list[str] = []
+    for name in received:
+        if name in declared:
+            continue
+        target = _TOOL_ARGUMENT_ALIASES.get(name, "")
+        if not target or target not in declared:
+            close = difflib.get_close_matches(name, sorted(declared), n=1, cutoff=0.6)
+            target = close[0] if close else ""
+        if target and target != name:
+            suggestions.append(f"{name} → {target}")
+    suggestion_line = f" 参数名建议：{'、'.join(suggestions)}。" if suggestions else ""
     return (
         f"[工具参数错误] {tool_name} 参数不符合当前工具签名：{error}。"
         f" 必填参数：{', '.join(required) if required else '无'}。"
         f" 可选参数：{', '.join(optional) if optional else '无'}。"
         f" 已收到参数：{', '.join(received) if received else '无'}。"
         f" 示例：{tool_name}({example})。"
+        f"{suggestion_line}"
         "请按工具描述修正参数名和类型后重试。"
     )
 
 
 def _validate_tool_arguments(tool_name: str, func: Callable, tool_args: dict[str, Any]) -> str | None:
-    payload = tool_args if isinstance(tool_args, dict) else {}
+    payload = _normalize_tool_argument_aliases(func, tool_args)
     try:
         signature = inspect.signature(func)
         signature.bind(**payload)
@@ -783,7 +824,9 @@ class ToolExecutor:
             "web_fetch_tool": 30,
             "web_search_tool": 30,
             "run_test_for_tool": 120,
-            "code_symbol_tool": 30,
+            # 代码图谱查询要现扫索引，30s 在冷索引/大仓下必然超时，
+            # 超时后模型只能换路重来，是导航阶段最典型的一次性摩擦。
+            "code_symbol_tool": 90,
             "python_lint_tool": 60,
             # 与 agent_tools.clamp_spawn_timeout 共用同一预算常量：工具入口
             # 把模型请求的 timeout clamp 到该值以内，外层预算不再被无界拉伸。
@@ -1151,6 +1194,7 @@ class ToolExecutor:
         if external_execution_arguments_json is None:
             call_args.pop("_internal_delegate", None)
             call_args.pop("force", None)
+        call_args = _normalize_tool_argument_aliases(func, call_args)
         argument_error = _validate_tool_arguments(tool_name, func, call_args)
         if argument_error:
             publish_tool_event(EventNames.TOOL_ERROR, {

@@ -85,3 +85,83 @@ it("keeps following on a guidance remeasure while still releasing follow for a r
     vi.unstubAllGlobals();
   }
 });
+
+it("drops the previous conversation's pending viewport work when the session switches", async () => {
+  const host = document.createElement("div");
+  const timeline = document.createElement("div");
+  document.body.append(host, timeline);
+  Object.defineProperties(timeline, {
+    scrollHeight: { value: 1000, configurable: true },
+    clientHeight: { value: 400, configurable: true },
+  });
+  const anchor = { rowKey: "old-row", offsetPx: 12 } as never;
+  const historyAnchorCorrectingRef = {
+    current: { anchor, startLength: 3, fallbackDone: true, geometryReflow: false } as never,
+  };
+  const historyScrollAnchorRef = { current: anchor };
+  const readingViewportAnchorRef = { current: anchor };
+  const contentWidthChangingUntilRef = { current: 9_999_999 };
+  const input: UseConversationTimelineFollowInput = {
+    timelineFollowApiRef: { current: null },
+    sessionId: "session-old",
+    timelineRef: { current: timeline },
+    timelineContentRef: { current: null },
+    readingViewportAnchorRef,
+    historyScrollAnchorRef,
+    historyAnchorCorrectingRef,
+    followLatestRef: { current: true },
+    atBottomRef: { current: true },
+    userScrollIntentRef: { current: "none" },
+    userScrollIntentAtRef: { current: 0 },
+    ignoreNextProgrammaticFollowRef: { current: false },
+    lastTimelineScrollTopRef: { current: 0 },
+    lastTimelineContentWidthRef: { current: 0 },
+    contentWidthChangingUntilRef,
+    streamingScrollFrameRef: { current: null },
+    autoScrollToLatestRef: { current: true },
+    initializedSessionRef: { current: "session-old" },
+    pinnedLatestUserMessageIdRef: { current: "" },
+    setIsAtBottom: vi.fn(),
+    autoScrollToLatest: true,
+    latestUserMessageId: "",
+    timelineScrollSignal: "steady",
+    streamingTimelineScrollSignal: "",
+    narrowTimelineViewport: false,
+    activeTimelineMessages: [],
+    displayMessages: [],
+    earlierMessagesLoading: false,
+    hasEarlierMessages: false,
+    hiddenHistorySignalCount: 0,
+    visibleMessageCount: 0,
+    timelineLiveTailStartIndex: 0,
+    timelineVirtualizer: {} as UseConversationTimelineFollowInput["timelineVirtualizer"],
+    preserveCurrentExpansionDefaults: vi.fn(),
+  };
+  function Harness({ sessionId }: { sessionId: string }) {
+    useConversationTimelineFollow({ ...input, sessionId });
+    return null;
+  }
+  const root = createRoot(host);
+  vi.stubGlobal("ResizeObserver", undefined);
+  try {
+    await act(async () => root.render(<Harness sessionId="session-old" />));
+    // The same session keeps whatever viewport work it already owns.
+    expect(historyAnchorCorrectingRef.current).not.toBeNull();
+    // Re-arm the reading anchor right before the switch: the assertion below can
+    // then only pass because the switch itself cleared it.
+    readingViewportAnchorRef.current = anchor;
+
+    await act(async () => root.render(<Harness sessionId="session-new" />));
+
+    // Frames queued for the old conversation must not re-pin the new one.
+    expect(historyAnchorCorrectingRef.current).toBeNull();
+    expect(historyScrollAnchorRef.current).toBeNull();
+    expect(readingViewportAnchorRef.current).toBeNull();
+    expect(contentWidthChangingUntilRef.current).toBe(0);
+  } finally {
+    await act(async () => root.unmount());
+    vi.unstubAllGlobals();
+    host.remove();
+    timeline.remove();
+  }
+});
