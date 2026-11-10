@@ -537,6 +537,28 @@ def list_session_runtime_ids(project_root: Path) -> list[str]:
         return list(repository.list_session_runtime_ids())
 
 
+def list_orphan_session_runtime_rows(project_root: Path) -> list[dict[str, Any]]:
+    """List chat-state rows the directory projection does not carry.
+
+    Each row is a candidate only; the caller still has to prove the session
+    holds no workspace files and no message body before deleting it.
+    """
+
+    with _chat_state_repository(project_root) as repository:
+        return list(repository.list_orphan_runtime_rows())
+
+
+def delete_session_runtime_rows(project_root: Path, session_ids: list[str]) -> int:
+    """Delete chat-state rows the caller proved unreachable."""
+
+    targets = [str(session_id or "").strip() for session_id in session_ids]
+    targets = [session_id for session_id in targets if session_id]
+    if not targets:
+        return 0
+    with _chat_state_repository(project_root) as repository:
+        return int(repository.delete_session_runtime_rows(targets).result(timeout=30))
+
+
 def load_active_conversation_id(project_root: Path) -> str:
     """Load the workspace active session id without assembling conversations."""
 
