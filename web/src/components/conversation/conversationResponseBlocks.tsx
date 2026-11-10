@@ -7,6 +7,7 @@ import type { ConversationMessage } from "../../api/types";
 import { LazyConversationMarkdownRenderer } from "./LazyConversationMarkdownRenderer";
 import { ConversationStreamingResponseContent } from "./ConversationStreamingResponseContent";
 import { ConversationFileReferenceChips } from "./ConversationFileReferenceChips";
+import { AgentAssistantContentSectionView } from "./AgentAssistantContentSectionView";
 import {
   ConversationSlashCommandChip,
   parseUserSlashCommandEcho,
@@ -123,7 +124,7 @@ export function createConversationResponseBlocks({
     // cell keeps its markdown subtree mounted on the streaming→settled flip
     // (settled text re-routes through the shared stable renderer instead of
     // swapping to a different renderer component).
-    return (
+    const rendered = (
       <ConversationStreamingResponseContent
         content={content}
         isStreaming={isStreaming}
@@ -133,6 +134,16 @@ export function createConversationResponseBlocks({
         language={lang}
         onOpenRailFile={onOpenRailFile}
       />
+    );
+    // A streaming answer stays fully visible: folding text mid-generation would
+    // clip exactly what the reader is watching arrive. Only the settled answer
+    // gets the bounded viewport, which is also what keeps the virtualized row
+    // height predictable for long answers.
+    if (isStreaming) {
+      return rendered;
+    }
+    return (
+      <AgentAssistantContentSectionView>{rendered}</AgentAssistantContentSectionView>
     );
   }
 
