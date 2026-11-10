@@ -9,7 +9,7 @@ import type { AgentInstance, ConversationMessage, SessionSummary, Team, VirtualH
 import { ConversationShareExportButton } from "../../components/conversation/ConversationShareExportButton";
 import { ConversationTodoProgressButton } from "../../components/conversation/ConversationTodoProgressButton";
 import { deriveSessionTodoChecklist } from "../../components/conversation/conversationTodoChecklistModel";
-import { VIconButton } from "../../components/vui";
+import { VButton, VIconButton } from "../../components/vui";
 import type { TranslationKey } from "../../i18n/dictionary";
 import { AgentSessionTabStrip, type AgentSessionTabStripProps, type SessionBarRailTab } from "../AgentSessionTabStrip";
 import { CompanionConversationHeader } from "../companions/CompanionConversationHeader";
@@ -208,13 +208,23 @@ export function ChatCodingCenterTabs({
           />
         ) : undefined}
       sessionBrowserControl={!financeSurface && !verifiedCompanionMode && !groupPanelActive ? (
-        <VIconButton
-          label={lang === "zh" ? "浏览会话" : "Browse sessions"}
-          icon={<List size={16} strokeWidth={1.5} aria-hidden="true" />}
-          className={sessionBrowserVisible ? `${styles.toolbarIconButton} ${styles.tabActive}` : styles.toolbarIconButton}
+        <VButton
+          type="button"
+          className={sessionBrowserVisible ? `${styles.overlayPaneToggle} ${styles.tabActive}` : styles.overlayPaneToggle}
           aria-pressed={sessionBrowserVisible}
+          aria-label={lang === "zh"
+            ? `全部会话 ${agentSessionTabs.length} 个${sessionIdsNeedingApproval.length > 0 ? `，${sessionIdsNeedingApproval.length} 个待处理` : ""}`
+            : `${agentSessionTabs.length} sessions${sessionIdsNeedingApproval.length > 0 ? `, ${sessionIdsNeedingApproval.length} need attention` : ""}`}
+          title={lang === "zh"
+            ? `全部会话 ${agentSessionTabs.length} 个${sessionIdsNeedingApproval.length > 0 ? `，${sessionIdsNeedingApproval.length} 个待处理` : ""}`
+            : `${agentSessionTabs.length} sessions${sessionIdsNeedingApproval.length > 0 ? `, ${sessionIdsNeedingApproval.length} need attention` : ""}`}
+          icon={<List size={14} strokeWidth={1.5} aria-hidden="true" />}
           onPress={() => setSessionBrowserOpen(current => !current)}
-        />
+        >
+          {sessionIdsNeedingApproval.length > 0
+            ? `${agentSessionTabs.length} · ${sessionIdsNeedingApproval.length}`
+            : String(agentSessionTabs.length)}
+        </VButton>
       ) : null}
       sessionActionsControl={headerExportVisible && conversationModel ? <ConversationShareExportButton
         key={conversationModel.sessionId}
