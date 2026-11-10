@@ -1102,6 +1102,32 @@ def _prefilter_session_ids(
     return candidates, skipped
 
 
+def _sweep_watermark_dirty_ids(s: Any) -> set[str]:
+    """Sessions the previous pass saw move under it; always re-inspected."""
+
+    from .recovery_sweep_state import load_watermark_dirty_session_ids
+
+    try:
+        return set(
+            load_watermark_dirty_session_ids(getattr(s, "_WORK_RUN_STORE", None))
+        )
+    except Exception:  # noqa: BLE001 - a damaged watermark costs one extra pass
+        return set()
+
+
+def _sweep_dirty_session_ids(
+    s: Any, candidates: list[str], *, started_wall_ns: int
+) -> list[str]:
+    """Candidates whose ledger moved while this pass was still running."""
+
+    dirty: list[str] = []
+    for session_id in candidates:
+        modified_ns = _ledger_modified_ns(s, session_id)
+        if modified_ns >= started_wall_ns:
+            dirty.append(session_id)
+    return dirty
+
+
 def _sweep_watermark_ns(s: Any) -> int:
     from .recovery_sweep_state import load_sweep_watermark_ns
 
@@ -1111,13 +1137,21 @@ def _sweep_watermark_ns(s: Any) -> int:
         return 0
 
 
-def _record_sweep_watermark(s: Any, *, started_wall_ns: int, summary: dict[str, Any]) -> None:
+def _record_sweep_watermark(
+    s: Any,
+    *,
+    started_wall_ns: int,
+    summary: dict[str, Any],
+    dirty_session_ids: list[str] | None = None,
+) -> None:
     from .recovery_sweep_state import record_sweep_watermark
 
     try:
         record_sweep_watermark(
             getattr(s, "_WORK_RUN_STORE", None),
             started_at_ns=started_wall_ns,
+            completed_at_ns=time.time_ns(),
+            dirty_session_ids=dirty_session_ids or (),
             scanned_session_count=int(summary.get("scannedSessionCount") or 0),
             resumed_count=int(summary.get("resumedCount") or 0),
         )
@@ -1204,6 +1238,7 @@ def recover_interrupted_session_turns_on_startup(
 
     global _SWEEP_IN_FLIGHT
     summary = _new_summary()
+    candidates: list[str] = []
     s = _service()
     started_at = s._perf_counter()
     started_wall_ns = time.time_ns()
@@ -1240,6 +1275,7 @@ def recover_interrupted_session_turns_on_startup(
         forced_session_ids = set(restart_pending_session_ids)
         if active_turn_session_ids:
             forced_session_ids |= set(active_turn_session_ids)
+            forced_session_ids |= _sweep_watermark_dirty_ids(s)
         lower_bound_ns = _resume_window_start_ns(now_ns=started_wall_ns)
         watermark_ns = _sweep_watermark_ns(s)
         if watermark_ns > lower_bound_ns:
@@ -1292,7 +1328,12 @@ def recover_interrupted_session_turns_on_startup(
                 if not summary.get("errorCount") and not summary.get("stopped"):
                     _clear_restart_resume_pending(s)
                     _record_sweep_watermark(
-                        s, started_wall_ns=started_wall_ns, summary=summary
+                        s,
+                        started_wall_ns=started_wall_ns,
+                        dirty_session_ids=_sweep_dirty_session_ids(
+                            s, candidates, started_wall_ns=started_wall_ns
+                        ),
+                        summary=summary,
                     )
         finally:
             with _SWEEP_LOCK:

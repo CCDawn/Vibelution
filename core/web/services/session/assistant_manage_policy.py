@@ -54,7 +54,7 @@ ASSISTANT_MANAGE_HIGH_RISK_ACTIONS = frozenset(
 
 # One approval buys a bounded direct-execution window for the same low-risk
 # action class. Four hours covers a working session without outliving it.
-DEFAULT_ACTION_WINDOW_SECONDS = 4 * 3600
+DEFAULT_ACTION_WINDOW_SECONDS = 24 * 3600
 
 _MAX_ACTIVE_WINDOWS = 64
 
