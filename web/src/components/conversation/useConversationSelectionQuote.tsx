@@ -13,7 +13,8 @@ import {
 export type UseConversationSelectionQuoteInput = {
   sessionId: string;
   lang: Language;
-  composerValue: string;
+  /** Reads the live draft at call time; a value captured at render goes stale. */
+  getComposerValue: () => string;
   timelineRef: RefObject<HTMLDivElement | null>;
   composerInputRef: RefObject<HTMLTextAreaElement | null>;
   onComposerChange: (value: string) => void;
@@ -35,7 +36,7 @@ export type UseConversationSelectionQuoteResult = {
 export function useConversationSelectionQuote({
   sessionId,
   lang,
-  composerValue,
+  getComposerValue,
   timelineRef,
   composerInputRef,
   onComposerChange,
@@ -142,7 +143,7 @@ export function useConversationSelectionQuote({
     if (!selectionQuoteMenu) {
       return;
     }
-    onComposerChange(buildQuotedDraftText(composerValue, selectionQuoteMenu.text));
+    onComposerChange(buildQuotedDraftText(getComposerValue(), selectionQuoteMenu.text));
     setSelectionQuoteMenu(null);
     selectionQuoteDismissedTextRef.current = null;
     // Park focus and the caret at the end of the appended quote.
@@ -155,7 +156,7 @@ export function useConversationSelectionQuote({
       const end = input.value.length;
       input.setSelectionRange(end, end);
     });
-  }, [composerInputRef, composerValue, onComposerChange, selectionQuoteMenu]);
+  }, [composerInputRef, getComposerValue, onComposerChange, selectionQuoteMenu]);
   const handleSelectionCopy = useCallback(() => {
     if (!selectionQuoteMenu) {
       return;

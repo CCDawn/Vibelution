@@ -72,7 +72,9 @@ export type ConversationCodexSurfaceDeps = CodexCellRenderers & CodexToolDetails
   setExpansionState: (messageId: string, section: string, expanded: boolean) => void;
   showComposer: boolean;
   composerDisabled: boolean;
-  composerValue: string;
+  /** Reads the live draft at call time so a memoized transcript never appends
+   * onto text captured during an earlier render. */
+  readComposerValue: () => string;
   composerInputRef: RefObject<HTMLTextAreaElement | null>;
   onComposerChange: (value: string) => void;
 };
@@ -97,7 +99,7 @@ export function createConversationCodexSurface({
   setExpansionState,
   showComposer,
   composerDisabled,
-  composerValue,
+  readComposerValue,
   composerInputRef,
   onComposerChange,
   renderCodexProgressCell,
@@ -536,7 +538,7 @@ export function createConversationCodexSurface({
             sessionId={sessionId}
             turnId={message.role === "assistant" ? message.turnId : undefined}
             onContinue={showComposer && !composerDisabled ? (path) => {
-              onComposerChange(fileDeliveryFollowupDraft(composerValue, path, lang === "en" ? "en" : "zh"));
+              onComposerChange(fileDeliveryFollowupDraft(readComposerValue(), path, lang === "en" ? "en" : "zh"));
               requestAnimationFrame(() => composerInputRef.current?.focus());
             } : undefined}
           />

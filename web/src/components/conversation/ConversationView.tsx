@@ -221,6 +221,23 @@ async function copyTextToClipboard(text: string) {
 const NOOP_STARTER = (_starter: unknown) => {};
 const NOOP_HANDLER = () => {};
 
+function conversationViewPropsAreEqual<P extends object>(previous: P, next: P): boolean {
+  const previousRecord = previous as Record<string, unknown>;
+  const nextRecord = next as Record<string, unknown>;
+  const editingInline = Boolean(
+    previousRecord.editingMessageId || nextRecord.editingMessageId,
+  );
+  for (const key of Object.keys(nextRecord)) {
+    if (key === "composerValue" && !editingInline) {
+      continue;
+    }
+    if (previousRecord[key] !== nextRecord[key]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export const ConversationView = React.memo(function ConversationView({
   runtimeApi,
   sessionId,
@@ -359,6 +376,12 @@ export const ConversationView = React.memo(function ConversationView({
     }
   }, [composerValueProp, composerDraftStore, fallbackDraftStore]);
   const composerValue = draftStore.getSnapshot();
+  // Callbacks need the draft that exists when they run, not the one captured
+  // by the render that produced them.
+  const readComposerValue = useCallback(
+    () => draftStore.getSnapshot(),
+    [draftStore],
+  );
   // Model labels for the turn-envelope switch dividers. Uses the lightweight
   // configuration bootstrap summary (modelLabels id→label map) instead of the full
   // /api/config/workspace payload: this mount only needs labels, and the heavy
@@ -527,7 +550,7 @@ export const ConversationView = React.memo(function ConversationView({
   const { timelineAreaRef, menu: selectionQuoteMenu } = useConversationSelectionQuote({
     sessionId,
     lang,
-    composerValue,
+    getComposerValue: readComposerValue,
     timelineRef,
     composerInputRef,
     onComposerChange,
@@ -1400,7 +1423,7 @@ export const ConversationView = React.memo(function ConversationView({
     setExpansionState,
     showComposer,
     composerDisabled,
-    composerValue,
+    readComposerValue,
     composerInputRef,
     onComposerChange,
     renderCodexProgressCell,
@@ -1901,4 +1924,4 @@ export const ConversationView = React.memo(function ConversationView({
       />
     </div>
   );
-});
+}, conversationViewPropsAreEqual);
