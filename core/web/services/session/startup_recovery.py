@@ -82,6 +82,12 @@ _RESUMED_TURN_KEYS_LOCK = threading.Lock()
 _RESUMED_TURN_KEYS: set[str] = set()
 
 
+# Bounded pool for the per-session candidate pass. Store reads are IO bound,
+# and once the resume-window prefilter has narrowed the candidate set the
+# ceiling stops mattering, so it stays small on purpose.
+_SWEEP_MAX_WORKERS = 8
+
+
 def _service():
     from core.web.services import session_service
 
@@ -113,6 +119,11 @@ def _new_summary() -> dict[str, Any]:
         "unreadableSessionSkipCount": 0,
         "queuedDrainScheduledCount": 0,
         "errorCount": 0,
+        "sessionIndexCount": 0,
+        "candidateCount": 0,
+        "prefilterSkippedCount": 0,
+        "workerCount": 1,
+        "watermarkApplied": False,
         "durationMs": 0,
     }
 
@@ -783,21 +794,182 @@ def _recover_session_on_startup(
     )
 
 
+_SWEEP_COUNTER_FIELDS = (
+    "scannedSessionCount",
+    "resumedCount",
+    "retryLimitSkipCount",
+    "companionSkipCount",
+    "noInterruptedTurnCount",
+    "noActiveTurnSkipCount",
+    "journalInterruptResumeCount",
+    "alreadyResumedSkipCount",
+    "unreadableSessionSkipCount",
+    "queuedDrainScheduledCount",
+    "externalTaskSkipCount",
+    "errorCount",
+)
+
+
+def _resume_window_start_ns(*, now_ns: int | None = None) -> int:
+    """Lower bound (epoch ns) of the age window this sweep may resume."""
+
+    observed = time.time_ns() if now_ns is None else int(now_ns)
+    return observed - int(_resume_age_window_seconds() * 1_000_000_000)
+
+
+def _ledger_modified_ns(s: Any, session_id: str) -> int:
+    """Ledger mtime used to prefilter a session without reading its events.
+
+    ``-1`` means "unknown"; the caller must then inspect the session instead of
+    trusting a missing timestamp.
+    """
+
+    try:
+        signature = s._journal_bridge.session_conversation_events_signature(session_id)
+    except Exception:  # noqa: BLE001 - unknown signature means "must inspect"
+        return -1
+    if not isinstance(signature, tuple) or len(signature) < 4:
+        return -1
+    try:
+        return int(signature[2])
+    except (TypeError, ValueError):
+        return -1
+
+
+def _prefilter_session_ids(
+    s: Any,
+    session_ids: list[str],
+    *,
+    forced_session_ids: set[str],
+    lower_bound_ns: int,
+) -> tuple[list[str], int]:
+    """Split sessions into "must inspect" and "cannot own a resumable turn".
+
+    A session qualifies for inspection when the runtime or the restart marker
+    already names it, or when its ledger changed inside ``lower_bound_ns``.
+    Everything else only holds settled history: skipping its journal read is
+    what removes hundreds of full event loads from startup.
+    """
+
+    candidates: list[str] = []
+    skipped = 0
+    for session_id in session_ids:
+        if session_id in forced_session_ids:
+            candidates.append(session_id)
+            continue
+        modified_ns = _ledger_modified_ns(s, session_id)
+        if modified_ns < 0 or modified_ns >= lower_bound_ns:
+            candidates.append(session_id)
+            continue
+        skipped += 1
+    return candidates, skipped
+
+
+def _sweep_watermark_ns(s: Any) -> int:
+    from .recovery_sweep_state import load_sweep_watermark_ns
+
+    try:
+        return load_sweep_watermark_ns(getattr(s, "_WORK_RUN_STORE", None))
+    except Exception:  # noqa: BLE001 - a bad watermark only costs one full scan
+        return 0
+
+
+def _record_sweep_watermark(s: Any, *, started_wall_ns: int, summary: dict[str, Any]) -> None:
+    from .recovery_sweep_state import record_sweep_watermark
+
+    try:
+        record_sweep_watermark(
+            getattr(s, "_WORK_RUN_STORE", None),
+            started_at_ns=started_wall_ns,
+            scanned_session_count=int(summary.get("scannedSessionCount") or 0),
+            resumed_count=int(summary.get("resumedCount") or 0),
+        )
+    except Exception:  # noqa: BLE001 - bookkeeping never fails startup
+        return
+
+
+def _run_session_candidates(
+    s: Any,
+    session_ids: list[str],
+    *,
+    worker_count: int,
+    companion_session_ids: set[str],
+    should_stop: Callable[[], bool] | None,
+    active_turn_session_ids: set[str] | None,
+    pending_turn_ids: set[str],
+) -> list[dict[str, Any]]:
+    """Run one candidate per session, serially or on a bounded pool.
+
+    Each call gets a private summary so no counter is shared between threads;
+    the caller merges them afterwards into the same shape a serial sweep
+    produced.
+    """
+
+    def run_one(session_id: str) -> dict[str, Any]:
+        local = _new_summary()
+        try:
+            _recover_session_on_startup(
+                s,
+                session_id,
+                companion_session_ids=companion_session_ids,
+                summary=local,
+                should_stop=should_stop,
+                active_turn_session_ids=active_turn_session_ids,
+                pending_turn_ids=pending_turn_ids,
+            )
+        except Exception as exc:  # noqa: BLE001 - one bad session never blocks startup
+            local["errorCount"] += 1
+            logger.warning(
+                "Session startup recovery failed for %s: %s",
+                session_id,
+                type(exc).__name__,
+            )
+        return local
+
+    if worker_count <= 1 or len(session_ids) <= 1:
+        return [run_one(session_id) for session_id in session_ids]
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(
+        max_workers=worker_count, thread_name_prefix="session-recovery"
+    ) as pool:
+        return list(pool.map(run_one, session_ids))
+
+
+def _merge_recovery_summaries(target: dict[str, Any], parts: list[dict[str, Any]]) -> None:
+    for part in parts:
+        for field in _SWEEP_COUNTER_FIELDS:
+            target[field] = int(target.get(field) or 0) + int(part.get(field) or 0)
+        if part.get("stopped"):
+            target["stopped"] = True
+
+
 def recover_interrupted_session_turns_on_startup(
     *, should_stop: Callable[[], bool] | None = None
 ) -> dict[str, Any]:
-    """Sweep every session once after startup: resume + queue drain.
+    """Sweep only the sessions that may own a resumable turn.
 
     Never raises. The operator switch gates the whole sweep: disabled means
     exactly the pre-sweep status quo (interrupted turns stay interrupted,
     queues wait for the next natural trigger).
+
+    Two filters keep startup bounded on a large install:
+
+    - the resume-window / last-clean-sweep watermark bound which ledgers are
+      even opened (a settled ledger cannot hold a turn this restart resumes);
+    - the surviving candidates run on a bounded pool instead of one serial
+      loop.
+
+    Recovery semantics are unchanged: the same per-session decision function
+    runs for every inspected session, and a failing session is still counted
+    and logged rather than aborting the sweep.
     """
 
     global _SWEEP_IN_FLIGHT
-
     summary = _new_summary()
     s = _service()
     started_at = s._perf_counter()
+    started_wall_ns = time.time_ns()
     with _SWEEP_LOCK:
         if _SWEEP_IN_FLIGHT:
             return {"trigger": "backend_startup", "skipped": "sweep_in_flight"}
@@ -828,40 +1000,66 @@ def recover_interrupted_session_turns_on_startup(
         summary["activeTurnCandidateCount"] = (
             len(active_turn_session_ids) if active_turn_session_ids is not None else -1
         )
-        for session_id in list(s.list_session_runtime_ids(s.PROJECT_ROOT) or []):
-            if _shutdown_requested(should_stop):
-                summary["stopped"] = True
-                break
-            normalized = str(session_id or "").strip()
-            if not normalized:
-                continue
-            try:
-                _recover_session_on_startup(
-                    s,
-                    normalized,
-                    companion_session_ids=companion_session_ids,
-                    summary=summary,
-                    should_stop=should_stop,
-                    active_turn_session_ids=active_turn_session_ids,
-                    pending_turn_ids=restart_pending_turn_ids,
-                )
-            except Exception as exc:  # noqa: BLE001 - one bad session never blocks startup
-                summary["errorCount"] += 1
-                logger.warning(
-                    "Session startup recovery failed for %s: %s",
-                    normalized,
-                    type(exc).__name__,
-                )
+        forced_session_ids = set(restart_pending_session_ids)
+        if active_turn_session_ids:
+            forced_session_ids |= set(active_turn_session_ids)
+        lower_bound_ns = _resume_window_start_ns(now_ns=started_wall_ns)
+        watermark_ns = _sweep_watermark_ns(s)
+        if watermark_ns > lower_bound_ns:
+            lower_bound_ns = watermark_ns
+            summary["watermarkApplied"] = True
+        session_ids = [
+            str(session_id or "").strip()
+            for session_id in (s.list_session_runtime_ids(s.PROJECT_ROOT) or [])
+        ]
+        session_ids = [session_id for session_id in session_ids if session_id]
+        summary["sessionIndexCount"] = len(session_ids)
+        candidates, prefiltered = _prefilter_session_ids(
+            s,
+            session_ids,
+            forced_session_ids=forced_session_ids,
+            lower_bound_ns=lower_bound_ns,
+        )
+        summary["prefilterSkippedCount"] = prefiltered
+        summary["candidateCount"] = len(candidates)
+        cpu_count = os.cpu_count() or 4
+        worker_count = (
+            1
+            if len(candidates) <= 1
+            else min(_SWEEP_MAX_WORKERS, max(2, cpu_count), len(candidates))
+        )
+        summary["workerCount"] = worker_count
+        results = _run_session_candidates(
+            s,
+            candidates,
+            worker_count=worker_count,
+            companion_session_ids=companion_session_ids,
+            should_stop=should_stop,
+            active_turn_session_ids=active_turn_session_ids,
+            pending_turn_ids=restart_pending_turn_ids,
+        )
+        _merge_recovery_summaries(summary, results)
+    except Exception as exc:  # noqa: BLE001 - the sweep must never fail startup
+        summary["errorCount"] = int(summary.get("errorCount") or 0) + 1
+        logger.warning(
+            "Session startup recovery sweep aborted: %s", type(exc).__name__
+        )
     finally:
         summary["durationMs"] = s._elapsed_ms(started_at)
-        if not _shutdown_requested(should_stop):
-            _record_sweep_scene_event(s, summary)
-            # Only a clean sweep may retire the marker: an interrupted or
-            # failing sweep must leave it for the next startup to retry.
-            if not summary.get("errorCount"):
-                _clear_restart_resume_pending(s)
-        with _SWEEP_LOCK:
-            _SWEEP_IN_FLIGHT = False
+        try:
+            if not _shutdown_requested(should_stop):
+                _record_sweep_scene_event(s, summary)
+                # Only a clean sweep may retire the marker or advance the
+                # watermark: an interrupted or failing sweep must be retried by
+                # the next startup.
+                if not summary.get("errorCount") and not summary.get("stopped"):
+                    _clear_restart_resume_pending(s)
+                    _record_sweep_watermark(
+                        s, started_wall_ns=started_wall_ns, summary=summary
+                    )
+        finally:
+            with _SWEEP_LOCK:
+                _SWEEP_IN_FLIGHT = False
     return summary
 
 
