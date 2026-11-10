@@ -140,7 +140,7 @@ export function createConversationSpecialRows({
           <span className={recoveryStyles.label}>
             {sessionRecoveryResumedLabel(message, lang)}
           </span>
-          {detail ? <span className={recoveryStyles.detail}>· {detail}</span> : null}
+          {detail ? <span className={recoveryStyles.detail}>{detail}</span> : null}
           {message.timestamp ? (
             <time className={recoveryStyles.time} dateTime={message.timestamp}>{formatTimestamp(message.timestamp)}</time>
           ) : null}
