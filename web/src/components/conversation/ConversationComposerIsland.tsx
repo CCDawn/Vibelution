@@ -89,18 +89,42 @@ function ConversationComposerIslandImpl({
   const onComposerChangeRef = useRef(onComposerChange);
   onComposerChangeRef.current = onComposerChange;
   const composerInputRef = composerProps.composerInputRef;
+  // Typing must never force a synchronous layout: writing `height: auto` and
+  // then reading `scrollHeight` reflows the whole document, and a long
+  // transcript pays that on every keystroke (twice: here and in the effect
+  // below, which re-runs because it depends on `draft`). One animation frame
+  // per burst keeps it to at most one measurement, and an IME composition
+  // session skips measurement entirely until the text actually commits.
+  const autosizeFrameRef = useRef<number | null>(null);
+  const composingRef = useRef(false);
+  const lastTypedDraftRef = useRef("");
+  const scheduleAutosize = useCallback(
+    (element: HTMLTextAreaElement | null | undefined) => {
+      if (!element || composingRef.current) {
+        return;
+      }
+      if (autosizeFrameRef.current !== null) {
+        return;
+      }
+      autosizeFrameRef.current = window.requestAnimationFrame(() => {
+        autosizeFrameRef.current = null;
+        if (composingRef.current || !element.isConnected) {
+          return;
+        }
+        element.style.height = "auto";
+        element.style.height = `${element.scrollHeight}px`;
+      });
+    },
+    [],
+  );
   const handleComposerChange = useCallback(
     (next: string) => {
       draftStore.set(next);
       onComposerChangeRef.current?.(next);
-      // Autosize on the keystroke itself: no effect has to re-run per character.
-      const element = composerInputRef?.current;
-      if (element) {
-        element.style.height = "auto";
-        element.style.height = `${element.scrollHeight}px`;
-      }
+      lastTypedDraftRef.current = next;
+      scheduleAutosize(composerInputRef?.current);
     },
-    [composerInputRef, draftStore],
+    [composerInputRef, draftStore, scheduleAutosize],
   );
 
   const {
@@ -157,9 +181,37 @@ function ConversationComposerIslandImpl({
     onOutputsChangeRef.current?.(outputs);
   }, [outputs]);
 
-  // Typing autosizes inside `handleComposerChange`; this effect only covers a
+  // An IME session owns the text until it commits; measuring mid-composition
+  // would reflow on every pinyin keystroke and can move the candidate window.
+  useEffect(() => {
+    const element = composerInputRef?.current;
+    if (!element) {
+      return undefined;
+    }
+    const handleCompositionStart = () => {
+      composingRef.current = true;
+    };
+    const handleCompositionEnd = () => {
+      composingRef.current = false;
+      scheduleAutosize(element);
+    };
+    element.addEventListener("compositionstart", handleCompositionStart);
+    element.addEventListener("compositionend", handleCompositionEnd);
+    return () => {
+      element.removeEventListener("compositionstart", handleCompositionStart);
+      element.removeEventListener("compositionend", handleCompositionEnd);
+      composingRef.current = false;
+      if (autosizeFrameRef.current !== null) {
+        window.cancelAnimationFrame(autosizeFrameRef.current);
+        autosizeFrameRef.current = null;
+      }
+    };
+  }, [composerInputRef, scheduleAutosize]);
+
+  // Typing autosizes through `scheduleAutosize`; this effect only covers a
   // draft arriving from outside (restored draft, queued message, cleared after
-  // submit) and the composer switching variant.
+  // submit) and the composer switching variant. Skipping the value the keystroke
+  // just queued keeps one character from requesting a second measurement.
   const showComposer = composerProps.showComposer;
   const composerVariant = composerProps.composerVariant;
   const composerDisabled = composerProps.composerDisabled;
@@ -167,13 +219,11 @@ function ConversationComposerIslandImpl({
     if (!showComposer) {
       return;
     }
-    const element = composerInputRef?.current;
-    if (!element) {
+    if (draft === lastTypedDraftRef.current) {
       return;
     }
-    element.style.height = "auto";
-    element.style.height = `${element.scrollHeight}px`;
-  }, [composerDisabled, composerInputRef, composerVariant, draft, showComposer]);
+    scheduleAutosize(composerInputRef?.current);
+  }, [composerDisabled, composerInputRef, composerVariant, draft, scheduleAutosize, showComposer]);
 
   return <>{composerSurface}</>;
 }
