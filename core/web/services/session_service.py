@@ -748,6 +748,7 @@ from core.web.services.session.signals_format import (
     _lightweight_chat_payload_decision,
     _looks_like_image_generation_success_text,
     _looks_like_image_retry_context,
+    _looks_like_local_runtime_os_error,
     _looks_like_provider_failure_summary_notice,
     _looks_like_runtime_failure_notice,
     _looks_like_tool_unavailable_claim,

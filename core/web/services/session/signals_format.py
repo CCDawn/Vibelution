@@ -23,6 +23,20 @@ def _service():
     return session_service
 
 
+# 本地文件系统 errno（2 缺文件 / 13 无权限 / 28 磁盘满）：LLM 调用在到达
+# provider 之前因本机环境失败（典型是重装依赖期间 httpx 读取缺失的
+# certifi/cacert.pem）时，错误文本只有裸 OSError 形态。这类失败仍要走
+# 会话失败呈现与恢复链路，但不能被归成 provider 协议错误。
+_LOCAL_RUNTIME_OS_ERROR_PATTERN = re.compile(
+    r"\[errno\s+(?:2|13|28)\]|no such file or directory",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_local_runtime_os_error(text: Any) -> bool:
+    return bool(_LOCAL_RUNTIME_OS_ERROR_PATTERN.search(str(text or "")))
+
+
 def _active_task_content_preview(active_task: Any) -> str:
     s = _service()
     task = s._normalize_session_active_task(active_task)
@@ -410,6 +424,8 @@ def _failure_error_type(raw_error: str, *, exc: Exception | None = None) -> str:
     s = _service()
     value = str(raw_error or "").strip().lower()
     exc_type = type(exc).__name__ if exc is not None else ""
+    if s._looks_like_local_runtime_os_error(value):
+        return "local_runtime_environment_error"
     if "prompt_cache_unsupported" in value:
         return "prompt_cache_unsupported"
     if s._looks_like_provider_error_text(value):
@@ -700,6 +716,11 @@ def _is_provider_failed_result(result: Any) -> bool:
     s = _service()
     if not isinstance(result, dict):
         return False
+    if any(
+        s._looks_like_local_runtime_os_error(result.get(key))
+        for key in ("error", "raw_error", "rawError")
+    ):
+        return True
     if any(
         "prompt_cache_unsupported" in str(result.get(key) or "").lower()
         or "不支持显式 prompt cache" in str(result.get(key) or "")
@@ -1155,7 +1176,7 @@ def _provider_failure_raw_error(result: dict[str, Any]) -> str:
     matched: list[str] = []
     for candidate in candidates:
         text = str(candidate or "").strip()
-        if s._looks_like_provider_error_text(text):
+        if s._looks_like_provider_error_text(text) or s._looks_like_local_runtime_os_error(text):
             matched.append(text)
     if matched:
         return max(matched, key=lambda item: (len(s._provider_error_reason_detail(item)), len(item)))
