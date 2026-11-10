@@ -31,13 +31,20 @@ def _payload_message_count(payload: Mapping[str, Any]) -> int:
 
 
 def _workspace_has_files(workspace_dir: Path | None) -> bool:
-    """Whether a session workspace carries anything worth keeping."""
+    """Whether a session workspace carries any file worth keeping.
+
+    Every session materializes the same empty skeleton (``artifacts``, ``logs``,
+    ``memory``, ``mental_model``, ``notes``, ``tmp``), so counting directory
+    entries answers yes for every ghost and the prune would never fire. Only
+    a real file inside the tree counts as content.
+    """
 
     if workspace_dir is None:
         return False
     try:
-        for _entry in workspace_dir.iterdir():
-            return True
+        for path in workspace_dir.rglob("*"):
+            if path.is_file():
+                return True
     except OSError:
         # An unreadable directory is not proof of emptiness; keep the row.
         return True

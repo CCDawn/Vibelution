@@ -94,3 +94,25 @@ def test_keeps_row_whose_workspace_still_has_files(
     assert summary["prunedCount"] == 0
     assert summary["keptWithContentCount"] == 1
     assert store.repository.list_session_runtime_ids() == ["worked"]
+
+def test_prunes_row_whose_workspace_is_only_an_empty_skeleton(
+    tmp_path: Path, store: ConversationStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every session gets an empty skeleton; that alone is not content."""
+
+    _write_chat_state(store, [{"conversation_id": "ghost", "title": "ghost"}])
+    workspace = tmp_path / "workspace" / "sessions" / "ghost"
+    for name in ("artifacts", "logs", "memory", "mental_model", "notes", "tmp"):
+        (workspace / name).mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(
+        conversation_index,
+        "_session_workspace_dir_if_present",
+        lambda session_id: workspace if session_id == "ghost" else None,
+    )
+
+    summary = chat_state_hygiene.prune_orphan_chat_state_sessions(tmp_path)
+
+    assert summary["orphanCandidateCount"] == 1
+    assert summary["prunedCount"] == 1
+    assert summary["keptWithContentCount"] == 0
+    assert store.repository.list_session_runtime_ids() == []
