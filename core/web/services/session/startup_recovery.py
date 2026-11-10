@@ -1325,9 +1325,6 @@ def _record_sweep_scene_event(s: Any, summary: dict[str, Any]) -> None:
                 "continuableResumeCount": max(
                     0, int(summary.get("continuableResumeCount") or 0)
                 ),
-                "continuableResumeCount": max(
-                    0, int(summary.get("continuableResumeCount") or 0)
-                ),
                 "alreadyResumedSkipCount": max(
                     0, int(summary.get("alreadyResumedSkipCount") or 0)
                 ),
