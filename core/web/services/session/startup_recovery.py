@@ -109,6 +109,8 @@ def _new_summary() -> dict[str, Any]:
         "noInterruptedTurnCount": 0,
         "noActiveTurnSkipCount": 0,
         "journalInterruptResumeCount": 0,
+        "alreadyResumedSkipCount": 0,
+        "unreadableSessionSkipCount": 0,
         "queuedDrainScheduledCount": 0,
         "errorCount": 0,
         "durationMs": 0,
@@ -264,22 +266,35 @@ def _latest_restart_interrupted_turn(events: list[Any]) -> tuple[str, str]:
         payload = getattr(event, "payload", None)
         if not isinstance(payload, dict):
             continue
-        for key in ("recoveredTurnId", "originalTurnId", "openTurnId"):
-            recovered = str(payload.get(key) or "").strip()
-            if recovered:
-                already_resumed.add(recovered)
+        # The runtime nests the ids under ``recovery`` (see the journal row
+        # ``{recovery: {recoveredTurnId: ...}}``), so reading only the payload
+        # top level silently disabled this guard and replayed one crash on
+        # every startup. Read both shapes.
+        sources = [payload]
+        nested = payload.get("recovery")
+        if isinstance(nested, dict):
+            sources.append(nested)
+        for source in sources:
+            for key in ("recoveredTurnId", "originalTurnId", "openTurnId"):
+                recovered = str(source.get(key) or "").strip()
+                if recovered:
+                    already_resumed.add(recovered)
+    already_resumed_skips = 0
     for event in reversed(raw_events):
         if str(getattr(event, "event_type", "") or "").strip() != EVENT_TURN_INTERRUPTED:
             continue
         turn_id = str(getattr(event, "turn_id", "") or "").strip()
-        if not turn_id or turn_id not in started_turn_ids or turn_id in already_resumed:
+        if not turn_id or turn_id not in started_turn_ids:
+            continue
+        if turn_id in already_resumed:
+            already_resumed_skips += 1
             continue
         payload = getattr(event, "payload", None)
         reason = str(payload.get("reason") or "").strip() if isinstance(payload, dict) else ""
         if reason not in _RESTART_INTERRUPT_REASONS:
             continue
-        return turn_id, str(getattr(event, "timestamp", "") or "").strip()
-    return "", ""
+        return turn_id, str(getattr(event, "timestamp", "") or "").strip(), already_resumed_skips
+    return "", "", already_resumed_skips
 
 
 def _open_turn_work_run_is_interrupted(
@@ -695,7 +710,13 @@ def _recover_session_on_startup(
         return
     summary["scannedSessionCount"] += 1
     conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
-    if conversation is None or _shutdown_requested(should_stop):
+    if conversation is None:
+        # session_runtime_state rows outlive their sessions row (archived,
+        # deleted, or a stale instance workspace). Counting them keeps
+        # scannedSessionCount explainable against the visible session list.
+        summary["unreadableSessionSkipCount"] += 1
+        return
+    if _shutdown_requested(should_stop):
         return
     from core.web.services.external_agent.approval_binding import is_external_session
     if is_external_session(conversation):
@@ -731,12 +752,18 @@ def _recover_session_on_startup(
         events = s._load_session_conversation_events_cached(session_id)
         open_turn_id = latest_open_turn_id(events)
         if not open_turn_id:
-            candidate_turn_id, interrupted_at = _latest_restart_interrupted_turn(events)
+            (
+                candidate_turn_id,
+                interrupted_at,
+                already_resumed_skips,
+            ) = _latest_restart_interrupted_turn(events)
+            summary["alreadyResumedSkipCount"] += already_resumed_skips
             if candidate_turn_id and _within_resume_age_window(interrupted_at):
                 open_turn_id = candidate_turn_id
                 journal_interrupt_evidence = True
                 summary["journalInterruptResumeCount"] += 1
         if not open_turn_id:
+            summary["noInterruptedTurnCount"] += 1
             summary["noActiveTurnSkipCount"] += 1
             return
     else:
@@ -854,6 +881,18 @@ def _record_sweep_scene_event(s: Any, summary: dict[str, Any]) -> None:
                 "resumedCount": max(0, int(summary.get("resumedCount") or 0)),
                 "retryLimitSkipCount": max(0, int(summary.get("retryLimitSkipCount") or 0)),
                 "companionSkipCount": max(0, int(summary.get("companionSkipCount") or 0)),
+                "noInterruptedTurnCount": max(
+                    0, int(summary.get("noInterruptedTurnCount") or 0)
+                ),
+                "journalInterruptResumeCount": max(
+                    0, int(summary.get("journalInterruptResumeCount") or 0)
+                ),
+                "alreadyResumedSkipCount": max(
+                    0, int(summary.get("alreadyResumedSkipCount") or 0)
+                ),
+                "unreadableSessionSkipCount": max(
+                    0, int(summary.get("unreadableSessionSkipCount") or 0)
+                ),
                 "queuedDrainScheduledCount": max(
                     0, int(summary.get("queuedDrainScheduledCount") or 0)
                 ),
