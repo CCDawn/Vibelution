@@ -158,7 +158,14 @@ export function resolveSingleInstanceProvenance(value: unknown): SingleInstanceL
   if (!isSingleInstanceEnvelope(value)) {
     return "operator";
   }
-  return value.lifecycle.provenance === "forwarded" ? "forwarded" : "operator";
+  if (value.lifecycle.provenance === "forwarded") {
+    return "forwarded";
+  }
+  // A bare CLI `restart` is not an interactive approval to interrupt work.
+  // The workbench/Launcher UI reaches restart through the IPC route, which
+  // keeps operator semantics; CLI restarts queue behind active tasks instead
+  // of silently killing them, so an agent shell cannot impersonate a click.
+  return value.lifecycle.command.trim().toLowerCase() === "restart" ? "forwarded" : "operator";
 }
 
 export function shouldRunDesktopWhenReadyHandlers(input: {

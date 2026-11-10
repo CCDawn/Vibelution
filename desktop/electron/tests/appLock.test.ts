@@ -155,6 +155,24 @@ describe("single-instance lifecycle envelope", () => {
     expect(resolveSingleInstanceProvenance(envelope)).toBe("operator");
   });
 
+  it("does not treat a bare CLI restart as an operator approval to interrupt work", () => {
+    const envelope = createSingleInstanceEnvelope({ lifecycleCommand: "restart" });
+    // The envelope still records the raw intent; only the provenance downgrade
+    // keeps a shell-launched CLI restart from bypassing the active-work guard.
+    expect(envelope.lifecycle).toEqual({ command: "restart", provenance: "operator" });
+    expect(resolveSingleInstanceProvenance(envelope)).toBe("forwarded");
+    expect(resolveSingleInstanceProvenance(createSingleInstanceEnvelope({ lifecycleCommand: "RESTART" }))).toBe("forwarded");
+    // Other bare CLI lifecycle commands keep their existing operator semantics.
+    expect(resolveSingleInstanceProvenance(createSingleInstanceEnvelope({ lifecycleCommand: "start" }))).toBe("operator");
+    expect(resolveSingleInstanceProvenance(createSingleInstanceEnvelope({ lifecycleCommand: "stop" }))).toBe("operator");
+    // An explicitly forwarded restart is unchanged.
+    expect(resolveSingleInstanceProvenance(createSingleInstanceEnvelope({
+      lifecycleCommand: "restart",
+      lifecycleSource: "runtime_manager",
+      explicitlyForwarded: true
+    }))).toBe("forwarded");
+  });
+
   it("round-trips project lifecycle intent without relying on second-instance argv order", () => {
     const envelope = createSingleInstanceEnvelope({
       projectRoot: " C:/repo/.worktrees/task ",
