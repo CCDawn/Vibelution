@@ -200,4 +200,14 @@ describe("sessionActivityIndicator", () => {
       { isRuntimeRunning: true, isActive: true },
     )).toBe("none");
   });
+
+  it("memoises the resolved tone and invalidates it when a read stamp is written", () => {
+    const session = { id: "s-tone-cache", status: "completed", taskSummary: "reply-cache" };
+    expect(resolveSessionActivityTone(session)).toBe("completed");
+    // A rebuilt object with the same snapshot is a cache hit, not a recompute.
+    expect(resolveSessionActivityTone({ ...session })).toBe("completed");
+    markSessionActivitySeen(session.id, sessionActivityStamp(session));
+    // Writing the stamp must drop the cached tone so the row goes quiet.
+    expect(resolveSessionActivityTone(session)).toBe("none");
+  });
 });

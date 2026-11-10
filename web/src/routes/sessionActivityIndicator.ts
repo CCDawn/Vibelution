@@ -31,6 +31,14 @@ const MAX_SEEN_STAMPS_PER_SESSION = 12;
  * The cache is validated against the raw string so writes from anywhere win.
  */
 let seenMapCache: { raw: string; map: SeenMap } | null = null;
+/**
+ * Tone cache. `resolveSessionActivityTone` runs for every session row on every
+ * paint, and a keystroke repaints the workbench. The tone is a pure function of
+ * the row snapshot plus the read-stamp state, so the signature cache is exact;
+ * `writeSeenMap` clears it because stamps are its only mutable input.
+ */
+const TONE_CACHE_LIMIT = 600;
+const toneCache = new Map<string, SessionActivityTone>();
 
 function activityStorage() {
   try {
@@ -74,6 +82,7 @@ function writeSeenMap(map: SeenMap): boolean {
     const raw = JSON.stringify(map);
     storage.setItem(SEEN_STORAGE_KEY, raw);
     seenMapCache = { raw, map };
+    toneCache.clear();
     return true;
   } catch {
     // ignore quota / private mode; callers must not report a persisted mutation
@@ -201,7 +210,7 @@ export function sessionPrimaryStatus(
   return activityOutputActive(state.execution) ? state.phase || state.execution : state.outcome || state.execution;
 }
 
-export function resolveSessionActivityTone(
+function computeSessionActivityTone(
   session: {
     id?: string;
     childStatus?: string;
@@ -255,6 +264,50 @@ export function resolveSessionActivityTone(
     return "completed";
   }
   return "none";
+}
+
+type SessionActivityToneInput = Parameters<typeof computeSessionActivityTone>[0];
+type SessionActivityToneOptions = NonNullable<Parameters<typeof computeSessionActivityTone>[1]>;
+
+function toneCacheKey(
+  session: SessionActivityToneInput,
+  options: SessionActivityToneOptions | undefined,
+) {
+  return [
+    session.id,
+    session.childStatus,
+    session.currentPhase,
+    session.status,
+    session.lastTurnStatus,
+    session.terminalReason,
+    session.sessionKind,
+    session.taskSummary,
+    session.agentInboxPendingCount,
+    options?.needsApproval ? 1 : 0,
+    options?.isRuntimeRunning ? 1 : 0,
+    options?.isActive ? 1 : 0,
+  ].join("\u0001");
+}
+
+/**
+ * Cached tone. Rows re-evaluate on every paint and a keystroke repaints the
+ * workbench, so the value is memoised on the snapshot signature.
+ */
+export function resolveSessionActivityTone(
+  session: SessionActivityToneInput,
+  options?: SessionActivityToneOptions,
+): SessionActivityTone {
+  const key = toneCacheKey(session, options);
+  const cached = toneCache.get(key);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const tone = computeSessionActivityTone(session, options);
+  if (toneCache.size >= TONE_CACHE_LIMIT) {
+    toneCache.clear();
+  }
+  toneCache.set(key, tone);
+  return tone;
 }
 
 /** Aggregate for an Agent row: approval > error > running > completed > none. */
