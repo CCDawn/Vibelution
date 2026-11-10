@@ -94,9 +94,9 @@ export function createCodexTranscriptCellRenderers({
     // scannable, and the shared expansion store still lets an explicit toggle win.
     const defaultExpanded = !isLive && fullText.length <= SHORT_THOUGHT_MAX_CHARS;
     const expanded = getExpansionState(messageId, input.sectionId, defaultExpanded);
-    const thoughtTitle = isLive
-      ? (lang === "zh" ? "思考中" : "Thinking…")
-      : (lang === "zh" ? "已思考" : "Thought");
+    // One stable label in both states: the live spinner and the duration carry
+    // the state, so the title never rewrites itself mid-stream.
+    const thoughtTitle = lang === "zh" ? "深度思考" : "Deep thinking";
     const toneClassName = styles[`codexTranscriptCell_${input.tone}` as keyof typeof styles] ?? "";
     return (
       <section
@@ -129,9 +129,7 @@ export function createCodexTranscriptCellRenderers({
           }}
         >
           <span className={styles.codexTranscriptReasoningIcon} aria-hidden="true">
-            {isLive
-              ? <LoaderCircle className={styles.statusSpinner} size={14} />
-              : <BrainCircuit size={14} />}
+            {isLive ? <LoaderCircle className={styles.statusSpinner} size={14} /> : null}
           </span>
           <span className={styles.codexTranscriptReasoningHeaderBody}>
             <span className={styles.codexTranscriptReasoningTitleRow}>

@@ -55,9 +55,47 @@ export function ThoughtScrollBody({
       data-thought-scroll-body="true"
       data-thought-scroll-streaming={streaming ? "true" : undefined}
     >
-      <pre className={styles.codexTranscriptReasoningText}>{text}</pre>
+      <div className={styles.thoughtBodyRail}>
+        <div className={styles.codexTranscriptReasoningText}>
+          {text.split("\n").map((line, index) => (
+            <span key={index} className={styles.thoughtLine}>
+              {renderThoughtLine(line, index)}
+            </span>
+          ))}
+        </div>
+      </div>
     </div>
   );
+}
+
+/**
+ * Inline code is the only rich text a reasoning unit gets: thinking is prose,
+ * not a second markdown surface. Everything else stays literal.
+ */
+function renderThoughtLine(line: string, lineIndex: number) {
+  if (!line.includes("`")) {
+    return line;
+  }
+  const parts: React.ReactNode[] = [];
+  const pattern = /`([^`\n]+)`/g;
+  let cursor = 0;
+  let match: RegExpExecArray | null = pattern.exec(line);
+  while (match) {
+    if (match.index > cursor) {
+      parts.push(line.slice(cursor, match.index));
+    }
+    parts.push(
+      <code key={`${lineIndex}-${match.index}`} className={styles.thoughtInlineCode}>
+        {match[1]}
+      </code>,
+    );
+    cursor = match.index + match[0].length;
+    match = pattern.exec(line);
+  }
+  if (cursor < line.length) {
+    parts.push(line.slice(cursor));
+  }
+  return parts;
 }
 
 /**
