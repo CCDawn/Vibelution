@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import {
-  BrainCircuit,
   ChevronDown,
   ChevronRight,
   LoaderCircle,
@@ -119,9 +118,7 @@ export function createConversationTimelineItems({
     const sectionId = `thought:${item.id}`;
     const expanded = getExpansionState(message.id, sectionId, defaultExpanded);
     const toggleLabel = expanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden");
-    const thoughtTitle = isLive
-      ? (lang === "zh" ? "思考中" : "Thinking…")
-      : (lang === "zh" ? "已思考" : "Thought");
+    const thoughtTitle = lang === "zh" ? "深度思考" : "Deep thinking";
     return (
       <section
         key={agentMessageTimelineItemRowKey(rowIdentity, item)}
@@ -141,7 +138,7 @@ export function createConversationTimelineItems({
             toggleSection(message.id, sectionId, defaultExpanded);
           }}
         >
-          {isActiveTimelineItem && isLive ? <LoaderCircle className={styles.statusSpinner} size={14} /> : <BrainCircuit size={14} />}
+          {isActiveTimelineItem && isLive ? <LoaderCircle className={styles.statusSpinner} size={14} /> : null}
           <span className={styles.timelineCellBody}>
             <span className={`${styles.timelineCellTitleRow} ${styles.timelineCellCompactTitleRow}`}>
               <span className={styles.codexTranscriptReasoningTitle}>{thoughtTitle}</span>

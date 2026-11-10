@@ -114,4 +114,29 @@ describe("codex transcript narration lanes", () => {
     expect(await renderThought(shortText)).toContain(shortText);
     expect(await renderThought(longText)).not.toContain(longText.slice(0, 24));
   });
+  it("renders inline code inside an expanded thought as a chip", async () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const withExpansion = createCodexTranscriptCellRenderers({
+      lang: "zh",
+      t: (key: TranslationKey) => key,
+      getExpansionState: () => true,
+      toggleSection: () => undefined,
+    });
+    const node = withExpansion.renderCodexThoughtScrollCell("message-1", {
+      cellId: "cell-thought-code",
+      sectionId: "reasoning:cell-thought-code",
+      text: "先看 `resolve_data_home()` 的返回值",
+      status: "completed",
+      tone: "default",
+    });
+    await act(async () => {
+      root?.render(<VuiProvider>{node}</VuiProvider>);
+    });
+    const chip = container.querySelector("code");
+    expect(chip?.textContent).toBe("resolve_data_home()");
+    expect(container.textContent).toContain("先看");
+  });
+
 });
