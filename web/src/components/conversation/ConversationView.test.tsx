@@ -1223,8 +1223,11 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     // react-virtual owns row measurement: stable keys feed its item-size cache,
     // and row refs delegate to measureElement (rAF-batched ResizeObserver).
     expect(conversationViewSource).toContain("useVirtualizer({");
+    expect(conversationViewSource).toContain("getItemKey: (index) =>");
+    // The index fallback is namespaced by session, so a row without a stable
+    // key yet cannot inherit the previous transcript measured height.
     expect(conversationViewSource).toContain(
-      "getItemKey: (index) => timelineHistoryRowKeys[index] ?? `timeline-row-${index}`",
+      "timelineHistoryRowKeys[index] ?? `timeline-row-${sessionId}-${index}`",
     );
     expect(conversationViewSource).toContain("measureTimelineVirtualRow");
     expect(conversationViewSource).toContain("useAnimationFrameWithResizeObserver: true");

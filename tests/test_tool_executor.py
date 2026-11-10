@@ -1476,6 +1476,11 @@ class TestToolExecutorTimeout:
 
         fake_module = ModuleType("core.infrastructure.codex_cli_sandbox")
         fake_module.execute_codex_sandbox_command = fake_execute_codex_sandbox_command
+        # cli_tool 还会导入该符号做环境拒绝豁免；手工 ModuleType 桩必须与真实模块
+        # 同步，否则会以 (unknown location) 的 ImportError 让 cli_tool 整条链路失控。
+        fake_module.is_sandbox_unverified_block = (
+            lambda text: "SANDBOX_UNVERIFIED" in str(text)
+        )
         monkeypatch.setitem(sys.modules, "core.infrastructure.codex_cli_sandbox", fake_module)
 
         cancel_requested = threading.Event()
@@ -1633,6 +1638,11 @@ class TestToolExecutorTimeout:
 
         fake_module = ModuleType("core.infrastructure.codex_cli_sandbox")
         fake_module.execute_codex_sandbox_command = fake_execute_codex_sandbox_command
+        # cli_tool 还会导入该符号做环境拒绝豁免；手工 ModuleType 桩必须与真实模块
+        # 同步，否则会以 (unknown location) 的 ImportError 让 cli_tool 整条链路失控。
+        fake_module.is_sandbox_unverified_block = (
+            lambda text: "SANDBOX_UNVERIFIED" in str(text)
+        )
         monkeypatch.setitem(sys.modules, "core.infrastructure.codex_cli_sandbox", fake_module)
         executor.set_cancel_checker(lambda: "")
 
@@ -1802,6 +1812,11 @@ class TestToolExecutorErrorHandling:
             return "x" * 80
 
         sandbox_module.execute_codex_sandbox_command = fake_execute_codex_sandbox_command
+        # cli_tool 还会导入该符号做环境拒绝豁免；手工 ModuleType 桩必须与真实模块
+        # 同步，否则会以 (unknown location) 的 ImportError 让 cli_tool 整条链路失控。
+        sandbox_module.is_sandbox_unverified_block = (
+            lambda text: "SANDBOX_UNVERIFIED" in str(text)
+        )
         monkeypatch.setitem(
             sys.modules,
             "core.infrastructure.codex_cli_sandbox",
@@ -2922,3 +2937,61 @@ def test_tool_events_preserve_call_and_turn_identity(monkeypatch):
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+
+class TestToolArgumentAliasGuard:
+    """模型高频写错的参数名应被归一化，并在报错时给出改名建议。"""
+
+    @staticmethod
+    def _sample_tool(command: str = "", max_output_chars: int = 6000) -> str:
+        return command
+
+    def test_alias_maps_model_typo_to_declared_parameter(self):
+        from core.infrastructure.tool_executor import _normalize_tool_argument_aliases
+
+        normalized = _normalize_tool_argument_aliases(
+            self._sample_tool, {"command": "dir", "max_output_tokens": 200}
+        )
+
+        assert normalized == {"command": "dir", "max_output_chars": 200}
+
+    def test_alias_does_not_override_explicit_parameter(self):
+        from core.infrastructure.tool_executor import _normalize_tool_argument_aliases
+
+        normalized = _normalize_tool_argument_aliases(
+            self._sample_tool, {"max_chars": 200, "max_output_chars": 6000}
+        )
+
+        assert normalized == {"max_chars": 200, "max_output_chars": 6000}
+
+    def test_argument_error_reports_alias_suggestion(self):
+        from core.infrastructure.tool_executor import _format_tool_argument_error
+
+        message = _format_tool_argument_error(
+            "cli_tool",
+            self._sample_tool,
+            {"max_chars": 200},
+            TypeError("unexpected keyword argument 'max_chars'"),
+        )
+
+        assert "参数名建议" in message
+        assert "max_chars → max_output_chars" in message
+
+    def test_argument_error_keeps_plain_message_when_no_close_match(self):
+        from core.infrastructure.tool_executor import _format_tool_argument_error
+
+        message = _format_tool_argument_error(
+            "cli_tool",
+            self._sample_tool,
+            {"zzz_unrelated": 1},
+            TypeError("unexpected keyword argument 'zzz_unrelated'"),
+        )
+
+        assert "参数名建议" not in message
+
+    def test_code_symbol_tool_has_ninety_second_budget(self):
+        from core.infrastructure.tool_executor import ToolExecutor
+
+        # 30s 在冷索引/大仓下必然超时，超时后只能换路重来。
+        assert ToolExecutor()._timeout_map["code_symbol_tool"] == 90
