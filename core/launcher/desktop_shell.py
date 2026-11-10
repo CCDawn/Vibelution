@@ -1903,7 +1903,34 @@ def _assistant_payload_builder_python(root: Path) -> str:
     return sys.executable
 
 
-def _build_assistant_payload(root: Path, payload: Path, *, deadline: float, env: dict[str, str]) -> str:
+_ASSISTANT_PAYLOAD_SOURCE_CHANGED = "product source changed during payload construction"
+_ASSISTANT_PAYLOAD_BUILD_ATTEMPTS = 2
+
+
+def _build_assistant_payload(
+    root: Path, payload: Path, *, deadline: float, env: dict[str, str]
+) -> str:
+    """Build the payload, retrying once when a live source writer raced it."""
+
+    attempts = 0
+    while True:
+        attempts += 1
+        try:
+            return _build_assistant_payload_once(root, payload, deadline=deadline, env=env)
+        except Exception as error:
+            retryable = _ASSISTANT_PAYLOAD_SOURCE_CHANGED in str(error)
+            if (
+                attempts >= _ASSISTANT_PAYLOAD_BUILD_ATTEMPTS
+                or not retryable
+                or time.monotonic() >= deadline
+            ):
+                raise
+            _remove_owned_shell_tree(payload, within=root / "dist")
+
+
+def _build_assistant_payload_once(
+    root: Path, payload: Path, *, deadline: float, env: dict[str, str]
+) -> str:
     builder_python = _assistant_payload_builder_python(root)
     command = [builder_python, "-B", "-c",
                ("import sys; from scripts.build_assistant_runtime import build_launcher_assistant_payload; "
@@ -1914,7 +1941,6 @@ def _build_assistant_payload(root: Path, payload: Path, *, deadline: float, env:
     if not path.is_file() or path.stat().st_size > 32 * 1024 * 1024:
         raise RuntimeError("desktop assistant builder did not produce a complete manifest")
     return hashlib.sha256(path.read_bytes()).hexdigest()
-
 
 def _run_desktop_shell_package_build(root: Path, *, mode: str, deadline: float) -> Path:
     if mode == "linux-arm64" or sys.platform != "win32":
