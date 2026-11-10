@@ -32,11 +32,14 @@ from core.infrastructure.owned_process import OwnedProcess
 from core.infrastructure.native_runtime import resolve_native_project_root
 from core.infrastructure.windows_process_job import WindowsProcessJob
 from core.launcher.frontend_build import (
+    DESKTOP_SHELL_BUILD_DIR_GC_MIN_INTERVAL_SECONDS,
     frontend_releases_dir,
     inspect_frontend_build,
+    mark_storage_gc,
     package_build_key_matches,
     release_build_key_matches,
     resolve_active_frontend_dist,
+    storage_gc_due,
 )
 from config.paths import PROJECT_ROOT as SOURCE_PROJECT_ROOT
 from scripts.windowless_subprocess import no_window_subprocess_kwargs
@@ -1963,8 +1966,11 @@ def build_desktop_shell_package(
     deadline = time.monotonic() + DESKTOP_SHELL_BUILD_DEADLINE_SECONDS
     _wait_for_desktop_shell_build_lock(root, deadline=deadline)
     # Reclaim sessions left by earlier killed or blocked builds before this
-    # one creates its own tree.
-    gc_desktop_shell_build_dirs(root)
+    # one creates its own tree. The sweep only lists dist's top level, and the
+    # interval keeps repeated builds in one session from re-listing it.
+    if storage_gc_due(root, "desktopShellBuilds", DESKTOP_SHELL_BUILD_DIR_GC_MIN_INTERVAL_SECONDS):
+        gc_desktop_shell_build_dirs(root)
+        mark_storage_gc(root, "desktopShellBuilds")
     session: Path | None = None
     try:
         session = _run_desktop_shell_package_build(root, mode=mode, deadline=deadline)

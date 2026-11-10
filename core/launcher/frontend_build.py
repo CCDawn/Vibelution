@@ -108,6 +108,9 @@ FRONTEND_RELEASE_KEEP_COUNT = 5
 SERVING_FRONTEND_LEASES_DIR_NAME = "serving-frontend-leases"
 SERVING_FRONTEND_LEASE_SCHEMA_VERSION = 1
 FRONTEND_PUBLISH_RETRY_TIMEOUT_SECONDS = 5.0
+STORAGE_GC_STATE_RELATIVE = Path(".runtime") / "launcher" / "storage-gc-state.json"
+FRONTEND_RELEASE_GC_MIN_INTERVAL_SECONDS = 60 * 60
+DESKTOP_SHELL_BUILD_DIR_GC_MIN_INTERVAL_SECONDS = 10 * 60
 _FRONTEND_PUBLISH_RETRY_INITIAL_DELAY_SECONDS = 0.05
 _FRONTEND_PUBLISH_RETRY_MAX_DELAY_SECONDS = 0.25
 FRONTEND_BUILD_TIMEOUT_SECONDS = 540.0
@@ -1494,6 +1497,51 @@ def _current_release_during_build_contention(root: Path, manager: str) -> dict[s
         return None
 
 
+def storage_gc_due(
+    project_root: Path | str,
+    key: str,
+    min_interval_seconds: float,
+    *,
+    now: float | None = None,
+) -> bool:
+    """Whether a periodic storage sweep is due before paying for the scan."""
+
+    path = Path(project_root).resolve() / STORAGE_GC_STATE_RELATIVE
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return True
+    last = state.get(key) if isinstance(state, dict) else None
+    if not isinstance(last, (int, float)) or isinstance(last, bool):
+        return True
+    current = time.time() if now is None else float(now)
+    return (current - float(last)) >= min_interval_seconds
+
+
+def mark_storage_gc(
+    project_root: Path | str,
+    key: str,
+    *,
+    now: float | None = None,
+) -> None:
+    """Remember a completed sweep; a failed write only costs one extra scan."""
+
+    path = Path(project_root).resolve() / STORAGE_GC_STATE_RELATIVE
+    current = time.time() if now is None else float(now)
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        state = {}
+    if not isinstance(state, dict):
+        state = {}
+    state[key] = current
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+
+
 def ensure_frontend_build(
     project_root: Path | str,
     *,
@@ -1551,8 +1599,12 @@ def ensure_frontend_build(
                 # has to be bounded. Release GC otherwise runs only right
                 # after a publish, so a project that stops rebuilding keeps
                 # every stale release forever.
-                with _build_phase("gcMs"):
-                    gc = gc_frontend_releases(root)
+                if storage_gc_due(root, "frontendReleases", FRONTEND_RELEASE_GC_MIN_INTERVAL_SECONDS):
+                    with _build_phase("gcMs"):
+                        gc = gc_frontend_releases(root)
+                    mark_storage_gc(root, "frontendReleases")
+                else:
+                    gc = {"removed": [], "skipped": [], "throttled": True}
                 return {
                     "rebuilt": False, "skipped": True, "lock": lock,
                     "timingsMs": timings, "gc": gc, **inspection,
