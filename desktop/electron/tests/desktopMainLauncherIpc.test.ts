@@ -553,7 +553,7 @@ describe("Electron main Launcher IPC facade", () => {
   });
 
   it("routes the first product-entry open through the supervised live-or-start path", () => {
-    const startupOpen = mainSource.indexOf("if (pendingOpenWorkbenchRequest &&");
+    const startupOpen = mainSource.indexOf("const openWorkbenchIntent = pendingOpenWorkbenchRequest");
     const startupBody = mainSource.slice(startupOpen, startupOpen + 500);
     expect(startupBody).toContain("await startOrFocusWorkbenchFromProductEntryOnShell()");
     expect(startupBody).not.toContain("windowProvider.openOrFocusWorkbench()");

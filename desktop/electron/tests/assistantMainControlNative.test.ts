@@ -27,7 +27,11 @@ describe.skipIf(process.platform !== "win32")("real private main-control transpo
     try {
       const fixtureRoot = join(root, "fixture"); mkdirSync(join(fixtureRoot, "scripts"), { recursive: true });
       writeFileSync(join(fixtureRoot, "scripts", "assistant_host.py"), CHILD);
-      const config = join(root, "operator.toml"); writeFileSync(config, "");
+      // The operator tier is opt-in, so a synthetic host that drives
+      // project_lifecycle must enable it explicitly; an empty file leaves the
+      // action refused before the native guard is ever consulted.
+      const operatorConfig = "[assistant]\noperator_tier_enabled = true\n";
+      const config = join(root, "operator.toml"); writeFileSync(config, operatorConfig);
       const project = join(root, "synthetic-project"); mkdirSync(join(project, ".venv", "Scripts"), { recursive: true });
       writeFileSync(join(project, ".venv", "Scripts", "python.exe"), "never executed");
       const registry = new AssistantProjectRegistryConnection(join(root, "projects.json"));
@@ -63,7 +67,7 @@ describe.skipIf(process.platform !== "win32")("real private main-control transpo
       expect(await send("project_lifecycle_receipt", "restart", "native-restart")).toMatchObject({ state: "queued", code: "restart_queued" });
       expect(await send("project_lifecycle", "restart", "native-restart")).toMatchObject({ state: "queued", code: "restart_queued" });
       expect(nativeRun).toHaveBeenCalledTimes(2);
-      expect(readFileSync(config, "utf8")).toBe("");
+      expect(readFileSync(config, "utf8")).toBe(operatorConfig);
     } catch (error) {
       // This synthetic child has no provider credentials or real profile. Keep
       // only a bounded diagnostic, never dump its environment or request data.

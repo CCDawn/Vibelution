@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -17,6 +17,25 @@ export function buildWorkbenchJob(input = {}) {
   const sourceRoot = join(root, "native", "workbench-job");
   const buildRoot = managedPaths.nativeBuildRoot;
   const run = input.run ?? spawnSync;
+  const env = input.env ?? process.env;
+  // node-gyp downloads the running node's headers on a cache miss. On a machine
+  // without direct access to nodejs.org that turns every patch upgrade of node
+  // (24.15.0 -> 24.18.0) into a hard packaging failure. Prefer the headers
+  // already cached locally for this major version: the addon is Node-API, so
+  // any headers within the major produce a compatible binary.
+  const cachedHeaders = input.headersDir ?? resolveLocalNodeHeaders({ env, exists: input.exists ?? existsSync });
+  const stagedHeaders = cachedHeaders
+    ? stageNodeHeaders({
+        source: cachedHeaders,
+        destination: input.headersStageRoot
+          ? join(input.headersStageRoot, basename(cachedHeaders))
+          : join(resolve(root, "..", ".."), "dist", ".node-headers", basename(cachedHeaders)),
+        env,
+        platform,
+        exists: input.exists ?? existsSync
+      })
+    : "";
+  const headersDir = stagedHeaders || cachedHeaders;
   let ownsBuildRoot = false;
   try {
     mkdirSync(buildRoot, { recursive: false });
@@ -28,15 +47,19 @@ export function buildWorkbenchJob(input = {}) {
       copyFileSync(join(sourceRoot, entry.name), join(buildRoot, entry.name));
     }
 
+    const nodeGypArgs = [join(root, "node_modules", "node-gyp", "bin", "node-gyp.js"), "rebuild"];
+    if (headersDir) {
+      nodeGypArgs.push(`--nodedir=${headersDir}`);
+    }
     const result = run(
       process.execPath,
-      [join(root, "node_modules", "node-gyp", "bin", "node-gyp.js"), "rebuild"],
+      nodeGypArgs,
       {
         cwd: buildRoot,
         stdio: "inherit",
         shell: false,
         windowsHide: true,
-        env: resolveNativeBuildEnvironment({ env: input.env ?? process.env, run, exists: input.exists ?? existsSync })
+        env: resolveNativeBuildEnvironment({ env, run, exists: input.exists ?? existsSync })
       }
     );
     if (result.error) {
@@ -57,6 +80,132 @@ export function buildWorkbenchJob(input = {}) {
       rmSync(buildRoot, { recursive: true, force: true });
     }
   }
+}
+
+/**
+ * Mirror cached node headers into the layout node-gyp's MSBuild link step wants.
+ *
+ * A node-gyp cache installed from the Windows headers tarball keeps the import
+ * library at ``<cache>/<arch>/node.lib``, while ``addon.gypi`` links from
+ * ``<(node_root_dir)/$(ConfigurationName)`` — i.e. ``Release/node.lib``. Pointing
+ * ``--nodedir`` straight at the cache therefore compiles and then fails to link.
+ *
+ * The staged copy is ~63 MB of headers, so it is written once per node version
+ * into a gitignored build-cache directory and reused by later builds rather
+ * than copied and deleted on every package.
+ */
+export function stageNodeHeaders({
+  source,
+  destination,
+  arch = process.arch,
+  env = process.env,
+  platform = process.platform,
+  exists = existsSync,
+  copy = cpSync
+} = {}) {
+  if (!source || !destination) {
+    return "";
+  }
+  if (nodeHeadersAreStaged({ destination, arch, exists })) {
+    return destination;
+  }
+  if (!exists(join(source, "include", "node", "node_api.h"))) {
+    return "";
+  }
+  const importLibrary = findNodeImportLibrary({ source, arch, env, platform, exists });
+  if (!importLibrary) {
+    return "";
+  }
+  mkdirSync(destination, { recursive: true });
+  copy(join(source, "include"), join(destination, "include"), { recursive: true });
+  for (const folder of ["Release", arch]) {
+    mkdirSync(join(destination, folder), { recursive: true });
+    copyFileSync(importLibrary, join(destination, folder, "node.lib"));
+  }
+  return destination;
+}
+
+export function nodeHeadersAreStaged({ destination, arch = process.arch, exists = existsSync } = {}) {
+  if (!destination) {
+    return false;
+  }
+  return exists(join(destination, "include", "node", "node_api.h"))
+    && exists(join(destination, "Release", "node.lib"))
+    && exists(join(destination, arch, "node.lib"));
+}
+
+export function findNodeImportLibrary({ source, arch = process.arch, platform = process.platform, exists = existsSync } = {}) {
+  if (platform !== "win32") {
+    return "";
+  }
+  for (const folder of [arch, "Release", "Debug"]) {
+    const candidate = join(source, folder, "node.lib");
+    if (exists(candidate)) {
+      return candidate;
+    }
+  }
+  return "";
+}
+
+/**
+ * Locate node headers node-gyp can compile against without a download.
+ *
+ * node-gyp fetches headers whenever the running node's exact version is not
+ * cached, which fails outright on a host that cannot reach nodejs.org. The
+ * addon is Node-API, so headers from another patch release of the same major
+ * version build a fully compatible binary.
+ */
+export function resolveLocalNodeHeaders({
+  version = process.versions.node,
+  env = process.env,
+  platform = process.platform,
+  exists = existsSync,
+  readDirectory = readdirSync
+} = {}) {
+  const major = String(version || "").trim().split(".")[0];
+  const cacheRoot = nodeGypCacheRoot({ env, platform });
+  if (!/^\d+$/.test(major) || !cacheRoot || !exists(cacheRoot)) {
+    return "";
+  }
+  let entries;
+  try {
+    entries = readDirectory(cacheRoot, { withFileTypes: true });
+  } catch {
+    return "";
+  }
+  const candidates = entries
+    .filter((entry) => entry.isDirectory() && /^\d+\.\d+\.\d+$/.test(entry.name))
+    .map((entry) => entry.name)
+    .filter((name) => name.split(".")[0] === major)
+    .sort((left, right) => compareVersionDesc(left, right));
+  for (const name of candidates) {
+    const candidate = join(cacheRoot, name);
+    if (exists(join(candidate, "include", "node", "node_api.h"))) {
+      return candidate;
+    }
+  }
+  return "";
+}
+
+export function nodeGypCacheRoot({ env = process.env, platform = process.platform } = {}) {
+  const localAppData = String(env.LOCALAPPDATA || "").trim();
+  if (platform === "win32") {
+    return localAppData ? join(localAppData, "node-gyp", "Cache") : "";
+  }
+  const home = String(env.HOME || env.USERPROFILE || "").trim();
+  return home ? join(home, ".cache", "node-gyp") : "";
+}
+
+function compareVersionDesc(left, right) {
+  const leftParts = left.split(".").map(Number);
+  const rightParts = right.split(".").map(Number);
+  for (let index = 0; index < 3; index += 1) {
+    const delta = (rightParts[index] ?? 0) - (leftParts[index] ?? 0);
+    if (delta !== 0) {
+      return delta;
+    }
+  }
+  return 0;
 }
 
 // node-gyp can use a Developer Command Prompt location directly, avoiding its

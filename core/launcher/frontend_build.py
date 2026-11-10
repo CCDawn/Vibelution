@@ -92,6 +92,15 @@ _BUILD_ENV_NAMES = ("VIBELUTION_PROBE_BUILD", "NODE_ENV")
 _VITE_ENV_PREFIX = "VITE_"
 _AUDIT_INPUT_NAMES = frozenset(("sourceCommit", "frontendTree"))
 _TRANSIENT_INPUT_NAMES = frozenset(("productionInputStateDigest",))
+# Toolchain patches are not part of a build's identity. Only the major version
+# of node/npm is a real bundle-affecting input: a patch upgrade (24.15.0 ->
+# 24.18.0, npm 11.12.1 -> 11.16.0) produces the same bytes, but keying on the
+# full version strands every previously published release as permanently
+# stale, so inspection reports "frontend_source_stale" on a source tree that
+# never changed and the refresh loop can never converge. Major bumps still
+# rebuild because they can change the emitted bundle.
+_TOOLCHAIN_KEY_INPUT_NAMES = ("nodeVersion", "packageManagerVersion")
+_TOOLCHAIN_KEY_VERSION_PATTERN = re.compile(r"^[vV]?(\d+)")
 FRONTEND_PACKAGE_MANAGER_ENV = "VIBELUTION_FRONTEND_PM"
 FRONTEND_RELEASE_RETENTION_SECONDS = 7 * 24 * 60 * 60
 FRONTEND_STAGE_RETENTION_SECONDS = 60 * 60
@@ -201,7 +210,9 @@ def _validate_release_assets(path: Path) -> None:
             raise RuntimeError("Frontend release references a missing asset.")
 
 
-def _is_complete_release(path: Path, *, build_key: str | None = None) -> bool:
+def _is_complete_release(
+    path: Path, *, build_key: str | None = None, allow_legacy_key: bool = False
+) -> bool:
     try:
         _validate_release_assets(path)
         provenance = json.loads((path / ".vibelution-build.json").read_text(encoding="utf-8"))
@@ -209,7 +220,16 @@ def _is_complete_release(path: Path, *, build_key: str | None = None) -> bool:
         return False
     if not isinstance(provenance, dict) or int(provenance.get("schemaVersion") or 0) != BUILD_SCHEMA_VERSION:
         return False
-    return build_key is None or str(provenance.get("buildKey") or "") == build_key
+    if build_key is None:
+        return True
+    if str(provenance.get("buildKey") or "") == build_key:
+        return True
+    # Releases published before the toolchain-normalization policy carry a key
+    # hashed over full node/npm versions. Re-hash their own recorded inputs so a
+    # patch bump does not discard a byte-identical release; a genuine source or
+    # major-toolchain change still fails here. Publishing keeps the strict
+    # comparison: only inspection may admit a legacy key.
+    return allow_legacy_key and release_build_key_matches(provenance, build_key)
 
 
 def frontend_package_manager(package_manager: str | None = None) -> str:
@@ -533,11 +553,64 @@ def build_inputs(project_root: Path | str, *, package_manager: str | None = None
     }
 
 
+def _toolchain_key_version(value: Any) -> str:
+    """Reduce a toolchain version probe to the major version used by the key.
+
+    Values that are not recognisable versions (custom builds, ``unavailable``)
+    stay verbatim so they still distinguish themselves instead of collapsing
+    into one bucket.
+    """
+
+    text = str(value or "").strip()
+    match = _TOOLCHAIN_KEY_VERSION_PATTERN.match(text)
+    return f"v{int(match.group(1))}" if match is not None else text
+
+
 def compute_build_key(inputs: dict[str, Any]) -> str:
     excluded = _AUDIT_INPUT_NAMES | _TRANSIENT_INPUT_NAMES
     key_inputs = {name: value for name, value in inputs.items() if name not in excluded}
+    for name in _TOOLCHAIN_KEY_INPUT_NAMES:
+        if name in key_inputs:
+            key_inputs[name] = _toolchain_key_version(key_inputs[name])
     canonical = json.dumps(key_inputs, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def release_build_key_matches(provenance: dict[str, Any], build_key: str) -> bool:
+    """Does a release/package provenance describe the build identified by key?
+
+    Accepts both the current key and a key recorded before toolchain versions
+    were normalized, by re-hashing the provenance's own build inputs.
+    """
+
+    if not isinstance(provenance, dict) or not build_key:
+        return False
+    if str(provenance.get("buildKey") or provenance.get("frontendBuildKey") or "") == build_key:
+        return True
+    recorded = provenance.get("buildInputs")
+    if not isinstance(recorded, dict):
+        return False
+    return compute_build_key(recorded) == build_key
+
+
+def package_build_key_matches(
+    packaged: dict[str, Any], active: dict[str, Any], build_key: str
+) -> bool:
+    """Does a desktop package provenance describe the build identified by key?
+
+    A package cut before toolchain normalization keeps the same legacy key as
+    the release it was built from and stores no build inputs to re-hash, so
+    agreement between the two records is the strongest statement its
+    provenance can still make. The caller remains responsible for the byte
+    level content/tree/commit proof.
+    """
+
+    if release_build_key_matches(packaged, build_key):
+        return True
+    if not isinstance(packaged, dict) or not isinstance(active, dict):
+        return False
+    active_key = str(active.get("buildKey") or "").strip()
+    return bool(active_key) and str(packaged.get("frontendBuildKey") or "").strip() == active_key
 
 
 def read_active_provenance(project_root: Path | str) -> dict[str, Any]:
@@ -554,7 +627,17 @@ def inspect_frontend_build(project_root: Path | str, *, package_manager: str | N
     key = compute_build_key(inputs)
     dist = resolve_active_frontend_dist(project_root)
     provenance = read_active_provenance(project_root)
-    current = _is_complete_release(dist, build_key=key)
+    current = _is_complete_release(dist, build_key=key, allow_legacy_key=True)
+    recorded_key = str(provenance.get("buildKey") or "").strip() if current else ""
+    if recorded_key:
+        # Report the identity the active release actually carries. A release
+        # published before toolchain normalization keeps its legacy key in
+        # ``.vibelution-build.json`` and in the active pointer, and every
+        # consumer (desktop packaging, shell freshness, build identity) compares
+        # against that same record. Handing out the freshly hashed key instead
+        # would make a byte-identical, already-current release look like it was
+        # swapped mid-build.
+        key = recorded_key
     return {
         "current": current,
         "reason": "frontend build is current" if current else "frontend build key differs from active release",

@@ -56,6 +56,10 @@ _ELECTRON_SESSION_BOOTSTRAP_TIMEOUT_SECONDS = 20.0
 _ELECTRON_WORKBENCH_OPEN_TIMEOUT_SECONDS = 30.0
 _ELECTRON_DESKTOP_ACTION_ACK_TIMEOUT_SECONDS = 8.0
 _ELECTRON_OPEN_SIGNAL_TIMEOUT_SECONDS = 8.0
+# Best-effort live-shell open: the shell long-polls for up to 1.75s, so a claim
+# plus ack lands well inside this window. Bounded short so a shell that is not
+# polling cannot delay the argv-handoff fallback that follows it.
+_LIVE_OPEN_ACTION_CONFIRM_SECONDS = 5.0
 _ELECTRON_SESSION_PROCESS_RE = re.compile(r"-(\d+)-[a-z0-9]+$", re.IGNORECASE)
 _ELECTRON_WINDOW_REQUIRED_MESSAGE = (
     "Electron desktop shell is unavailable. Refusing Edge fallback. "
@@ -1662,6 +1666,12 @@ def open_workbench_window_via_desktop_shell(*, env: dict[str, str] | None = None
     if not executable_text:
         return {"opened": False, "reason": "desktop_shell_executable_unknown"}
     executable = Path(executable_text)
+    if _request_workbench_open_via_desktop_action():
+        return {
+            "opened": True,
+            "reason": f"{route.get('reason') or 'desktop_shell'}:desktop_action",
+            "executable": str(executable),
+        }
     try:
         _signal_live_electron_open_workbench(executable=executable, env=dict(env or os.environ.copy()))
     except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
@@ -1676,6 +1686,44 @@ def open_workbench_window_via_desktop_shell(*, env: dict[str, str] | None = None
         "reason": str(route.get("reason") or "signaled"),
         "executable": str(executable),
     }
+
+
+def _request_workbench_open_via_desktop_action() -> bool:
+    """Ask an already-live shell to open Workbench through its action channel.
+
+    Starting a second process with ``--open-workbench`` leans on the OS
+    single-instance handoff and on that process's exit code, which is not a
+    reliable success signal: a live shell was observed returning a fast
+    non-zero exit while no window appeared. The shell already polls the Launcher
+    for Desktop Actions, so submit the open there and confirm it through the
+    desktop-session snapshot instead.
+    """
+
+    session = _latest_active_electron_desktop_session()
+    if not session:
+        return False
+    try:
+        intent = _submit_electron_window_action(
+            action="open_workbench",
+            reason="launcher:open_workbench_request",
+            session=session,
+        )
+    except (OSError, RuntimeError, ValueError):
+        return False
+    if str(intent.get("status") or "") != "accepted":
+        return False
+    try:
+        _await_electron_window_action_confirmed(
+            intent=intent,
+            session=session,
+            action="open_workbench",
+            timeout_seconds=_LIVE_OPEN_ACTION_CONFIRM_SECONDS,
+        )
+    except (OSError, RuntimeError, TimeoutError, ValueError):
+        # Fall back to the argv handoff: a shell that is not polling (for
+        # example before its control plane attaches) still gets a chance.
+        return False
+    return True
 
 
 def _signal_live_electron_open_workbench(*, executable: Path, env: dict[str, str]) -> None:

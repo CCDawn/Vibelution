@@ -505,10 +505,15 @@ describe("guarded local Launcher update", () => {
     const relaunch = vi.fn();
     const sandbox: Record<string, unknown> = {
       app: { isPackaged: false, relaunch, exit: () => { events.push("exit"); } },
+      process: { argv: ["vibelution.exe"] },
       shellRefreshInFlight: false, shutdownApproved: false,
       decideLauncherShellRestart: () => "ensure-and-relaunch",
       desktopPythonPath: () => "pythonw.exe",
       createDesktopPathsForApp: () => ({ workspaceRoot: "test-workspace" }),
+      // Captured before teardown for the direct-relaunch paths; the guarded
+      // update path below exits through the refresh helper instead.
+      buildShellRelaunchArgs: () => ["--project", "test-workspace", "--open-workbench"],
+      workbenchIntentAtShellRestart: () => false,
       notifyDesktopTray: vi.fn(),
       ensureLatestLauncher: async () => { events.push("prepare"); },
       scheduleCurrentDesktopShellRefresh: schedule,

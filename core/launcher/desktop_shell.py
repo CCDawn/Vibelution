@@ -34,6 +34,8 @@ from core.infrastructure.windows_process_job import WindowsProcessJob
 from core.launcher.frontend_build import (
     frontend_releases_dir,
     inspect_frontend_build,
+    package_build_key_matches,
+    release_build_key_matches,
     resolve_active_frontend_dist,
 )
 from config.paths import PROJECT_ROOT as SOURCE_PROJECT_ROOT
@@ -1190,8 +1192,13 @@ def _inspect_desktop_shell_package(
             return "frontend_source_mismatch"
         if for_reuse and (
             not re.fullmatch(r"[0-9a-f]{64}", current_frontend_build_key)
-            or packaged_frontend_build_key != current_frontend_build_key
-            or frontend_provenance.get("buildKey") != current_frontend_build_key
+            or not release_build_key_matches(frontend_provenance, current_frontend_build_key)
+            or (
+                packaged_frontend_build_key != current_frontend_build_key
+                and not package_build_key_matches(
+                    provenance, frontend_provenance, current_frontend_build_key
+                )
+            )
         ):
             return "frontend_build_key_mismatch"
         if for_reuse and (

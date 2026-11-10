@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from core.launcher import desktop_shell
+from core.launcher.frontend_build import package_build_key_matches, release_build_key_matches
 
 _GIT_HASH = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -172,7 +173,8 @@ def _packaged_build(root: Path, package: Path, *, staged: bool, native_status: d
             or not status.get("currentFrontendDist")
             or Path(status["currentFrontendDist"]).resolve() != active_dist.resolve()
             or not isinstance(build_key, str) or not _SHA256.fullmatch(build_key)
-            or provenance.get("frontendBuildKey") != build_key or active.get("buildKey") != build_key
+            or not release_build_key_matches(active, build_key)
+            or not package_build_key_matches(provenance, active, build_key)
             or not isinstance(frontend_tree, str) or not _GIT_HASH.fullmatch(frontend_tree)
             or active.get("frontendTree") != frontend_tree
             or not isinstance(frontend_commit, str) or not _GIT_HASH.fullmatch(frontend_commit)

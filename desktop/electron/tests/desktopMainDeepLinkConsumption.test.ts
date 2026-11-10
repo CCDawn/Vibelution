@@ -87,7 +87,7 @@ describe("Electron main public deep-link consumption", () => {
 
   it("does not open the Launcher as a first-launch fallback and resolves the workbench URL without python", () => {
     const source = readFileSync(mainSourcePath, "utf8");
-    const startupIndex = source.indexOf("if (pendingOpenWorkbenchRequest &&");
+    const startupIndex = source.indexOf("const openWorkbenchIntent = pendingOpenWorkbenchRequest");
     const deferIndex = source.indexOf("if (deferWorkbenchOpen)", startupIndex);
 
     expect(startupIndex).toBeGreaterThan(0);
