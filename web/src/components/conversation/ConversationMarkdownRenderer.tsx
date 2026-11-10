@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState, type ComponentPropsWithoutRef } from "react";
 import { Check, Copy, WrapText } from "lucide-react";
 import ReactMarkdown, { type Options as ReactMarkdownOptions } from "react-markdown";
+import { Link } from "react-router-dom";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 
@@ -21,6 +22,7 @@ import {
 import { remarkConversationAutolinks } from "./conversationMarkdownAutolinks";
 import { ConversationMarkdownMermaidBlock } from "./conversationMarkdownMermaidBlock";
 import { safeConversationMarkdownUrl } from "./conversationMarkdownUrl";
+import { resolveConversationInternalRoutePath } from "./conversationMarkdownInternalRoute";
 import { ConversationMarkdownWorkspaceFileLink } from "./conversationMarkdownWorkspaceFileLink";
 import {
   CONVERSATION_MARKDOWN_DENSE_TABLE_MIN_COLUMNS,
@@ -257,6 +259,17 @@ function markdownComponents(
       const safeHref = safeConversationMarkdownUrl(rawHref);
       if (!safeHref) {
         return <>{literalChildren}</>;
+      }
+      // A same-origin target is a route this app already owns. Rendering a
+      // plain anchor makes Electron load the whole workbench document again
+      // instead of switching the current view, so route it inside the SPA.
+      const internalPath = resolveConversationInternalRoutePath(safeHref);
+      if (internalPath) {
+        return (
+          <Link className={classNames.inlineLink} to={internalPath}>
+            {literalChildren}
+          </Link>
+        );
       }
       return (
         <a className={classNames.inlineLink} href={safeHref}>
