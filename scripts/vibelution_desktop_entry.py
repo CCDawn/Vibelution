@@ -2342,6 +2342,7 @@ def _ensure_latest_launcher_bridge(args: argparse.Namespace) -> dict[str, object
     _append_log(
         "desktop_entry_python.desktop_shell.ensure_latest",
         electron_rebuilt=bool(electron.get("rebuilt")),
+        electron_reason=str(electron.get("reason") or ""),
         frontend_skipped=bool(frontend.get("skipped")),
         frontend_reason=str(frontend.get("reason") or ""),
     )

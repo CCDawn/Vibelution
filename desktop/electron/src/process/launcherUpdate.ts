@@ -7,6 +7,18 @@ import { parseLauncherBuild, type LauncherBuild } from "./launcherBuildIdentity.
 export type LauncherUpdatePhase = "checking" | "preparing" | "desktop" | "frontend" | "package" | "saving" | "replacing";
 export type LauncherUpdateProgress = { phase: LauncherUpdatePhase; startedAt: number };
 
+/**
+ * The ensure step found another refresh helper already staging the package.
+ * That helper publishes after this shell exits, so this transaction must not
+ * stop the workspace: it could not take the helper's lock afterwards.
+ */
+function preparationOwnedByAnotherRefresh(prepared: unknown): boolean {
+  if (typeof prepared !== "object" || prepared === null) return false;
+  const electron = (prepared as { electron?: unknown }).electron;
+  if (typeof electron !== "object" || electron === null) return false;
+  return (electron as { reason?: unknown }).reason === "refresh_in_progress";
+}
+
 /** A version read is not permission to stop a workspace. Recheck after preparation. */
 export async function executeLauncherUpdate(input: {
   /** Explicit operator refresh saves active tasks through stopWorkspaces. */
@@ -52,7 +64,17 @@ export async function executeLauncherUpdate(input: {
   if (before) return before;
   // Build failures stay in the live window; no workspace has been stopped yet.
   phase("preparing");
-  await input.prepare();
+  const prepared = await input.prepare();
+  if (preparationOwnedByAnotherRefresh(prepared)) {
+    return {
+      schemaVersion: 1,
+      accepted: false,
+      operation: "restart-latest-shell",
+      code: "launcher_update_in_progress",
+      message: "桌面壳正在由另一个进程更新，当前窗口保持打开。",
+      activeWorkRuns: [],
+    };
+  }
   const after = await check();
   if (after) return after;
   const guard = await input.acquireShutdownGuard?.();

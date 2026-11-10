@@ -2043,7 +2043,6 @@ def test_packaged_update_current_retry_does_not_rebuild_after_exit(tmp_path, mon
 
 @pytest.mark.parametrize("result", [
     {"ok": False, "message": "compiler unavailable"},
-    {"ok": True, "skipped": "refresh_in_progress"},
     {"ok": True},
 ])
 def test_packaged_update_rejects_failed_or_unconfirmed_preparation(tmp_path, monkeypatch, result):
@@ -2052,6 +2051,28 @@ def test_packaged_update_rejects_failed_or_unconfirmed_preparation(tmp_path, mon
     monkeypatch.setattr(desktop_shell, "run_desktop_shell_prebuild", lambda _root: result)
     with pytest.raises(RuntimeError):
         desktop_shell.ensure_latest_launcher(tmp_path, shell_kind="packaged", on_progress=phases.append)
+    assert phases == ["frontend", "package"]
+
+
+def test_packaged_update_accepts_refresh_already_in_progress(tmp_path, monkeypatch):
+    """Another helper owning the package must not fail this window's startup.
+
+    Incident shape: the previous shell's refresh still held the lock, so every
+    ensure-latest-launcher retry raised "Launcher 更新准备未完成" and the new
+    window could not finish starting even though that helper owned the update.
+    """
+    phases: list[str] = []
+    monkeypatch.setattr("core.runtime_manager.daemon._preflight_frontend_build_for_restart", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(desktop_shell, "run_desktop_shell_prebuild", lambda _root: {"ok": True, "skipped": "refresh_in_progress"})
+
+    result = desktop_shell.ensure_latest_launcher(tmp_path, shell_kind="packaged", on_progress=phases.append)
+
+    assert result["ok"] is True
+    assert result["electron"] == {
+        "rebuilt": False,
+        "prepared": False,
+        "reason": "refresh_in_progress",
+    }
     assert phases == ["frontend", "package"]
 
 
@@ -3221,7 +3242,9 @@ def test_prebuild_logs_a_bounded_reuse_rejection_reason(tmp_path, monkeypatch, r
 
 
 def test_run_desktop_shell_prebuild_skips_while_refresh_lock_held(tmp_path, monkeypatch):
-    _write_refresh_lock(tmp_path, pid=99142)
+    _write_refresh_lock(tmp_path, pid=os.getpid())
+    # The holder process predates its lock, so it is the real live owner.
+    monkeypatch.setattr(desktop_shell, "_process_create_time", lambda _pid: 0.0)
     monkeypatch.setattr(
         desktop_shell,
         "inspect_desktop_shell",
@@ -3231,6 +3254,18 @@ def test_run_desktop_shell_prebuild_skips_while_refresh_lock_held(tmp_path, monk
     assert result["ok"] is True
     assert result["skipped"] == "refresh_in_progress"
     assert not desktop_shell._refresh_lock_path(tmp_path, desktop_shell.PREBUILD_LOCK_RELATIVE).is_file()
+
+
+def test_run_desktop_shell_prebuild_ignores_dead_refresh_lock(tmp_path, monkeypatch):
+    """A crashed helper's lock must not make every preparation a benign skip."""
+    _write_refresh_lock(tmp_path, pid=99142)
+    monkeypatch.setattr(desktop_shell, "_pid_alive", lambda _pid: False)
+    monkeypatch.setattr(desktop_shell, "inspect_desktop_shell", lambda _root: {"stale": False, "reason": "current"})
+
+    result = desktop_shell.run_desktop_shell_prebuild(tmp_path)
+
+    assert result["ok"] is True
+    assert result["skipped"] == "current"
 
 
 def test_run_desktop_shell_prebuild_stages_valid_build(tmp_path, monkeypatch):
@@ -3515,6 +3550,53 @@ def test_rebuild_desktop_shell_promote_sharing_violation_falls_back_to_npm(tmp_p
     assert not (tmp_path / desktop_shell.PREVIOUS_WIN_UNPACKED_RELATIVE).exists()
     # The promotion lock must not outlive the failed promote either.
     assert not desktop_shell._refresh_lock_path(tmp_path, desktop_shell.PREBUILD_LOCK_RELATIVE).is_file()
+
+
+def test_rebuild_desktop_shell_refuses_to_promote_over_live_owner(tmp_path, monkeypatch):
+    """A live owner maps the packaged exe; promoting would fail at the rename."""
+    tree = "a" * 40
+    live = _write_live_win_unpacked(tmp_path)
+    staged = _write_staged_shell(tmp_path, tree_hash=tree)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    _patch_owner_reader(monkeypatch, [_live_owner(999)])
+    events: list[str] = []
+    monkeypatch.setattr(desktop_shell, "_append_refresh_log", lambda _root, event, **_fields: events.append(event))
+    monkeypatch.setattr(
+        desktop_shell, "inspect_desktop_shell", lambda _root: pytest.fail("must not inspect after a blocked promote")
+    )
+
+    with pytest.raises(desktop_shell.LiveOwnerHoldingLockError) as raised:
+        desktop_shell.rebuild_desktop_shell(tmp_path)
+
+    assert raised.value.holder["pid"] == 999
+    assert (live / "main.js").read_text(encoding="utf-8") == "old"
+    assert (staged / "main.js").read_text(encoding="utf-8") == "new"
+    assert "rebuild.blocked_live_owner" in events
+    assert "rebuild.failed" not in events
+    assert desktop_shell.recent_desktop_shell_refresh_failure(tmp_path) is None
+    assert not desktop_shell._refresh_lock_path(tmp_path, desktop_shell.PREBUILD_LOCK_RELATIVE).is_file()
+
+
+def test_rebuild_desktop_shell_refuses_publish_when_owner_appears_during_build(tmp_path, monkeypatch):
+    tree = "a" * 40
+    live = _write_live_win_unpacked(tmp_path)
+    # Staged provenance does not match HEAD, so the slow package build runs.
+    _write_staged_shell(tmp_path, tree_hash="b" * 40)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    # Free before the promote, live only when the built tree is ready to publish.
+    _patch_owner_reader(monkeypatch, [None, _live_owner(999)])
+    _stub_desktop_shell_package_build(monkeypatch, tmp_path, tree_hash=tree)
+    events: list[str] = []
+    monkeypatch.setattr(desktop_shell, "_append_refresh_log", lambda _root, event, **_fields: events.append(event))
+
+    with pytest.raises(desktop_shell.LiveOwnerHoldingLockError):
+        desktop_shell.rebuild_desktop_shell(tmp_path)
+
+    assert (live / "main.js").read_text(encoding="utf-8") == "old"
+    assert "rebuild.blocked_live_owner" in events
+    assert "rebuild.failed" not in events
+    assert not (tmp_path / desktop_shell.PREVIOUS_WIN_UNPACKED_RELATIVE).exists()
+    assert desktop_shell.recent_desktop_shell_refresh_failure(tmp_path) is None
 
 
 # ---------------------------------------------------------------------------
@@ -3890,6 +3972,38 @@ def test_refresh_rebuild_fallback_refuses_launch_when_owner_appeared(tmp_path, m
     assert result["fallbackLaunch"]["errorCode"] == "LIVE_OWNER_HOLDING_LOCK"
     assert result["launchPid"] == 0
     assert result["ownerPid"] == 999
+
+
+def test_refresh_reports_live_owner_block_when_owner_appears_during_rebuild(tmp_path, monkeypatch):
+    """Path 3b: a primary that appears during the build is a block, not a failure.
+
+    Incident shape: the helper saw a free lock, built, and then hit WinError 5
+    renaming the live ``win-unpacked`` while the new shell mapped its exe. It
+    recorded ``rebuild_failed`` and tried a fallback launch that could only bow
+    out, poisoning the refresh cooldown.
+    """
+    tree = "a" * 40
+    _write_live_win_unpacked(tmp_path)
+    _write_staged_shell(tmp_path, tree_hash="b" * 40)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    # Free at the pre-launch gate and promote, live when the built tree publishes.
+    _patch_owner_reader(monkeypatch, [None, None, _live_owner(999)])
+    _stub_desktop_shell_package_build(monkeypatch, tmp_path, tree_hash=tree)
+    monkeypatch.setattr(
+        desktop_shell, "launch_packaged_desktop_shell", lambda **_k: pytest.fail("must not launch a fallback")
+    )
+    monkeypatch.setattr(desktop_shell, "_append_refresh_log", lambda *_a, **_k: None)
+
+    result = desktop_shell.run_desktop_shell_refresh(wait_pid=0, project_root=tmp_path)
+
+    assert result["refreshed"] is False
+    assert result["reason"] == "live_owner_holding_lock"
+    assert result["errorCode"] == "LIVE_OWNER_HOLDING_LOCK"
+    assert result["ownerPid"] == 999
+    assert result["launchPid"] == 0
+    assert "fallbackLaunch" not in result
+    marker = desktop_shell.recent_desktop_shell_refresh_failure(tmp_path)
+    assert marker is not None and marker["reason"] == "live_owner_holding_lock"
 
 
 def test_refresh_unpackaged_direct_launch_refuses_when_owner_appeared(tmp_path, monkeypatch):
