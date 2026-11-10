@@ -7695,6 +7695,10 @@ class TestResolvedApiKeyUsage:
     def test_agent_uses_provider_specific_resolved_key(self, monkeypatch):
         monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
         monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
+        # 产品进程在 fallback 开关开启时会优先读 HKCU 用户级变量（UI 保存的真实
+        # key）。测试只改进程环境，不禁用该回退时，本机已保存的 key 会遮蔽
+        # monkeypatch 的测试值，使断言依赖操作者机器状态。
+        monkeypatch.delenv("VIBELUTION_ENABLE_USER_ENV_FALLBACK", raising=False)
         monkeypatch.setenv("MINIMAX_API_KEY", "minimax-test-key")
 
         monkeypatch.setattr(agent_module.Key_Tools, "create_llm_facing_tools", lambda: [])
