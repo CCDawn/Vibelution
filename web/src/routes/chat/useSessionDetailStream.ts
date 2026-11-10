@@ -1,5 +1,5 @@
 import { resolveSessionActivity, sessionOwnsExecution, sessionIsAtRest, type SessionActivitySource } from "../sessionActivityState";
-import { useCallback, useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import { startTransition, useCallback, useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../../app/browserTelemetry";
@@ -735,7 +735,10 @@ export function useSessionDetailStream({
       if (!applyTimer) {
         applyTimer = window.setTimeout(() => {
           applyTimer = null;
-          applyPendingDetail("timer");
+          // Snapshot apply is a background refresh, not user intent: run it
+          // as a transition so a click or keystroke landing in the same frame
+          // paints immediately instead of queueing behind the whole tree.
+          startTransition(() => applyPendingDetail("timer"));
         }, decision.delayMs);
       }
       if (decision.shouldLogQueued) {
