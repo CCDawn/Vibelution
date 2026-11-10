@@ -405,6 +405,19 @@ export function useConversationTimelineFollow({
     if (initializedSessionRef.current !== sessionId) {
       initializedSessionRef.current = sessionId;
       pinnedLatestUserMessageIdRef.current = latestUserMessageId;
+      // A switch abandons the previous conversation's pending viewport work: its
+      // anchor-correction frames, reading anchor and width-settle window all
+      // describe rows that are no longer mounted. Leaving them armed let those
+      // frames re-pin the new conversation to stale geometry, which is the text
+      // overlap that showed for a frame or two right after switching.
+      historyAnchorCorrectingRef.current = null;
+      historyScrollAnchorRef.current = null;
+      readingViewportAnchorRef.current = null;
+      contentWidthChangingUntilRef.current = 0;
+      if (streamingScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(streamingScrollFrameRef.current);
+        streamingScrollFrameRef.current = null;
+      }
       // Codex resume: restore mid-history viewport when revisiting a thread.
       const saved = peekSessionTimelineScroll(sessionId);
       const restored = restoreSessionTimelineScroll(timeline, saved);
