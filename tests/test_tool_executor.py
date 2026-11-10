@@ -1476,6 +1476,11 @@ class TestToolExecutorTimeout:
 
         fake_module = ModuleType("core.infrastructure.codex_cli_sandbox")
         fake_module.execute_codex_sandbox_command = fake_execute_codex_sandbox_command
+        # cli_tool 还会导入该符号做环境拒绝豁免；手工 ModuleType 桩必须与真实模块
+        # 同步，否则会以 (unknown location) 的 ImportError 让 cli_tool 整条链路失控。
+        fake_module.is_sandbox_unverified_block = (
+            lambda text: "SANDBOX_UNVERIFIED" in str(text)
+        )
         monkeypatch.setitem(sys.modules, "core.infrastructure.codex_cli_sandbox", fake_module)
 
         cancel_requested = threading.Event()
@@ -1633,6 +1638,11 @@ class TestToolExecutorTimeout:
 
         fake_module = ModuleType("core.infrastructure.codex_cli_sandbox")
         fake_module.execute_codex_sandbox_command = fake_execute_codex_sandbox_command
+        # cli_tool 还会导入该符号做环境拒绝豁免；手工 ModuleType 桩必须与真实模块
+        # 同步，否则会以 (unknown location) 的 ImportError 让 cli_tool 整条链路失控。
+        fake_module.is_sandbox_unverified_block = (
+            lambda text: "SANDBOX_UNVERIFIED" in str(text)
+        )
         monkeypatch.setitem(sys.modules, "core.infrastructure.codex_cli_sandbox", fake_module)
         executor.set_cancel_checker(lambda: "")
 
@@ -1802,6 +1812,11 @@ class TestToolExecutorErrorHandling:
             return "x" * 80
 
         sandbox_module.execute_codex_sandbox_command = fake_execute_codex_sandbox_command
+        # cli_tool 还会导入该符号做环境拒绝豁免；手工 ModuleType 桩必须与真实模块
+        # 同步，否则会以 (unknown location) 的 ImportError 让 cli_tool 整条链路失控。
+        sandbox_module.is_sandbox_unverified_block = (
+            lambda text: "SANDBOX_UNVERIFIED" in str(text)
+        )
         monkeypatch.setitem(
             sys.modules,
             "core.infrastructure.codex_cli_sandbox",
