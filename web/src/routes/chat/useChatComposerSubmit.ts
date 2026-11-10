@@ -1031,6 +1031,21 @@ export function useChatComposerSubmitActions({
       if (optimisticDetail) {
         queryClient.setQueryData(sessionKey, optimisticDetail);
       }
+      // A submission that is still uploading is also "not accepted yet": its
+      // stop has to wait for the turn that upload will create. Only a turn that
+      // is genuinely running, with no submission pending, can be stopped blind.
+      // An optimistic layer id is the client's own placeholder: the server has
+      // never seen it, so a blind stop would be addressed to nothing. Only a
+      // real running turn with no submission behind it can be stopped blind.
+      const optimisticLayerTurnId = (activeTurnId ?? "").startsWith("optimistic-");
+      if (!submitPending && !optimisticLayerTurnId && !pendingUploadSubmissionRef.current.has(activeSessionId)) {
+        // The turn is already running; the server resolves the live turn from
+        // the session when this layer has no id for it. Waiting for an
+        // acceptance that is never coming left the button painting a stopping
+        // phase while the backend kept streaming.
+        stopTurnMutation.mutate({ sessionId: activeSessionId, turnId: "" });
+        return;
+      }
       const pendingSubmissionId = submitTurnMutation.isPending
         && submitTurnMutation.variables?.sessionId === activeSessionId
         ? submitTurnMutation.variables.clientSubmissionId
