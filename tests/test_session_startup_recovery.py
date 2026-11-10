@@ -1074,3 +1074,36 @@ def test_stale_worker_gone_interruption_is_continuable() -> None:
     assert not startup_recovery._interrupt_reason_can_continue(
         "electron_user_close"
     )
+
+
+def test_restart_interruption_does_not_spend_retry_budget(
+    recovery_env, tmp_path, submit_calls
+) -> None:
+    """An operator restart must not consume the bounded auto-retry budget."""
+
+    _seed_conversation(
+        tmp_path,
+        recovery_state={
+            "originTurnId": ORIGINAL_TURN_ID,
+            "resumedTurnId": "",
+            "attempts": 2,
+            "updatedAt": "2026-09-25T00:00:00Z",
+        },
+    )
+    _seed_interrupted_turn(tmp_path)
+    _seed_active_work_run(recovery_env)
+    append_turn_event(
+        tmp_path,
+        SESSION_ID,
+        ORIGINAL_TURN_ID,
+        EVENT_TURN_INTERRUPTED,
+        status="interrupted",
+        payload={"reason": "process_restarted"},
+        source="turn_journal_reconcile",
+    )
+
+    summary = startup_recovery.recover_interrupted_session_turns_on_startup()
+
+    assert summary["retryLimitSkipCount"] == 0
+    assert summary["resumedCount"] == 1
+    assert len(submit_calls) == 1

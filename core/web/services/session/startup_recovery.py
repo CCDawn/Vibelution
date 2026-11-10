@@ -650,6 +650,22 @@ def _first_nonempty_line(prompt: str) -> str:
     return ""
 
 
+def _restart_interrupt_reason(events: list[Any], turn_id: str) -> str:
+    """Reason recorded for the newest interruption of ``turn_id``."""
+
+    wanted = str(turn_id or "").strip()
+    if not wanted:
+        return ""
+    for event in reversed(list(events or [])):
+        if str(getattr(event, "event_type", "") or "").strip() != EVENT_TURN_INTERRUPTED:
+            continue
+        if str(getattr(event, "turn_id", "") or "").strip() != wanted:
+            continue
+        payload = getattr(event, "payload", None)
+        return str(payload.get("reason") or "").strip() if isinstance(payload, dict) else ""
+    return ""
+
+
 def _load_recovery_attempts(state: Any, open_turn_id: str) -> int:
     """Attempt budget used so far for the resume chain of ``open_turn_id``."""
 
@@ -787,6 +803,11 @@ def _resume_interrupted_turn(
         else {}
     )
     attempts = _load_recovery_attempts(previous_state, open_turn_id)
+    # An operator-driven restart is not a poison object: it must not spend the
+    # bounded auto-retry budget, or a couple of restarts would silence recovery
+    # for this session until somebody types manually.
+    if _restart_interrupt_reason(events, open_turn_id) in _RESTART_INTERRUPT_REASONS:
+        attempts = 0
     if attempts >= max_retries:
         summary["retryLimitSkipCount"] += 1
         return
