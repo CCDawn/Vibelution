@@ -75,6 +75,34 @@ def _is_gateway_transient_400(message: str) -> bool:
     return "渠道" in message and any(token in message for token in _GATEWAY_CHANNEL_DISABLED_TOKENS)
 
 
+# 本地文件系统 errno：2 缺文件 / 13 无权限 / 28 磁盘满。这三个都只可能来自
+# 本机环境（典型是 httpx 在构造 SSL 上下文时读取 certifi/cacert.pem，包正在
+# 被重装时会以裸 "[Errno 2] No such file or directory" 抛出），请求根本没有
+# 发到 provider。传输族 errno（104 connection reset / 110 timeout 等）不在
+# 此列，继续由下方 network_error 关键词分支处理。
+_LOCAL_FS_ERRNOS: Tuple[int, ...] = (2, 13, 28)
+_LOCAL_FS_ERRNO_PATTERN = re.compile(r"\[Errno\s+(2|13|28)\]", re.IGNORECASE)
+_LOCAL_FS_ERRNO_MESSAGES = {
+    2: "本地运行时文件缺失（[Errno 2]）：本轮调用未到达 provider；请完成当前更新/安装后重试",
+    13: "本地运行时文件访问被拒绝（[Errno 13]）：本轮调用未到达 provider；请检查文件权限后重试",
+    28: "本地磁盘空间不足（[Errno 28]）：本轮调用未到达 provider；请释放磁盘空间后重试",
+}
+
+
+def _local_filesystem_errno(exc: Exception, message: str) -> int | None:
+    """读取本地文件系统 errno；异常对象优先，消息里的 ``[Errno N]`` 为同源证据。"""
+
+    raw = getattr(exc, "errno", None)
+    try:
+        errno_value = int(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        errno_value = None
+    if errno_value in _LOCAL_FS_ERRNOS:
+        return errno_value
+    match = _LOCAL_FS_ERRNO_PATTERN.search(message)
+    return int(match.group(1)) if match else None
+
+
 # 结构化 HTTP 状态证据：只认 "HTTP 503" / '"status_code": 429' / "code=401"
 # 形态（Error code: 400 属同族）。纯文本三位数（模型名、request id、trace
 # 片段里的 "-403-"、"4013"）不是状态码证据——词边界要求三位数后紧跟非数字，
@@ -166,6 +194,16 @@ def classify_exception(exc: Exception) -> LLMError:
         return LLMError("tool_protocol_error", exc_msg or "tool calling 协议错误", retryable=False)
     if "chat content is empty" in lower or "content is empty" in lower:
         return LLMError("empty_content_error", "provider 拒绝空消息内容", retryable=False)
+    # 本地文件系统错误先于传输关键词判定：本机缺文件（典型是重装依赖期间缺失
+    # certifi/cacert.pem）不是 provider 协议错误，调用从未到达上游。
+    local_errno = _local_filesystem_errno(exc, exc_msg)
+    if local_errno is not None:
+        return LLMError(
+            "configuration_error",
+            _LOCAL_FS_ERRNO_MESSAGES[local_errno],
+            retryable=False,
+            details={"errno": local_errno, "exceptionType": exc_type},
+        )
     if (
         "unexpected_eof_while_reading" in lower
         or "eof occurred in violation of protocol" in lower

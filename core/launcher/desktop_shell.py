@@ -100,6 +100,23 @@ class BuildProcessRetirementError(RuntimeError):
         self.owner = owner
 
 
+class LiveOwnerHoldingLockError(RuntimeError):
+    """A verifiably live shell owns the packaged tree, so it cannot be replaced.
+
+    Windows refuses to rename a directory whose exe/modules are mapped by a
+    running process. Detecting the owner before the publish keeps that expected
+    condition out of the rebuild-failure cooldown and lets the refresh report
+    the same ``LIVE_OWNER_HOLDING_LOCK`` block as its pre-launch gate.
+    """
+
+    def __init__(self, holder: dict[str, Any]) -> None:
+        self.holder = dict(holder)
+        super().__init__(
+            "desktop shell is held by a live owner process "
+            f"(pid={int(self.holder.get('pid') or 0)}); the live package cannot be replaced"
+        )
+
+
 @dataclass
 class _PendingBuildRetirement:
     owner: OwnedProcess
@@ -1472,6 +1489,11 @@ def run_desktop_shell_refresh(
                 rebuilt = {"rebuilt": False, "reason": current["reason"]}
             else:
                 rebuilt = rebuild_desktop_shell(project_root=root)
+        except LiveOwnerHoldingLockError as exc:
+            # The wait pid exited, but another shell became primary during the
+            # build. Nothing may be renamed over it: report the same block as
+            # the pre-launch gate instead of a rebuild failure with a cooldown.
+            return _refresh_blocked_by_live_owner(root, exc.holder, wait_pid=int(wait_pid))
         except Exception as exc:
             detail = str(exc)
             record_desktop_shell_refresh_failure(root, reason="rebuild_failed", detail=detail)
@@ -1719,7 +1741,10 @@ def run_desktop_shell_prebuild(project_root: Path | str = PROJECT_ROOT) -> dict[
     root = Path(project_root)
     deadline = time.monotonic() + DESKTOP_SHELL_BUILD_DEADLINE_SECONDS
     try:
-        if _refresh_lock_path(root).is_file():
+        refresh_lock = _refresh_lock_path(root)
+        # A dead helper's leftover lock must not wedge preparation forever;
+        # only a lock owned by a live process means a refresh is publishing.
+        if refresh_lock.is_file() and not _refresh_lock_is_stale(refresh_lock):
             # Refresh owns the final package; a staging build would only race it.
             return {"schemaVersion": 1, "ok": True, "skipped": "refresh_in_progress"}
         _ensure_desktop_shell_build_lock(root, deadline=deadline)
@@ -1903,7 +1928,34 @@ def _assistant_payload_builder_python(root: Path) -> str:
     return sys.executable
 
 
-def _build_assistant_payload(root: Path, payload: Path, *, deadline: float, env: dict[str, str]) -> str:
+_ASSISTANT_PAYLOAD_SOURCE_CHANGED = "product source changed during payload construction"
+_ASSISTANT_PAYLOAD_BUILD_ATTEMPTS = 2
+
+
+def _build_assistant_payload(
+    root: Path, payload: Path, *, deadline: float, env: dict[str, str]
+) -> str:
+    """Build the payload, retrying once when a live source writer raced it."""
+
+    attempts = 0
+    while True:
+        attempts += 1
+        try:
+            return _build_assistant_payload_once(root, payload, deadline=deadline, env=env)
+        except Exception as error:
+            retryable = _ASSISTANT_PAYLOAD_SOURCE_CHANGED in str(error)
+            if (
+                attempts >= _ASSISTANT_PAYLOAD_BUILD_ATTEMPTS
+                or not retryable
+                or time.monotonic() >= deadline
+            ):
+                raise
+            _remove_owned_shell_tree(payload, within=root / "dist")
+
+
+def _build_assistant_payload_once(
+    root: Path, payload: Path, *, deadline: float, env: dict[str, str]
+) -> str:
     builder_python = _assistant_payload_builder_python(root)
     command = [builder_python, "-B", "-c",
                ("import sys; from scripts.build_assistant_runtime import build_launcher_assistant_payload; "
@@ -1914,7 +1966,6 @@ def _build_assistant_payload(root: Path, payload: Path, *, deadline: float, env:
     if not path.is_file() or path.stat().st_size > 32 * 1024 * 1024:
         raise RuntimeError("desktop assistant builder did not produce a complete manifest")
     return hashlib.sha256(path.read_bytes()).hexdigest()
-
 
 def _run_desktop_shell_package_build(root: Path, *, mode: str, deadline: float) -> Path:
     if mode == "linux-arm64" or sys.platform != "win32":
@@ -2159,6 +2210,19 @@ def _publish_built_shell_tree(source: Path, destination: Path, *, previous: Path
         _remove_owned_shell_tree(previous, within=destination.parent)
 
 
+def _raise_if_live_owner_holds_shell(root: Path) -> None:
+    """Refuse to replace a package a verified-live shell is still running.
+
+    Called before the promote rename and again before the built-tree publish:
+    the owner can appear at any point during the build, and Windows reports the
+    resulting lock as ``WinError 5`` at the rename.
+    """
+
+    holder = _verified_live_desktop_shell_owner(root)
+    if holder is not None:
+        raise LiveOwnerHoldingLockError(holder)
+
+
 def rebuild_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, Any]:
     """Rebuild ``win-unpacked`` from the current ``desktop/electron`` checkout."""
 
@@ -2166,6 +2230,7 @@ def rebuild_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, 
     deadline = time.monotonic() + DESKTOP_SHELL_BUILD_DEADLINE_SECONDS
     _wait_for_desktop_shell_build_lock(root, deadline=deadline)
     try:
+        _raise_if_live_owner_holds_shell(root)
         if _try_promote_staged_desktop_shell_locked(root, deadline=deadline):
             status = inspect_desktop_shell(root)
             if not status["stale"]:
@@ -2184,6 +2249,9 @@ def rebuild_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, 
         try:
             built = session / "builder-output" / "win-unpacked"
             _assert_assistant_package(root, built, deadline=deadline)
+            # The owner can appear while the package builds; publishing then
+            # only wastes the rename and records a filesystem error.
+            _raise_if_live_owner_holds_shell(root)
             _publish_built_shell_tree(
                 built,
                 root / PACKAGED_EXE_RELATIVE.parent,
@@ -2201,6 +2269,16 @@ def rebuild_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, 
             "reason": status["reason"],
             "currentElectronTree": status["currentElectronTree"],
         }
+    except LiveOwnerHoldingLockError as exc:
+        # Expected contention, not a broken build: keep it out of the
+        # rebuild-failure marker and let the refresh report the block.
+        _append_refresh_log(
+            root,
+            "rebuild.blocked_live_owner",
+            owner_pid=int(exc.holder.get("pid") or 0),
+            detail=str(exc)[-800:],
+        )
+        raise
     except Exception as exc:
         detail = str(exc)
         _append_refresh_log(root, "rebuild.failed", detail=detail)
@@ -2330,7 +2408,10 @@ def ensure_latest_launcher(
     """Prepare Electron and the frontend while the old shell remains usable.
 
     The refresh helper publishes the prepared Electron tree after wait_pid exits.
-    Progress reports entry into each preparation stage; observer errors are ignored.
+    If another helper already owns that final package, this returns ``ok`` with
+    ``electron.reason == "refresh_in_progress"`` instead of failing startup: the
+    owning helper is the one that publishes. Progress reports entry into each
+    preparation stage; observer errors are ignored.
     """
 
     root = Path(project_root)
@@ -2358,14 +2439,18 @@ def ensure_latest_launcher(
     if shell_kind == "packaged":
         report_progress("package")
         staged = run_desktop_shell_prebuild(root)
+        skipped = str(staged.get("skipped") or "")
+        # ``refresh_in_progress`` means another helper already owns the final
+        # package and will publish it after the old shell exits. This window
+        # must not fail its own startup over an update it does not own.
         if staged.get("ok") is not True or not (
-            staged.get("staged") is True or staged.get("skipped") == "current"
+            staged.get("staged") is True or skipped in {"current", "refresh_in_progress"}
         ):
             raise RuntimeError(str(staged.get("message") or "Launcher 更新准备未完成，当前窗口保持打开。"))
         electron = {
             "rebuilt": False,
             "prepared": staged.get("staged") is True,
-            "reason": "prepared" if staged.get("staged") else str(staged.get("skipped") or "current"),
+            "reason": "prepared" if staged.get("staged") else skipped or "current",
         }
     return {
         "schemaVersion": 1,

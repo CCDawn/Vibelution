@@ -34,6 +34,8 @@ backend startup never blocks on recovery.
 
 from __future__ import annotations
 
+import json
+
 import logging
 import os
 import threading
@@ -122,6 +124,7 @@ def _new_summary() -> dict[str, Any]:
         "sessionIndexCount": 0,
         "candidateCount": 0,
         "prefilterSkippedCount": 0,
+        "tailSkippedCount": 0,
         "workerCount": 1,
         "watermarkApplied": False,
         "durationMs": 0,
@@ -306,6 +309,107 @@ def _latest_restart_interrupted_turn(events: list[Any]) -> tuple[str, str]:
             continue
         return turn_id, str(getattr(event, "timestamp", "") or "").strip(), already_resumed_skips
     return "", "", already_resumed_skips
+
+
+_TAIL_READ_BYTES = 256 * 1024
+
+_TAIL_TERMINAL_EVENT_TYPES = frozenset(
+    {"turn_completed", "turn_failed", "turn_interrupted"}
+)
+
+
+def _tail_ledger_rows(s: Any, session_id: str) -> tuple[list[dict[str, Any]], bool]:
+    """Newest rows of the session ledger, without loading the whole journal.
+
+    Startup recovery only needs the newest turn-level fact: a settled turn, a
+    restart interruption, or a turn that is still open. Active agent sessions
+    keep ledgers tens of megabytes long, and parsing them end to end dominated
+    the sweep even after the candidate set had been narrowed.
+    """
+
+    from pathlib import Path
+
+    from core.chat.turn_journal import turn_journal_path
+
+    path = Path(turn_journal_path(s.PROJECT_ROOT, session_id))
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as handle:
+            truncated = size > _TAIL_READ_BYTES
+            if truncated:
+                handle.seek(size - _TAIL_READ_BYTES)
+            chunk = handle.read()
+    except OSError:
+        return [], False
+    lines = chunk.split(b"\n")
+    if truncated and lines:
+        # The tail window cut the oldest row mid-record.
+        lines = lines[1:]
+    rows: list[dict[str, Any]] = []
+    for raw in lines:
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            parsed = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            continue
+        if isinstance(parsed, dict):
+            rows.append(parsed)
+    return rows, truncated
+
+
+def _tail_resumed_turn_ids(rows: list[dict[str, Any]]) -> set[str]:
+    resumed: set[str] = set()
+    for row in rows:
+        if str(row.get("eventType") or "").strip() != "session_recovery_resumed":
+            continue
+        payload = row.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        sources: list[dict[str, Any]] = [payload]
+        nested = payload.get("recovery")
+        if isinstance(nested, dict):
+            sources.append(nested)
+        for source in sources:
+            for key in ("recoveredTurnId", "originalTurnId", "openTurnId"):
+                value = str(source.get(key) or "").strip()
+                if value:
+                    resumed.add(value)
+    return resumed
+
+
+def _tail_may_need_resume(s: Any, session_id: str) -> tuple[bool | None, int]:
+    """``False`` when the ledger tail proves nothing is resumable.
+
+    ``True`` and ``None`` both mean "load the full events": a turn is still
+    open or was restart-interrupted, or the tail was too short to decide. Only
+    ``False`` may skip the journal read, so an unusual tail can never hide a
+    genuine recovery.
+    """
+
+    rows, _truncated = _tail_ledger_rows(s, session_id)
+    if not rows:
+        return False, 0
+    resumed_turn_ids = _tail_resumed_turn_ids(rows)
+    for row in reversed(rows):
+        event_type = str(row.get("eventType") or "").strip()
+        turn_id = str(row.get("turnId") or "").strip()
+        if event_type == "turn_interrupted" and turn_id:
+            if turn_id in resumed_turn_ids:
+                return False, 1
+            payload = row.get("payload")
+            reason = (
+                str(payload.get("reason") or "").strip()
+                if isinstance(payload, dict)
+                else ""
+            )
+            return reason in _RESTART_INTERRUPT_REASONS, 0
+        if event_type in _TAIL_TERMINAL_EVENT_TYPES:
+            return False, 0
+        if event_type == "turn_started":
+            return True, 0
+    return None, 0
 
 
 def _open_turn_work_run_is_interrupted(
@@ -760,6 +864,13 @@ def _recover_session_on_startup(
         # journal at all and the turn waited for the operator to press continue.
         # Fall back to the journal's own restart-interrupt stamp, bounded by age
         # so a stale turn is never replayed at every startup.
+        tail_decision, tail_resumed_skips = _tail_may_need_resume(s, session_id)
+        summary["alreadyResumedSkipCount"] += tail_resumed_skips
+        if tail_decision is False:
+            summary["tailSkippedCount"] += 1
+            summary["noInterruptedTurnCount"] += 1
+            summary["noActiveTurnSkipCount"] += 1
+            return
         events = s._load_session_conversation_events_cached(session_id)
         open_turn_id = latest_open_turn_id(events)
         if not open_turn_id:
@@ -778,6 +889,11 @@ def _recover_session_on_startup(
             summary["noActiveTurnSkipCount"] += 1
             return
     else:
+        tail_decision, tail_resumed_skips = _tail_may_need_resume(s, session_id)
+        summary["alreadyResumedSkipCount"] += tail_resumed_skips
+        if tail_decision is False:
+            summary["tailSkippedCount"] += 1
+            return
         events = s._load_session_conversation_events_cached(session_id)
         open_turn_id = latest_open_turn_id(events)
         if not open_turn_id:
@@ -807,6 +923,7 @@ _SWEEP_COUNTER_FIELDS = (
     "queuedDrainScheduledCount",
     "externalTaskSkipCount",
     "errorCount",
+    "tailSkippedCount",
 )
 
 
@@ -1105,6 +1222,18 @@ def _record_sweep_scene_event(s: Any, summary: dict[str, Any]) -> None:
                     if summary.get("activeTurnCandidateCount") is None
                     else int(summary["activeTurnCandidateCount"])
                 ),
+                "sessionIndexCount": max(
+                    0, int(summary.get("sessionIndexCount") or 0)
+                ),
+                "candidateCount": max(0, int(summary.get("candidateCount") or 0)),
+                "prefilterSkippedCount": max(
+                    0, int(summary.get("prefilterSkippedCount") or 0)
+                ),
+                "tailSkippedCount": max(
+                    0, int(summary.get("tailSkippedCount") or 0)
+                ),
+                "workerCount": max(1, int(summary.get("workerCount") or 1)),
+                "watermarkApplied": bool(summary.get("watermarkApplied")),
                 "errorCount": max(0, int(summary.get("errorCount") or 0)),
                 "durationMs": max(0, int(summary.get("durationMs") or 0)),
             },

@@ -108,6 +108,10 @@ _CLASSIFICATION_TABLE = [
     ("bad request: 400", "provider_protocol_error", PERMANENT),
     ("profile `primary` 不支持 tool support", "capability_error", PERMANENT),
     ("missing profile for role", "configuration_error", PERMANENT),
+    # 本地文件系统 errno（重装依赖期间 httpx 读取缺失的 certifi/cacert.pem
+    # 实测就是这个形态）：调用未到达 provider，归本地配置/环境错误而非
+    # provider 协议错误。
+    ("[Errno 2] No such file or directory", "configuration_error", PERMANENT),
     # 回归红线：网关瞬态 400 pattern 放宽后，真参数错误（schema/参数族 400、
     # 无渠道/分组调度词汇）仍 fail-closed 判死。
     (
@@ -202,6 +206,35 @@ def test_unknown_error_is_fail_closed_and_never_retryable():
     assert classification.disposition == PERMANENT
     assert classification.retryable is False
     assert not classification.is_transient_retryable
+
+
+def test_local_filesystem_enoent_is_configuration_error_not_provider_protocol():
+    # 2026-11-10 生产事故形态：.venv 重装期间 httpx 构造 SSL 上下文时
+    # certifi/cacert.pem 暂缺，裸 FileNotFoundError 被旧 catch-all 归为
+    # provider_protocol_error，用户看到"provider 返回了协议或服务错误"。
+    exc = FileNotFoundError(2, "No such file or directory")
+    classification = classify_error(exc)
+
+    assert classification.category == "configuration_error"
+    assert classification.disposition == PERMANENT
+    assert classification.error.details.get("errno") == 2
+    assert classification.error.details.get("exceptionType") == "FileNotFoundError"
+    assert "未到达 provider" in str(classification.error)
+
+
+def test_local_filesystem_errno_message_form_is_configuration_error():
+    classification = classify_error(Exception("[Errno 2] No such file or directory"))
+
+    assert classification.category == "configuration_error"
+    assert classification.error.details.get("errno") == 2
+
+
+def test_transport_oserror_errnos_stay_network_error():
+    # 只有本地文件系统 errno 归 configuration_error；连接重置仍是传输族。
+    classification = classify_error(ConnectionResetError(104, "Connection reset by peer"))
+
+    assert classification.category == "network_error"
+    assert classification.disposition == TRANSIENT_RETRYABLE
 
 
 def test_http_408_bare_exception_is_request_timeout_retryable():

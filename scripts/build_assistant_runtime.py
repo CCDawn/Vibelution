@@ -628,11 +628,17 @@ def build_launcher_assistant_payload(
     files = [entries[key] for key in sorted(entries)]
     # A source writer may run during the longer dependency copy. Do not publish
     # a manifest for a source snapshot that no longer matches its build inputs.
-    if source_files != _source_files(project) or any(
-        _file_sha256(path, expected_size=entries["source/" + path.relative_to(project).as_posix()]["size"])
-        != entries["source/" + path.relative_to(project).as_posix()]["sha256"]
-        for path in source_files
-    ):
+    try:
+        source_unchanged = source_files == _source_files(project) and not any(
+            _file_sha256(path, expected_size=entries["source/" + path.relative_to(project).as_posix()]["size"])
+            != entries["source/" + path.relative_to(project).as_posix()]["sha256"]
+            for path in source_files
+        )
+    except (OSError, ValueError) as error:
+        # A source writer raced the dependency copy; the read gate refuses the
+        # changed file instead of publishing a mismatched manifest.
+        raise ValueError("product source changed during payload construction") from error
+    if not source_unchanged:
         raise ValueError("product source changed during payload construction")
     # Drift guard: the packaged copy must carry the wire-contract identity so a
     # snapshot whose contracts module was dropped or separately rewritten is

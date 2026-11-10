@@ -54,6 +54,16 @@ describe("guarded local Launcher update", () => {
     expect(await executeLauncherUpdate({ ...input, onPhase: () => { throw new Error("observer failed"); } })).toMatchObject({ accepted: true });
     expect(input.scheduleReplacement).toHaveBeenCalledOnce();
   });
+
+  it("does not stop or schedule when another refresh already owns the package", async () => {
+    const input = updateInputs();
+    input.prepare.mockResolvedValue({ ok: true, electron: { prepared: false, reason: "refresh_in_progress" } });
+    expect(await executeLauncherUpdate(input)).toMatchObject({
+      accepted: false, code: "launcher_update_in_progress", operation: "restart-latest-shell"
+    });
+    expect(input.stopWorkspaces).not.toHaveBeenCalled();
+    expect(input.scheduleReplacement).not.toHaveBeenCalled();
+  });
   // Parse/transpile the large main module once during collection. The tests
   // below measure controlled shutdown promises, not a cold TypeScript JIT.
   const automaticMain = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
@@ -180,6 +190,22 @@ describe("guarded local Launcher update", () => {
     expect(input.stopMainRuntimeForApprovedShutdown).not.toHaveBeenCalled();
     expect(input.scheduleCurrentDesktopShellRefresh).not.toHaveBeenCalled();
     expect(input.app.exit).not.toHaveBeenCalled();
+  });
+
+  it("leaves the shell running when a refresh already owns the staged package", async () => {
+    const input = automaticRefreshHarness();
+    input.ensureLatestLauncher.mockResolvedValue({ ok: true, electron: { prepared: false, reason: "refresh_in_progress" } });
+
+    expect(await input.refresh("")).toBe(false);
+
+    // Stopping first would strand the runtime: that helper holds the lock this
+    // transaction would need for its own replacement.
+    expect(input.stopMainRuntimeForApprovedShutdown).not.toHaveBeenCalled();
+    expect(input.stopIsolatedInstancesForApprovedShutdown).not.toHaveBeenCalled();
+    expect(input.scheduleCurrentDesktopShellRefresh).not.toHaveBeenCalled();
+    expect(input.app.exit).not.toHaveBeenCalled();
+    expect(input.shellRefreshInFlight).toBe(false);
+    expect(input.notifyDesktopTray.mock.calls.filter(call => call[2] === "warning")).toEqual([]);
   });
 
   it("does not stop or replace when native admission becomes busy after preparation", async () => {

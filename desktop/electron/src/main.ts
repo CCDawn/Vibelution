@@ -4104,6 +4104,12 @@ async function refreshPackagedDesktopShellIfStale(thenLifecycle: string, launchR
     const result = await restartLauncherToLatestBuild(false, thenLifecycle, {
       forceRefresh: false, ...(launchRequest ? { launchRequest } : {})
     });
+    if (!result.accepted && result.code === "launcher_update_in_progress") {
+      // Another refresh helper already owns the staged package. It publishes
+      // after this shell exits, so keep the window and stay quiet instead of
+      // reporting a failure the helper itself will resolve.
+      return false;
+    }
     if (!result.accepted && result.message) {
       notifyDesktopTray("Vibelution", result.message, "warning");
     }

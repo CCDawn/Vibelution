@@ -2377,6 +2377,15 @@ def _provider_error_user_reason(raw_error: Any, *, lang: str | None = None) -> d
     def reason(code: str, zh: str, en: str) -> dict[str, str]:
         return {"code": code, "summary": s.text_for(language, zh=zh, en=en), "detail": detail}
 
+    # 本地文件系统 errno（2 缺文件 / 13 无权限 / 28 磁盘满）：调用未到达
+    # provider，按本地运行时环境呈现，不能复用上游错误文案。
+    if s._looks_like_local_runtime_os_error(value):
+        return reason(
+            "local_runtime_environment_error",
+            "本地运行环境缺少文件或依赖不完整，本轮调用没有到达 provider",
+            "the local runtime is missing files or dependencies; this turn never reached the provider",
+        )
+
     if "api key" in lower and ("额度" in value or "限额" in value or "用完" in value or "quota" in lower or "rate_limit" in lower):
         return reason("quota_exhausted", "API Key 额度或当日限额已用完", "API key quota or daily limit is exhausted")
     # Preserve genuine local payload/tool protocol failures. A generic
@@ -2717,6 +2726,13 @@ def _user_visible_failure_summary(
             language,
             zh=f"模型配置不满足本轮 prompt cache 要求，本轮已停止。{reason_line}请把当前模型的 prompt_cache.mode 配置为 automatic 或 explicit_cache_control，或关闭缓存强制要求。",
             en=f"The model configuration does not satisfy this turn's prompt-cache requirement, so the turn was stopped. {reason_line} Set this model's prompt_cache.mode to automatic or explicit_cache_control, or disable the cache requirement.",
+        )
+    if s._looks_like_local_runtime_os_error(text):
+        # 本地文件系统错误：请求没有到达 provider，通常是更新/重装尚未完成。
+        return s.text_for(
+            language,
+            zh="本地运行环境缺少文件或依赖不完整，本轮调用没有到达 provider；通常是更新或安装尚未完成，完成后直接重试即可。",
+            en="The local runtime is missing files or dependencies, so this turn never reached the provider. This usually means an update or install was still in progress; retry once it finishes.",
         )
     if s._looks_like_provider_error_text(text):
         reason_summary = str((provider_reason or {}).get("summary") or "").strip()

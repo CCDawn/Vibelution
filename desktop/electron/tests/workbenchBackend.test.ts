@@ -528,6 +528,25 @@ describe("workbenchBackendRetire", () => {
     expect(connect).not.toHaveBeenCalled();
   });
 
+it("treats an already-closing backend 503 as acceptance and waits for exit", async () => {
+  // A backend that already started shutting down answers the duplicate
+  // request with 503. Reporting that as a failed cleanup aborted the
+  // operator restart before a new backend could bind, so it has to count
+  // as accepted and fall through to the exit wait.
+  const connect = vi.fn().mockResolvedValueOnce(true).mockResolvedValue(false);
+  await expect(
+    requestGracefulWorkbenchShutdown({
+      port: 8000,
+      controlToken: "test-control-token",
+      request: async () => ({ status: 503 }),
+      connect,
+      pidAlive: () => true,
+      delay: async () => undefined
+    })
+  ).resolves.toMatchObject({ requested: true, completed: true, status: 503 });
+  expect(connect).toHaveBeenCalledTimes(2);
+});
+
   it("uses the existing Electron control token when no override is supplied", async () => {
     const previousToken = process.env.VIBELUTION_WEB_CONTROL_TOKEN;
     process.env.VIBELUTION_WEB_CONTROL_TOKEN = "environment-control-token";
