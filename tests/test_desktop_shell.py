@@ -4059,3 +4059,43 @@ def test_launched_process_alive_uses_owned_handle_over_pid_probes(monkeypatch):
 
     assert desktop_shell._launched_process_alive(_FakeShellProcess(4242, alive_polls=None), {}) is True
     assert desktop_shell._launched_process_alive(_FakeShellProcess(4242), {}) is False
+
+
+def test_gc_desktop_shell_build_dirs_removes_only_expired_sessions(tmp_path):
+    dist = tmp_path / "dist"
+    expired = dist / ".desktop-shell-build-expired"
+    fresh = dist / ".desktop-shell-build-fresh"
+    live = dist / "desktop"
+    for path in (expired, fresh, live):
+        path.mkdir(parents=True)
+        (path / "payload.dat").write_bytes(b"owned")
+    now = time.time()
+    stale = now - desktop_shell.DESKTOP_SHELL_BUILD_DIR_RETENTION_SECONDS - 60
+    os.utime(expired, (stale, stale))
+
+    result = desktop_shell.gc_desktop_shell_build_dirs(tmp_path, now=now)
+
+    assert not expired.exists()
+    assert fresh.is_dir()
+    assert live.is_dir()
+    assert expired.name in result["removed"]
+    assert fresh.name in result["skipped"]
+
+
+def test_gc_desktop_shell_build_dirs_keeps_pending_retirement(tmp_path, monkeypatch):
+    dist = tmp_path / "dist"
+    pending = dist / ".desktop-shell-build-pending"
+    pending.mkdir(parents=True)
+    now = time.time()
+    stale = now - desktop_shell.DESKTOP_SHELL_BUILD_DIR_RETENTION_SECONDS - 60
+    os.utime(pending, (stale, stale))
+    monkeypatch.setattr(
+        desktop_shell,
+        "_pending_build_retirement_for",
+        lambda _root, cleanup_path=None: cleanup_path is not None and Path(cleanup_path).name == pending.name,
+    )
+
+    result = desktop_shell.gc_desktop_shell_build_dirs(tmp_path, now=now)
+
+    assert pending.is_dir()
+    assert pending.name in result["skipped"]

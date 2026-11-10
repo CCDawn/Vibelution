@@ -1547,7 +1547,16 @@ def ensure_frontend_build(
                 inspection = inspect_frontend_build(root, package_manager=manager)
             _require_frontend_build_time(deadline, "initial build inspection")
             if bool(inspection["current"]):
-                return {"rebuilt": False, "skipped": True, "lock": lock, "timingsMs": timings, **inspection}
+                # A current release needs no rebuild, but its storage still
+                # has to be bounded. Release GC otherwise runs only right
+                # after a publish, so a project that stops rebuilding keeps
+                # every stale release forever.
+                with _build_phase("gcMs"):
+                    gc = gc_frontend_releases(root)
+                return {
+                    "rebuilt": False, "skipped": True, "lock": lock,
+                    "timingsMs": timings, "gc": gc, **inspection,
+                }
             attempts = 0
             while True:
                 attempts += 1

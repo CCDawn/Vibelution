@@ -68,6 +68,9 @@ PREBUILD_COOLDOWN_SECONDS = 1800.0
 PREBUILD_FAILURE_RELATIVE = Path(".runtime") / "launcher" / "desktop-shell-prebuild-failure.json"
 PREBUILD_LOCK_RELATIVE = Path(".runtime") / "launcher" / "desktop-shell-prebuild.lock"
 DESKTOP_SHELL_BUILD_DEADLINE_SECONDS = 15 * 60
+# Abandoned build sessions are otherwise reclaimed only by a later build; a
+# killed or sharing-violation build leaves its tree behind permanently.
+DESKTOP_SHELL_BUILD_DIR_RETENTION_SECONDS = 6 * 60 * 60
 DESKTOP_SHELL_BUILD_CLEANUP_RESERVE_SECONDS = 5.0
 DESKTOP_SHELL_BUILD_LOCK_POLL_SECONDS = 0.1
 DESKTOP_SHELL_BUILD_CLOSE_RETRIES = 3
@@ -1959,6 +1962,9 @@ def build_desktop_shell_package(
     root = Path(project_root).resolve()
     deadline = time.monotonic() + DESKTOP_SHELL_BUILD_DEADLINE_SECONDS
     _wait_for_desktop_shell_build_lock(root, deadline=deadline)
+    # Reclaim sessions left by earlier killed or blocked builds before this
+    # one creates its own tree.
+    gc_desktop_shell_build_dirs(root)
     session: Path | None = None
     try:
         session = _run_desktop_shell_package_build(root, mode=mode, deadline=deadline)
@@ -2081,6 +2087,48 @@ def _remove_owned_shell_tree(path: Path, *, within: Path) -> None:
     if target == boundary or not target.is_relative_to(boundary):
         raise ValueError("desktop shell cleanup target is outside its owner boundary")
     shutil.rmtree(target, ignore_errors=True)
+
+
+def gc_desktop_shell_build_dirs(
+    project_root: Path | str = PROJECT_ROOT,
+    *,
+    now: float | None = None,
+    retention_seconds: float = DESKTOP_SHELL_BUILD_DIR_RETENTION_SECONDS,
+) -> dict[str, Any]:
+    """Reclaim abandoned ``dist/.desktop-shell-build-*`` staging trees.
+
+    A package build retires its own session tree in ``finally``, but Windows
+    sharing violations on mapped ``.node`` files make that removal
+    best-effort, and a killed builder never reaches ``finally`` at all. Nothing
+    else reclaims those directories, so every aborted or blocked build leaves a
+    multi-hundred-megabyte tree behind for good. Only trees past the grace
+    period and outside any pending retirement record are removed, so a
+    concurrent build keeps its own fresh session untouched.
+    """
+
+    root = Path(project_root).resolve()
+    dist_dir = root / "dist"
+    if not dist_dir.is_dir():
+        return {"removed": [], "skipped": []}
+    current_time = time.time() if now is None else float(now)
+    removed: list[str] = []
+    skipped: list[str] = []
+    for entry in sorted(dist_dir.glob(".desktop-shell-build-*")):
+        if not entry.is_dir():
+            continue
+        try:
+            age = current_time - entry.stat().st_mtime
+        except OSError:
+            continue
+        if age < retention_seconds or _pending_build_retirement_for(root, cleanup_path=entry):
+            skipped.append(entry.name)
+            continue
+        _remove_owned_shell_tree(entry, within=dist_dir)
+        if entry.exists():
+            skipped.append(entry.name)
+        else:
+            removed.append(entry.name)
+    return {"removed": removed, "skipped": skipped}
 
 
 def _publish_built_shell_tree(source: Path, destination: Path, *, previous: Path) -> None:
