@@ -232,6 +232,7 @@ _RESTART_INTERRUPT_REASONS = frozenset({"process_restarted", "electron_user_rest
 _INTERRUPT_REASON_ACTIVITY_OUTCOME = {
     "process_restarted": "stopped",
     "electron_user_restart": "stopped",
+    "stale_work_run_worker_gone": "stopped",
 }
 # Continuable as an outcome, but the operator closed the window or shut the
 # runtime down on purpose: never auto-resume these.

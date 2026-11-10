@@ -1064,3 +1064,13 @@ def test_sweep_runs_candidates_on_bounded_pool(
     assert summary["workerCount"] >= 2
     assert summary["resumedCount"] == 0
     assert summary["errorCount"] == 0
+
+def test_stale_worker_gone_interruption_is_continuable() -> None:
+    """A lost work-run worker is an abnormal interruption, not an operator stop."""
+
+    assert startup_recovery._interrupt_reason_can_continue(
+        "stale_work_run_worker_gone"
+    )
+    assert not startup_recovery._interrupt_reason_can_continue(
+        "electron_user_close"
+    )

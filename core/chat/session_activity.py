@@ -50,6 +50,7 @@ SESSION_ACTIVITY_CONTRACT = {
         "failed_provider": "failed", "timeout": "failed", "timed_out": "failed", "blocked": "failed",
         "danger": "failed", "crashed": "failed", "unhealthy": "failed",
         "stopped": "stopped", "stopped_by_user": "stopped", "force_stopped": "stopped", "aborted": "stopped", "interrupted": "stopped",
+        "stale_work_run_worker_gone": "stopped",
         "cancelled": "cancelled", "canceled": "cancelled", "superseded": "superseded",
         "needs_continue": "needs_continue", "paused_limit": "paused_limit",
     },
