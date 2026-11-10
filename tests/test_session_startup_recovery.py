@@ -15,7 +15,9 @@ These tests lock the sweep contract:
 
 from __future__ import annotations
 
+import os
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,6 +25,7 @@ from typing import Any
 
 import pytest
 
+from core.chat.conversation_ledger import conversation_ledger_path
 from core.chat.turn_journal import (
     EVENT_ASSISTANT_PARTIAL,
     EVENT_SESSION_RECOVERY_RESUMED,
@@ -37,7 +40,11 @@ from core.infrastructure import developer_sandbox
 from core.runtime_manager.work_run_store import WorkRunStore
 from core.ui.chat_state import save_chat_state
 from core.web.services import session_service
-from core.web.services.session import queued_turns, startup_recovery
+from core.web.services.session import (
+    queued_turns,
+    recovery_sweep_state,
+    startup_recovery,
+)
 
 SESSION_ID = "session-a"
 ORIGINAL_TURN_ID = "turn-1"
@@ -969,3 +976,66 @@ def test_already_resumed_turn_is_not_resumed_twice(
     assert summary["resumedCount"] == 0
     assert summary["alreadyResumedSkipCount"] == 1
     assert submit_calls == []
+
+
+def test_sweep_prefilters_settled_ledgers(
+    recovery_env, tmp_path, submit_calls, monkeypatch
+):
+    """A ledger older than the resume window never gets its events read."""
+
+    _seed_conversation(tmp_path)
+    _seed_interrupted_turn(tmp_path)
+    _seed_active_work_run(recovery_env)
+
+    stale_id = "session-settled"
+    monkeypatch.setattr(
+        session_service,
+        "list_session_runtime_ids",
+        lambda _root: [SESSION_ID, stale_id],
+    )
+    monkeypatch.setattr(
+        startup_recovery,
+        "_ledger_modified_ns",
+        lambda _s, session_id: -1 if session_id == SESSION_ID else 1,
+    )
+
+    summary = startup_recovery.recover_interrupted_session_turns_on_startup()
+
+    assert summary["resumedCount"] == 1
+    assert summary["prefilterSkippedCount"] == 1
+    assert summary["candidateCount"] == 1
+
+
+def test_clean_sweep_records_watermark(recovery_env, tmp_path):
+    """A clean sweep leaves the next startup a durable lower bound."""
+
+    _seed_conversation(tmp_path)
+
+    summary = startup_recovery.recover_interrupted_session_turns_on_startup()
+
+    assert summary["errorCount"] == 0
+    path = recovery_sweep_state.watermark_path_for_store(recovery_env)
+    assert path is not None and path.is_file()
+    assert recovery_sweep_state.load_sweep_watermark_ns(recovery_env) > 0
+
+
+def test_sweep_runs_candidates_on_bounded_pool(
+    recovery_env, tmp_path, submit_calls, monkeypatch
+):
+    """Multiple candidates inspect concurrently and merge into one summary."""
+
+    _seed_conversation(tmp_path)
+    session_ids = [SESSION_ID, "session-b", "session-c"]
+    monkeypatch.setattr(
+        session_service, "list_session_runtime_ids", lambda _root: session_ids
+    )
+    monkeypatch.setattr(
+        startup_recovery, "_ledger_modified_ns", lambda _s, _session_id: time.time_ns()
+    )
+
+    summary = startup_recovery.recover_interrupted_session_turns_on_startup()
+
+    assert summary["candidateCount"] == 3
+    assert summary["workerCount"] >= 2
+    assert summary["resumedCount"] == 0
+    assert summary["errorCount"] == 0
