@@ -94,8 +94,10 @@ export function ChatChangeRail({
   return (
     <aside id={embedded ? undefined : "chat-status-pane"} className={`${stacked ? (surface === "panel" ? styles.railStackedPanel : styles.railStacked) : styles.rail} ${className}`} aria-label={resolvedTitle}>
       <div className={styles.header}>
-        <button
+        <VButton
           type="button"
+          variant="ghost"
+          contentLayout="plain"
           className={styles.headerToggle}
           aria-expanded={!collapsed}
           onClick={() => setCollapsed((value) => !value)}
@@ -105,7 +107,7 @@ export function ChatChangeRail({
             aria-hidden="true"
           >▾</span>
           <span className={styles.title}>{resolvedTitle}</span>
-        </button>
+        </VButton>
         {paths.length > 0 ? <span className={styles.count}>{paths.length}</span> : null}
       </div>
       {showList ? <ul className={stacked ? styles.listStacked : styles.list}>

@@ -679,6 +679,10 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(styles.timeline).toContain("overflow-y-auto");
     expect(styles.timeline).toContain("overflow-x-hidden");
     expect(styles.timeline).not.toContain("overflow-auto");
+    // Scroll chaining must stop at the transcript: without overscroll containment
+    // a wheel past the last message scrolls the page shell instead.
+    expect(styles.timeline).toContain("overscroll-contain");
+    expect(styles.timelineWithAvatarGutters).toContain("overscroll-contain");
     expect(styles.timelineCellHeader).toContain("!items-start");
     expect(styles.timelineCellHeader).not.toContain("!items-center");
     expect(styles.timelineCellHeader).toContain("!grid");

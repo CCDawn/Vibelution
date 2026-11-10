@@ -523,7 +523,15 @@ backToBottomButton:
     "vui-components-conversationview codexTranscriptProgressText min-w-0 max-w-[min(100%,128ch)] whitespace-pre-wrap break-words [overflow-wrap:anywhere] border-0 bg-transparent p-0 text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   /** Shared thought body: max ~8–10 lines, scroll inside the box when longer. */
   thoughtScrollBody:
-    "vui-components-conversationview thoughtScrollBody min-w-0 max-h-[12rem] overflow-y-auto overflow-x-hidden overscroll-contain [scrollbar-gutter:stable] border-0 bg-transparent px-0 py-1 text-[var(--fg-tertiary)]",
+    "vui-components-conversationview thoughtScrollBody min-w-0 max-h-[12rem] overflow-y-auto overflow-x-hidden overscroll-contain [scrollbar-gutter:stable] border-0 bg-transparent px-0 py-1 text-[var(--fg-tertiary)] [scrollbar-width:thin] [scrollbar-color:transparent_transparent] hover:[scrollbar-color:var(--border-subtle)_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-transparent hover:[&::-webkit-scrollbar-thumb]:bg-[var(--border-subtle)]",
+  /** Deep-thinking body: a quote rail instead of a boxed panel. */
+  thoughtBodyRail:
+    "vui-components-conversationview thoughtBodyRail border-l border-[var(--border-subtle)] pl-3",
+  /** Inline code inside a reasoning unit: a quiet chip, not a second code block. */
+  thoughtInlineCode:
+    "vui-components-conversationview thoughtInlineCode rounded-[4px] bg-[color-mix(in_srgb,var(--fg-quaternary)_12%,transparent)] px-1 py-[0.1em] font-mono text-[0.92em] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
+  thoughtLine:
+    "vui-components-conversationview thoughtLine block min-h-[1em] whitespace-pre-wrap break-words [overflow-wrap:anywhere]",
   codexTranscriptReasoningTextButton:
     "vui-components-conversationview codexTranscriptReasoningTextButton min-w-0 !h-auto !w-full !max-w-full cursor-pointer !justify-start !rounded-none !border-0 !bg-transparent !p-0 !pl-7 !text-left !shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),transparent)] focus-visible:ring-offset-1 [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
   codexTranscriptSurface:
@@ -1243,10 +1251,10 @@ backToBottomButton:
   thoughtTextBlock:
     "vui-components-conversationview thoughtTextBlock min-w-0 text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
 timeline:
-    "vui-components-conversationview timeline flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden bg-[var(--vui-surface-chat)] pl-[clamp(1rem,3vw,3rem)] pr-[clamp(3rem,3vw,3.5rem)] @min-[864px]/conversation:pl-14 pt-7 pb-4 max-[719px]:px-5 max-[719px]:py-[22px] [scrollbar-gutter:stable]",  timelineArea:
+    "vui-components-conversationview timeline flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden overscroll-contain bg-[var(--vui-surface-chat)] pl-[clamp(1rem,3vw,3rem)] pr-[clamp(3rem,3vw,3.5rem)] @min-[864px]/conversation:pl-14 pt-7 pb-4 max-[719px]:px-5 max-[719px]:py-[22px] [scrollbar-gutter:stable]",  timelineArea:
     "vui-components-conversationview timelineArea @container/conversation relative flex min-h-0 min-w-0 flex-1 flex-col",
   timelineWithAvatarGutters:
-    "vui-components-conversationview timeline timelineWithAvatarGutters flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden bg-[var(--vui-surface-chat)] px-3 pt-7 pb-4 max-[719px]:py-[22px] [scrollbar-gutter:stable_both-edges]",
+    "vui-components-conversationview timeline timelineWithAvatarGutters flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden overscroll-contain bg-[var(--vui-surface-chat)] px-3 pt-7 pb-4 max-[719px]:py-[22px] [scrollbar-gutter:stable_both-edges]",
   timelineAreaWithAvatarGutters:
     "[&_.turnNavigatorRail]:!hidden @min-[960px]/conversation:[&_.turnNavigatorRail]:!block",
   timelineContent:

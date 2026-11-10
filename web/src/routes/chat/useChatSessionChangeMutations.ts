@@ -153,7 +153,7 @@ export function useChatSessionChangeMutations({
       // Drop the create pin now. A later sessions refetch must not reattach a
       // tab the user just closed. Keep the summary so a failed delete can pin it again.
       const releasedCreatePreserve = takeSessionCreatePreserve(variables.sessionId);
-      markSessionDeleteTombstone(variables.sessionId);
+      markSessionDeleteTombstone(variables.sessionId, { origin: "user" });
       void queryClient.cancelQueries({ queryKey: queryKeys.sessions() });
       void queryClient.cancelQueries({ queryKey: queryKeys.conversations() });
       void queryClient.cancelQueries({ queryKey: queryKeys.agents() });
@@ -248,7 +248,7 @@ export function useChatSessionChangeMutations({
         void chatWorkspaceCache.refreshSessionRuntime(variables.sessionId);
         return;
       }
-      markSessionDeleteTombstone(variables.sessionId, { confirmed: true });
+      markSessionDeleteTombstone(variables.sessionId, { confirmed: true, origin: "user" });
       // Other windows must drop the row from their rails; their index poll is
       // off while a stream owns live queries, so announce the deletion.
       broadcastSessionIndexChange({
@@ -309,6 +309,9 @@ export function useChatSessionChangeMutations({
       setSessionComposerErrors((current) => ({
         ...current,
         [variables.sessionId]: describeError(error, t("deleteSessionFailed")),
+      // The route already moved on, so a per-session composer error would be
+      // invisible. Surface the failure where the session list still renders.
+      __sessions__: describeError(error, t("deleteSessionFailed")),
       }));
       void chatWorkspaceCache.refreshSessionRuntime(variables.sessionId);
     },

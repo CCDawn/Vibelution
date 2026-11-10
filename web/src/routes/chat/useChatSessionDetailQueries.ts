@@ -13,6 +13,7 @@ import { postBrowserTelemetry } from "../../app/browserTelemetry";
 import { chatStartupCorrelationFields, recordChatStartupMilestone } from "../../app/chatStartupMetrics";
 import { isVisibleDirectSession, rootSessionIdFor } from "../conversationIndexModel";
 import { isTempSessionId } from "../sessionOptimisticIds";
+import { isSessionDeleteTombstoned } from "../sessionDeleteTombstone";
 import {
   resolveChatLiveQueryPolicy,
   type ChatLiveQueryPolicy,
@@ -101,10 +102,14 @@ export function useChatSessionDetailQueries({
       ? sessions?.find((session) => session.id === activeSessionId)
       : undefined,
   });
+  // A deleted session must never be queried again: the optimistic delete marks
+  // the tombstone before the route handoff lands, so an enabled query would
+  // GET the removed id, surface a 404, and paint a blocking error for one frame.
+  const activeSessionDeleted = activeSessionId ? isSessionDeleteTombstoned(activeSessionId) : false;
   const sessionDetailQuery = useQuery<SessionDetail>({
     queryKey: queryKeys.session(activeSessionId ?? "none"),
     // Temp create shells are local-only; never GET/stream them until rebased.
-    enabled: Boolean(activeSessionId) && !isTempSessionId(activeSessionId),
+    enabled: Boolean(activeSessionId) && !isTempSessionId(activeSessionId) && !activeSessionDeleted,
     queryFn: ({ signal }) => fetchSessionDetailWindow(activeSessionId, {
       signal,
       // Switching is a paint-first path: inbox / governance / group / next-state
@@ -128,7 +133,8 @@ export function useChatSessionDetailQueries({
     queryKey: queryKeys.sessionSecondary(activeSessionId ?? "none"),
     enabled: Boolean(activeSessionId)
       && !isTempSessionId(activeSessionId)
-      && secondaryChatDataEnabled,
+      && secondaryChatDataEnabled
+      && !activeSessionDeleted,
     queryFn: ({ signal }) => fetchSessionDetailWindow(activeSessionId, {
       signal,
       // Only the side lists are consumed here, so keep the transcript

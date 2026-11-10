@@ -260,7 +260,7 @@ describe("thought duration client-clock label", () => {
     const settledLabel = container?.querySelector('[data-thought-duration="settled"]');
     expect(thoughtToggle()?.getAttribute("aria-expanded")).toBe("true");
     expect(settledLabel?.textContent).toContain("8s");
-    expect(container?.textContent).toContain("已思考");
+    expect(container?.textContent).toContain("深度思考");
     await act(async () => vi.advanceTimersByTime(10000));
     expect(container?.querySelector('[data-thought-duration="settled"]')?.textContent).toContain("8s");
   });
@@ -290,7 +290,7 @@ describe("thought duration client-clock label", () => {
     // Settled units keep a visible native header and start with their body closed.
     expectCollapsedThought();
     await showThoughts();
-    expect(container?.textContent).toContain("已思考");
+    expect(container?.textContent).toContain("深度思考");
     // History loads without canonical stamps have no honest duration: nothing
     // renders — not even a whole-turn number from usageStats.
     expect(container?.querySelector("[data-thought-duration]")).toBeNull();
@@ -386,9 +386,9 @@ describe("thought duration client-clock label", () => {
     await expandThoughts(1);
     const thoughts = [...(container?.querySelectorAll('[data-thought-section]') ?? [])];
     expect(thoughts.map(section => section.getAttribute("data-codex-transcript-cell-status"))).toEqual(["completed", "running"]);
-    expect(thoughts[0].textContent).toContain("已思考");
+    expect(thoughts[0].textContent).toContain("深度思考");
     expect(thoughts[0].textContent).not.toContain("思考中");
-    expect(thoughts[1].textContent).toContain("思考中");
+    expect(thoughts[1].textContent).toContain("深度思考");
     expect(thoughts.map(section => section.querySelector('[data-thought-scroll-body="true"]')?.textContent))
       .toEqual([completedText, LONG_THOUGHT_TEXT]);
     expect(thoughts[0].compareDocumentPosition(narration()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

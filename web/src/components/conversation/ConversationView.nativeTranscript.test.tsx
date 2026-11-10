@@ -564,10 +564,10 @@ describe("ConversationView native Codex transcript surface", () => {
     const thoughts = expectNativeThoughts(html, ["thought-completed", "thought-running"]);
     expect(thoughts).toHaveLength(2);
     expect(thoughts[0].getAttribute("data-codex-transcript-cell-status")).toBe("completed");
-    expect(thoughts[0].textContent).toContain("已思考");
+    expect(thoughts[0].textContent).toContain("深度思考");
     expect(thoughts[0].textContent).not.toContain("思考中");
     expect(thoughts[1].getAttribute("data-codex-transcript-cell-status")).toBe("running");
-    expect(thoughts[1].textContent).toContain("思考中");
+    expect(thoughts[1].textContent).toContain("深度思考");
     expect(thoughts[1].querySelector('[data-thought-streaming-summary="true"]')?.textContent).toBe("当前仍在进行的思考。");
   });
 
@@ -587,7 +587,7 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain('data-codex-final-response="true"');
     expect(html.match(/data-codex-progress-cell="true"/g)).toHaveLength(2);
     expect(html).not.toContain("思考中");
-    expect(html).toContain("已思考");
+    expect(html).toContain("深度思考");
     expectNativeThoughts(html, ["thought"]);
     expect(html.indexOf(texts[0])).toBeLessThan(html.indexOf('data-conversation-part-key="tool"'));
     expect(html.indexOf('data-conversation-part-key="tool"')).toBeLessThan(html.indexOf(texts[1]));
@@ -1084,7 +1084,7 @@ describe("ConversationView native Codex transcript surface", () => {
 
     const settled = renderConversation([reasoning("completed")]);
     const settledThoughts = expectNativeThoughts(settled, ["reasoning-completed"]);
-    expect(settledThoughts[0].textContent).toContain("已思考");
+    expect(settledThoughts[0].textContent).toContain("深度思考");
     expect(settledThoughts[0].textContent).not.toContain("思考中");
     expect(settled).not.toContain('data-thought-streaming-summary="true"');
   });

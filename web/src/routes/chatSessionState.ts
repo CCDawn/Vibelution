@@ -6,7 +6,7 @@ import {  editMessageIndex,
   editMessageTurnId,
   mergeEditResubmitDetailWithOutcome,
 } from "./chat/chatEditResubmitState";
-import { isSessionDeleteTombstoned } from "./sessionDeleteTombstone";
+import { isSessionDeleteTombstoned, sessionDeleteTombstoneOrigin } from "./sessionDeleteTombstone";
 import { messageSequenceOrder } from "../components/conversation/conversationMessageOrder";
 import { isLiveOverlayMessage } from "../components/conversation/conversationMessagePredicates";
 
@@ -1260,6 +1260,12 @@ export function deriveSessionDetailQueryErrorState(
   // A definitive not-found response marks the existing deletion tombstone.
   // Cached/placeholder detail must not turn that failure into a writable shell.
   if (detail && isSessionDeleteTombstoned(detail.id)) {
+    // A deliberate delete is a handoff, not a failure: the route is already
+    // moving to the next session, so never paint the blocking unavailable UI
+    // for it. Externally confirmed absence still deserves that surface.
+    if (sessionDeleteTombstoneOrigin(detail.id) === "user") {
+      return { blockingError: false, transientError: false, backgroundError: false };
+    }
     return { blockingError: true, transientError: false, backgroundError: false };
   }
   if (options.localOnlySession) {

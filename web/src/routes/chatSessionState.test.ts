@@ -1582,6 +1582,7 @@ describe("chatSessionState", () => {
     }
   });
 
+  it("treats a user-initiated delete as a handoff instead of a blocking error", () => {     const detail = makeDetail({ id: "user-deleted" });     markSessionDeleteTombstone(detail.id, { origin: "user" });     try {       expect(deriveSessionDetailQueryErrorState(detail, false)).toEqual({         blockingError: false,         transientError: false,         backgroundError: false,       });       expect(deriveSessionDetailQueryErrorState(detail, true, { streamConnected: true })).toEqual({         blockingError: false,         transientError: false,         backgroundError: false,       });     } finally {       clearSessionDeleteTombstone(detail.id);     }   });
   it("keeps stale detail visible when a refetch fails", () => {
     expect(deriveSessionDetailQueryErrorState(makeDetail(), true)).toEqual({
       blockingError: false,
