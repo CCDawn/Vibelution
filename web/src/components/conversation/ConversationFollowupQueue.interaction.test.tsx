@@ -405,7 +405,7 @@ describe("ConversationView follow-up queue actions", () => {
     });
   }
 
-  it("queues a draft and preserves empty Enter steering while the primary control stops", async () => {
+  it("queues a draft and leaves empty Enter inert while the primary control stops", async () => {
     const onSubmit = vi.fn();
     await renderBusyComposer({
       composerValue: "先不要改测试",
@@ -429,7 +429,9 @@ describe("ConversationView follow-up queue actions", () => {
         key: "Enter", bubbles: true, cancelable: true,
       }));
     });
-    expect(onSubmit).toHaveBeenCalledTimes(1);
+    // ZCode default queue behavior: an empty draft has nothing to queue and
+    // Enter never escalates the existing queue into an immediate send.
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it("submits the same queue action from Enter on the running composer", async () => {
