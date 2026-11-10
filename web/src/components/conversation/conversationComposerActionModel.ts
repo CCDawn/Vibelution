@@ -80,12 +80,14 @@ export function resolveComposerPrimaryAction(input: {
   composerValue: string;
   hasAttachments: boolean;
   hasReferences: boolean;
-  hasSafeGuidance: boolean;
 }): ComposerPrimaryAction {
   const hasDraft = Boolean(input.composerValue.trim()) || input.hasAttachments || input.hasReferences;
   if (input.actionMode === "stop") {
     if (!hasDraft) return "stop";
-    return input.hasSafeGuidance && !input.hasAttachments && !input.hasReferences ? "steer" : "queue";
+    // ZCode parity (default "queue" interaction behavior): the round primary
+    // button queues the draft while a turn runs. Immediate steering stays on
+    // Ctrl/Cmd+Enter and the queued row's steer action, never the primary.
+    return "queue";
   }
   return input.actionMode === "continue" && !hasDraft ? "continue" : "send";
 }
@@ -119,16 +121,14 @@ export function resolveComposerPrimaryActionFlags(input: {
 export type ComposerEnterDelivery = "none" | "send" | "continue" | "queue" | "steer";
 
 /**
- * Composer Enter delivery (claim: composer action state). User decision
- * (2026-10): the previous Ctrl/⌘+Enter opposite-delivery flip is gone —
- * modifier keys never participate in the delivery choice. While a turn runs,
- * Enter immediately steers the draft into the running turn via the existing
- * safe-guidance channel; when that channel cannot carry the payload (no
- * handler, or attachments/references riding the draft) Enter queues instead
- * of dropping the message. Idle Enter sends or continues according to the
+ * Composer Enter delivery (claim: composer action state). ZCode parity with
+ * the default "queue" interaction behavior: while a turn runs, bare Enter
+ * queues the draft and Ctrl/⌘+Enter steers it into the running turn. When the
+ * steer channel cannot carry the payload (no handler, or attachments/
+ * references riding the draft) the modifier falls back to queueing instead of
+ * dropping the message. Idle Enter sends or continues according to the
  * selected action mode. Shift (newline), alt, and IME composition stay
- * guarded. The ctrl/meta fields are kept for call-site
- * compatibility but intentionally ignored. Pure: no React / DOM.
+ * guarded. Pure: no React / DOM.
  */
 export function resolveComposerEnterDelivery(input: {
   key: string;
@@ -144,7 +144,7 @@ export function resolveComposerEnterDelivery(input: {
     return "none";
   }
   if (input.actionMode === "stop") {
-    return input.canDeliverImmediately ? "steer" : "queue";
+    return (input.ctrlKey || input.metaKey) && input.canDeliverImmediately ? "steer" : "queue";
   }
   if (input.actionMode === "continue") {
     return "continue";

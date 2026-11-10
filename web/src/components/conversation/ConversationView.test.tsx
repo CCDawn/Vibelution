@@ -1896,9 +1896,9 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(html).toContain("Use my local avatar");
     expect(html).not.toContain(">C</div>");
   });
-  it("uses one send control while a running draft can guide the task", () => {
+  it("uses one queue control while a running draft is queued", () => {
     const html = renderConversation([], { composerValue: "下一句先写在这里", composerActionMode: "stop", onSafeGuidance: () => undefined, onInterruptGuidance: () => undefined });
-    expect(html).toContain('data-composer-action="steer"');
+    expect(html).toContain('data-composer-action="queue"');
     expect(html.match(/data-testid="composer-primary-action"/g)).toHaveLength(1);
     expect(html).not.toContain('data-testid="composer-interrupt-guidance"');
     expect(html).not.toContain("composerEditSubmitButton");
@@ -1913,12 +1913,13 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
   });
 
   it("keeps a running empty composer on stop even when followups are queued", () => {
-    const html = renderConversation([], { composerValue: "", composerActionMode: "stop", onSafeGuidance: () => undefined, followupQueue: [{ id: "q-1", text: "先不要改测试，只汇报改了哪些文件。" }] });
+    const html = renderConversation([], { composerValue: "", composerActionMode: "stop", onSafeGuidance: () => undefined, composerPlaceholder: "输入将排队，本轮结束后自动发送", followupQueue: [{ id: "q-1", text: "先不要改测试，只汇报改了哪些文件。" }] });
     expect(html).toContain("先不要改测试，只汇报改了哪些文件。");
     expect(html).toContain("followupQueueTray");
     expect(html).toContain('data-composer-action="stop"');
     expect(html.match(/data-testid="composer-primary-action"/g)).toHaveLength(1);
-    expect(html).toContain("补充消息以引导当前任务");
+    expect(html).toContain("输入将排队，本轮结束后自动发送");
+    expect(html).not.toContain("补充消息以引导当前任务");
   });
 
   it("renders edit controls for every user message on the active path", () => {

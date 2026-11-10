@@ -51,16 +51,16 @@ describe("one composer action across native hosts", () => {
     const view = await composer({ composerValue: "你好", submitLabel: "" });
     expect(view.primary().getAttribute("aria-label")).toBe("发送");
   });
-  it("changes stop to send guidance as the running draft changes, including an existing queue", async () => {
+  it("changes stop to queue as the running draft changes, including an existing queue", async () => {
     const view = await composer({ composerActionMode: "stop", followupQueue: [{ id: "q", text: "queued" }] });
     expect(view.primary().dataset.composerAction).toBe("stop");
     expect(view.primary().querySelector(".lucide-square")).toBeTruthy();
     await view.render({ composerValue: "先核对日程" });
-    expect(view.primary().dataset.composerAction).toBe("steer");
+    expect(view.primary().dataset.composerAction).toBe("queue");
     expect(view.primary().querySelector(".lucide-arrow-up")).toBeTruthy();
     await act(async () => view.primary().click());
-    expect(view.onSafeGuidance).toHaveBeenCalledOnce();
-    expect(view.onSubmit).not.toHaveBeenCalled();
+    expect(view.onSubmit).toHaveBeenCalledOnce();
+    expect(view.onSafeGuidance).not.toHaveBeenCalled();
     expect(view.onStop).not.toHaveBeenCalled();
     await view.render({ composerValue: "" });
     await act(async () => view.primary().click());

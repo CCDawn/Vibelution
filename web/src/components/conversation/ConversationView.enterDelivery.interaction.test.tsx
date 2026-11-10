@@ -155,7 +155,7 @@ describe("composer Enter delivery (running Enter sends immediately)", () => {
     }
   });
 
-  it("steers immediately on Enter while a turn runs, with or without modifiers", async () => {
+  it("queues on Enter and steers on Ctrl/Cmd+Enter while a turn runs", async () => {
     const onSubmit = vi.fn();
     const onSafeGuidance = vi.fn();
     const textarea = await renderEnterDeliveryComposer({
@@ -164,28 +164,27 @@ describe("composer Enter delivery (running Enter sends immediately)", () => {
       onSafeGuidance,
     });
 
-    typeIntoTextarea(textarea, "立刻引导");
+    typeIntoTextarea(textarea, "排队一条");
     await act(async () => {
       pressEnter(textarea);
     });
-    expect(onSafeGuidance).toHaveBeenCalledTimes(1);
-    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSafeGuidance).not.toHaveBeenCalled();
 
-    // Modifier keys no longer flip the delivery (user decision): Ctrl+Enter
-    // steers exactly like bare Enter.
-    typeIntoTextarea(textarea, "再引导一条");
+    // ZCode default "queue" behavior: the modifier is the immediate steer.
+    typeIntoTextarea(textarea, "立即引导");
     await act(async () => {
       pressEnter(textarea, { ctrl: true });
     });
-    expect(onSafeGuidance).toHaveBeenCalledTimes(2);
-    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onSafeGuidance).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
 
-    typeIntoTextarea(textarea, "第三条");
+    typeIntoTextarea(textarea, "再立即引导一条");
     await act(async () => {
       pressEnter(textarea, { meta: true });
     });
-    expect(onSafeGuidance).toHaveBeenCalledTimes(3);
-    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onSafeGuidance).toHaveBeenCalledTimes(2);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 
   it("keeps idle behavior: Enter sends, modifiers included", async () => {
@@ -324,7 +323,8 @@ describe("composer Enter delivery (running Enter sends immediately)", () => {
 
     await act(async () => root?.unmount());
     container?.remove();
-    // A running text draft uses the same guidance delivery as Enter.
+    // A running text draft keeps the round primary on the ZCode queue action;
+    // immediate steering stays on Ctrl/Cmd+Enter.
     const stopGuidance = vi.fn();
     const stopSubmit = vi.fn();
     const busyTextarea = await renderEnterDeliveryComposer({
@@ -337,7 +337,7 @@ describe("composer Enter delivery (running Enter sends immediately)", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     const primary = container?.querySelector<HTMLButtonElement>('[data-testid="composer-primary-action"]');
-    expect(primary?.getAttribute("aria-label")).toBe(dictionary.zh.safeGuidance);
-    expect(primary?.getAttribute("data-composer-action")).toBe("steer");
+    expect(primary?.getAttribute("aria-label")).toBe(dictionary.zh.queueFollowup);
+    expect(primary?.getAttribute("data-composer-action")).toBe("queue");
   });
 });

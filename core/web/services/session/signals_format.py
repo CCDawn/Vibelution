@@ -12,6 +12,7 @@ from __future__ import annotations
 import copy
 import json
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Any, Mapping
@@ -1438,9 +1439,73 @@ def _session_last_cache_composition(
     )
 
 
+# The submit path reads the full active-branch projection before it can accept
+# a turn. On a long-lived ledger that projection is thousands of raw messages
+# and takes seconds to normalize (2026-11: 31 MB ledger / ~1.2k events /
+# 2.7 s). The ledger is append-only; branch switches append a head-select
+# marker, so (event count + first/last event id) plus the display language is
+# enough to reuse the previous normalized list until the next append.
+_SESSION_LEDGER_VISIBLE_MESSAGES_CACHE_MAX_ENTRIES = 4
+_SESSION_LEDGER_VISIBLE_MESSAGES_CACHE_LOCK = threading.Lock()
+_SESSION_LEDGER_VISIBLE_MESSAGES_CACHE: dict[tuple[Any, ...], dict[str, Any]] = {}
+
+
+def _session_events_revision(events: list[Any]) -> tuple[int, str, str]:
+    if not events:
+        return (0, "", "")
+    return (
+        len(events),
+        str(getattr(events[0], "event_id", "") or ""),
+        str(getattr(events[-1], "event_id", "") or ""),
+    )
+
+
 def _session_ledger_visible_messages(session_id: str) -> list[dict[str, Any]]:
     s = _service()
-    return s._normalize_messages(session_id, s._ledger_visible_messages_for_session(session_id))
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return []
+    events = s._load_session_conversation_events_cached(normalized_session_id)
+    if not events:
+        return []
+    language = s.get_web_language()
+    cache_key = (normalized_session_id, _session_events_revision(events), language)
+    now = time.monotonic()
+    with _SESSION_LEDGER_VISIBLE_MESSAGES_CACHE_LOCK:
+        cached = _SESSION_LEDGER_VISIBLE_MESSAGES_CACHE.get(cache_key)
+        if cached is not None:
+            cached["last_access"] = now
+            cached_messages = cached.get("messages")
+            # Callers own the list they receive (submit stores it on the turn
+            # context while other readers inspect it), so never hand out the
+            # cache's own object graph.
+            return copy.deepcopy(cached_messages) if isinstance(cached_messages, list) else []
+    from .turn_steer import restore_guidance_display_messages
+
+    raw_messages, _active_leaf_id, _active_branch_id = s.visible_messages_with_branch_info(events)
+    messages = s._normalize_messages(
+        normalized_session_id,
+        restore_guidance_display_messages(raw_messages, events),
+    )
+    with _SESSION_LEDGER_VISIBLE_MESSAGES_CACHE_LOCK:
+        _SESSION_LEDGER_VISIBLE_MESSAGES_CACHE[cache_key] = {
+            "messages": copy.deepcopy(messages),
+            "last_access": now,
+        }
+        while len(_SESSION_LEDGER_VISIBLE_MESSAGES_CACHE) > _SESSION_LEDGER_VISIBLE_MESSAGES_CACHE_MAX_ENTRIES:
+            oldest_key = min(
+                _SESSION_LEDGER_VISIBLE_MESSAGES_CACHE,
+                key=lambda key: float(
+                    _SESSION_LEDGER_VISIBLE_MESSAGES_CACHE.get(key, {}).get("last_access") or 0.0
+                ),
+            )
+            _SESSION_LEDGER_VISIBLE_MESSAGES_CACHE.pop(oldest_key, None)
+    return messages
+
+
+def _reset_session_ledger_visible_messages_cache() -> None:
+    with _SESSION_LEDGER_VISIBLE_MESSAGES_CACHE_LOCK:
+        _SESSION_LEDGER_VISIBLE_MESSAGES_CACHE.clear()
 
 
 def _session_prompt_cache_log_fields(*, scope: str, partition: str) -> dict[str, Any]:
