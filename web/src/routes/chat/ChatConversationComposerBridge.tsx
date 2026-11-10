@@ -1,4 +1,7 @@
 import { memo, useEffect, useMemo, useRef, type ReactNode } from "react";
+import {
+  liveComposerDraftOr,
+} from "./composerLiveDraft";
 
 import type { SessionReferenceAttachment } from "../../api/types";
 import { postBrowserTelemetry } from "../../app/browserTelemetry";
@@ -287,7 +290,7 @@ export const ChatConversationComposerBridge = memo(function ChatConversationComp
   // re-renders this bridge or the session view behind it. It is rebuilt when the
   // edit target changes, because the upstream draft is a different string then.
   const draftStore = useMemo(
-    () => createComposerDraftStore(composer.value),
+    () => createComposerDraftStore(liveComposerDraftOr(sessionId, composer.value)),
     [sessionId, composer.editingMessageId],
   );
   // Submitting clears the upstream draft while the store keeps the keystroke

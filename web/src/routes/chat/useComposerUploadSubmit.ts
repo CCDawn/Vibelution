@@ -40,6 +40,7 @@ import {
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
 import { loadTurnStatusTailConfig } from "./turnStatusTailModel";
 import type { EditResubmitVariables, SubmitTurnVariables } from "./useChatComposerSubmit";
+import { clearLiveComposerDraft, clearLiveComposerDraftIfEquals } from "./composerLiveDraft";
 
 export type UseSubmitTurnWithAttachmentsInput = {
   queryClient: QueryClient;
@@ -149,6 +150,7 @@ export function useSubmitTurnWithAttachments({
     }));
     setSessionDrafts((current) => clearSessionDraftForSubmittedTurn(current, sessionId));
     // The submitted draft must not resurrect from localStorage after a reload.
+    clearLiveComposerDraftIfEquals(sessionId, content);
     removeStoredSessionDraft(sessionId);
     let draftRecoveryGuard = beginSessionDraftRecoveryGuard(sessionId);
     let mutationOwnsRecoveryGuard = false;

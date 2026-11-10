@@ -92,6 +92,7 @@ import {
   scheduleSessionDraftSave,
   type SessionDraftRecoveryGuard,
 } from "./chatDraftPersistence";
+import { clearLiveComposerDraft, liveComposerDraftOr, scheduleLiveDraftMirror, writeLiveComposerDraft } from "./composerLiveDraft";
 import { type ComposerQueueItem } from "../../components/conversation/composerFollowupQueueModel";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
 import { startUserAction, type UserActionTracker } from "../../app/userActionTelemetry";
@@ -406,16 +407,23 @@ export function useChatComposerSubmitActions({
     if (!activeSessionId) {
       return;
     }
-    setSessionDrafts((current) => ({
-      ...current,
-      [activeSessionId]: value,
-    }));
+    // Typing stays off the workbench render path: the draft lands in the live
+    // registry synchronously and reaches `sessionDrafts` only after the typing
+    // pause. Submit and edit read the live value, so no keystroke is lost and
+    // nothing is sent stale.
+    writeLiveComposerDraft(activeSessionId, value);
     // Debounced localStorage persistence: drafts survive a reload/restart.
     scheduleSessionDraftSave(activeSessionId, value);
-    setSessionComposerErrors((current) => ({
-      ...current,
-      [activeSessionId]: "",
-    }));
+    scheduleLiveDraftMirror(activeSessionId, value, (id, next) => {
+      setSessionDrafts((current) => (
+        current[id] === next ? current : { ...current, [id]: next }
+      ));
+    });
+    // Clearing an already-clear error returns the same record, so React bails
+    // out instead of re-rendering the workbench for every character.
+    setSessionComposerErrors((current) => (
+      current[activeSessionId] ? { ...current, [activeSessionId]: "" } : current
+    ));
   }, [activeSessionId, setSessionComposerErrors, setSessionDrafts]);
 
   const handleMentalModelEnabledChange = useCallback((enabled: boolean) => {
@@ -578,7 +586,7 @@ export function useChatComposerSubmitActions({
       return;
     }
     if (sessionBusy && !resolvedEditTarget) {
-      const content = activeDraftEffective.trim();
+      const content = liveComposerDraftOr(activeSessionId, activeDraftEffective).trim();
       const hasAttachmentsOrReferences = activeImageAttachments.length > 0 || activeReferenceAttachments.length > 0;
       if (!content && !hasAttachmentsOrReferences) {
         // Codex-style steer: an empty submit on a running turn pushes the first
@@ -613,7 +621,7 @@ export function useChatComposerSubmitActions({
       );
       return;
     }
-    const content = activeDraftEffective.trim();
+    const content = liveComposerDraftOr(activeSessionId, activeDraftEffective).trim();
     const clientSubmissionId = createClientSubmissionId(activeSessionId);
     const telemetryActivePhase = activePhase ?? undefined;
     postSubmitTelemetry(
@@ -823,6 +831,8 @@ export function useChatComposerSubmitActions({
     releaseComposerSessionPreviewUrls(activeSessionId, true);
     setSessionImageAttachments((current) => clearSessionImageAttachments(current, activeSessionId));
     setSessionReferenceAttachments((current) => clearSessionReferenceAttachments(current, activeSessionId));
+    // Edit prefill is the new source of truth for this session's draft.
+    writeLiveComposerDraft(activeSessionId, message.content);
     setSessionDrafts((current) => ({
       ...current,
       [activeSessionId]: message.content,
@@ -856,6 +866,7 @@ export function useChatComposerSubmitActions({
       const { [activeSessionId]: _removed, ...remaining } = current;
       return remaining;
     });
+    clearLiveComposerDraft(activeSessionId);
     setSessionDrafts((current) => ({
       ...current,
       [activeSessionId]: "",
@@ -870,10 +881,12 @@ export function useChatComposerSubmitActions({
       const { [activeSessionId]: _removed, ...remaining } = current;
       return remaining;
     });
+    clearLiveComposerDraft(activeSessionId);
     setSessionDrafts((current) => ({
       ...current,
       [activeSessionId]: "",
     }));
+    clearLiveComposerDraft(activeSessionId);
     removeStoredSessionDraft(activeSessionId);
     releaseComposerSessionPreviewUrls(activeSessionId, true);
     setSessionImageAttachments((current) => clearSessionImageAttachments(current, activeSessionId));

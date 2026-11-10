@@ -1,4 +1,8 @@
 import { resolveSessionActivity, sessionBlocksMutation, sessionOwnsExecution } from "../sessionActivityState";
+import {
+  moveLiveComposerDraft,
+  writeLiveComposerDraft,
+} from "./composerLiveDraft";
 import { isChatRoomMutationPending } from "./useChatScopedMutationPending";
 import { collapseProjectUtilityRail, selectSessionUtilityRail, setProjectUtilityHost } from "../../app/projectUtilityRail";
 import { useProjectAwareRightRail } from "./useProjectAwareRightRail";
@@ -503,6 +507,7 @@ export function ChatCodingRouteWorkbench() {
   const rebaseSessionComposerState = useCallback((fromId: string, toId: string) => {
     rebaseComposerPreviewOwnersRef.current?.(fromId, toId);
     moveStoredSessionDraft(fromId, toId);
+    moveLiveComposerDraft(fromId, toId);
     setSessionDrafts((current) => rekeySessionComposerEntry(current, fromId, toId));
     setSessionReferenceAttachments((current) => rekeySessionComposerEntry(current, fromId, toId));
     setTurnModelSelections((current) => rekeySessionComposerEntry(current, fromId, toId));
@@ -1126,6 +1131,7 @@ export function ChatCodingRouteWorkbench() {
     if (activeSessionId !== targetSessionId) {
       return;
     }
+    writeLiveComposerDraft(targetSessionId, pendingHandoff.content);
     setSessionDrafts((current) => ({
       ...current,
       [targetSessionId]: pendingHandoff.content,

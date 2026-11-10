@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import React, { act, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { liveComposerDraftOr, resetLiveComposerDraftsForTests } from "./composerLiveDraft";
 import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -175,7 +176,7 @@ function Harness({
     stop: actions.handleStopTurn,
     cancelEdit: actions.handleCancelEditMessage,
     switchSession: setActiveSessionId,
-    draft: drafts[activeSessionId] ?? "",
+    draft: liveComposerDraftOr(activeSessionId, drafts[activeSessionId] ?? ""),
     error: errors[activeSessionId] ?? "",
     get activeTurnLayer() { return activeTurnLayersStore.getSnapshot()[activeSessionId]; },
     setActiveTurnLayer: (layer) => activeTurnLayersStore.setActiveTurnLayersBySession((current) => {
@@ -211,7 +212,9 @@ function Harness({
   return null;
 }
 
-function mount(attachments: ComposerImageAttachment[] = [], options: { initialDraft?: string; persistInitialDraft?: boolean } = {}) {
+function mount(attachments: ComposerImageAttachment[] = [], options: {
+  // A fresh mount mirrors a page reload: module-level draft memory starts empty.
+  resetLiveComposerDraftsForTests(); initialDraft?: string; persistInitialDraft?: boolean } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   clients.push(client);
   const container = document.createElement("div");
@@ -230,6 +233,7 @@ async function settle() {
 }
 
 beforeEach(() => {
+    resetLiveComposerDraftsForTests();
   localStorage.clear();
   resetChatDraftPersistenceForTests();
   vi.mocked(submitSessionMessage).mockReset().mockRejectedValue(new Error("network disconnected"));

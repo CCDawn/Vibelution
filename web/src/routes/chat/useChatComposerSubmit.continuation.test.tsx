@@ -13,6 +13,7 @@ import { flushPendingSessionDraftWrites, readStoredSessionDrafts, resetChatDraft
 import { fetchSessionDetailWindow } from "./chatSessionDetailHelpers";
 import { useChatComposerSubmitActions } from "./useChatComposerSubmit";
 import { useChatComposerTurnMutations } from "./useChatComposerTurnMutations";
+import { liveComposerDraftOr, resetLiveComposerDraftsForTests } from "./composerLiveDraft";
 
 vi.mock("../../api/chat", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../api/chat")>(), submitSessionMessage: vi.fn(),
@@ -87,13 +88,15 @@ function Harness({ client }: { client: QueryClient }) {
     continue: actions.handleContinueTurn, change: actions.handleComposerChange,
     addAttachment: (attachment) => setImages((current) => ({ ...current, [sid]: [...(current[sid] ?? []), attachment] })),
     addReference: actions.handleAddComposerReference,
-    draft: drafts[sid] ?? "", attachments: images[sid] ?? [], references: references[sid] ?? [],
+    draft: liveComposerDraftOr(sid, drafts[sid] ?? ""), attachments: images[sid] ?? [], references: references[sid] ?? [],
     error: errors[sid] ?? "", pending: mutations.submitTurnMutation.isPending,
   };
   return null;
 }
 
 async function mount() {
+  // A fresh mount mirrors a page reload: module-level draft memory starts empty.
+  resetLiveComposerDraftsForTests();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   clients.push(client);
   client.setQueryData(queryKeys.session(sid), stoppedDetail);
