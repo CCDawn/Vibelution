@@ -6,6 +6,7 @@ import base64
 import csv
 import hashlib
 import json
+import sys
 from collections import Counter
 from pathlib import Path
 
@@ -285,9 +286,16 @@ def test_builder_resolves_the_admitted_output_root_once(package_fixture, monkeyp
     original = Path.resolve
     resolutions = 0
 
+    # A sandbox runtime injects a sitecustomize mkdir hook that resolves every
+    # created path, which is host policy rather than builder work. Count only
+    # resolutions the project code itself performs.
+    def _is_project_caller() -> bool:
+        caller = sys._getframe(2).f_globals.get("__file__") or ""
+        return not str(caller).endswith("sitecustomize.py")
+
     def resolve(path, *args, **kwargs):
         nonlocal resolutions
-        if path == root:
+        if path == root and _is_project_caller():
             resolutions += 1
         return original(path, *args, **kwargs)
 
