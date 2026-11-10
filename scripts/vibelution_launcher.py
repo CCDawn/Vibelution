@@ -113,6 +113,11 @@ LAUNCHER_ICON_PATH = PROJECT_ROOT / "assets" / "icons" / "vibelution.ico"
 VENV_DIR = PROJECT_ROOT / ".venv"
 REQUIREMENTS_PATH = PROJECT_ROOT / "requirements.txt"
 REQUIREMENT_IMPORT_NAME_OVERRIDES = {
+    # Pip names whose import name differs and which pip cannot guess at all:
+    # probing the dashed name reports the package as missing and aborts a
+    # healthy start on a machine that has it installed.
+    "pillow": "PIL",
+    "pyjwt": "jwt",
     "pytest-xdist": "xdist",
     "pywinpty": "winpty",
     # Package installs under langgraph.checkpoint.sqlite (no top-level module).

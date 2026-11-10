@@ -901,10 +901,12 @@ def test_publish_copy_validation_failure_keeps_previous_active_release_and_clean
             raise PermissionError("sharing violation")
         os.replace(source, destination)
 
-    def copied_release_is_incomplete(path: Path, *, build_key: str | None = None) -> bool:
+    def copied_release_is_incomplete(
+        path: Path, *, build_key: str | None = None, allow_legacy_key: bool = False
+    ) -> bool:
         if path.name.startswith("release-") and path.name != "release-old":
             return False
-        return original_complete_release(path, build_key=build_key)
+        return original_complete_release(path, build_key=build_key, allow_legacy_key=allow_legacy_key)
 
     monkeypatch.setattr(frontend_build.os, "replace", persistent_sharing_violation)
     monkeypatch.setattr(frontend_build, "_is_complete_release", copied_release_is_incomplete)

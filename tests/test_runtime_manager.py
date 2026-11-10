@@ -6781,6 +6781,108 @@ def test_desktop_shell_visible_window_route_prefers_live_shell_then_packaged_ent
     assert route["reason"] == "packaged_entry_missing"
 
 
+def test_open_workbench_window_prefers_the_live_shell_action_channel(monkeypatch, tmp_path):
+    exe = tmp_path / "Vibelution.exe"
+    exe.write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        workbench_controller,
+        "desktop_shell_visible_window_route",
+        lambda: {"available": True, "reason": "live_desktop_shell", "executable": str(exe)},
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_latest_active_electron_desktop_session",
+        lambda: {"desktopSessionId": "electron-4242-abcd", "revision": 4},
+    )
+    submitted: list[dict] = []
+    monkeypatch.setattr(
+        workbench_controller,
+        "_submit_electron_window_action",
+        lambda **kwargs: submitted.append(kwargs) or {"status": "accepted", "intentId": "intent-live-open"},
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_await_electron_window_action_confirmed",
+        lambda **_kwargs: {"desktopSessionId": "electron-4242-abcd", "revision": 5},
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_signal_live_electron_open_workbench",
+        lambda **_kwargs: pytest.fail("a live shell that confirms the action must not be signaled again"),
+    )
+
+    result = workbench_controller.open_workbench_window_via_desktop_shell()
+
+    assert result["opened"] is True
+    assert result["reason"] == "live_desktop_shell:desktop_action"
+    assert [entry["action"] for entry in submitted] == ["open_workbench"]
+
+
+def test_open_workbench_window_falls_back_to_the_signal_when_the_action_is_unconfirmed(monkeypatch, tmp_path):
+    exe = tmp_path / "Vibelution.exe"
+    exe.write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        workbench_controller,
+        "desktop_shell_visible_window_route",
+        lambda: {"available": True, "reason": "live_desktop_shell", "executable": str(exe)},
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_latest_active_electron_desktop_session",
+        lambda: {"desktopSessionId": "electron-4242-abcd", "revision": 4},
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_submit_electron_window_action",
+        lambda **_kwargs: {"status": "accepted", "intentId": "intent-live-open"},
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_await_electron_window_action_confirmed",
+        lambda **_kwargs: (_ for _ in ()).throw(TimeoutError("no ack")),
+    )
+    signaled: list[Path] = []
+    monkeypatch.setattr(
+        workbench_controller,
+        "_signal_live_electron_open_workbench",
+        lambda *, executable, **_kwargs: signaled.append(executable),
+    )
+
+    result = workbench_controller.open_workbench_window_via_desktop_shell()
+
+    # A shell that never claims the action (for example before its control plane
+    # attaches) must still be reachable through the argv handoff.
+    assert result["opened"] is True
+    assert signaled == [exe]
+
+
+def test_open_workbench_window_skips_the_action_channel_without_a_live_session(monkeypatch, tmp_path):
+    exe = tmp_path / "Vibelution.exe"
+    exe.write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        workbench_controller,
+        "desktop_shell_visible_window_route",
+        lambda: {"available": True, "reason": "packaged_shell_bootstrap", "executable": str(exe)},
+    )
+    monkeypatch.setattr(workbench_controller, "_latest_active_electron_desktop_session", dict)
+    monkeypatch.setattr(
+        workbench_controller,
+        "_submit_electron_window_action",
+        lambda **_kwargs: pytest.fail("no live shell can claim a desktop action"),
+    )
+    signaled: list[Path] = []
+    monkeypatch.setattr(
+        workbench_controller,
+        "_signal_live_electron_open_workbench",
+        lambda *, executable, **_kwargs: signaled.append(executable),
+    )
+
+    result = workbench_controller.open_workbench_window_via_desktop_shell()
+
+    assert result["opened"] is True
+    assert signaled == [exe]
+
+
 def test_open_workbench_window_via_desktop_shell_reports_a_refused_signal(monkeypatch, tmp_path):
     exe = tmp_path / "Vibelution.exe"
     exe.write_text("", encoding="utf-8")
@@ -6789,6 +6891,7 @@ def test_open_workbench_window_via_desktop_shell_reports_a_refused_signal(monkey
         "desktop_shell_visible_window_route",
         lambda: {"available": True, "reason": "live_desktop_shell", "executable": str(exe)},
     )
+    monkeypatch.setattr(workbench_controller, "_latest_active_electron_desktop_session", dict)
     monkeypatch.setattr(
         workbench_controller,
         "_signal_live_electron_open_workbench",

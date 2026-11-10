@@ -44,6 +44,12 @@ describe("Electron main startup sequence", () => {
       pendingOpenWorkbenchRequest: desktopCliArgs.openWorkbench,
       pendingProjectRoot: "",
       windowProvider: {},
+      launcherBootstrap: null,
+      electronStartupStage: "",
+      // A resident shell keeps serving the backend on relaunch. These tests only
+      // assert the single startup open, so the resident start stays inert.
+      shouldEnsureResidentBackend: () => false,
+      ensureResidentWorkbenchBackendOnStartup: vi.fn(),
       shouldDeferWorkbenchOpenUntilLifecycleStart,
       startOrFocusWorkbenchFromProductEntryOnShell: open,
       markWorkbenchOpenRequested: vi.fn(),
@@ -99,10 +105,9 @@ describe("Electron main startup sequence", () => {
   it("starts the workbench lifecycle before loading a possibly-dead workbench URL", () => {
     const source = readFileSync(mainSourcePath, "utf8");
     const deferIndex = source.indexOf("shouldDeferWorkbenchOpenUntilLifecycleStart(firstLifecycle)");
-    const openIfIndex = source.indexOf(
-      "if (pendingOpenWorkbenchRequest && !desktopCliArgs.workbenchCloseCanary && !deferWorkbenchOpen)"
-    );
-    const pendingProjectIndex = source.indexOf("if (pendingProjectRoot)");
+    const openIntentIndex = source.indexOf("const openWorkbenchIntent = pendingOpenWorkbenchRequest");
+    const openIfIndex = source.indexOf("if (openWorkbenchIntent) {");
+    const pendingProjectIndex = source.indexOf("if (pendingProjectRoot) {");
     const applySlotIndex = source.indexOf(
       "await applyPendingProjectSlot(pendingProjectRoot, firstLifecycle, desktopLifecycleProvenance, {"
     );
@@ -114,7 +119,8 @@ describe("Electron main startup sequence", () => {
     );
 
     expect(deferIndex).toBeGreaterThan(0);
-    expect(openIfIndex).toBeGreaterThan(deferIndex);
+    expect(openIntentIndex).toBeGreaterThan(deferIndex);
+    expect(openIfIndex).toBeGreaterThan(openIntentIndex);
     expect(pendingProjectIndex).toBeGreaterThan(openIfIndex);
     expect(applySlotIndex).toBeGreaterThan(pendingProjectIndex);
     expect(noProjectLifecycleIndex).toBeGreaterThan(applySlotIndex);
@@ -133,7 +139,7 @@ describe("Electron main startup sequence", () => {
 
   it("does not open the Launcher as a startup window fallback", () => {
     const source = readFileSync(mainSourcePath, "utf8");
-    const startupIndex = source.indexOf("if (pendingOpenWorkbenchRequest &&");
+    const startupIndex = source.indexOf("const openWorkbenchIntent = pendingOpenWorkbenchRequest");
     const deferIndex = source.indexOf("if (deferWorkbenchOpen)", startupIndex);
 
     expect(startupIndex).toBeGreaterThan(0);
@@ -350,6 +356,10 @@ describe("passive startup inventory", () => {
       projectControlPlaneObserversStarted: false,
       app: { isPackaged: true },
       shouldDeferWorkbenchOpenUntilLifecycleStart,
+      // Resident-backend startup keeps running in the background; the inventory
+      // assertions only care about the dispatch gate below.
+      shouldEnsureResidentBackend: () => false,
+      ensureResidentWorkbenchBackendOnStartup: vi.fn(),
       markWorkbenchOpenRequested: vi.fn(),
       startOrFocusWorkbenchFromProductEntryOnShell: vi.fn(() => gate),
       handleSecondInstanceLifecycleCommand: vi.fn(() => gate),
