@@ -7,6 +7,7 @@ import {
   isSessionDeleteTombstoned,
   markSessionDeleteTombstone,
   resetSessionDeleteTombstonesForTests,
+  sessionDeleteTombstoneOrigin,
 } from "./sessionDeleteTombstone";
 
 describe("sessionDeleteTombstone", () => {
@@ -54,6 +55,7 @@ describe("sessionDeleteTombstone", () => {
     expect(isSessionDeleteTombstoned("confirmed-missing", { nowMs: 252000 })).toBe(false);
   });
 
+  it("keeps the user origin when a later marker is optimistic", () => {     markSessionDeleteTombstone("user-deleted", { origin: "user", confirmed: true });     expect(sessionDeleteTombstoneOrigin("user-deleted")).toBe("user");          markSessionDeleteTombstone("user-deleted", { nowMs: 5000 });     expect(sessionDeleteTombstoneOrigin("user-deleted")).toBe("user");     markSessionDeleteTombstone("external-missing", { confirmed: true });     expect(sessionDeleteTombstoneOrigin("external-missing")).toBe("external");     expect(sessionDeleteTombstoneOrigin("unknown")).toBe(null);   });
   it("clears tombstones on failed delete recovery", () => {
     markSessionDeleteTombstone("session-a");
     clearSessionDeleteTombstone("session-a");

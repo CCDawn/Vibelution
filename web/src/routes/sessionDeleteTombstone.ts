@@ -9,9 +9,11 @@
  * protection cannot resurrect a cached writable conversation.
  */
 
+export type SessionDeleteTombstoneOrigin = "user" | "external";
+
 const DEFAULT_TTL_MS = 120_000;
 
-const deletedAtBySessionId = new Map<string, { deletedAt: number; confirmed: boolean }>();
+const deletedAtBySessionId = new Map<string, { deletedAt: number; confirmed: boolean; origin: SessionDeleteTombstoneOrigin }>();
 
 type TombstoneClock = {
   nowMs?: number;
@@ -20,17 +22,30 @@ type TombstoneClock = {
 
 export function markSessionDeleteTombstone(
   sessionId: string,
-  options: TombstoneClock & { confirmed?: boolean } = {},
+  options: TombstoneClock & { confirmed?: boolean; origin?: SessionDeleteTombstoneOrigin } = {},
 ): void {
   const id = String(sessionId || "").trim();
   if (!id) {
     return;
   }
+  const previousMarker = deletedAtBySessionId.get(id);
   deletedAtBySessionId.set(id, {
     deletedAt: options.nowMs ?? Date.now(),
     // A server-confirmed not-found must not become an optimistic TTL marker.
-    confirmed: Boolean(options.confirmed || deletedAtBySessionId.get(id)?.confirmed),
+    confirmed: Boolean(options.confirmed || previousMarker?.confirmed),
+    origin: previousMarker?.origin === "user" ? "user" : (options.origin ?? "external"),
   });
+}
+
+/** Why a tombstone exists: a user delete handoff or an externally confirmed absence. */
+export function sessionDeleteTombstoneOrigin(
+  sessionId: string,
+): SessionDeleteTombstoneOrigin | null {
+  const id = String(sessionId || "").trim();
+  if (!id) {
+    return null;
+  }
+  return deletedAtBySessionId.get(id)?.origin ?? null;
 }
 
 export function clearSessionDeleteTombstone(sessionId: string): void {

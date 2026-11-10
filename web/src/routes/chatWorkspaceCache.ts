@@ -90,7 +90,7 @@ export function createChatWorkspaceCache(queryClient: QueryClientLike) {
       const deletedSessionId = String(options.deletedSessionId || "").trim();
       if (deletedSessionId) {
         // Survive brief list refetch races after optimistic delete.
-        markSessionDeleteTombstone(deletedSessionId);
+        markSessionDeleteTombstone(deletedSessionId, { origin: "user" });
         queryClient.removeQueries?.({ queryKey: queryKeys.session(deletedSessionId), exact: true });
         queryClient.removeQueries?.({ queryKey: queryKeys.sessionLlmOptions(deletedSessionId), exact: true });
       }
