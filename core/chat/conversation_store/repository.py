@@ -1015,6 +1015,71 @@ class WorkspaceChatStateDao:
         ).fetchall()
         return [str(row["session_id"] or "").strip() for row in rows if str(row["session_id"] or "").strip()]
 
+    def list_orphan_runtime_rows(self) -> list[dict[str, Any]]:
+        """Chat-state rows with no ``sessions`` projection row.
+
+        A candidate only means "the directory does not know this session". The
+        caller still has to prove the row carries nothing before deleting it.
+        """
+
+        rows = self._connection.execute(
+            "SELECT r.session_id, r.payload_json FROM session_runtime_state r "
+            "WHERE NOT EXISTS ("
+            "SELECT 1 FROM sessions s WHERE s.session_id = r.session_id"
+            ") "
+            "ORDER BY r.position ASC"
+        ).fetchall()
+        orphans: list[dict[str, Any]] = []
+        for row in rows:
+            session_id = str(row["session_id"] or "").strip()
+            if not session_id:
+                continue
+            try:
+                decoded = json.loads(str(row["payload_json"] or "{}"))
+            except ValueError:
+                decoded = {}
+            orphans.append(
+                {
+                    "sessionId": session_id,
+                    "payload": decoded if isinstance(decoded, dict) else {},
+                }
+            )
+        return orphans
+
+    def delete_runtime_rows(self, session_ids: Sequence[str]) -> int:
+        """Drop chat-state rows whose session is provably gone.
+
+        ``session_runtime_state`` has no foreign key onto the ``sessions``
+        projection, so a retired session leaves its chat-state row behind and
+        every later read-modify-write carries it forward. Callers must prove the
+        row is unreachable (no directory row, no workspace files, no message
+        body) before asking for the delete; this DAO only obeys.
+        """
+
+        targets = [str(session_id or "").strip() for session_id in session_ids]
+        targets = [session_id for session_id in targets if session_id]
+        if not targets:
+            return 0
+        deleted = 0
+        for session_id in targets:
+            existing = self._connection.execute(
+                "SELECT COUNT(*) FROM session_runtime_state r "
+                "WHERE r.session_id=? AND NOT EXISTS ("
+                "SELECT 1 FROM sessions s WHERE s.session_id = r.session_id"
+                ")",
+                (session_id,),
+            ).fetchone()
+            deleted += int(existing[0] or 0) if existing is not None else 0
+            self._connection.execute(
+                "DELETE FROM session_runtime_state WHERE session_id=?",
+                (session_id,),
+            )
+            self._connection.execute(
+                "DELETE FROM session_debug_snapshots WHERE session_id=?",
+                (session_id,),
+            )
+        return deleted
+
     def get_active_session_id(self) -> str:
         root = self._connection.execute(
             "SELECT active_session_id FROM workspace_chat_state WHERE id=1"
@@ -1981,6 +2046,23 @@ class ConversationRepository:
             return {**result, "sessionIds": session_ids}
 
         return self._writer.submit(upsert, force_flush=True)
+
+    def list_orphan_runtime_rows(self) -> list[dict[str, Any]]:
+        """Chat-state rows the directory projection does not carry."""
+
+        with self._database.reader() as connection:
+            return WorkspaceChatStateDao(connection).list_orphan_runtime_rows()
+
+    def delete_session_runtime_rows(self, session_ids: Sequence[str]) -> Future[int]:
+        """Delete chat-state rows the caller proved unreachable."""
+
+        frozen = [str(session_id or "").strip() for session_id in session_ids]
+        frozen = [session_id for session_id in frozen if session_id]
+
+        def delete(unit_of_work: ConversationUnitOfWork) -> int:
+            return unit_of_work.chat_state.delete_runtime_rows(frozen)
+
+        return self._writer.submit(delete, force_flush=True)
 
     def get_chat_state_directory_overlay(self) -> tuple[str, dict[str, dict[str, Any]]]:
         with self._database.reader() as connection:
