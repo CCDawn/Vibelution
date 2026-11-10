@@ -256,12 +256,21 @@ export async function requestGracefulWorkbenchShutdown(input: {
       };
     }
     if (response.status !== 202) {
-      return {
-        requested: false,
-        completed: false,
-        status: response.status,
-        reason: `backend graceful shutdown returned HTTP ${response.status}`
-      };
+      if (response.status === 503) {
+        // 503 means the backend has already stopped accepting work and is
+        // shutting down. Sending another shutdown request would only hit the
+        // same closing server, so treat it as accepted and wait for the port
+        // and process to disappear instead of failing the operator restart
+        // before a new backend can bind.
+        accepted = true;
+      } else {
+        return {
+          requested: false,
+          completed: false,
+          status: response.status,
+          reason: `backend graceful shutdown returned HTTP ${response.status}`
+        };
+      }
     }
 
     accepted = true;
