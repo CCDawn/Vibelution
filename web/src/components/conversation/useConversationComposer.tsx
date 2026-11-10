@@ -45,7 +45,7 @@ import type { ConversationImagePreviewRequest } from "./ConversationImagePreview
 import { ConversationTurnModelControl } from "./ConversationTurnModelControl";
 import { attachmentSizeLabel, isImageAttachment } from "./attachmentPresentation";
 import type { ComposerQueueItem } from "./composerFollowupQueueModel";
-import { resolveComposerQueuePrimaryKind } from "./composerFollowupQueueModel";
+
 import {
   MAX_COMPOSER_STARTERS,
   resolveComposerPlaceholder,
@@ -378,7 +378,6 @@ export function useConversationComposer({
     composerValue,
     hasAttachments: hasComposerAttachments,
     hasReferences: hasComposerReferences,
-    hasSafeGuidance: Boolean(onSafeGuidance),
   });
   const {
     guidanceActionDisabled,
@@ -392,11 +391,6 @@ export function useConversationComposer({
     queueCount: followupQueue.length,
     hasAttachments: hasComposerAttachments,
     hasReferences: hasComposerReferences,
-  });
-  const queuePrimaryKind = resolveComposerQueuePrimaryKind({
-    sessionBusy: runningGuidanceActionsEnabled,
-    draft: composerValue,
-    queueCount: followupQueue.length,
   });
   const resolvedQueueFollowupLabel = t("queueFollowup");
   const resolvedSafeGuidanceLabel = safeGuidanceLabel ?? t("safeGuidance");
@@ -421,9 +415,7 @@ export function useConversationComposer({
   const primaryDisabled = primaryPending || (primaryAction === "steer" || primaryAction === "queue"
     ? composerDisabled || !(composerValue.trim() || hasComposerAttachments || hasComposerReferences)
     : resolvedActionDisabled);
-  const baseComposerPlaceholder = runningGuidanceActionsEnabled && onSafeGuidance && !hasComposerAttachments && !hasComposerReferences
-    ? (lang === "zh" ? "补充消息以引导当前任务…" : "Add a message to guide the current task…")
-    : composerPlaceholder.trim()
+  const baseComposerPlaceholder = composerPlaceholder.trim()
     ? composerPlaceholder
     : resolvedActionMode === "stop"
       ? (followupQueue.length ? t("sessionBusyQueuedPlaceholder") : t("sessionBusyPlaceholder"))
@@ -909,6 +901,7 @@ export function useConversationComposer({
         onClick={handlePrimaryAction}
         label={primaryLabel}
         tooltip={primaryPending ? primaryPendingLabel : primaryAction === "send" ? t("composerSendEnterHint")
+          : primaryAction === "queue" ? t("composerQueueSteerEnterHint")
           : primaryAction === "steer" ? t("composerSteerEnterHint") : primaryLabel}
         icon={primaryPending ? null : primaryAction === "stop" ? <Square size={14} aria-hidden="true" />
           : primaryAction === "continue" ? <Play size={16} aria-hidden="true" />
@@ -1417,12 +1410,11 @@ export function useConversationComposer({
                 event.preventDefault();
                 onStop?.();
               }
-              // Enter delivery: while a turn runs, Enter immediately steers
-              // the draft via the existing safe-guidance channel, falling
-              // back to queueing when the payload cannot ride guidance
-              // (attachments/references) or no guidance handler exists.
-              // Idle Enter sends. Modifier keys never change the delivery
-              // (user decision removed the Ctrl/⌘+Enter flip).
+              // Enter delivery (ZCode default "queue" parity): while a turn
+              // runs, bare Enter queues; Ctrl/⌘+Enter steers immediately via
+              // the safe-guidance channel. Payloads that guidance cannot
+              // carry (attachments/references) fall back to the queue. Idle
+              // Enter sends.
               const composerEnterDelivery = resolveComposerEnterDelivery({
                 key: event.key,
                 shiftKey: event.shiftKey,
@@ -1453,7 +1445,8 @@ export function useConversationComposer({
                     onSafeGuidance();
                   }
                 } else if (
-                  (hasComposerAttachments || hasComposerReferences || queuePrimaryKind === "queue" || queuePrimaryKind === "immediate")
+                  composerEnterDelivery === "queue"
+                  && (composerValue.trim() || hasComposerAttachments || hasComposerReferences)
                   && !guidanceActionDisabled
                 ) {
                   handleQueueSubmit();

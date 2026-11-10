@@ -100,17 +100,16 @@ describe("conversationComposerActionModel", () => {
   });
 
   it.each([
-    ["send", "", false, false, true, "send"],
-    ["stop", "", false, false, true, "stop"],
-    ["stop", "draft", false, false, true, "steer"],
-    ["stop", "draft", false, false, false, "queue"],
-    ["stop", "", true, false, true, "queue"],
-    ["stop", "draft", false, true, true, "queue"],
-    ["continue", "", false, false, true, "continue"],
-    ["continue", "draft", false, false, true, "send"],
-  ])("resolves one primary action for %s / %s", (actionMode, composerValue, hasAttachments, hasReferences, hasSafeGuidance, expected) => {
+    ["send", "", false, false, "send"],
+    ["stop", "", false, false, "stop"],
+    ["stop", "draft", false, false, "queue"],
+    ["stop", "", true, false, "queue"],
+    ["stop", "draft", false, true, "queue"],
+    ["continue", "", false, false, "continue"],
+    ["continue", "draft", false, false, "send"],
+  ])("resolves one primary action for %s / %s", (actionMode, composerValue, hasAttachments, hasReferences, expected) => {
     expect(resolveComposerPrimaryAction({ actionMode: actionMode as string, composerValue: composerValue as string,
-      hasAttachments: Boolean(hasAttachments), hasReferences: Boolean(hasReferences), hasSafeGuidance: Boolean(hasSafeGuidance) })).toBe(expected);
+      hasAttachments: Boolean(hasAttachments), hasReferences: Boolean(hasReferences) })).toBe(expected);
   });
 
   it("resolves edit mode and guidance UI flags", () => {
@@ -198,7 +197,7 @@ describe("conversationComposerActionModel", () => {
     expect(resolveComposerEnterDelivery({ ...continuation, isComposing: true })).toBe("none");
   });
 
-  it("resolves enter delivery: running Enter steers immediately regardless of modifiers", () => {
+  it("resolves enter delivery: running Enter queues, Ctrl/Cmd+Enter steers", () => {
     const running = {
       key: "Enter",
       shiftKey: false,
@@ -209,7 +208,7 @@ describe("conversationComposerActionModel", () => {
       actionMode: "stop" as const,
       canDeliverImmediately: true,
     };
-    expect(resolveComposerEnterDelivery(running)).toBe("steer");
+    expect(resolveComposerEnterDelivery(running)).toBe("queue");
     expect(resolveComposerEnterDelivery({ ...running, ctrlKey: true })).toBe("steer");
     expect(resolveComposerEnterDelivery({ ...running, metaKey: true })).toBe("steer");
   });

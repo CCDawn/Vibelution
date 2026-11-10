@@ -3498,6 +3498,81 @@ def _assistant_turn_header_terminal_event_types() -> set[str]:
     return {s.EVENT_TURN_COMPLETED, s.EVENT_TURN_FAILED, s.EVENT_TURN_INTERRUPTED}
 
 
+_ASSISTANT_TURN_HEADER_INDEX_CACHE_MAX_ENTRIES = 4
+_ASSISTANT_TURN_HEADER_INDEX_CACHE_LOCK = threading.Lock()
+_ASSISTANT_TURN_HEADER_INDEX_CACHE: dict[tuple[Any, ...], dict[str, Any]] = {}
+
+
+def _assistant_turn_header_index(session_id: str) -> dict[str, tuple[str, str, str]]:
+    """Event-derived ``turnId -> (startedAt, endedAt, terminalStatus)`` index.
+
+    ``_normalize_messages`` asks for one header per assistant turn. Scanning
+    the full journal per turn made a 12k-event / 168-turn ledger quadratic
+    (~1.9 s of a 2.7 s projection in 2026-11). One scan per ledger revision is
+    enough: turn boundaries only come from journal events here; the work-run
+    snapshot stays a per-call fallback in the caller.
+    """
+
+    s = _service()
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return {}
+    events = s._load_session_conversation_events_cached(normalized_session_id)
+    if not events:
+        return {}
+    revision = (
+        len(events),
+        str(getattr(events[0], "event_id", "") or ""),
+        str(getattr(events[-1], "event_id", "") or ""),
+    )
+    cache_key = (normalized_session_id, revision)
+    now = time.monotonic()
+    with _ASSISTANT_TURN_HEADER_INDEX_CACHE_LOCK:
+        cached = _ASSISTANT_TURN_HEADER_INDEX_CACHE.get(cache_key)
+        if cached is not None:
+            cached["last_access"] = now
+            index = cached.get("index")
+            return index if isinstance(index, dict) else {}
+    terminal_event_types = _assistant_turn_header_terminal_event_types()
+    index: dict[str, tuple[str, str, str]] = {}
+    for event in events:
+        turn_id = str(getattr(event, "turn_id", "") or "").strip()
+        if not turn_id:
+            continue
+        event_type = str(getattr(event, "event_type", "") or "").strip()
+        if event_type != s.EVENT_TURN_STARTED and event_type not in terminal_event_types:
+            continue
+        timestamp = str(getattr(event, "timestamp", "") or "").strip()
+        started_at, ended_at, terminal_status = index.get(turn_id, ("", "", ""))
+        if event_type == s.EVENT_TURN_STARTED:
+            if not started_at:
+                started_at = timestamp
+        else:
+            terminal_status = str(getattr(event, "status", "") or "").strip().lower()
+            if timestamp:
+                ended_at = timestamp
+        index[turn_id] = (started_at, ended_at, terminal_status)
+    with _ASSISTANT_TURN_HEADER_INDEX_CACHE_LOCK:
+        _ASSISTANT_TURN_HEADER_INDEX_CACHE[cache_key] = {
+            "index": index,
+            "last_access": now,
+        }
+        while len(_ASSISTANT_TURN_HEADER_INDEX_CACHE) > _ASSISTANT_TURN_HEADER_INDEX_CACHE_MAX_ENTRIES:
+            oldest_key = min(
+                _ASSISTANT_TURN_HEADER_INDEX_CACHE,
+                key=lambda key: float(
+                    _ASSISTANT_TURN_HEADER_INDEX_CACHE.get(key, {}).get("last_access") or 0.0
+                ),
+            )
+            _ASSISTANT_TURN_HEADER_INDEX_CACHE.pop(oldest_key, None)
+    return index
+
+
+def _reset_assistant_turn_header_index_cache() -> None:
+    with _ASSISTANT_TURN_HEADER_INDEX_CACHE_LOCK:
+        _ASSISTANT_TURN_HEADER_INDEX_CACHE.clear()
+
+
 def _assistant_turn_header_fields(
     session_id: str,
     turn_id: str,
@@ -3521,22 +3596,10 @@ def _assistant_turn_header_fields(
     normalized_turn_id = str(turn_id or "").strip()
     if not normalized_turn_id:
         return {}
-    started_at = ""
-    ended_at = ""
-    terminal_status = ""
-    terminal_event_types = _assistant_turn_header_terminal_event_types()
     try:
-        for event in s._load_session_conversation_events_cached(str(session_id or "").strip()):
-            if str(getattr(event, "turn_id", "") or "").strip() != normalized_turn_id:
-                continue
-            event_type = str(getattr(event, "event_type", "") or "").strip()
-            timestamp = str(getattr(event, "timestamp", "") or "").strip()
-            if event_type == s.EVENT_TURN_STARTED:
-                started_at = started_at or timestamp
-            elif event_type in terminal_event_types:
-                terminal_status = str(getattr(event, "status", "") or "").strip().lower()
-                if timestamp:
-                    ended_at = timestamp
+        started_at, ended_at, terminal_status = _assistant_turn_header_index(
+            str(session_id or "").strip()
+        ).get(normalized_turn_id, ("", "", ""))
     except Exception:
         started_at = ""
         ended_at = ""
