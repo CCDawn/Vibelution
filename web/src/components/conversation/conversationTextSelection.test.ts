@@ -52,6 +52,35 @@ function stubSelection(
 };
 
 describe("conversationTextSelection", () => {
+  it("withholds a single-source reference when the selection crosses message rows", () => {
+    const container = document.createElement("div");
+    const firstRow = document.createElement("div");
+    firstRow.setAttribute(CONVERSATION_SELECTION_MESSAGE_ATTRIBUTE, "m1");
+    const firstText = document.createTextNode("第一条");
+    firstRow.appendChild(firstText);
+    container.appendChild(firstRow);
+
+    const secondRow = document.createElement("div");
+    secondRow.setAttribute(CONVERSATION_SELECTION_MESSAGE_ATTRIBUTE, "m2");
+    const secondText = document.createTextNode("第二条");
+    secondRow.appendChild(secondText);
+    container.appendChild(secondRow);
+
+    const withinOneRow = extractConversationSelectionSnapshot(
+      stubSelection([stubRange(firstText, firstText, stubRect({ width: 10, height: 10 }))], "第一条"),
+      container,
+    );
+    expect(withinOneRow?.sourceMessageId).toBe("m1");
+    expect(withinOneRow?.spansMessages).toBe(false);
+
+    const crossingRows = extractConversationSelectionSnapshot(
+      stubSelection([stubRange(firstText, secondText, stubRect({ width: 10, height: 10 }))], "第一条第二条"),
+      container,
+    );
+    expect(crossingRows?.sourceMessageId).toBe("m1");
+    expect(crossingRows?.spansMessages).toBe(true);
+  });
+
   it("returns null for empty, collapsed, or container-less selections", () => {
     const container = document.createElement("div");
     const node = document.createTextNode("内容");

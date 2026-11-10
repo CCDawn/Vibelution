@@ -54,6 +54,7 @@ export function useConversationSelectionQuote({
     text: string;
     rect: ConversationSelectionRect;
     sourceMessageId: string;
+    spansMessages: boolean;
   } | null>(null);
   // Selection quote lifecycle: document-level selectionchange + mouseup/keyup,
   // rAF-coalesced. The menu opens only for a non-empty selection fully inside
@@ -84,6 +85,7 @@ export function useConversationSelectionQuote({
       setSelectionQuoteMenu({
         text: snapshot.text,
         sourceMessageId: snapshot.sourceMessageId,
+        spansMessages: snapshot.spansMessages,
         rect: snapshot.rect,
       });
     };
@@ -171,7 +173,7 @@ export function useConversationSelectionQuote({
    * anchor lives inside a message row.
    */
   const handleSelectionReferenceToComposer = useCallback(() => {
-    if (!selectionQuoteMenu?.sourceMessageId || !onAddComposerReference) {
+    if (!selectionQuoteMenu?.sourceMessageId || selectionQuoteMenu.spansMessages || !onAddComposerReference) {
       return;
     }
     onAddComposerReference(buildMessageReferencePayload({
@@ -192,7 +194,9 @@ export function useConversationSelectionQuote({
       sideLabel={lang === "zh" ? "辅助对话" : "Side chat"}
       onSideChat={onOpenSideChat ? handleSelectionSideChat : undefined}
       onQuote={handleSelectionQuoteToComposer}
-      onReference={selectionQuoteMenu.sourceMessageId && onAddComposerReference
+      onReference={selectionQuoteMenu.sourceMessageId
+        && !selectionQuoteMenu.spansMessages
+        && onAddComposerReference
         ? handleSelectionReferenceToComposer
         : undefined}
       onCopy={handleSelectionCopy}

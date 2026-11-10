@@ -46,6 +46,13 @@ export type ConversationSelectionSnapshot = {
    * selection is not anchored inside a message row.
    */
   sourceMessageId: string;
+  /**
+   * ZCode single-limit parity: a `message` reference quotes exactly one row.
+   * A selection that starts in one message and ends in another cannot be
+   * attributed to a single source, so the structured chip is withheld while
+   * plain text quoting stays available.
+   */
+  spansMessages: boolean;
 };
 
 /**
@@ -149,10 +156,14 @@ export function extractConversationSelectionSnapshot(
     // Degenerate geometry (no painted rects): nothing to anchor a menu to.
     return null;
   }
+  const tailRange = selection.getRangeAt(selection.rangeCount - 1);
+  const sourceMessageId = findConversationSelectionMessageId(anchorRange.startContainer, container);
+  const tailMessageId = findConversationSelectionMessageId(tailRange.endContainer, container);
   return {
     text,
     rect: union,
-    sourceMessageId: findConversationSelectionMessageId(anchorRange.startContainer, container),
+    sourceMessageId,
+    spansMessages: Boolean(sourceMessageId) && Boolean(tailMessageId) && sourceMessageId !== tailMessageId,
   };
 }
 
