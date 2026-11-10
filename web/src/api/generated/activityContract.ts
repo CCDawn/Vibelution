@@ -139,6 +139,7 @@ export const ACTIVITY_CONTRACT = {
       "force_stopped": "stopped",
       "aborted": "stopped",
       "interrupted": "stopped",
+      "stale_work_run_worker_gone": "stopped",
       "cancelled": "cancelled",
       "canceled": "cancelled",
       "superseded": "superseded",
