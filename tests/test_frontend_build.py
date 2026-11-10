@@ -1994,3 +1994,20 @@ def test_input_change_retry_skips_when_reinspection_is_already_current(
     assert result["skipped"] is True
     assert result["inputRetries"] == 1
     assert json.loads(frontend_build.active_release_path(tmp_path).read_text(encoding="utf-8"))["release"] == "release-old"
+
+
+def test_current_release_still_gcs_frontend_storage(monkeypatch, tmp_path):
+    _current_release(tmp_path, monkeypatch)
+    calls: list[Path] = []
+
+    def record(root, **_kwargs):
+        calls.append(Path(root))
+        return {"removed": ["release-stale"], "skipped": []}
+
+    monkeypatch.setattr(frontend_build, "gc_frontend_releases", record)
+
+    result = frontend_build.ensure_frontend_build(tmp_path, lock_timeout_seconds=0)
+
+    assert result["skipped"] and not result["rebuilt"]
+    assert calls == [tmp_path.resolve()]
+    assert result["gc"] == {"removed": ["release-stale"], "skipped": []}
