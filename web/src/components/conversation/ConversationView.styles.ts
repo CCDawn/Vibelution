@@ -1243,10 +1243,10 @@ backToBottomButton:
   thoughtTextBlock:
     "vui-components-conversationview thoughtTextBlock min-w-0 text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
 timeline:
-    "vui-components-conversationview timeline flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden bg-[var(--vui-surface-chat)] pl-[clamp(1rem,3vw,3rem)] pr-[clamp(3rem,3vw,3.5rem)] @min-[864px]/conversation:pl-14 pt-7 pb-4 max-[719px]:px-5 max-[719px]:py-[22px] [scrollbar-gutter:stable]",  timelineArea:
+    "vui-components-conversationview timeline flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden overscroll-contain bg-[var(--vui-surface-chat)] pl-[clamp(1rem,3vw,3rem)] pr-[clamp(3rem,3vw,3.5rem)] @min-[864px]/conversation:pl-14 pt-7 pb-4 max-[719px]:px-5 max-[719px]:py-[22px] [scrollbar-gutter:stable]",  timelineArea:
     "vui-components-conversationview timelineArea @container/conversation relative flex min-h-0 min-w-0 flex-1 flex-col",
   timelineWithAvatarGutters:
-    "vui-components-conversationview timeline timelineWithAvatarGutters flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden bg-[var(--vui-surface-chat)] px-3 pt-7 pb-4 max-[719px]:py-[22px] [scrollbar-gutter:stable_both-edges]",
+    "vui-components-conversationview timeline timelineWithAvatarGutters flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden overscroll-contain bg-[var(--vui-surface-chat)] px-3 pt-7 pb-4 max-[719px]:py-[22px] [scrollbar-gutter:stable_both-edges]",
   timelineAreaWithAvatarGutters:
     "[&_.turnNavigatorRail]:!hidden @min-[960px]/conversation:[&_.turnNavigatorRail]:!block",
   timelineContent:
