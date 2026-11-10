@@ -919,3 +919,53 @@ def test_electron_user_close_is_not_resumed_from_journal(
     assert summary["resumedCount"] == 0
     assert summary["journalInterruptResumeCount"] == 0
     assert submit_calls == []
+
+
+
+def test_nested_recovery_payload_marks_turn_already_resumed(tmp_path) -> None:
+    """The resumed ids live under ``payload["recovery"]``, not the top level.
+
+    Reading only the payload top level silently disabled the guard, so one
+    crash was replayed on every startup.
+    """
+
+    _seed_restart_interrupted_turn(tmp_path)
+    append_turn_event(
+        tmp_path,
+        SESSION_ID,
+        RESUMED_TURN_ID,
+        EVENT_SESSION_RECOVERY_RESUMED,
+        payload={"recovery": {"recoveredTurnId": ORIGINAL_TURN_ID}},
+        source="startup_sweep",
+    )
+
+    events = load_turn_events(Path(tmp_path), SESSION_ID)
+    turn_id, _interrupted_at, already_resumed_skips = (
+        startup_recovery._latest_restart_interrupted_turn(events)
+    )
+
+    assert turn_id == ""
+    assert already_resumed_skips == 1
+
+
+def test_already_resumed_turn_is_not_resumed_twice(
+    recovery_env, tmp_path, submit_calls
+) -> None:
+    """A turn already resumed once must not be resubmitted on the next startup."""
+
+    _seed_conversation(tmp_path)
+    _seed_restart_interrupted_turn(tmp_path)
+    append_turn_event(
+        tmp_path,
+        SESSION_ID,
+        RESUMED_TURN_ID,
+        EVENT_SESSION_RECOVERY_RESUMED,
+        payload={"recovery": {"recoveredTurnId": ORIGINAL_TURN_ID}},
+        source="startup_sweep",
+    )
+
+    summary = startup_recovery.recover_interrupted_session_turns_on_startup()
+
+    assert summary["resumedCount"] == 0
+    assert summary["alreadyResumedSkipCount"] == 1
+    assert submit_calls == []
