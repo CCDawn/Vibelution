@@ -112,12 +112,41 @@ def personal_assistant_platform_api_tool(path: str = "index", query: str = "", t
     return json.dumps(platform_api_get(normalized, query=query), ensure_ascii=False)
 
 
+def _coerce_action_parameters(parameters):
+    """Accept an object, or a JSON object string produced by a host adapter.
+
+    Hosts may serialize tool arguments before dispatch, so ``parameters`` can
+    arrive as ``'{"project_id": "..."}'`` even though the signature asks for an
+    object. Rejecting that form silently disables every parameterized action,
+    so decode one level of JSON here and keep the strict error only for values
+    that cannot become an object.
+    """
+
+    if parameters is None:
+        return {}
+    if isinstance(parameters, dict):
+        return parameters
+    if isinstance(parameters, str):
+        raw = parameters.strip()
+        if not raw:
+            return {}
+        try:
+            decoded = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                "parameters 必须是对象。收到字符串但无法解析为 JSON 对象，请直接传对象。"
+            ) from exc
+        if isinstance(decoded, dict):
+            return decoded
+        raise ValueError("parameters 必须是对象。字符串解析结果不是 JSON 对象。")
+    raise ValueError("parameters 必须是对象。请直接传对象，不要传其他类型。")
+
+
 def personal_assistant_action_tool(action: str = "index", parameters: dict | None = None) -> str:
     """Execute an explicitly registered everyday action using object parameters."""
     try:
         runtime = _identity()
-        if parameters is not None and not isinstance(parameters, dict):
-            raise ValueError("parameters 必须是对象。")
+        parameters = _coerce_action_parameters(parameters)
         from core.infrastructure.native_runtime import is_launcher_assistant_process
         if is_launcher_assistant_process():
             from core.assistant_runtime.actions import execute_action
