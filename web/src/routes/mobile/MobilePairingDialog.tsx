@@ -1,10 +1,21 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { VButton, VDialog } from "../../components/vui";
+import qrcode from "../../vendor/qrcode-generator.js";
 
 import styles from "./MobilePairingDialog.styles";
 
 const CONTROL_TOKEN_HEADER = "X-Vibelution-Control-Token";
+
+// Sync with devicePairing.renderPairingQrSvg in the phone Bridge: error correction M
+// (15%) keeps the code readable off a glossy screen without inflating its density,
+// and margin 2 is the quiet zone scanners need around the symbol.
+function renderPairingQrSvg(payload: string): string {
+  const qr = qrcode(0, "M");
+  qr.addData(payload);
+  qr.make();
+  return qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+}
 
 export type PairingCodeResponse = {
   code: string;
@@ -116,6 +127,15 @@ export function MobilePairingDialog({ open, onOpenChange, lang = "zh" }: MobileP
               {pairing ? `${pairing.host}:${pairing.port}` : ""}
             </span>
           </div>
+        ) : null}
+
+        {pairing ? (
+<div
+            className={styles.qr}
+            data-testid="mobile-pairing-qr"
+            // In-process render of our own payload; no external or user-controlled HTML.
+            dangerouslySetInnerHTML={{ __html: renderPairingQrSvg(pairing.payload) }}
+          />
         ) : null}
 
         {pairing ? (

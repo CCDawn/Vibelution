@@ -55,7 +55,7 @@ def _request_port(request: Request) -> int:
 
 def _pairing_payload(*, host: str, port: int, code: str) -> str:
     base_url = f"http://{host}:{port}"
-    return f"vibelution://pair?v=1&u={quote(base_url, safe='')}&c={code}"
+    return f"codexharmony://pair?v=1&u={quote(base_url, safe='')}&c={code}"
 
 
 @router.post("/mobile/pairing/code")

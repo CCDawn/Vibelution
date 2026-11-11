@@ -16,6 +16,7 @@ const styles = {
     "font-mono text-2xl font-semibold tracking-[0.2em] text-vui-fg-primary",
   ),
   codeMeta: cv("code-meta", "text-xs text-vui-fg-tertiary"),
+  qr: cv("qr", "flex justify-center py-1"),
   payload: cv("payload", "m-0 break-all text-xs text-vui-fg-tertiary"),
   actions: cv("actions", "flex justify-end gap-2 pt-1"),
 };
