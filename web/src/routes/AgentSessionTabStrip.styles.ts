@@ -106,7 +106,33 @@ const styles = {
   agentSessionTabGroupSectionCollapsed:
     "vui-routes-chatcodingroute agentSessionTabGroupSectionCollapsed",
   agentSessionTabGroupHeader:
-    "vui-routes-chatcodingroute agentSessionTabGroupHeader inline-flex h-7 min-w-0 shrink-0 items-center gap-0.5 rounded-[6px] px-1 text-[11px] text-[var(--fg-secondary)]",
+    "vui-routes-chatcodingroute agentSessionTabGroupHeader group/tabgroup inline-flex h-7 min-w-0 shrink-0 cursor-pointer items-center gap-1 rounded-[6px] px-1.5 text-[11px] text-[var(--fg-secondary)] transition-colors",
+  agentSessionTabGroupHeaderOpen:
+    "vui-routes-chatcodingroute agentSessionTabGroupHeaderOpen [&_[data-group-chevron]]:opacity-100",
+  agentSessionTabGroupChevron:
+    "vui-routes-chatcodingroute agentSessionTabGroupChevron inline-flex shrink-0 items-center opacity-0 transition-opacity duration-150 group-hover/tabgroup:opacity-100",
+  agentSessionTabGroupTintGray:
+    "vui-routes-chatcodingroute bg-[hsl(220_10%_55%/0.16)] hover:bg-[hsl(220_10%_55%/0.24)]",
+  agentSessionTabGroupTintBlue:
+    "vui-routes-chatcodingroute bg-[hsl(212_72%_55%/0.16)] hover:bg-[hsl(212_72%_55%/0.24)]",
+  agentSessionTabGroupTintGreen:
+    "vui-routes-chatcodingroute bg-[hsl(148_55%_45%/0.16)] hover:bg-[hsl(148_55%_45%/0.24)]",
+  agentSessionTabGroupTintAmber:
+    "vui-routes-chatcodingroute bg-[hsl(38_85%_52%/0.18)] hover:bg-[hsl(38_85%_52%/0.26)]",
+  agentSessionTabGroupTintViolet:
+    "vui-routes-chatcodingroute bg-[hsl(268_60%_58%/0.16)] hover:bg-[hsl(268_60%_58%/0.24)]",
+  agentSessionTabGroupTintRose:
+    "vui-routes-chatcodingroute bg-[hsl(340_70%_56%/0.16)] hover:bg-[hsl(340_70%_56%/0.24)]",
+  agentSessionTabGroupPanelList:
+    "vui-routes-chatcodingroute agentSessionTabGroupPanelList m-0 flex max-h-[22rem] w-[15rem] list-none flex-col gap-0.5 overflow-y-auto rounded-[10px] p-1",
+  agentSessionTabGroupPanelItem:
+    "vui-routes-chatcodingroute agentSessionTabGroupPanelItem flex w-full min-w-0 items-center gap-1.5 rounded-[7px] px-2 py-1.5 text-left text-[12px] leading-tight text-[var(--fg-primary)] hover:bg-[color-mix(in_srgb,var(--fg-primary)_10%,transparent)]",
+  agentSessionTabGroupPanelItemActive:
+    "vui-routes-chatcodingroute agentSessionTabGroupPanelItemActive bg-[color-mix(in_srgb,var(--accent-cool)_16%,transparent)] ring-1 ring-[color-mix(in_srgb,var(--accent-cool)_45%,transparent)]",
+  agentSessionTabGroupPanelTitle:
+    "vui-routes-chatcodingroute agentSessionTabGroupPanelTitle min-w-0 flex-1 truncate",
+  agentSessionTabGroupPanelEmpty:
+    "vui-routes-chatcodingroute agentSessionTabGroupPanelEmpty m-0 px-2 py-1.5 text-[11px] text-[var(--fg-tertiary)]",
   agentSessionTabGroupHeaderDropTarget:
     "vui-routes-chatcodingroute agentSessionTabGroupHeaderDropTarget bg-[color-mix(in_srgb,var(--fg-primary)_10%,transparent)] ring-1 ring-[color-mix(in_srgb,var(--fg-primary)_35%,transparent)]",
   agentSessionTabGroupName:

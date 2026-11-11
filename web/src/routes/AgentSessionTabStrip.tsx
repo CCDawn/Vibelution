@@ -16,7 +16,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { AgentInstance, SessionReferenceAttachment, SessionSummary, Team } from "../api/types";
 import type { AgentSessionTabGroupState } from "./agentSessionTabGroups";
-import { VButton, VDropdownMenu, VHoverCard, VIconButton, VNativeInput } from "../components/vui";
+import { VButton, VDropdownMenu, VHoverCard, VIconButton, VNativeInput, VPopover } from "../components/vui";
 import type { VDropdownMenuItem } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import { sessionAgentDisplayInfo } from "./agentDisplay";
@@ -112,6 +112,15 @@ export type CliAgentRunTab = {
 export type AgentSessionStatusTone = SessionActivityTone;
 
 /** Header aggregate: approval outranks running, then error, unread, idle. */
+const GROUP_TINT_CLASS: Record<AgentSessionTabGroupColor, string> = {
+  gray: styles.agentSessionTabGroupTintGray,
+  blue: styles.agentSessionTabGroupTintBlue,
+  green: styles.agentSessionTabGroupTintGreen,
+  amber: styles.agentSessionTabGroupTintAmber,
+  violet: styles.agentSessionTabGroupTintViolet,
+  rose: styles.agentSessionTabGroupTintRose,
+};
+
 const GROUP_TONE_PRIORITY: Record<AgentSessionStatusTone, number> = {
   approval: 6,
   running: 5,
@@ -758,31 +767,43 @@ export function AgentSessionTabStrip({
       "none",
     );
 
-  /** Hover surface carries members only; configuration lives in the right-click menu. */
-  const renderGroupPeek = (section: AgentSessionTabGroupSection) => {
-    const peekTitle = section.ungrouped
-      ? (lang === "zh" ? "未分组" : "Ungrouped")
-      : section.name;
+  /** Vertical group panel: mouse-first, one click switches the session and closes the panel. */
+  const renderGroupPopoverList = (section: AgentSessionTabGroupSection) => {
+    const activeColor = sessionTabGroupColorFor(groupState, section.groupId);
+    const tintClass = activeColor ? GROUP_TINT_CLASS[activeColor] : "";
+    if (!section.sessions.length) {
+      return (
+        <p className={styles.agentSessionTabGroupPanelEmpty}>
+          {lang === "zh" ? "这个分组还没有会话" : "No sessions in this group"}
+        </p>
+      );
+    }
     return (
-      <div className={styles.agentSessionTabGroupPeek}>
-        <p className={styles.agentSessionTabGroupPeekHeading}>{peekTitle}</p>
-        <ul className={styles.agentSessionTabGroupPeekList}>
-          {section.sessions.map((session) => (
+      <ul className={[styles.agentSessionTabGroupPanelList, tintClass].filter(Boolean).join(" ")}>
+        {section.sessions.map((session) => {
+          const sessionActive = activeSessionId === session.id;
+          return (
             <li key={session.id}>
               <VButton
                 type="button"
                 contentLayout="plain"
-                className={styles.agentSessionTabGroupPeekItem}
+                className={[
+                  styles.agentSessionTabGroupPanelItem,
+                  sessionActive ? styles.agentSessionTabGroupPanelItemActive : "",
+                ].filter(Boolean).join(" ")}
                 title={session.title}
-                onPress={() => onOpenDirectSession(session.id)}
+                onPress={() => {
+                  onOpenDirectSession(session.id);
+                  setGroupOpen(section.groupId, false);
+                }}
               >
                 {renderAgentSessionStatusSlot(groupSessionTone(session))}
-                <span className={styles.agentSessionTabGroupPeekTitle}>{session.title}</span>
+                <span className={styles.agentSessionTabGroupPanelTitle}>{session.title}</span>
               </VButton>
             </li>
-          ))}
-        </ul>
-      </div>
+          );
+        })}
+      </ul>
     );
   };
   const renderSessionTabGroupHeader = (section: AgentSessionTabGroupSection) => {
@@ -792,18 +813,16 @@ export function AgentSessionTabStrip({
     }
     const renaming = renamingGroupId === section.groupId;
     const dropActive = groupDropTarget === section.groupId;
-    const sectionTitle = section.ungrouped
-      ? (lang === "zh" ? "未分组" : "Ungrouped")
-      : section.name;
     const aggregateTone = groupAggregateTone(section);
     const activeColor = sessionTabGroupColorFor(groupState, section.groupId);
+    const tintClass = activeColor ? GROUP_TINT_CLASS[activeColor] : "";
+    const isOpen = groupIsOpen(section.groupId);
     const headerClassName = [
       styles.agentSessionTabGroupHeader,
+      tintClass,
       dropActive ? styles.agentSessionTabGroupHeaderDropTarget : "",
+      isOpen ? styles.agentSessionTabGroupHeaderOpen : "",
     ].filter(Boolean).join(" ");
-    const collapseTitle = section.collapsed
-      ? (lang === "zh" ? "展开分组" : "Expand group")
-      : (lang === "zh" ? "折叠分组" : "Collapse group");
     const menu = groupMenu && groupMenu.groupId === section.groupId ? groupMenu : null;
     const menuItems: VDropdownMenuItem[] = [
       {
@@ -833,15 +852,6 @@ export function AgentSessionTabStrip({
           ),
       })),
       {
-        id: "collapse",
-        label: collapseTitle,
-        icon: section.collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />,
-        onSelect: () =>
-          applyGroupMutation((state) =>
-            setAgentSessionTabGroupCollapsed(state, section.groupId, !section.collapsed),
-          ),
-      },
-      {
         id: "delete",
         label: lang === "zh" ? "删除分组" : "Delete group",
         icon: <Trash2 size={12} />,
@@ -850,87 +860,76 @@ export function AgentSessionTabStrip({
       },
     ];
     return (
-      <div
-        className={headerClassName}
-        data-session-tab-group-header={section.groupId}
-        data-session-tab-group-collapsed={section.collapsed ? "true" : undefined}
-        data-session-tab-group-tone={aggregateTone}
-        onContextMenu={(event) => {
-          if (section.ungrouped) {
-            return;
-          }
-          event.preventDefault();
-          event.stopPropagation();
-          setGroupMenu({ groupId: section.groupId, x: event.clientX, y: event.clientY });
-        }}
-      >
-        {section.ungrouped ? null : (
-          <VIconButton
-            type="button"
-            variant="ghost"
-            className={styles.agentSessionTabGroupAction}
-            onPress={() =>
-              applyGroupMutation((state) =>
-                setAgentSessionTabGroupCollapsed(state, section.groupId, !section.collapsed),
-              )
-            }
-            title={collapseTitle}
-            label={collapseTitle}
-            icon={section.collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
-          />
-        )}
-        {renderAgentSessionStatusSlot(aggregateTone)}
-        {renaming ? (
-          <VNativeInput
-            className={styles.agentSessionTabGroupNameInput}
-            value={groupNameDraft}
-            maxLength={40}
-            autoFocus
-            placeholder={lang === "zh" ? "分组名称" : "Group name"}
-            aria-label={lang === "zh" ? "分组名称" : "Group name"}
-            onChange={(event) => setGroupNameDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                commitGroupRename(section.groupId);
-              }
-              if (event.key === "Escape") {
-                event.preventDefault();
-                setRenamingGroupId(null);
-                setGroupNameDraft("");
-              }
+      <VPopover
+        open={isOpen}
+        onOpenChange={(open) => setGroupOpen(section.groupId, open)}
+        side="bottom"
+        align="start"
+        sideOffset={6}
+        aria-label={section.name}
+        trigger={
+          <div
+            className={headerClassName}
+            data-session-tab-group-header={section.groupId}
+            data-session-tab-group-open={isOpen ? "true" : undefined}
+            data-session-tab-group-tone={aggregateTone}
+            title={lang === "zh" ? `${section.name} · ${section.sessions.length} 个会话` : `${section.name} · ${section.sessions.length} sessions`}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setGroupMenu({ groupId: section.groupId, x: event.clientX, y: event.clientY });
             }}
-            onBlur={() => commitGroupRename(section.groupId)}
-          />
-        ) : section.ungrouped || section.collapsed ? (
-          <VHoverCard
-            side="bottom"
-            align="start"
-            openDelay={180}
-            closeDelay={140}
-            width="wide"
-            content={renderGroupPeek(section)}
           >
-            <span className={styles.agentSessionTabGroupName}>{sectionTitle}</span>
-          </VHoverCard>
-        ) : null}
-        {section.collapsed || section.ungrouped ? (
-          <span className={styles.agentSessionTabGroupCount}>{section.sessions.length}</span>
-        ) : null}
-        {menu ? (
-          <VDropdownMenu
-            open
-            position={{ x: menu.x, y: menu.y }}
-            items={menuItems}
-            aria-label={lang === "zh" ? "分组设置" : "Group settings"}
-            onOpenChange={(next) => {
-              if (!next) {
-                setGroupMenu(null);
-              }
-            }}
-          />
-        ) : null}
-      </div>
+            {renderAgentSessionStatusSlot(aggregateTone)}
+            {renaming ? (
+              <span onPointerDown={(event) => event.stopPropagation()}>
+                <VNativeInput
+                  className={styles.agentSessionTabGroupNameInput}
+                  value={groupNameDraft}
+                  maxLength={40}
+                  autoFocus
+                  placeholder={lang === "zh" ? "分组名称" : "Group name"}
+                  aria-label={lang === "zh" ? "分组名称" : "Group name"}
+                  onChange={(event) => setGroupNameDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      commitGroupRename(section.groupId);
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      setRenamingGroupId(null);
+                      setGroupNameDraft("");
+                    }
+                  }}
+                  onBlur={() => commitGroupRename(section.groupId)}
+                />
+              </span>
+            ) : (
+              <span className={styles.agentSessionTabGroupName}>{section.name}</span>
+            )}
+            <span className={styles.agentSessionTabGroupCount}>{section.sessions.length}</span>
+            <span className={styles.agentSessionTabGroupChevron} aria-hidden="true" data-group-chevron>
+              {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            </span>
+            {menu ? (
+              <VDropdownMenu
+                open
+                position={{ x: menu.x, y: menu.y }}
+                items={menuItems}
+                aria-label={lang === "zh" ? "分组设置" : "Group settings"}
+                onOpenChange={(next) => {
+                  if (!next) {
+                    setGroupMenu(null);
+                  }
+                }}
+              />
+            ) : null}
+          </div>
+        }
+      >
+        {renderGroupPopoverList(section)}
+      </VPopover>
     );
   };
   const commitTabOrderDrop = useCallback((targetId: string, position: "before" | "after") => {
@@ -953,6 +952,20 @@ export function AgentSessionTabStrip({
   const [armedCloseSessionId, setArmedCloseSessionId] = useState<string | null>(null);
   /** Right-click config surface for a tab group: rename / colour / collapse / delete. */
   const [groupMenu, setGroupMenu] = useState<{ groupId: string; x: number; y: number } | null>(null);
+  /**
+   * Open group panels live in memory only: a reload always starts closed so the
+   * workbench never opens with floating panels over the conversation.
+   */
+  const [openGroupIds, setOpenGroupIds] = useState<string[]>([]);
+  const groupIsOpen = (groupId: string) => openGroupIds.includes(groupId);
+  const setGroupOpen = useCallback((groupId: string, open: boolean) => {
+    setOpenGroupIds((current) => {
+      if (open) {
+        return current.includes(groupId) ? current : [...current, groupId];
+      }
+      return current.includes(groupId) ? current.filter((id) => id !== groupId) : current;
+    });
+  }, []);
   const rapidCloseUntilRef = useRef(0);
   const disarmCloseConfirm = useCallback(() => setArmedCloseSessionId(null), []);
   useEffect(() => {
@@ -1113,9 +1126,9 @@ export function AgentSessionTabStrip({
           }}
         >
           {renderSessionTabGroupHeader(section)}
-          {section.collapsed
-            ? null
-            : section.sessions.map((session) => renderSessionTab(session, section.groupId))}
+          {section.ungrouped
+            ? section.sessions.map((session) => renderSessionTab(session, section.groupId))
+            : null}
         </div>
       ))}
       <VIconButton
