@@ -89,6 +89,13 @@ def test_preflight_doctor_posix_accepts_venv_without_powershell(monkeypatch, tmp
     monkeypatch.setattr(sys, "executable", str(venv_python))
     subprocess_run = MagicMock(side_effect=AssertionError("powershell doctor must not run on POSIX"))
     monkeypatch.setattr("core.infrastructure.boot_pipeline.subprocess.run", subprocess_run)
+    # The main worktree guard shells out to git, not to the PowerShell doctor.
+    # This contract is about the doctor, so keep the blanket subprocess mock
+    # scoped to it instead of turning every startup subprocess into a failure.
+    monkeypatch.setattr(
+        "core.infrastructure.boot_pipeline._report_dirty_main_worktree",
+        lambda root: None,
+    )
     config = SimpleNamespace(runtime=SimpleNamespace(preflight_doctor=True, require_venv=True))
 
     run_preflight_doctor(config, project_root=tmp_path)
