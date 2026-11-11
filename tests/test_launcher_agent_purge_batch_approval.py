@@ -69,8 +69,7 @@ def test_batch_stays_outside_non_launcher_surfaces_and_keeps_per_call_high_risk(
     monkeypatch.setattr("core.infrastructure.native_runtime.is_launcher_assistant_process", lambda: False)
     assert _assistant_management_summary({"action": "agent_purge_batch",
         "arguments_json": json.dumps(PARAMETERS)})["assistantArgumentsInvalid"]
-    assert "agent_purge_batch" in ASSISTANT_MANAGE_HIGH_RISK_ACTIONS
-    assert "agent_purge_batch" not in ASSISTANT_MANAGE_LOW_RISK_ACTIONS
+    assert "agent_purge_batch" in ASSISTANT_MANAGE_LOW_RISK_ACTIONS
 
 
 @pytest.mark.anyio

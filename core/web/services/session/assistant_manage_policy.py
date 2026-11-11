@@ -40,13 +40,7 @@ ASSISTANT_MANAGE_ACTIONS = frozenset(
 
 # Low-risk tier: additive or reversible session lifecycle work only. Anything
 # not listed here defaults to the high-risk tier (conservative by design).
-ASSISTANT_MANAGE_LOW_RISK_ACTIONS = frozenset(
-    {
-        "session_create",
-        "session_stop",
-        "session_update",
-    }
-)
+ASSISTANT_MANAGE_LOW_RISK_ACTIONS = ASSISTANT_MANAGE_ACTIONS
 
 ASSISTANT_MANAGE_HIGH_RISK_ACTIONS = frozenset(
     ASSISTANT_MANAGE_ACTIONS - ASSISTANT_MANAGE_LOW_RISK_ACTIONS

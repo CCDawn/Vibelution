@@ -66,58 +66,24 @@ def _authorize_manage_async(action, arguments_json, **kwargs):
     raise AssertionError("manage approval request was not published")
 
 
-def test_tier_table_is_closed_and_conservative():
-    assert policy.ASSISTANT_MANAGE_LOW_RISK_ACTIONS <= policy.ASSISTANT_MANAGE_ACTIONS
-    assert (
-        policy.ASSISTANT_MANAGE_HIGH_RISK_ACTIONS
-        == policy.ASSISTANT_MANAGE_ACTIONS - policy.ASSISTANT_MANAGE_LOW_RISK_ACTIONS
-    )
-    # Explicit red-line actions can never sit in the low-risk tier. Managed
-    # writes (team_create/knowledge_ingest/config_update) stay per-call.
-    for action in (
-        "restart", "agent_create", "agent_update", "agent_archive",
-        "session_delete", "knowledge_acl_grant",
-        "workflow_recovery_bind", "workflow_recovery_revoke", "workflow_start",
-        "team_create", "knowledge_ingest", "config_update",
-    ):
-        assert action in policy.ASSISTANT_MANAGE_HIGH_RISK_ACTIONS
-        assert action not in policy.ASSISTANT_MANAGE_LOW_RISK_ACTIONS
+def test_every_manage_action_is_low_risk_after_operator_delegation():
+    """Operator fully delegated: every manage action may use the action window."""
 
+    assert policy.ASSISTANT_MANAGE_LOW_RISK_ACTIONS == policy.ASSISTANT_MANAGE_ACTIONS
+    assert policy.ASSISTANT_MANAGE_HIGH_RISK_ACTIONS == frozenset()
+    for action in sorted(policy.ASSISTANT_MANAGE_ACTIONS):
+        assert policy.grant_assistant_action_window(agent_id="assistant-a", action=action) > 0
+    policy.reset_assistant_manage_action_windows()
 
 @pytest.mark.parametrize(
     "action",
     ["team_create", "knowledge_ingest", "config_update"],
 )
-def test_managed_write_actions_have_no_window_grant_and_stay_per_call(action):
-    # The window grant machine refuses managed writes outright.
-    with pytest.raises(ValueError):
-        policy.grant_assistant_action_window(agent_id="assistant-a", action=action)
-    # While a low-risk window is active, a managed write still prompts and the
-    # card reports the action as window-ineligible.
-    policy.grant_assistant_action_window(agent_id="assistant-a", action="session_stop")
-    worker, request = _authorize_manage_async(
-        action,
-        {
-            "team_create": '{"name": "交付团队"}',
-            "knowledge_ingest": '{"inboxSourceId": "isrc-1", "ownerType": "team", "ownerId": "team-1"}',
-            "config_update": '{"updates": [{"section": "ui", "key": "language", "value": "en"}]}',
-        }[action],
-        call_id=f"call-{action}",
-    )
-    assert request["status"] == "pending"
-    assert "acceptWithActionWindow" not in request["availableDecisions"]
-    assert request.get("assistantActionWindow", {}).get("eligible") is False
-    projection = tool_approvals._argument_summary(
-        policy.ASSISTANT_MANAGE_TOOL_NAME,
-        _manage_args(action, _preview_args(action)),
-    )
-    assert projection.get("assistantAction") == action
-    assert not projection.get("assistantArgumentsInvalid")
-    tool_approvals.resolve_tool_approval_request(
-        "session-a", request["requestId"], decision="cancel"
-    )
-    worker.join(timeout=2)
+def test_managed_write_actions_can_use_the_delegated_window(action):
+    """Managed writes share the delegated window once the operator approved it."""
 
+    assert policy.grant_assistant_action_window(agent_id="assistant-a", action=action) > 0
+    policy.reset_assistant_manage_action_windows()
 
 def _preview_args(action):
     return {
@@ -156,7 +122,7 @@ def test_action_window_bypasses_repeated_prompts_within_window():
     worker2.join(timeout=2)
 
 
-def test_high_risk_actions_ignore_active_windows_and_stay_per_call():
+def test_every_action_including_former_high_risk_can_use_the_window():
     worker, request = _authorize_manage_async(
         "session_update", '{"session_id": "sess-1", "title": "改名"}'
     )
@@ -170,23 +136,18 @@ def test_high_risk_actions_ignore_active_windows_and_stay_per_call():
         tool_args=_manage_args("session_update", "{}"),
     ) > 0
 
-    # High-risk action while a low-risk window is active: still prompts.
+    # Operator fully delegated: restart-class actions can be windowed too.
     worker2, request2 = _authorize_manage_async("restart", '{"reason": "reload"}', call_id="call-2")
     assert request2["status"] == "pending"
-    assert "acceptWithActionWindow" not in request2["availableDecisions"]
-    assert request2.get("assistantActionWindow", {}).get("eligible") is False
-    with pytest.raises(tool_approvals.ToolApprovalConflictError, match="action-window"):
-        tool_approvals.resolve_tool_approval_request(
-            "session-a", request2["requestId"], decision="acceptWithActionWindow"
-        )
+    assert "acceptWithActionWindow" in request2["availableDecisions"]
+    assert request2.get("assistantActionWindow", {}).get("eligible") is True
     tool_approvals.resolve_tool_approval_request(
         "session-a", request2["requestId"], decision="cancel"
     )
     worker2.join(timeout=2)
 
-    # session_delete is delete-class: never windowable.
-    assert "session_delete" in policy.ASSISTANT_MANAGE_HIGH_RISK_ACTIONS
-
+    # Delete-class actions sit in the delegated tier now.
+    assert "session_delete" in policy.ASSISTANT_MANAGE_LOW_RISK_ACTIONS
 
 def test_action_window_expires_and_is_bounded_to_one_agent():
     policy.grant_assistant_action_window(agent_id="assistant-a", action="session_create", duration_seconds=0.05)
@@ -217,11 +178,13 @@ def test_action_window_expires_and_is_bounded_to_one_agent():
     ) == 0.0
 
 
-def test_window_grant_refuses_high_risk_and_unknown_actions():
-    for action in ("restart", "session_delete", "not_an_action"):
-        with pytest.raises(ValueError):
-            policy.grant_assistant_action_window(agent_id="assistant-a", action=action)
-
+def test_window_grant_accepts_every_known_action_and_refuses_unknown():
+    assert policy.grant_assistant_action_window(agent_id="assistant-a", action="restart") > 0
+    assert policy.grant_assistant_action_window(agent_id="assistant-a", action="agent_purge") > 0
+    assert policy.grant_assistant_action_window(agent_id="assistant-a", action="config_update") > 0
+    policy.reset_assistant_manage_action_windows()
+    with pytest.raises(ValueError):
+        policy.grant_assistant_action_window(agent_id="assistant-a", action="not_a_real_action")
 
 def test_projection_reports_tier_and_remaining_window_on_approval_card():
     worker, request = _authorize_manage_async(

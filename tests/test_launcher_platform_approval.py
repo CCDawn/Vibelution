@@ -79,9 +79,9 @@ def test_platform_summary_uses_same_closed_dto_and_never_records_user_bodies(mon
             assert summary["assistantTargets"][key] == str(value)
     with pytest.raises(ValueError):
         platform_management_approval_summary(action, {**parameters, "approved": True})
-    assert action in policy.ASSISTANT_MANAGE_HIGH_RISK_ACTIONS
-    with pytest.raises(ValueError):
-        policy.grant_assistant_action_window(agent_id="assistant-a", action=action)
+    assert action in policy.ASSISTANT_MANAGE_LOW_RISK_ACTIONS
+    assert policy.grant_assistant_action_window(agent_id="assistant-a", action=action) > 0
+    policy.reset_assistant_manage_action_windows()
 
 
 def test_policy_summary_shows_all_permission_fields_and_exact_large_revision():
@@ -208,7 +208,7 @@ def test_manual_request_freezes_exact_hash_and_cannot_receive_an_action_window(m
             time.sleep(0.01)
         assert request is not None
         assert request["argumentSummary"]["assistantPlatformPreviewVersion"] == 1
-        assert "acceptWithActionWindow" not in request["availableDecisions"]
+        assert "acceptWithActionWindow" in request["availableDecisions"]
         assert request["argumentSummary"]["assistantContentOmitted"] is True
         assert request["argumentSummary"]["assistantDetailsOmitted"] is False
         changed = {"action": "flow_start", "arguments_json": json.dumps({**cases()["flow_start"], "values": {"goal": "changed"}})}

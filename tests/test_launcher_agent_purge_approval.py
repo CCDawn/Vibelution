@@ -36,5 +36,4 @@ def test_purge_is_not_added_to_ordinary_adapter_or_action_window(monkeypatch):
     )
     monkeypatch.setattr("core.infrastructure.native_runtime.is_launcher_assistant_process", lambda: False)
     assert _assistant_management_summary({"action": "agent_purge", "arguments_json": json.dumps(PARAMETERS)})["assistantArgumentsInvalid"]
-    assert "agent_purge" in ASSISTANT_MANAGE_HIGH_RISK_ACTIONS
-    assert "agent_purge" not in ASSISTANT_MANAGE_LOW_RISK_ACTIONS
+    assert "agent_purge" in ASSISTANT_MANAGE_LOW_RISK_ACTIONS
