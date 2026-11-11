@@ -408,8 +408,6 @@ describe("thought duration client-clock label", () => {
       { ...thought, id: "duration-answer-r1", itemId: "duration-answer", sequence: 5,
         type: "agent_message", phase: "final_answer", status: "completed", terminal: true, text: answerText },
     ] }]));
-    expect(thoughtToggle(0)?.getAttribute("aria-expanded")).toBe("true");
-    expect(thoughtToggle(1)?.getAttribute("aria-expanded")).toBe("false");
     expect(container?.querySelector('[data-codex-final-response="true"]')?.textContent).toBe(answerText);
     // Codex parity: settling collapses the work trail (reasoning + tool rows) but
     // mid-turn narration is body text, so it must stay visible.
@@ -418,11 +416,14 @@ describe("thought duration client-clock label", () => {
     const workToggle = container?.querySelector<HTMLButtonElement>('[data-codex-process-work-toggle]')!;
     expect(workToggle.getAttribute("aria-expanded")).toBe("false");
     expect(document.activeElement).toBe(workToggle);
+    // A trail the reader never opened is not mounted while it is collapsed, so a
+    // settled turn drops its reasoning rows instead of keeping them in the DOM
+    // behind hidden/inert. They come back, in order, on the first expand.
     await act(async () => workToggle.click());
     expectVisibleNarrationAndTool();
+    expect(container?.querySelectorAll('[data-thought-section]')).toHaveLength(2);
     expectCollapsedThought(1);
     await expandThoughts(1);
-    expect(container?.querySelectorAll('[data-thought-section]')).toHaveLength(2);
     expect(container?.textContent?.split(completedText).length).toBe(2);
     expect(container?.textContent?.split(narrationText).length).toBe(2);
     expect(container?.textContent?.split(answerText).length).toBe(2);

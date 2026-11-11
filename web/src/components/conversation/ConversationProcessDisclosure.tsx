@@ -365,6 +365,17 @@ export function ConversationProcessDisclosure({
     ? children(presentation === "flow" ? workExpanded : expanded)
     : children;
   const rows = shouldRenderContent ? Children.toArray(content) : [];
+  // A settled trail that has never rendered is not worth mounting: rejoining a
+  // session would otherwise commit every reasoning and tool row of every
+  // historical turn at once, which is what stalled switching into the
+  // turn-heavy session. Once a trail has rendered, this latch keeps it mounted
+  // so hidden/inert can preserve per-step choices and the focus handoff.
+  const flowWorkRenderedRef = useRef(false);
+  const shouldRenderFlowWork = workExpanded || turnStreaming || flowWorkRenderedRef.current
+    || typeof window === "undefined";
+  if (shouldRenderFlowWork) {
+    flowWorkRenderedRef.current = true;
+  }
 
   if (presentation === "flow") {
     const StatusIcon = running ? CircleDot : state === "failed" ? CircleAlert : CheckCircle2;
@@ -428,7 +439,7 @@ export function ConversationProcessDisclosure({
               <div key={segment.key} data-codex-narration-row="true" className={styles.flowContent}>
                 {segment.node}
               </div>
-            ) : (
+            ) : shouldRenderFlowWork ? (
               <div
                 key={segment.key}
                 className={styles.flowContent}
@@ -438,12 +449,12 @@ export function ConversationProcessDisclosure({
               >
                 {segment.node}
               </div>
-            )
-          )) : (
+            ) : null
+          )) : shouldRenderFlowWork ? (
             <div ref={contentRef} id={contentId} className={styles.flowContent} hidden={!workExpanded} inert={!workExpanded} aria-hidden={!workExpanded}>
               {content}
             </div>
-          )}
+          ) : null}
         </div>
       </div>
     );
