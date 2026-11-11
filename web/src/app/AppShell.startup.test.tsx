@@ -302,7 +302,7 @@ describe("Workbench initial route priority", () => {
     router.dispose();
   });
 
-  it("ignores a cancelled update check after a newer update attempt starts", async () => {
+  it("keeps the workbench usable while a deferred update check runs", async () => {
     seedControlTokenForTests();
     const freshness = { current: false, updateAvailable: true, headShort: "bbbb", activeWorkState: "idle" };
     const checks: Array<{ resolve: (value: typeof freshness) => void; reject: (error: Error) => void }> = [];
@@ -337,15 +337,23 @@ describe("Workbench initial route priority", () => {
     await act(async () => button("重启更新").click());
     expect(checks).toHaveLength(1);
     expect(replaceShell).not.toHaveBeenCalled();
-    await act(async () => button("取消重启").click());
+    // Preparation must not cover a workbench that is still usable.
+    expect(document.querySelector(".shutdownOverlay")).toBeNull();
+    expect(button("正在准备更新…")).toBeTruthy();
+    expect(button("正在准备更新…").disabled).toBe(true);
+    await act(async () => checks[0].reject(new Error("late update check")));
+    expect(replaceShell).not.toHaveBeenCalled();
+    // A failed version check is a real failure and must be shown, not hidden.
+    expect(document.querySelector(".shutdownOverlay")).not.toBeNull();
+    await act(async () => button("关闭提示").click());
+    expect(document.querySelector(".shutdownOverlay")).toBeNull();
+    expect(button("重启更新")).toBeTruthy();
     await act(async () => button("重启更新").click());
     expect(checks).toHaveLength(2);
-    await act(async () => checks[0].reject(new Error("late cancelled check")));
-    expect(replaceShell).not.toHaveBeenCalled();
-    expect(button("取消重启")).toBeTruthy();
-    expect(button("重启更新").disabled).toBe(true);
     await act(async () => checks[1].resolve(freshness));
     expect(replaceShell).toHaveBeenCalledOnce();
+    // The accepted shell replacement owns the blocking overlay from here on.
+    await waitForRouteCommit(() => expect(document.querySelector(".shutdownOverlay")).not.toBeNull());
     router.dispose();
   });
 });

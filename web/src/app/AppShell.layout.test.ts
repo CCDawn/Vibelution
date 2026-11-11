@@ -703,7 +703,8 @@ describe("AppShell layout contract", () => {
     expect(restartRegion).toContain("waitForRestartedBackend");
     expect(restartRegion).toContain("previousBackendPid");
     expect(restartRegion).toContain("RESTART_READY_TIMEOUT");
-    expect(restartRegion).toContain('restartPhaseRef.current = mode === "update" ? "preparing" : "restarting"');
+    expect(restartRegion).toContain('const initialPhase = mode === "update" ? "preparing" : "restarting"');
+    expect(restartRegion).toContain('setShutdownOpen(mode !== "update")');
     expect(restartRegion).toContain("updatePreparingTitle");
     expect(restartRegion).toContain("restartSwitchingBody");
     expect(restartRegion).toContain("window.location.reload()");
@@ -741,7 +742,11 @@ describe("AppShell layout contract", () => {
     expect(bannerRegion).toContain("{updateBannerRestartNotice}");
     expect(bannerRegion).toContain("title={updateBannerRestartNotice || updateBannerRestartActionLabel}");
     expect(shellSource).toContain("activeWorkRestartNotice = (activeWorkIndicator?.items.length ?? 0) > 0");
-    expect(shellSource).toContain("updateBannerRestartNotice = activeWorkRestartNotice");
+    expect(shellSource).toContain('updateBannerRestartNotice = updatePreparationActive ? "" : activeWorkRestartNotice');
+    // Background preparation stays non-blocking and owns the banner state.
+    expect(shellSource).toContain("const updatePreparationActive = restartPhase === \"preparing\"");
+    expect(shellSource).toContain("updatePreparingBannerCopy(lang)");
+    expect(shellSource).toContain("updateBannerVisible = updatePreparationActive || shouldShowUpdateBanner");
     // The initial restart overlay explains interruption using task labels only.
     expect(shellSource).toContain("restartActiveWorkNoticeMessage(lang, activeWorkLabels)");
     expect(shellSource).toContain("const activeWorkLabels = [...new Set(activeWorkIndicator?.items.map((item) => item.label)");

@@ -116,6 +116,43 @@ def test_current_release_does_not_wait_for_or_mutate_another_builder_lock(monkey
     assert frontend_build._FRONTEND_BUILD_TIMINGS.get() is None
 
 
+def test_pinned_release_reuses_prepared_frontend_after_head_advances(monkeypatch, tmp_path):
+    dist, key = _current_release(tmp_path, monkeypatch)
+    # HEAD moved after preparation; a normal ensure would build a new release.
+    (tmp_path / "web/src/App.tsx").write_text("export const changed = 2;", encoding="utf-8")
+    monkeypatch.setenv(frontend_build.FRONTEND_BUILD_PIN_ENV, key)
+    monkeypatch.setenv(frontend_build.FRONTEND_BUILD_PIN_EXPIRES_ENV, str(time.time() + 60))
+    with frontend_build.frontend_build_lock(tmp_path):
+        # The pin also bypasses lock waiting: the replacement shell must not
+        # queue behind a builder after the old window is already gone.
+        result = frontend_build.ensure_frontend_build(tmp_path, lock_timeout_seconds=0)
+    assert result["skipped"] is True
+    assert result["rebuilt"] is False
+    assert result["pinned"] is True
+    assert result["buildKey"] == key
+    assert Path(result["dist"]) == dist
+    assert result["lock"]["acquired"] is False
+
+
+def test_pinned_release_is_consumed_once(monkeypatch, tmp_path):
+    _dist, key = _current_release(tmp_path, monkeypatch)
+    monkeypatch.setenv(frontend_build.FRONTEND_BUILD_PIN_ENV, key)
+    monkeypatch.setenv(frontend_build.FRONTEND_BUILD_PIN_EXPIRES_ENV, str(time.time() + 60))
+    assert frontend_build.pinned_frontend_release(tmp_path) is not None
+    # A backend retry or a user restart inside the window must rebuild.
+    assert frontend_build.pinned_frontend_release(tmp_path) is None
+
+
+def test_pinned_release_expires_and_never_matches_another_release(monkeypatch, tmp_path):
+    _dist, key = _current_release(tmp_path, monkeypatch)
+    monkeypatch.setenv(frontend_build.FRONTEND_BUILD_PIN_ENV, "other")
+    monkeypatch.setenv(frontend_build.FRONTEND_BUILD_PIN_EXPIRES_ENV, str(time.time() + 60))
+    assert frontend_build.pinned_frontend_release(tmp_path) is None
+    monkeypatch.setenv(frontend_build.FRONTEND_BUILD_PIN_ENV, key)
+    monkeypatch.setenv(frontend_build.FRONTEND_BUILD_PIN_EXPIRES_ENV, str(time.time() - 1))
+    assert frontend_build.pinned_frontend_release(tmp_path) is None
+
+
 @pytest.mark.parametrize("change", ["source", "toolchain", "environment", "schema", "missing_asset", "key_prefix", "legacy"])
 def test_contended_reuse_requires_full_current_inputs_and_complete_immutable_release(monkeypatch, tmp_path, change):
     dist, key = _current_release(tmp_path, monkeypatch)

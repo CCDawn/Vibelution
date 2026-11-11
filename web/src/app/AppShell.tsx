@@ -76,6 +76,8 @@ import {
   updateBannerRestartHoldsForShellExit,
   updateBannerRestartLabel,
   updateBannerRestartReloadsDocument,
+  updatePreparingBannerActionLabel,
+  updatePreparingBannerCopy,
 } from "./updateBanner";
 import { refreshUpdateFreshness, UPDATE_FRESHNESS_INTERVAL_MS, UPDATE_FRESHNESS_QUERY_OPTIONS, useUpdateFreshnessFocus } from "./updateFreshness";
 import { useShellI18n } from "../i18n/useShellI18n";
@@ -1092,6 +1094,7 @@ export function AppShell() {
   // "preparing" covers the update transaction (builds happen before any
   // switch); "switching" starts only after an update request was accepted.
   const restartPhaseRef = useRef<"idle" | "preparing" | "switching" | "restarting">("idle");
+  const [restartPhase, setRestartPhase] = useState<"idle" | "preparing" | "switching" | "restarting">("idle");
   const lifecycleRequestSeqRef = useRef(0);
   const lifecycleOverlayDismissedRef = useRef(false);
 
@@ -1528,34 +1531,40 @@ export function AppShell() {
   // shell; a window reload cannot clear that banner.
   const updateBannerVerdict = codeFreshnessQuery.data?.verdict ?? null;
   const launcherShellUpdate = updateRestartTarget(launcherFreshnessQuery.data) === "shell";
+  const updatePreparationActive = restartPhase === "preparing";
   const updateBannerDiskHead = codeFreshnessQuery.data?.backend.disk?.head || launcherFreshnessQuery.data?.headShort || "";
-  const updateBannerVisible = shouldShowUpdateBanner({
+  const updateBannerVisible = updatePreparationActive || shouldShowUpdateBanner({
     verdict: updateBannerVerdict,
     diskHead: updateBannerDiskHead,
     dismissedHead: updateBannerDismissedHead,
     launcherFreshness: launcherFreshnessQuery.data,
   });
-  const updateBannerText = launcherShellUpdate
-    ? launcherUpdateBannerCopy(lang)
-    : updateBannerVerdict === "frontend_behind"
-      ? frontendUpdateBannerCopy(lang)
-      : updateBannerCopy(
-        lang,
-        updateBannerDiskHead,
-        updateBannerVerdict === "backend_and_frontend_behind",
-        // null/0 with a behind verdict means uncommitted workspace changes.
-        codeFreshnessQuery.data?.backend.behindCount ?? null,
-      );
-  const updateBannerRestartActionLabel = updateBannerRestartLabel(lang);
+  const updateBannerText = updatePreparationActive
+    ? updatePreparingBannerCopy(lang)
+    : launcherShellUpdate
+      ? launcherUpdateBannerCopy(lang)
+      : updateBannerVerdict === "frontend_behind"
+        ? frontendUpdateBannerCopy(lang)
+        : updateBannerCopy(
+          lang,
+          updateBannerDiskHead,
+          updateBannerVerdict === "backend_and_frontend_behind",
+          // null/0 with a behind verdict means uncommitted workspace changes.
+          codeFreshnessQuery.data?.backend.behindCount ?? null,
+        );
+  const updateBannerRestartActionLabel = updatePreparationActive
+    ? updatePreparingBannerActionLabel(lang)
+    : updateBannerRestartLabel(lang);
   const updateBannerDismissActionLabel = updateBannerDismissLabel(lang);
   const activeWorkRestartNotice = (activeWorkIndicator?.items.length ?? 0) > 0
     ? restartActiveWorkNoticeMessage(lang, activeWorkLabels)
     : "";
   const updateBannerRestartDisabled =
-    restartRequested
+    updatePreparationActive
+    || restartRequested
     || shutdownRequested
     || (shutdownOpen && !shutdownSettled);
-  const updateBannerRestartNotice = activeWorkRestartNotice;
+  const updateBannerRestartNotice = updatePreparationActive ? "" : activeWorkRestartNotice;
   const dismissUpdateBanner = useCallback(() => {
     setUpdateBannerDismissedHead(updateBannerDiskHead);
     storeUpdateBannerDismissedHead(updateBannerDiskHead);
@@ -1957,11 +1966,15 @@ export function AppShell() {
       clearRestartCompletionDismissTimer();
       lifecycleOverlayDismissedRef.current = false;
       restartWaitsForDocumentReloadRef.current = true;
-      restartPhaseRef.current = mode === "update" ? "preparing" : "restarting";
+      const initialPhase = mode === "update" ? "preparing" : "restarting";
+      restartPhaseRef.current = initialPhase;
+      setRestartPhase(initialPhase);
       setRestartRequested(true);
       setShutdownRequested(false);
       setShutdownSettled(false);
-      setShutdownOpen(true);
+      // Update preparation builds while the current window is still fully
+      // usable. Do not cover it: the overlay belongs to the short switch only.
+      setShutdownOpen(mode !== "update");
       setLifecycleAction("restart");
       setLifecycleCommandId("");
       setLifecycleCancelPending(false);
@@ -1991,9 +2004,14 @@ export function AppShell() {
       }
       emitBrowserTelemetry(buildLifecycleControlResponseTelemetry("restart", payload), { preferBeacon: true });
       if (updateBannerRestartHoldsForShellExit(payload.operation, payload.accepted)) {
-        if (payload.message) {
-          setShutdownDetail(payload.message);
-        }
+        // An accepted shell replacement is already committed to replacing this
+        // process. Only now does the blocking overlay have a job to do.
+        restartPhaseRef.current = "switching";
+        setRestartPhase("switching");
+        setShutdownOpen(true);
+        setShutdownSettled(false);
+        setShutdownTitle(restartHeading);
+        setShutdownDetail(payload.message || restartSwitchingBody);
         return;
       }
       if (!updateBannerRestartReloadsDocument(payload.code, payload.accepted, payload.operation)) {
@@ -2024,6 +2042,9 @@ export function AppShell() {
       // connection failure. Keep the restart overlay up until a different,
       // ready backend PID is serving the published release.
       restartPhaseRef.current = "switching";
+      setRestartPhase("switching");
+      setShutdownOpen(true);
+      setShutdownSettled(false);
       setShutdownTitle(restartHeading);
       setShutdownDetail(restartDetailWithActiveWorkNotice(restartSwitchingBody, activeWorkRestartNotice));
       await waitForRestartedBackend({
@@ -2039,6 +2060,7 @@ export function AppShell() {
       }
       restartWaitsForDocumentReloadRef.current = false;
       restartPhaseRef.current = "idle";
+      setRestartPhase("idle");
       const blocked = parseRuntimeControlBlockedDetail(error);
       if (isActiveWorkRestartBlocked(blocked)) {
         lifecycleOverlayDismissedRef.current = false;
@@ -2151,6 +2173,8 @@ export function AppShell() {
 
     const resetOverlay = () => {
       restartWaitsForDocumentReloadRef.current = false;
+      restartPhaseRef.current = "idle";
+      setRestartPhase("idle");
       lifecycleOverlayDismissedRef.current = true;
       shutdownPromiseRef.current = null;
       restartPromiseRef.current = null;
@@ -2752,6 +2776,12 @@ export function AppShell() {
       && workbench.browserWindowAlive;
     const preparing = restartPhaseRef.current === "preparing";
     const switching = restartPhaseRef.current === "switching";
+    if (preparing && !failed) {
+      // Preparation runs against the live workbench. The window must stay
+      // usable, so this status poll never opens the blocking overlay here;
+      // the update banner owns the non-blocking progress state instead.
+      return;
+    }
     const waitingTitle = preparing ? updatePreparingTitle : restartHeading;
     const waitingBody = preparing
       ? updatePreparingBody
@@ -2780,6 +2810,7 @@ export function AppShell() {
         return;
       }
       restartPhaseRef.current = "idle";
+      setRestartPhase("idle");
       setRestartRequested(false);
       setShutdownOpen(true);
       setShutdownSettled(true);
@@ -2802,6 +2833,7 @@ export function AppShell() {
     if (ready) {
       lifecycleOverlayDismissedRef.current = false;
       restartPhaseRef.current = "idle";
+      setRestartPhase("idle");
       setRestartRequested(false);
       setShutdownOpen(true);
       setShutdownSettled(true);
@@ -2830,6 +2862,7 @@ export function AppShell() {
     restartCompleteTitle,
     restartErrorBody,
     restartHeading,
+    restartPhase,
     restartUnconfirmedTitle,
     restartRequested,
     workbench,
@@ -3117,7 +3150,9 @@ export function AppShell() {
                 aria-label={lang === "en" ? "Update notification" : "更新通知"}
                 title={updateBannerText.title}>
                 <span className={styles.activeWorkTriggerContent}>
-                  {lang === "en" ? "Update available" : "有更新"}
+                  {updatePreparationActive
+                    ? (lang === "en" ? "Preparing update" : "正在准备更新")
+                    : (lang === "en" ? "Update available" : "有更新")}
                   <ChevronDown size={12} aria-hidden="true" />
                 </span>
               </VButton>
@@ -3139,7 +3174,10 @@ export function AppShell() {
                   {updateBannerRestartActionLabel}
                 </VButton>
                 <VButton type="button" variant="ghost" onPress={dismissUpdateBanner}
-                  title={updateBannerDismissActionLabel}>
+                  isDisabled={updatePreparationActive}
+                  title={updatePreparationActive
+                    ? (lang === "en" ? "Preparation continues in the background." : "更新准备仍在后台继续。")
+                    : updateBannerDismissActionLabel}>
                   {lang === "en" ? "Dismiss" : "暂不提醒"}
                 </VButton>
               </div>
