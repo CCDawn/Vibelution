@@ -16,7 +16,14 @@ import { forgetSessionTimelineScroll } from "../../components/conversation/conve
 import { mergeSessionDetailMessageWindow, removeOptimisticUserMessage, type OptimisticUserMessageInput } from "../chatSessionState";
 import { mergeEditResubmitDetail } from "./chatEditResubmitState";
 
-const MAX_LAST_GOOD_SESSIONS = 12;
+/**
+ * Sticky paint ceiling. A tab-thrashing user walks a dozen threads back and
+ * forth; a ceiling that low evicts a thread they are about to return to, and
+ * the revisit then paints an empty shell until the GET re-hydrates.
+ */
+const MAX_LAST_GOOD_SESSIONS = 24;
+/** Recent switches protected from eviction even at the ceiling. */
+export const SESSION_PAINT_KEEP_ALIVE_LIMIT = 8;
 const lastGoodBySessionId = new Map<string, SessionDetail>();
 /** Active-first keep-alive ring for recent session ids (switch resume). */
 let keepAliveSessionIds: string[] = [];
@@ -67,12 +74,23 @@ function touchOrder(sessionId: string, detail: SessionDetail) {
     lastGoodBySessionId.delete(sessionId);
   }
   lastGoodBySessionId.set(sessionId, detail);
+  evictColdSessionPaints();
+}
+
+/**
+ * Evict the oldest paints, but never the keep-alive ring: those ids are the
+ * threads a switch is about to come back to, and dropping one makes the
+ * return paint an empty shell before the GET lands.
+ */
+function evictColdSessionPaints() {
   while (lastGoodBySessionId.size > MAX_LAST_GOOD_SESSIONS) {
-    const oldest = lastGoodBySessionId.keys().next().value;
-    if (oldest == null) {
+    const protectedIds = new Set(keepAliveSessionIds);
+    const victim = [...lastGoodBySessionId.keys()].find((id) => !protectedIds.has(id))
+      ?? lastGoodBySessionId.keys().next().value;
+    if (victim == null) {
       break;
     }
-    lastGoodBySessionId.delete(oldest);
+    lastGoodBySessionId.delete(victim);
   }
 }
 

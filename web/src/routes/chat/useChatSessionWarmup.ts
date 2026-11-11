@@ -13,7 +13,7 @@ import {
   prefetchSessionDetailWindow,
   resolveNeighborSessionIdsForPrefetch,
 } from "./chatSessionDetailHelpers";
-import { touchSessionKeepAlive } from "./chatSessionPaintCache";
+import { SESSION_PAINT_KEEP_ALIVE_LIMIT, touchSessionKeepAlive } from "./chatSessionPaintCache";
 
 export type UseChatSessionWarmupInput = {
   activeSessionId: string | null;
@@ -49,7 +49,7 @@ export function useChatSessionWarmup({
     if (!activeSessionId) {
       return;
     }
-    touchSessionKeepAlive(activeSessionId);
+    touchSessionKeepAlive(activeSessionId, SESSION_PAINT_KEEP_ALIVE_LIMIT);
   }, [activeSessionId]);
 
   // T1: warm ConversationView after session intent is known (does not mount).
