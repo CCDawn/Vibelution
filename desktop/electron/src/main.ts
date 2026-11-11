@@ -8404,6 +8404,9 @@ async function handleMainLineLaunchRequest(
       receipt.failed("launcher_workspace_mismatch", "请求工作区与当前 Launcher 绑定的工作区不一致，未执行请求。");
       return;
     }
+    // Provenance stays exactly as the caller declared it: a forwarded launch
+    // request must keep its join semantics, and an operator command already
+    // carries the interrupt authority this path relies on.
     const result = await orchestrateLauncherLifecycle(executionOperation, { schemaVersion: 1, path: command }, provenance,
       undefined, undefined, false, undefined, { ...metadata, launchRequestOperation: operation, receipt });
     if (!result.accepted) {
@@ -8413,6 +8416,16 @@ async function handleMainLineLaunchRequest(
       if (!result.commandId) throw new Error("LAUNCH_REQUEST_COMMAND_ID_MISSING");
       if (result.code === "restart_queued" || result.code === "joined_in_flight_restart") {
         receipt.dispatched(result.commandId);
+        // The deferred pass only fires in an idle window, and the turn that
+        // queued this restart is itself the active work: bound the wait so a
+        // restart never sits on "dispatched" for as long as the operator works.
+        const queueTimer = setTimeout(() => {
+          receipt.failed(
+            "restart_queue_timeout",
+            "重启请求排队超过 20 秒仍未执行：当前有任务在运行。请先点「停止任务」再重启，或等待该任务结束。"
+          );
+        }, 20_000);
+        (queueTimer as unknown as { unref?: () => void }).unref?.();
       } else {
         receipt.completed(result.commandId, ["start", "restart", "rebuild-and-start"].includes(operation));
       }

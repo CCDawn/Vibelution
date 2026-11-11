@@ -613,6 +613,14 @@ describe("Electron main Launcher IPC facade", () => {
     expect(branchBody).toContain(
       'interruptActiveWork: provenance === "operator-restart" || (operation === "restart" && provenance === "operator")'
     );
+    // A queued restart must become a visible failure rather than sitting on
+    // "dispatched" for as long as the operator keeps working.
+    const launchStart = mainSource.indexOf("async function handleMainLineLaunchRequest");
+    const launchBody = mainSource.slice(
+      launchStart,
+      mainSource.indexOf('app.on("open-url"', launchStart)
+    );
+    expect(launchBody).toContain('"restart_queue_timeout"');
 
     const slotStart = mainSource.indexOf("async function applyPendingProjectSlotImpl");
     const slotEnd = mainSource.indexOf("async function", slotStart + 1);
