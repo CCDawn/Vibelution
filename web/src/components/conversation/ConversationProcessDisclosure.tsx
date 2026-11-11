@@ -1,3 +1,4 @@
+import { useNowTick } from "../../app/useNowTick";
 import { CheckCircle2, ChevronRight, CircleAlert, CircleDot } from "lucide-react";
 import React, {
   Children,
@@ -301,15 +302,10 @@ export function ConversationProcessDisclosure({
   const workTriggerRef = useRef<HTMLButtonElement>(null);
   const workContentRef = useRef<HTMLDivElement>(null);
   const lastRecordFocusRef = useRef<EventTarget | null>(null);
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  useEffect(() => {
-    if (!running || activeTurnElapsedSeconds(turnStartedAt, Date.now()) === null) {
-      return undefined;
-    }
-    setNowMs(Date.now());
-    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [running, turnStartedAt]);
+  // A settled disclosure has no counter to update, so it must not keep a
+  // timer alive; the shared clock only runs while this surface needs it.
+  const clockActive = running && activeTurnElapsedSeconds(turnStartedAt, Date.now()) !== null;
+  const nowMs = useNowTick(clockActive, 1_000, turnStartedAt);
   const elapsedSeconds = running ? activeTurnElapsedSeconds(turnStartedAt, nowMs) : null;
   const {
     expanded,

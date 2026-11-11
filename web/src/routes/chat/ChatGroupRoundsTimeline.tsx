@@ -1,3 +1,4 @@
+import { useNowTick } from "../../app/useNowTick";
 import { useEffect, useId, useRef, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
@@ -43,14 +44,9 @@ function isDeliverySummary(summary: string) {
 }
 
 function useStalenessNow(enabled: boolean): number {
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  useEffect(() => {
-    if (!enabled) return;
-    setNowMs(Date.now());
-    const timer = window.setInterval(() => setNowMs(Date.now()), GROUP_TYPING_STALE_TICK_MS);
-    return () => window.clearInterval(timer);
-  }, [enabled]);
-  return nowMs;
+  // Staleness only matters while typing is live; share the page clock instead
+  // of owning a 15s interval per timeline instance.
+  return useNowTick(enabled, GROUP_TYPING_STALE_TICK_MS);
 }
 
 

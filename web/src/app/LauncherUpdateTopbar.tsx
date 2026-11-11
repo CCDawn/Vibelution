@@ -1,3 +1,4 @@
+import { useNowTick } from "./useNowTick";
 import { useMutation, useMutationState, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
@@ -80,18 +81,13 @@ export function LauncherUpdateTopbar({ lang }: { lang: "zh" | "en" }) {
     ? (zh ? `有 ${freshness?.activeWorkCount || 1} 个进行中的任务。更新会中断任务并保存已有记录，启动后可回到会话继续。` : "Updating will interrupt active tasks and save existing records. You can return to the conversation after restart.")
     : taskUnknown ? (zh ? "暂时无法确认任务状态。更新会中断任务并保存已有记录。" : "Task status is unavailable. Updating interrupts tasks and saves existing records.")
       : (zh ? "更新会保存已有任务记录并重启。" : "Updating saves existing task records and restarts.");
-  const [now, setNow] = useState(Date.now);
   const nativeStartedAt = freshness?.updateStartedAt;
   const startedAt = busy ? (typeof nativeStartedAt === "number" && Number.isFinite(nativeStartedAt) && nativeStartedAt > 0 && nativeStartedAt <= Date.now()
     ? nativeStartedAt : lastAttempt?.submittedAt) : undefined;
+  // Only a running update renders elapsed time; an idle bar stays off the clock.
+  const now = useNowTick(busy && typeof startedAt === "number" && Number.isFinite(startedAt) && startedAt > 0, 1_000, startedAt);
   const elapsedSeconds = typeof startedAt === "number" && Number.isFinite(startedAt) && startedAt > 0
     ? Math.max(0, Math.floor((now - startedAt) / 1_000)) : null;
-  useEffect(() => {
-    if (!busy || typeof startedAt !== "number" || !Number.isFinite(startedAt) || startedAt <= 0) return;
-    setNow(Date.now());
-    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
-    return () => window.clearInterval(timer);
-  }, [busy, startedAt]);
 
   return <div className={styles.pageContent}>
     <div role="status" aria-live="polite" className={styles.pageStatus}>{status}</div>

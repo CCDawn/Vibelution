@@ -1,3 +1,4 @@
+import { useNowTick } from "../../app/useNowTick";
 import { Brain, ChevronRight, RotateCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -60,7 +61,11 @@ export function ConversationActiveTurnStatusNote({
   const [stage, setStage] = useState(stopping ? "stopping" : resolvedStage);
   const displayStage = stopping ? "stopping" : stage;
   const stageShownAtRef = useRef(Date.now());
-  const [nowMs, setNowMs] = useState(() => Date.now());
+  // Thinking shows the shimmering label and a preview, never a counter, so it
+  // must not hold a clock: an idle clock is a render per second for text that
+  // cannot change.
+  const heartbeatActive = activeTurnStageBarPhase(displayStage) === "thinking";
+  const nowMs = useNowTick(!companionMode && !heartbeatActive);
   const streamState = useActiveTurnStreamState();
   // ZCode keeps the reasoning block collapsed while streaming, so the row shows
   // one preview line and the full text only on an explicit open.
@@ -86,16 +91,6 @@ export function ConversationActiveTurnStatusNote({
     }, plan.delayMs);
     return () => window.clearTimeout(timer);
   }, [resolvedStage, stage, companionMode, stopping]);
-
-  useEffect(() => {
-    if (companionMode) {
-      return undefined;
-    }
-    const timer = window.setInterval(() => {
-      setNowMs(Date.now());
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [companionMode]);
 
   // ZCode reasoning-block semantics: the heartbeat bills the current thinking
   // segment, not the whole turn. A segment starts when the displayed stage
@@ -138,7 +133,6 @@ export function ConversationActiveTurnStatusNote({
   // Activity is carried by the type (a shimmer sweep), not by a spinner: the
   // heartbeat can live for minutes, and a rotating loader next to the avatar
   // becomes a second focal point that never settles.
-  const heartbeatActive = activeTurnStageBarPhase(displayStage) === "thinking";
   // ZCode shows the shimmering label alone while the reasoning stream is live;
   // the duration belongs to the settled block, not to the wait. Other stages
   // (queued / requesting / generating / stopping) keep their counter.
