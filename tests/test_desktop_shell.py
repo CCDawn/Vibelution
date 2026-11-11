@@ -1336,8 +1336,36 @@ def test_desktop_shell_package_build_uses_direct_owned_builder_entry(tmp_path, m
     assert command[-2:] == ["--mode", "dir"]
     assert kwargs["env"]["VIBELUTION_DESKTOP_BUILD_ROOT"] == str(session)
     assert kwargs["env"]["VIBELUTION_DESKTOP_BUILD_MANAGED"] == "1"
+    assert kwargs["env"]["TEMP"] == str(tmp_path / ".runtime" / "tmp" / "desktop-shell-build")
+    assert kwargs["env"]["TMP"] == kwargs["env"]["TEMP"]
     assert kwargs["deadline"] > desktop_shell.time.monotonic()
     shutil.rmtree(session, ignore_errors=True)
+
+
+def test_shell_refresh_pins_the_prepared_frontend_release(tmp_path, monkeypatch):
+    from core.launcher import frontend_build
+
+    release = frontend_build.frontend_releases_dir(tmp_path) / "release-pin"
+    (release / "assets").mkdir(parents=True)
+    (release / "index.html").write_text('<script src="/assets/app.js"></script>', encoding="utf-8")
+    (release / "assets" / "app.js").write_text("prepared", encoding="utf-8")
+    (release / ".vibelution-build.json").write_text(
+        json.dumps({"schemaVersion": frontend_build.BUILD_SCHEMA_VERSION, "buildKey": "pin-key"}),
+        encoding="utf-8",
+    )
+    frontend_build.active_release_path(tmp_path).write_text(
+        json.dumps({"schemaVersion": 2, "release": release.name, "buildKey": "pin-key"}),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv(frontend_build.FRONTEND_BUILD_PIN_ENV, raising=False)
+    monkeypatch.delenv(frontend_build.FRONTEND_BUILD_PIN_EXPIRES_ENV, raising=False)
+    marker = frontend_build.frontend_build_pin_marker_path(tmp_path)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("previous-pin", encoding="utf-8")
+    desktop_shell._pin_prepared_frontend_release(tmp_path)
+    assert os.environ[frontend_build.FRONTEND_BUILD_PIN_ENV] == "pin-key"
+    assert float(os.environ[frontend_build.FRONTEND_BUILD_PIN_EXPIRES_ENV]) > time.time()
+    assert not marker.exists()
 
 
 @pytest.mark.parametrize("first_stage", ["assistant", "electron"])
@@ -1668,6 +1696,8 @@ def test_ensure_unpackaged_electron_rebuilds_stale_bundle(tmp_path, monkeypatch)
         stage = Path(kwargs.get("env", {}).get("VIBELUTION_ELECTRON_DIST", ""))
         assert kwargs["env"]["VIBELUTION_DESKTOP_BUILD_MANAGED"] == "1"
         assert Path(kwargs["env"]["VIBELUTION_DESKTOP_BUILD_ROOT"]) == stage
+        assert kwargs["env"]["TEMP"] == str(tmp_path / ".runtime" / "tmp" / "desktop-shell-build")
+        assert kwargs["env"]["TMP"] == kwargs["env"]["TEMP"]
         if "--outDir" in command:
             out = Path(command[command.index("--outDir") + 1])
             out.mkdir(parents=True, exist_ok=True)
@@ -1917,6 +1947,47 @@ def test_ensure_latest_launcher_prepares_electron_and_frontend(tmp_path, monkeyp
     assert result["ok"] is True
     assert result["electron"]["rebuilt"] is False
     assert result["frontend"]["skipped"] is True
+
+
+def test_ensure_latest_launcher_republishes_when_head_moves_during_preparation(tmp_path, monkeypatch):
+    events = []
+    heads = iter(["a" * 40, "b" * 40])
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda *_args: next(heads))
+    monkeypatch.setattr(
+        desktop_shell,
+        "prepare_unpackaged_electron",
+        lambda root: events.append("prepare:desktop") or {"ensured": True, "rebuilt": False, "reason": "current"},
+    )
+    monkeypatch.setattr(
+        "core.runtime_manager.daemon._preflight_frontend_build_for_restart",
+        lambda command_id, *, project_root: events.append("prepare:frontend") or {
+            "ok": True, "skipped": False, "reason": "frontend build release published",
+            "freshness": {"buildKey": f"key-{events.count('prepare:frontend')}", "dist": "dist"},
+        },
+    )
+    result = desktop_shell.ensure_latest_launcher(tmp_path, on_progress=lambda phase: events.append(f"progress:{phase}"))
+    assert events == [
+        "progress:desktop", "prepare:desktop", "progress:frontend", "prepare:frontend",
+        "progress:desktop", "prepare:desktop", "progress:frontend", "prepare:frontend",
+    ]
+    assert result["frontend"]["buildKey"] == "key-2"
+
+
+def test_ensure_latest_launcher_does_not_republish_when_head_is_stable(tmp_path, monkeypatch):
+    events = []
+    heads = iter(["a" * 40, "a" * 40])
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda *_args: next(heads))
+    monkeypatch.setattr(
+        desktop_shell,
+        "prepare_unpackaged_electron",
+        lambda root: events.append("prepare:desktop") or {"ensured": True, "rebuilt": False, "reason": "current"},
+    )
+    monkeypatch.setattr(
+        "core.runtime_manager.daemon._preflight_frontend_build_for_restart",
+        lambda command_id, *, project_root: events.append("prepare:frontend") or {"ok": True, "skipped": True},
+    )
+    desktop_shell.ensure_latest_launcher(tmp_path)
+    assert events == ["prepare:desktop", "prepare:frontend"]
 
 
 @pytest.mark.parametrize("shell_kind", ["packaged", "unpackaged"])

@@ -537,7 +537,7 @@ export type LatestLauncherEnsureResult = {
   schemaVersion: 1;
   ok: boolean;
   electron?: { rebuilt?: boolean; reason?: string };
-  frontend?: { skipped?: boolean; ok?: boolean; reason?: string };
+  frontend?: { skipped?: boolean; ok?: boolean; reason?: string; buildKey?: string; release?: string };
 };
 
 export function parseLatestLauncherEnsureResult(raw: string): LatestLauncherEnsureResult {

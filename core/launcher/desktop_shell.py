@@ -1434,6 +1434,39 @@ def schedule_desktop_shell_refresh(
     }
 
 
+def _pin_prepared_frontend_release(root: Path) -> None:
+    """Hand the verified frontend release to the shell launched right after.
+
+    The replacement shell starts after the old window is already gone. Without
+    this pin its startup preflight would rebuild the frontend whenever HEAD
+    advanced during the few seconds of switching, extending the dead window by
+    half a minute. The pin names only the already-published active release and
+    expires quickly; a missing pin simply restores the old behavior.
+    """
+
+    try:
+        from core.launcher.frontend_build import (
+            FRONTEND_BUILD_PIN_ENV,
+            FRONTEND_BUILD_PIN_EXPIRES_ENV,
+            FRONTEND_BUILD_PIN_MAX_AGE_SECONDS,
+            frontend_build_pin_marker_path,
+            read_active_provenance,
+        )
+
+        build_key = str(read_active_provenance(root).get("buildKey") or "").strip()
+        if not build_key:
+            return
+        # A new switch starts a new one-shot pin; drop the previous marker so
+        # the replacement shell can consume this handoff exactly once.
+        frontend_build_pin_marker_path(root).unlink(missing_ok=True)
+        os.environ[FRONTEND_BUILD_PIN_ENV] = build_key
+        os.environ[FRONTEND_BUILD_PIN_EXPIRES_ENV] = f"{time.time() + FRONTEND_BUILD_PIN_MAX_AGE_SECONDS:.3f}"
+        _append_refresh_log(root, "refresh.frontend_pin", buildKey=build_key[:16])
+    except Exception:
+        # Pinning is an optimization; the startup preflight can always rebuild.
+        return
+
+
 def run_desktop_shell_refresh(
     *,
     wait_pid: int = 0,
@@ -1473,6 +1506,7 @@ def run_desktop_shell_refresh(
         try:
             if kind == "unpackaged":
                 rebuilt = ensure_unpackaged_electron(root)
+                _pin_prepared_frontend_release(root)
                 launched = launch_desktop_shell(
                     project_root=root,
                     then_lifecycle=then_lifecycle,
@@ -1507,6 +1541,7 @@ def run_desktop_shell_refresh(
             fallback_error = ""
             if packaged_desktop_exe(root).is_file():
                 try:
+                    _pin_prepared_frontend_release(root)
                     fallback = launch_packaged_desktop_shell(
                         project_root=root,
                         then_lifecycle=then_lifecycle,
@@ -1546,6 +1581,7 @@ def run_desktop_shell_refresh(
                 "message": detail[-800:],
             }
         try:
+            _pin_prepared_frontend_release(root)
             launched = launch_packaged_desktop_shell(
                 project_root=root,
                 then_lifecycle=then_lifecycle,
@@ -1967,6 +2003,30 @@ def _build_assistant_payload_once(
         raise RuntimeError("desktop assistant builder did not produce a complete manifest")
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
+def _stable_build_temp_dir(root: Path) -> Path:
+    """Return a workspace-owned temp dir for detached shell builds.
+
+    Detached build helpers can outlive the sandboxed agent process that
+    spawned them; inheriting its TEMP/TMP then points electron-builder at a
+    directory that disappears mid-build (observed as a raw ``ENOENT`` on a
+    ``tmp*`` path). Keep every build's temp files inside the workspace runtime
+    tree instead.
+    """
+
+    path = root / ".runtime" / "tmp" / "desktop-shell-build"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _stabilize_build_temp(root: Path, env: dict[str, str]) -> dict[str, str]:
+    temp = str(_stable_build_temp_dir(root))
+    env["TEMP"] = temp
+    env["TMP"] = temp
+    if os.name != "nt":
+        env["TMPDIR"] = temp
+    return env
+
+
 def _run_desktop_shell_package_build(root: Path, *, mode: str, deadline: float) -> Path:
     if mode == "linux-arm64" or sys.platform != "win32":
         raise ValueError("Launcher assistant packages currently require a native Windows build")
@@ -1974,7 +2034,7 @@ def _run_desktop_shell_package_build(root: Path, *, mode: str, deadline: float) 
     electron_dir = root / ELECTRON_PACKAGE_DIR
     node_command = _node_command()
     command = [node_command, str(electron_dir / "scripts" / "buildDesktopPackage.js"), "--mode", mode]
-    env = os.environ.copy()
+    env = _stabilize_build_temp(root, os.environ.copy())
     env["VIBELUTION_DESKTOP_BUILD_ROOT"] = str(session)
     env["VIBELUTION_DESKTOP_BUILD_MANAGED"] = "1"
     try:
@@ -2426,32 +2486,42 @@ def ensure_latest_launcher(
                 # Progress observers must not change preparation success or failure.
                 pass
 
-    electron = {}
-    if shell_kind == "unpackaged":
-        report_progress("desktop")
-        electron = prepare_unpackaged_electron(root)
-    from core.runtime_manager.daemon import _preflight_frontend_build_for_restart
+    def prepare_once() -> tuple[dict[str, Any], dict[str, Any]]:
+        prepared_electron: dict[str, Any] = {}
+        if shell_kind == "unpackaged":
+            report_progress("desktop")
+            prepared_electron = prepare_unpackaged_electron(root)
+        from core.runtime_manager.daemon import _preflight_frontend_build_for_restart
 
-    report_progress("frontend")
-    frontend = _preflight_frontend_build_for_restart("ensure-latest-launcher", project_root=root)
-    if not bool(frontend.get("ok", True)):
-        raise RuntimeError(str(frontend.get("reason") or "frontend ensure failed"))
-    if shell_kind == "packaged":
-        report_progress("package")
-        staged = run_desktop_shell_prebuild(root)
-        skipped = str(staged.get("skipped") or "")
-        # ``refresh_in_progress`` means another helper already owns the final
-        # package and will publish it after the old shell exits. This window
-        # must not fail its own startup over an update it does not own.
-        if staged.get("ok") is not True or not (
-            staged.get("staged") is True or skipped in {"current", "refresh_in_progress"}
-        ):
-            raise RuntimeError(str(staged.get("message") or "Launcher 更新准备未完成，当前窗口保持打开。"))
-        electron = {
-            "rebuilt": False,
-            "prepared": staged.get("staged") is True,
-            "reason": "prepared" if staged.get("staged") else skipped or "current",
-        }
+        report_progress("frontend")
+        prepared_frontend = _preflight_frontend_build_for_restart("ensure-latest-launcher", project_root=root)
+        if not bool(prepared_frontend.get("ok", True)):
+            raise RuntimeError(str(prepared_frontend.get("reason") or "frontend ensure failed"))
+        if shell_kind == "packaged":
+            report_progress("package")
+            staged = run_desktop_shell_prebuild(root)
+            skipped = str(staged.get("skipped") or "")
+            # ``refresh_in_progress`` means another helper already owns the final
+            # package and will publish it after the old shell exits. This window
+            # must not fail its own startup over an update it does not own.
+            if staged.get("ok") is not True or not (
+                staged.get("staged") is True or skipped in {"current", "refresh_in_progress"}
+            ):
+                raise RuntimeError(str(staged.get("message") or "Launcher 更新准备未完成，当前窗口保持打开。"))
+            prepared_electron = {
+                "rebuilt": False,
+                "prepared": staged.get("staged") is True,
+                "reason": "prepared" if staged.get("staged") else skipped or "current",
+            }
+        return prepared_electron, prepared_frontend
+
+    head_before = _git_tree_hash(root, "HEAD")
+    electron, frontend = prepare_once()
+    if _git_tree_hash(root, "HEAD") != head_before:
+        # main can advance while the first release builds. Republish against
+        # the new HEAD now, while the old window is still usable, instead of
+        # making the replacement shell build behind a closed window.
+        electron, frontend = prepare_once()
     return {
         "schemaVersion": 1,
         "ok": True,
@@ -2464,6 +2534,8 @@ def ensure_latest_launcher(
             "skipped": bool(frontend.get("skipped")),
             "ok": True,
             "reason": str(frontend.get("reason") or ""),
+            "buildKey": str((frontend.get("freshness") or {}).get("buildKey") or ""),
+            "release": str((frontend.get("freshness") or {}).get("dist") or ""),
         },
     }
 
@@ -3186,7 +3258,7 @@ def _rebuild_unpackaged_electron(project_root: Path, *, prepare_only: bool = Fal
         stage.mkdir(parents=True)
         current_tree = _git_tree_hash(project_root, "HEAD:desktop/electron")
         node_command = _node_command()
-        env = os.environ.copy()
+        env = _stabilize_build_temp(project_root, os.environ.copy())
         env["VIBELUTION_DESKTOP_BUILD_MANAGED"] = "1"
         env["VIBELUTION_DESKTOP_BUILD_ROOT"] = str(stage)
         env["VIBELUTION_ELECTRON_DIST"] = str(stage)
