@@ -98,6 +98,7 @@ export function ChatReadOnlySessionWorkspace({
           composerChrome: {
             composer: {
               actionDisabled: true,
+              actionDisabledByState: true,
               actionMode: "send",
               attachmentInputDisabled: true,
               attachments: [],
