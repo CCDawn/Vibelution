@@ -1460,6 +1460,31 @@ def _session_events_revision(events: list[Any]) -> tuple[int, str, str]:
     )
 
 
+def _session_ledger_last_message_is_stopped_turn(session_id: str) -> bool:
+    """Report whether the last visible turn message is already a stop notice.
+
+    Shutdown persistence only needs this one bit to stay idempotent. Reading
+    the raw projection costs a fraction of normalizing every message, and the
+    result is conservative: a trailing non-assistant raw item counts as "not
+    stopped", which at worst writes one duplicate stop notice.
+    """
+
+    s = _service()
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return False
+    events = s._load_session_conversation_events_cached(normalized_session_id)
+    if not events:
+        return False
+    raw_messages, _active_leaf_id, _active_branch_id = s.visible_messages_with_branch_info(events)
+    if not raw_messages:
+        return False
+    message = raw_messages[-1]
+    if not isinstance(message, dict):
+        return False
+    return s._latest_assistant_message_is_stop([message])
+
+
 def _session_ledger_visible_messages(session_id: str) -> list[dict[str, Any]]:
     s = _service()
     normalized_session_id = str(session_id or "").strip()

@@ -28,6 +28,7 @@ from core.launcher.api_contract import (
     LauncherDeveloperModeUpdateResponse,
     LauncherDeveloperNoiseOverviewResponse,
     LauncherFreshnessResponse,
+    LauncherFrontendBuildResponse,
     LauncherLifecycleIntentResponse,
     LauncherRuntimeSceneEventPayload,
     LauncherRuntimeSceneEventResponse,
@@ -114,6 +115,15 @@ def launcher_status(projection: Literal["full", "active-work"] = "full") -> dict
 )
 def launcher_freshness() -> dict:
     return launcher_service.get_launcher_freshness()
+
+
+@router.get(
+    "/launcher/frontend-build",
+    response_model=LauncherFrontendBuildResponse,
+    response_model_exclude_unset=True,
+)
+def launcher_frontend_build() -> dict:
+    return launcher_service.get_launcher_frontend_build()
 
 
 @router.get(

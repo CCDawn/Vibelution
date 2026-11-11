@@ -1190,7 +1190,28 @@ def _resume_window_start_ns(*, now_ns: int | None = None) -> int:
     return observed - int(_resume_age_window_seconds() * 1_000_000_000)
 
 
-def _ledger_modified_ns(s: Any, session_id: str) -> int:
+def _session_workspace_root(s: Any) -> Any:
+    """Resolve the shared sessions workspace once per prefilter pass.
+
+    ``turn_journal_path`` re-resolves the project identity and ensures the
+    sandbox state on every call, so asking it once per session spent seconds of
+    config and state reads before a single candidate was inspected. The same
+    authority is still used; the result is only reused for the pass.
+    """
+
+    from pathlib import Path
+
+    from core.chat.turn_journal import turn_journal_workspace_root
+
+    try:
+        return turn_journal_workspace_root(Path(s.PROJECT_ROOT))
+    except Exception:  # noqa: BLE001 - unknown root means "resolve per session"
+        return None
+
+
+def _ledger_modified_ns(
+    s: Any, session_id: str, *, workspace_root: Any = None
+) -> int:
     """Ledger mtime used to prefilter a session without reading its events.
 
     ``-1`` means "unknown"; the caller must then inspect the session instead of
@@ -1204,10 +1225,12 @@ def _ledger_modified_ns(s: Any, session_id: str) -> int:
 
     from pathlib import Path
 
-    from core.chat.conversation_ledger import conversation_ledger_path
+    from core.chat.turn_journal import turn_journal_path
 
     try:
-        path = conversation_ledger_path(Path(s.PROJECT_ROOT), session_id)
+        path = turn_journal_path(
+            Path(s.PROJECT_ROOT), session_id, journal_workspace_root=workspace_root
+        )
         return int(path.stat().st_mtime_ns)
     except OSError:
         return -1
@@ -1232,11 +1255,14 @@ def _prefilter_session_ids(
 
     candidates: list[str] = []
     skipped = 0
+    workspace_root = _session_workspace_root(s)
     for session_id in session_ids:
         if session_id in forced_session_ids:
             candidates.append(session_id)
             continue
-        modified_ns = _ledger_modified_ns(s, session_id)
+        modified_ns = _ledger_modified_ns(
+            s, session_id, workspace_root=workspace_root
+        )
         if modified_ns < 0 or modified_ns >= lower_bound_ns:
             candidates.append(session_id)
             continue
@@ -1263,8 +1289,11 @@ def _sweep_dirty_session_ids(
     """Candidates whose ledger moved while this pass was still running."""
 
     dirty: list[str] = []
+    workspace_root = _session_workspace_root(s)
     for session_id in candidates:
-        modified_ns = _ledger_modified_ns(s, session_id)
+        modified_ns = _ledger_modified_ns(
+            s, session_id, workspace_root=workspace_root
+        )
         if modified_ns >= started_wall_ns:
             dirty.append(session_id)
     return dirty

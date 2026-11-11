@@ -669,12 +669,15 @@ def _persist_session_interrupted_snapshot(
         and live_mental is None
     )
 
+    # Normalizing the visible transcript costs about a second on long sessions.
+    # Build it before taking the global chat-state lock; the in-lock check below
+    # stays atomic against the worker's own persist but only needs the raw tail.
+    messages = s._session_ledger_visible_messages(session_id)
     with s._CHAT_STATE_LOCK:
         conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
         if conversation is None:
             return
-        messages = s._session_ledger_visible_messages(session_id)
-        if s._latest_assistant_message_is_stop(messages):
+        if s._session_ledger_last_message_is_stopped_turn(session_id):
             conversation["last_turn_status"] = "ready"
             conversation["last_turn_terminal_turn_id"] = turn_id
             conversation["last_turn_terminal_reason"] = s._terminal_reason_for_turn(

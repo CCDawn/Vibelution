@@ -91,3 +91,27 @@ def test_empty_session_short_circuits(monkeypatch) -> None:
     assert signals_format._session_ledger_visible_messages("") == []
     assert signals_format._session_ledger_visible_messages("session-empty") == []
     assert state.normalize_calls == 0
+
+
+def test_stop_tail_probe_reads_the_raw_tail_without_normalizing(monkeypatch) -> None:
+    """Shutdown idempotency needs one bit, not a full transcript projection."""
+
+    state = _State()
+    state.install(monkeypatch)
+
+    state.raw_messages = [{"role": "assistant", "content": "partial\n\n本轮已按请求停止"}]
+    assert signals_format._session_ledger_last_message_is_stopped_turn("session-stop") is True
+    assert state.normalize_calls == 0
+
+    state.raw_messages = [{"role": "assistant", "content": "still working"}]
+    assert signals_format._session_ledger_last_message_is_stopped_turn("session-stop") is False
+
+    state.raw_messages = [{"role": "user", "content": "本轮已按请求停止"}]
+    assert signals_format._session_ledger_last_message_is_stopped_turn("session-stop") is False
+
+    state.raw_messages = []
+    assert signals_format._session_ledger_last_message_is_stopped_turn("session-stop") is False
+
+    state.events = []
+    assert signals_format._session_ledger_last_message_is_stopped_turn("session-stop") is False
+    assert state.normalize_calls == 0

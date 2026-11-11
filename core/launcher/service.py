@@ -446,6 +446,42 @@ def get_launcher_active_work_status() -> dict[str, Any]:
     }}}
 
 
+
+def _launcher_frontend_summary() -> dict[str, Any]:
+    """Cheap "what is served" facts for tray and status polling.
+
+    Deliberately excludes the build-key comparison: that scan spawns toolchain
+    version probes, so the expensive half lives behind ``/launcher/frontend-build``
+    and the ``core.launcher.frontend_build`` CLI instead of every status poll.
+    """
+
+    from core.launcher.frontend_build import (
+        SERVING_SOURCE_LEGACY_DIST,
+        resolve_frontend_serving_target,
+    )
+
+    try:
+        target = resolve_frontend_serving_target(PROJECT_ROOT)
+    except Exception:  # noqa: BLE001 - status must never fail on build inspection
+        return {"source": "", "fallbackReason": "serving_resolution_failed"}
+    return {
+        "source": str(target.get("source") or ""),
+        "release": str(target.get("release") or ""),
+        "dist": str(target.get("dist") or ""),
+        "publishedAt": target.get("publishedAt"),
+        "fallbackReason": str(target.get("fallbackReason") or ""),
+        "legacyDistUsed": str(target.get("source") or "") == SERVING_SOURCE_LEGACY_DIST,
+    }
+
+
+def get_launcher_frontend_build() -> dict[str, Any]:
+    """Full frontend build identity: current/reason plus the served release."""
+
+    from core.launcher.frontend_build import frontend_build_status
+
+    return frontend_build_status(PROJECT_ROOT)
+
+
 def get_launcher_status() -> dict[str, Any]:
     """Return standalone Launcher status without importing the Web service layer."""
 
@@ -503,6 +539,7 @@ def get_launcher_status() -> dict[str, Any]:
         "guardianAdapter": _guardian_adapter_from_workbench(runtime_manager=runtime_manager, workbench=workbench),
         "runtimeManager": runtime_manager,
         "lifecycleProof": lifecycle_proof,
+        "frontend": _launcher_frontend_summary(),
         "settings": {
             "startup": get_launcher_startup_settings(),
             "workbenchWindow": get_workbench_window_mode_setting(),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import traceback
@@ -78,12 +79,55 @@ def project_venv_python(root: Path) -> Path:
     return root / ".venv" / "bin" / "python"
 
 
+_MAIN_GUARD_BLOCK_ENV = "VIBELUTION_MAIN_GUARD"
+
+
+def _report_dirty_main_worktree(root: Path) -> None:
+    """Name the owner of an unexpectedly dirty main checkout before work starts.
+
+    ``task_closeout`` already refuses to merge while the shared main checkout
+    holds uncommitted edits, but it only speaks after a task is finished: by
+    then every other task is blocked and nobody knows whom to ask. Reporting the
+    same attribution here makes the owner visible at startup instead.
+
+    The default is a warning, not a failure. A checkout is often dirty during a
+    merge, and refusing startup would keep every session out of the project --
+    strictly worse than the block this check exists to explain. Set
+    ``VIBELUTION_MAIN_GUARD=block`` to turn it into a refusal.
+    """
+
+    try:
+        from scripts import main_guard
+
+        payload = main_guard.inspect_main_checkout(root)
+    except (OSError, RuntimeError, ValueError, ImportError):
+        # A packaged build has no git checkout, and a coordination outage must
+        # never become a startup failure. The guard is advisory by nature.
+        return
+    if payload.get("status") == "clean":
+        return
+    file_lines = [str(line) for line in payload.get("fileLines") or []]
+    owners = [str(owner) for owner in payload.get("owners") or []]
+    detail = "\n".join(
+        [
+            f"main 工作区有未提交改动（{len(file_lines)} 处）",
+            *file_lines,
+            *(f"dirty_main_suspected_owner: {owner}" for owner in owners),
+            f"处理建议: {payload.get('nextAction') or '先让所属会话提交或撤销这些改动。'}",
+        ]
+    )
+    if os.environ.get(_MAIN_GUARD_BLOCK_ENV, "").strip().lower() == "block":
+        raise RuntimeError(f"main 工作区不干净，已阻止启动:\n{detail}")
+    print(f"[preflight] {detail}", file=sys.stderr)
+
+
 def run_preflight_doctor(config: AppConfig, *, project_root: Path | None = None) -> None:
     """执行启动前环境自检，确保当前运行基线稳定。"""
     if not getattr(config.runtime, "preflight_doctor", True):
         return
 
     root = project_root or Path(__file__).resolve().parents[2]
+    _report_dirty_main_worktree(root)
     expected_python = project_venv_python(root)
     if config.runtime.require_venv and Path(sys.executable).resolve() != expected_python.resolve():
         raise RuntimeError(

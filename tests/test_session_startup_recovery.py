@@ -1021,7 +1021,7 @@ def test_sweep_prefilters_settled_ledgers(
     monkeypatch.setattr(
         startup_recovery,
         "_ledger_modified_ns",
-        lambda _s, session_id: -1 if session_id == SESSION_ID else 1,
+        lambda _s, session_id, **_kwargs: -1 if session_id == SESSION_ID else 1,
     )
 
     summary = startup_recovery.recover_interrupted_session_turns_on_startup()
@@ -1055,7 +1055,9 @@ def test_sweep_runs_candidates_on_bounded_pool(
         session_service, "list_session_runtime_ids", lambda _root: session_ids
     )
     monkeypatch.setattr(
-        startup_recovery, "_ledger_modified_ns", lambda _s, _session_id: time.time_ns()
+        startup_recovery,
+        "_ledger_modified_ns",
+        lambda _s, _session_id, **_kwargs: time.time_ns(),
     )
 
     summary = startup_recovery.recover_interrupted_session_turns_on_startup()

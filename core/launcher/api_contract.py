@@ -150,6 +150,9 @@ class LauncherJsonResponse(BaseModel):
 
 class LauncherStatusResponse(LauncherJsonResponse):
     launcher: dict[str, Any] = Field(default_factory=dict)
+    # Cheap serving facts (release source, fallback reason). The build-key
+    # comparison lives on /launcher/frontend-build so polling stays cheap.
+    frontend: dict[str, Any] = Field(default_factory=dict)
     projectBundle: dict[str, Any] = Field(default_factory=dict)
     controlPlaneEvidence: dict[str, Any] = Field(default_factory=dict)
     guardianAdapter: dict[str, Any] = Field(default_factory=dict)
@@ -178,6 +181,23 @@ class LauncherFreshnessResponse(LauncherJsonResponse):
     headShort: str = ""
     headBranch: str = ""
     startedAt: str = ""
+
+
+class LauncherFrontendBuildResponse(LauncherJsonResponse):
+    schemaVersion: int = 1
+    current: bool = False
+    reason: str = ""
+    dist: str = ""
+    source: str = ""
+    release: str = ""
+    publishedAt: float | None = None
+    publishedAtISO: str = ""
+    buildKey: str = ""
+    servedBuildKey: str = ""
+    fallbackReason: str = ""
+    recoverableRelease: str = ""
+    legacyDist: str = ""
+    legacyDistUsed: bool = False
 
 
 class LauncherCurrentInstanceIdentityResponse(LauncherJsonResponse):

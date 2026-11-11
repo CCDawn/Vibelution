@@ -8,10 +8,12 @@ This keeps a running backend from observing a half-written Vite output.
 
 from __future__ import annotations
 
+import argparse
 import contextvars
 import errno
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -254,22 +256,110 @@ def frontend_package_manager(package_manager: str | None = None) -> str:
     return "bun" if value == "bun" else "npm"
 
 
-def resolve_active_frontend_dist(project_root: Path | str) -> Path:
-    """Resolve the verified active release, falling back to legacy ``web/dist``.
+_LOGGER = logging.getLogger(__name__)
 
-    The pointer stores only a release directory name, never an arbitrary path.
-    A malformed/incomplete pointer is ignored so it cannot redirect file serving
-    outside the workspace.
+SERVING_SOURCE_RELEASE = "release"
+SERVING_SOURCE_LEGACY_DIST = "legacy-dist"
+SERVING_SOURCE_MISSING = "missing"
+
+# One warning per (checkout, reason). Serving is resolved on every shell mount,
+# so an un-deduplicated warning would drown the log it is supposed to explain.
+_SERVING_FALLBACKS_WARNED: set[tuple[str, str]] = set()
+_SERVING_FALLBACKS_WARNED_LOCK = Lock()
+
+
+def _warn_serving_fallback(root: Path, reason: str, dist: Path) -> None:
+    key = (os.path.normcase(str(root)), reason)
+    with _SERVING_FALLBACKS_WARNED_LOCK:
+        if key in _SERVING_FALLBACKS_WARNED:
+            return
+        _SERVING_FALLBACKS_WARNED.add(key)
+    _LOGGER.warning(
+        "frontend serving resolved to %s (%s); rebuild or restart publishes a new active release",
+        dist,
+        reason,
+    )
+
+
+def _complete_release_candidates(releases: Path) -> list[Path]:
+    """Structurally complete releases, newest first.
+
+    Used only when the active pointer is unusable. Identity is checked against
+    the recorded provenance by ``inspect_frontend_build``; this helper answers
+    "which published bytes are still on disk", not "are they current".
+    """
+
+    if not releases.is_dir():
+        return []
+    candidates: list[Path] = []
+    for child in releases.iterdir():
+        if not child.is_dir() or not child.name.startswith("release-"):
+            continue
+        if _is_complete_release(child):
+            candidates.append(child)
+    def _mtime(path: Path) -> float:
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            return 0.0
+    candidates.sort(key=_mtime, reverse=True)
+    return candidates
+
+
+def resolve_frontend_serving_target(project_root: Path | str) -> dict[str, Any]:
+    """Resolve the directory this checkout actually serves, and why.
+
+    The active pointer is authoritative. When it is missing, malformed, or
+    names a release that no longer validates, the newest structurally complete
+    release is served instead of silently dropping to the legacy ``web/dist``
+    tree. A legacy fallback still happens when nothing was ever published, but
+    it is reported through ``source``/``fallbackReason`` and logged once, so
+    "the page did not update" stops being an unexplained observation.
     """
 
     root = Path(project_root)
     releases = frontend_releases_dir(root)
+    pointer: dict[str, Any] = {}
+    pointer_error = ""
     try:
-        payload = json.loads(active_release_path(root).read_text(encoding="utf-8"))
+        decoded = json.loads(active_release_path(root).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        decoded = None
+        pointer_error = "active_release_missing"
     except (OSError, ValueError, TypeError):
-        payload = {}
-    release_name = str(payload.get("release") or "").strip() if isinstance(payload, dict) else ""
-    build_key = str(payload.get("buildKey") or "").strip() if isinstance(payload, dict) else ""
+        decoded = None
+        pointer_error = "active_release_unreadable"
+    if isinstance(decoded, dict):
+        pointer = decoded
+    elif not pointer_error:
+        pointer_error = "active_release_unreadable"
+
+    release_name = str(pointer.get("release") or "").strip()
+    build_key = str(pointer.get("buildKey") or "").strip()
+    published_at = pointer.get("publishedAt")
+
+    def payload(
+        dist: Path,
+        *,
+        source: str,
+        fallback: str,
+        name: str = "",
+        key: str = "",
+        published: object = None,
+        recoverable: str = "",
+    ) -> dict[str, Any]:
+        numeric = float(published) if isinstance(published, (int, float)) else None
+        return {
+            "dist": str(dist),
+            "source": source,
+            "release": name,
+            "buildKey": key,
+            "publishedAt": numeric,
+            "fallbackReason": fallback,
+            "recoverableRelease": recoverable,
+        }
+
+    reason = pointer_error
     if release_name and Path(release_name).name == release_name and release_name.startswith("release-"):
         candidate = releases / release_name
         try:
@@ -277,10 +367,47 @@ def resolve_active_frontend_dist(project_root: Path | str) -> Path:
                 candidate.resolve().is_relative_to(releases.resolve())
                 and _is_complete_release(candidate, build_key=build_key or None)
             ):
-                return candidate
+                return payload(
+                    candidate,
+                    source=SERVING_SOURCE_RELEASE,
+                    fallback="",
+                    name=release_name,
+                    key=build_key,
+                    published=published_at,
+                )
         except OSError:
             pass
-    return legacy_frontend_dist(root)
+        reason = "active_release_invalid"
+
+    # A structurally complete release may still be on disk while the pointer is
+    # unusable. It is reported, never served implicitly: the active pointer
+    # stays the only authority for what runs, so recovering the checkout is a
+    # rebuild/restart (which republishes and rewrites the pointer), not a read
+    # path that quietly adopts an unreferenced directory.
+    recoverable = _complete_release_candidates(releases)
+
+    legacy = legacy_frontend_dist(root)
+    resolved_reason = reason or "no_published_release"
+    if releases.is_dir() or pointer_error:
+        _warn_serving_fallback(root, resolved_reason, legacy)
+    return payload(
+        legacy,
+        source=SERVING_SOURCE_LEGACY_DIST if legacy.is_dir() else SERVING_SOURCE_MISSING,
+        fallback=resolved_reason,
+        recoverable=recoverable[0].name if recoverable else "",
+    )
+
+
+def resolve_active_frontend_dist(project_root: Path | str) -> Path:
+    """Resolve the directory the workbench serves for this checkout.
+
+    Pointer validation and the legacy fallback live in
+    ``resolve_frontend_serving_target``; callers that need to know *why* this
+    directory was chosen (and whether it is the compatibility tree) read that
+    instead of re-deriving it from the path.
+    """
+
+    return Path(str(resolve_frontend_serving_target(project_root)["dist"]))
 
 
 def _is_test_path(relative: Path) -> bool:
@@ -1750,3 +1877,63 @@ def ensure_frontend_build(
         _record_build_phase("totalMs", started)
         _FRONTEND_BUILD_TIMINGS.reset(timings_token)
         _FRONTEND_BUILD_DEADLINE.reset(deadline_token)
+
+
+def frontend_build_status(project_root: Path | str) -> dict[str, Any]:
+    """Single authoritative answer: what is served, and is it current.
+
+    ``current``/``reason`` come from the same build-key comparison the launcher
+    gates rebuilds on; ``source``/``release``/``publishedAt`` describe which
+    published bytes are actually served. Diagnostics must read this instead of
+    comparing ``web/dist`` timestamps, which only ever describe the legacy tree.
+    """
+
+    target = resolve_frontend_serving_target(project_root)
+    inspected = inspect_frontend_build(project_root)
+    published_at = target.get("publishedAt")
+    published_iso = ""
+    if isinstance(published_at, (int, float)):
+        published_iso = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(float(published_at)))
+    return {
+        "schemaVersion": 1,
+        "current": bool(inspected.get("current")),
+        "reason": str(inspected.get("reason") or ""),
+        "dist": str(target.get("dist") or ""),
+        "source": str(target.get("source") or ""),
+        "release": str(target.get("release") or ""),
+        "publishedAt": published_at,
+        "publishedAtISO": published_iso,
+        "buildKey": str(inspected.get("buildKey") or ""),
+        "servedBuildKey": str(target.get("buildKey") or ""),
+        "fallbackReason": str(target.get("fallbackReason") or ""),
+        "recoverableRelease": str(target.get("recoverableRelease") or ""),
+        "legacyDist": str(legacy_frontend_dist(project_root)),
+        "legacyDistUsed": str(target.get("source") or "") == SERVING_SOURCE_LEGACY_DIST,
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Report the frontend build this checkout serves (``python -m core.launcher.frontend_build``)."""
+
+    parser = argparse.ArgumentParser(description="Report the frontend build this checkout serves.")
+    parser.add_argument("command", nargs="?", default="status", choices=("status",))
+    parser.add_argument("--project-root", type=Path, default=Path.cwd())
+    parser.add_argument("--json", action="store_true", help="Print the raw status payload.")
+    args = parser.parse_args(argv)
+    status = frontend_build_status(args.project_root)
+    if args.json:
+        print(json.dumps(status, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if status["current"] else 1
+    state = "current" if status["current"] else "stale"
+    print(f"frontend: {state} ({status['reason']})")
+    print(f"  source: {status['source']}   release: {status['release'] or '-'}")
+    print(f"  dist: {status['dist']}")
+    if status["publishedAtISO"]:
+        print(f"  published: {status['publishedAtISO']}")
+    if status["fallbackReason"]:
+        print(f"  fallback: {status['fallbackReason']}")
+    return 0 if status["current"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
