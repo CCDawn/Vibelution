@@ -126,7 +126,7 @@ export function MobilePairingDialog({ open, onOpenChange, lang = "zh" }: MobileP
           <VButton variant="secondary" onPress={() => onOpenChange(false)}>
             {zh ? "关闭" : "Close"}
           </VButton>
-          <VButton variant="primary" onPress={() => void refresh()} disabled={pending}>
+          <VButton variant="primary" onPress={() => void refresh()} isDisabled={pending}>
             {zh ? "重新生成" : "Regenerate"}
           </VButton>
         </div>
