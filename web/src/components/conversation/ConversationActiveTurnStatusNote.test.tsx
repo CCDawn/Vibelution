@@ -269,9 +269,11 @@ describe("ConversationActiveTurnStatusNote stream advisories", () => {
     expect(html).toContain('data-active-turn-stage="model_thinking"');
     expect(html).not.toContain('data-active-turn-stalled="true"');
     expect(html).not.toContain(dictionaryChat.zh.chatStreamNoOutputStalled);
-    // The heartbeat bills the current thinking segment, not the whole turn
-    // (static first render counts the segment from mount: 0s).
-    expect(html).toContain("思考中 · 0s");
+    // The heartbeat bills the current thinking segment, not the whole turn.
+    // The first second shows the label alone: a static first render must not
+    // paint "0 秒".
+    expect(html).toContain("思考中");
+    expect(html).not.toContain("0 秒");
   });
 
   it("prefers the live activity-stamp getter over the legacy delta timestamp", () => {

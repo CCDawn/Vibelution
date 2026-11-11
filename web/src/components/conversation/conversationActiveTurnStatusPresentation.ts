@@ -364,7 +364,39 @@ export function formatActiveTurnHeartbeatText(
   if (elapsedSeconds == null || !Number.isFinite(elapsedSeconds)) {
     return head;
   }
-  return `${head} · ${Math.max(0, Math.floor(elapsedSeconds))}s`;
+  const totalSeconds = Math.floor(elapsedSeconds);
+  // A zero-second counter carries no information and reads like a stuck timer,
+  // so the heartbeat only starts counting once the stage has actually run for a
+  // second.
+  if (totalSeconds < 1) {
+    return head;
+  }
+  return `${head} · ${formatActiveTurnElapsedDuration(totalSeconds, zh)}`;
+}
+
+export function formatActiveTurnElapsedDuration(totalSeconds: number, zh: boolean) {
+  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+  if (safeSeconds < 60) {
+    return zh ? `${safeSeconds} 秒` : `${safeSeconds}s`;
+  }
+  const minutes = Math.floor(safeSeconds / 60);
+  const seconds = safeSeconds % 60;
+  if (seconds === 0) {
+    return zh ? `${minutes} 分` : `${minutes}m`;
+  }
+  return zh ? `${minutes} 分 ${seconds} 秒` : `${minutes}m ${seconds}s`;
+}
+
+/**
+ * Splits the heartbeat into its label and its duration so the row can render
+ * two type levels: the label is the message, the counter is metadata.
+ */
+export function splitActiveTurnHeartbeatText(text: string) {
+  const separator = text.lastIndexOf(" · ");
+  if (separator <= 0) {
+    return { head: text, duration: "" };
+  }
+  return { head: text.slice(0, separator), duration: text.slice(separator + 3) };
 }
 
 export function buildActiveTurnStageBarItems(

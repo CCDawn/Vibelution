@@ -1,4 +1,4 @@
-import { LoaderCircle, RotateCw } from "lucide-react";
+import { Brain, RotateCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { VButton, VStatusChip } from "../vui";
@@ -16,6 +16,7 @@ import {
   resolveActiveTurnRouteFallback,
   resolveActiveTurnStallSeconds,
   shouldShowActiveTurnReconnectAction,
+  splitActiveTurnHeartbeatText,
   shouldShowNoOutputStall,
   visibleActiveTurnRetryProgress,
   type ActiveTurnStatusMessageLike,
@@ -125,6 +126,11 @@ export function ConversationActiveTurnStatusNote({
     : companionMode
       ? (lang === "en" ? "Typing…" : "正在输入…")
       : formatActiveTurnHeartbeatText(stage, thinkingSegmentSeconds ?? elapsedSeconds, lang, retryProgress);
+  const { head: heartbeatHead, duration: heartbeatDuration } = splitActiveTurnHeartbeatText(heartbeatText);
+  // Activity is carried by the type (a shimmer sweep), not by a spinner: the
+  // heartbeat can live for minutes, and a rotating loader next to the avatar
+  // becomes a second focal point that never settles.
+  const heartbeatActive = activeTurnStageBarPhase(displayStage) === "thinking";
   const resolvedStatusLabel = statusLabel
     || (lang === "en" ? "Status" : "状态");
 
@@ -217,11 +223,18 @@ export function ConversationActiveTurnStatusNote({
       <div className={styles.body}>
         {showHeartbeat ? (
           <span className={styles.textRow}>
-            <LoaderCircle className={styles.spinner} size={14} aria-hidden="true" />
-            <span
-              className={visibleRetryProgress ? `${styles.text} ${styles.retryShimmer}` : styles.text}
-            >
-              {heartbeatText}
+            <Brain className={styles.icon} size={16} aria-hidden="true" />
+            <span className={styles.text}>
+              <span
+                className={heartbeatActive || visibleRetryProgress
+                  ? `${styles.textHead} ${styles.retryShimmer}`
+                  : styles.textHead}
+              >
+                {heartbeatHead}
+              </span>
+              {heartbeatDuration ? (
+                <span className={styles.duration}>{` · ${heartbeatDuration}`}</span>
+              ) : null}
             </span>
           </span>
         ) : null}
