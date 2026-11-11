@@ -38,6 +38,14 @@ BUILD_SCHEMA_VERSION = 2
 RELEASES_DIR_NAME = ".vibelution-builds"
 ACTIVE_RELEASE_NAME = "active.json"
 LOCK_DIR_NAME = "frontend-build.lockdir"
+# One-shot handoff for the shell refresh helper. After the old window exits the
+# replacement shell may serve the release that was prepared before the switch
+# even if HEAD advanced during those few seconds. The pin never authorizes a
+# different release and expires quickly, so ordinary restarts keep rebuilding.
+FRONTEND_BUILD_PIN_ENV = "VIBELUTION_FRONTEND_BUILD_PIN"
+FRONTEND_BUILD_PIN_EXPIRES_ENV = "VIBELUTION_FRONTEND_BUILD_PIN_EXPIRES_AT"
+FRONTEND_BUILD_PIN_MAX_AGE_SECONDS = 300.0
+FRONTEND_BUILD_PIN_MARKER_NAME = "frontend-build-pin.used"
 # A concurrent task can touch web/ while a release builds. One bounded retry
 # re-inspects the settled sources instead of failing the whole restart.
 FRONTEND_BUILD_INPUT_RETRY_LIMIT = 2
@@ -155,6 +163,12 @@ def active_release_path(project_root: Path | str) -> Path:
 
 def frontend_build_lock_path(project_root: Path | str) -> Path:
     return frontend_releases_dir(project_root) / LOCK_DIR_NAME
+
+
+def frontend_build_pin_marker_path(project_root: Path | str) -> Path:
+    """Marker proving the update handoff pin has already been consumed."""
+
+    return Path(project_root) / ".runtime" / "tmp" / FRONTEND_BUILD_PIN_MARKER_NAME
 
 
 def serving_frontend_leases_dir(project_root: Path | str) -> Path:
@@ -623,6 +637,72 @@ def read_active_provenance(project_root: Path | str) -> dict[str, Any]:
     except (OSError, ValueError, TypeError):
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _consume_frontend_build_pin(project_root: Path | str, build_key: str) -> bool:
+    """Allow exactly one startup preflight to use the handoff pin.
+
+    A failed backend retry or a user restart inside the pin window must not
+    keep serving the release prepared before the switch. The first consumer
+    creates the marker; every later caller falls back to the normal build.
+    """
+
+    marker = frontend_build_pin_marker_path(project_root)
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return False
+    except OSError:
+        # An unwritable marker must not turn into an unbounded pin.
+        return False
+    try:
+        os.write(descriptor, build_key.encode("utf-8"))
+    finally:
+        os.close(descriptor)
+    return True
+
+
+def pinned_frontend_release(project_root: Path | str) -> dict[str, Any] | None:
+    """Return the active release named by a short-lived update handoff pin.
+
+    The desktop shell refresh helper sets the pin right before it launches the
+    replacement shell. Both startup preflight call sites then reuse the release
+    that was already prepared instead of rebuilding it after the old window has
+    gone away. The pin only matches an already-published, complete release and
+    is consumed once, so a retried startup or a later manual restart rebuilds
+    from current source instead of serving the pre-switch release again.
+    """
+
+    build_key = os.environ.get(FRONTEND_BUILD_PIN_ENV, "").strip()
+    if not build_key:
+        return None
+    try:
+        expires_at = float(os.environ.get(FRONTEND_BUILD_PIN_EXPIRES_ENV) or 0)
+    except (TypeError, ValueError):
+        expires_at = 0.0
+    if expires_at <= 0 or time.time() > expires_at:
+        return None
+    root = Path(project_root)
+    dist = resolve_active_frontend_dist(root)
+    if not _is_complete_release(dist, build_key=build_key, allow_legacy_key=True):
+        return None
+    try:
+        provenance = json.loads((dist / ".vibelution-build.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    if not isinstance(provenance, dict):
+        return None
+    if not _consume_frontend_build_pin(root, build_key):
+        return None
+    return {
+        "current": True,
+        "reason": "serving the frontend release prepared before the update switch",
+        "buildKey": str(provenance.get("buildKey") or build_key).strip(),
+        "buildInputs": {},
+        "dist": str(dist),
+        "provenance": provenance,
+    }
 
 
 def inspect_frontend_build(project_root: Path | str, *, package_manager: str | None = None) -> dict[str, Any]:
@@ -1564,6 +1644,19 @@ def ensure_frontend_build(
         root = Path(project_root).resolve()
         web_dir = root / "web"
         manager = frontend_package_manager(package_manager)
+        pinned = pinned_frontend_release(root)
+        if pinned is not None:
+            # The refresh helper prepared this exact release before the old
+            # shell exited. Reuse it instead of building again behind a closed
+            # window; freshness reporting will still show any newer HEAD.
+            return {
+                **pinned,
+                "rebuilt": False,
+                "skipped": True,
+                "pinned": True,
+                "timingsMs": timings,
+                "lock": {"acquired": False, "waited": False, "path": str(frontend_build_lock_path(root))},
+            }
         with _build_phase("cleanupMs"):
             _retry_pending_build_cleanup(
                 root,

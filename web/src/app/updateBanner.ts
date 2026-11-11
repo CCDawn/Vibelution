@@ -66,14 +66,43 @@ export function shouldShowUpdateBanner({
 
 export function launcherUpdateBannerCopy(lang: string): { title: string; detail: string } {
   return lang === "en"
-    ? { title: "Update ready — restart to apply", detail: "Restart closes this window, replaces the desktop shell, and reopens it." }
-    : { title: "有更新，重启后生效", detail: "重启会关闭当前窗口，换上最新桌面壳后重新打开。" };
+    ? {
+      title: "Desktop shell update ready",
+      detail: "This update replaces the desktop shell, not just the page, so it takes longer than a frontend refresh. Keep working during preparation; the window closes only for the short switch.",
+    }
+    : {
+      title: "桌面壳有更新，重启后生效",
+      detail: "这次会替换桌面壳，不只是刷新页面，所以比前端更新慢。准备期间可以继续使用，完成后会短暂关闭窗口，换上最新桌面壳后重新打开。",
+    };
 }
 
 export function frontendUpdateBannerCopy(lang: string): { title: string; detail: string } {
   return lang === "en"
-    ? { title: "Frontend updated — restart to apply", detail: "The interface build is behind local code. Restart to load the latest frontend." }
-    : { title: "前端有更新，重启后生效", detail: "运行中的界面构建落后于本地代码，重启会加载最新前端。" };
+    ? {
+      title: "Frontend updated — restart to apply",
+      detail: "This restart only loads the latest frontend build; the desktop shell stays as it is. The window closes briefly during the restart.",
+    }
+    : {
+      title: "前端有更新，重启后生效",
+      detail: "这次只加载新的前端构建，不替换桌面壳。重启期间窗口会短暂关闭。",
+    };
+}
+
+/** Non-blocking progress copy shown while an update prepares in the background. */
+export function updatePreparingBannerCopy(lang: string): { title: string; detail: string } {
+  return lang === "en"
+    ? {
+      title: "Preparing update — window stays usable",
+      detail: "Building the latest frontend and desktop shell in the background. Keep working; the window closes briefly once preparation finishes and the switch starts.",
+    }
+    : {
+      title: "正在准备更新，窗口仍可使用",
+      detail: "正在后台构建最新前端和桌面壳。可以继续操作；准备完成后会短暂关闭窗口并切换。",
+    };
+}
+
+export function updatePreparingBannerActionLabel(lang: string): string {
+  return lang === "en" ? "Preparing update…" : "正在准备更新…";
 }
 
 /** Short commit token for copy, e.g. `@e91a851`. Empty when no HEAD is known. */
