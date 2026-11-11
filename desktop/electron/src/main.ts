@@ -5867,21 +5867,6 @@ async function orchestrateLauncherLifecycle(
     : execute();
 }
 
-/**
- * Whether this lifecycle pass may interrupt running work.
- *
- * ``operator-restart`` always may: it is the provenance Electron's own
- * operator-restart retirement uses. A plain ``restart`` from the operator UI
- * carries the same meaning, so both are treated alike; every automatic path
- * keeps its guard.
- */
-function restartInterruptsActiveWork(
-  operation: string,
-  provenance: LauncherLifecycleProvenance
-): boolean {
-  return provenance === "operator-restart" || (operation === "restart" && provenance === "operator");
-}
-
 async function orchestrateLauncherLifecycleImpl(
   operation: string,
   payload: LauncherIpcInvokePayload,
@@ -6128,7 +6113,7 @@ async function orchestrateLauncherLifecycleImpl(
     notifyDesktopTray("Vibelution", "桌面壳不是当前代码，Launcher 正在更新后再执行…");
     try {
       return await restartLauncherToLatestBuild(
-        restartInterruptsActiveWork(operation, provenance),
+        operation === "restart" && provenance === "operator",
         lifecycleOperation,
         // The helper must promote and relaunch the packaged shell even when
         // the current running shell is unpackaged.
@@ -6158,7 +6143,7 @@ async function orchestrateLauncherLifecycleImpl(
       operation: lifecycleOperation,
       ...(launchRequest ? { onCommand: (commandId: string) => launchRequest.receipt.dispatched(commandId) } : {}),
       ...(admission ? { beforeExecute: () => admission.check(), beforeSpawn: () => admission.check() } : {}),
-      interruptActiveWork: restartInterruptsActiveWork(operation, provenance),
+      interruptActiveWork: provenance === "operator-restart" || (operation === "restart" && provenance === "operator"),
       ...(fastCloseTiming && preconfirmedCloseAuthorization("main", payload)
         ? { fastCloseTiming, controlToken: desktopActionContext?.controlToken } : {}),
       // Never cache the earlier reuse probe: queueing can overlap source
@@ -7084,7 +7069,7 @@ async function orchestrateBranchInstanceLifecycleImpl(
       isCurrent: () => {
         try { branchExecution?.check(); return launcherLifecycleSupervisor.isCurrent(intentLease); } catch { return false; }
       },
-      interruptActiveWork: restartInterruptsActiveWork(operation, provenance)
+      interruptActiveWork: provenance === "operator-restart" || (operation === "restart" && provenance === "operator")
       , admission, commandId: branchExecution?.command.commandId, branchExecution
     }); },
     reconcile: async () => {
@@ -8394,25 +8379,6 @@ async function handleSecondInstanceLifecycleCommand(
   }
 }
 
-const LAUNCH_REQUEST_QUEUE_TIMEOUT_MS = 20_000;
-
-/**
- * Bound how long a queued restart may sit on ``dispatched``.
- *
- * A queued restart is only fulfilled by the deferred pass in an idle window,
- * and the turn that queued it is itself the active work: without this, an
- * operator who keeps working never sees the restart happen or fail.
- */
-function scheduleLaunchRequestQueueTimeout(receipt: LaunchRequestReceipt): void {
-  const timer = setTimeout(() => {
-    receipt.failed(
-      "restart_queue_timeout",
-      "重启请求排队超过 20 秒仍未执行：当前有任务在运行。请先点「停止任务」再重启，或等待该任务结束。"
-    );
-  }, LAUNCH_REQUEST_QUEUE_TIMEOUT_MS);
-  timer.unref();
-}
-
 /** Observe the existing owner all the way to READY, including pre-queue rejects. */
 async function handleMainLineLaunchRequest(
   command: string,
@@ -8438,12 +8404,10 @@ async function handleMainLineLaunchRequest(
       receipt.failed("launcher_workspace_mismatch", "请求工作区与当前 Launcher 绑定的工作区不一致，未执行请求。");
       return;
     }
-    // An operator-visible restart owns its lifecycle meaning: the operator
-    // asked for a restart, so it must interrupt the running turn instead of
-    // queueing behind it. Automatic passes keep their own provenance.
-    const lifecycleProvenance: LauncherLifecycleProvenance =
-      executionOperation === "restart" && metadata.launchRequestId ? "operator-restart" : provenance;
-    const result = await orchestrateLauncherLifecycle(executionOperation, { schemaVersion: 1, path: command }, lifecycleProvenance,
+    // Provenance stays exactly as the caller declared it: a forwarded launch
+    // request must keep its join semantics, and an operator command already
+    // carries the interrupt authority this path relies on.
+    const result = await orchestrateLauncherLifecycle(executionOperation, { schemaVersion: 1, path: command }, provenance,
       undefined, undefined, false, undefined, { ...metadata, launchRequestOperation: operation, receipt });
     if (!result.accepted) {
       receipt.failed(result.code || "lifecycle_rejected", result.message || "Launcher 拒绝了生命周期请求。");
@@ -8452,7 +8416,16 @@ async function handleMainLineLaunchRequest(
       if (!result.commandId) throw new Error("LAUNCH_REQUEST_COMMAND_ID_MISSING");
       if (result.code === "restart_queued" || result.code === "joined_in_flight_restart") {
         receipt.dispatched(result.commandId);
-        scheduleLaunchRequestQueueTimeout(receipt);
+        // The deferred pass only fires in an idle window, and the turn that
+        // queued this restart is itself the active work: bound the wait so a
+        // restart never sits on "dispatched" for as long as the operator works.
+        const queueTimer = setTimeout(() => {
+          receipt.failed(
+            "restart_queue_timeout",
+            "重启请求排队超过 20 秒仍未执行：当前有任务在运行。请先点「停止任务」再重启，或等待该任务结束。"
+          );
+        }, 20_000);
+        (queueTimer as unknown as { unref?: () => void }).unref?.();
       } else {
         receipt.completed(result.commandId, ["start", "restart", "rebuild-and-start"].includes(operation));
       }

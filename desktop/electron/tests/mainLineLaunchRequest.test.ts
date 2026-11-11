@@ -35,6 +35,9 @@ function harness() {
   };
   const sandbox = {
     beginLaunchRequestReceipt: vi.fn(beginLaunchRequestReceipt), AbortSignal, console, normalizeInstanceKey, realpathSync,
+    // The queued-restart bound arms a host timer in production, so the vm sandbox
+    // must expose the same host API; without it that arm becomes a preparation error.
+    setTimeout, clearTimeout,
     createDesktopPathsForApp: () => ({ workspaceRoot: root }),
     ensureProjectControlPlane: vi.fn(async () => true), launcherBootstrap: {}, windowProvider: {},
     authorizeLauncherForceLifecycle: vi.fn(async () => undefined),
