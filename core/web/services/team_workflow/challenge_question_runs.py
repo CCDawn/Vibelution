@@ -105,6 +105,31 @@ def _result_package_artifact_path(team_id: str, question_id: str, run_id: str) -
         / f"{run_id}.result-package.v2.json"
     )
 
+def _resolve_result_package_path(team_id: str, locator: str) -> Path:
+    """Resolve a stored locator against the live workflow root.
+
+    Older records may carry an absolute path from a previous runtime
+    instance. Prefer the stored path when it exists, then rebuild the same
+    suffix under the current team workflow root.
+    """
+
+    raw = str(locator or "").strip()
+    candidate = Path(raw)
+    if candidate.is_file():
+        return candidate
+    parts = candidate.parts
+    marker = "challenge_program"
+    if marker in parts:
+        start = len(parts) - 1 - list(reversed(parts)).index(marker)
+        fallback = _workflow_root(team_id) / Path(*parts[start:])
+        if fallback.is_file():
+            return fallback
+    if not candidate.is_absolute():
+        fallback = _workflow_root(team_id) / candidate
+        if fallback.is_file():
+            return fallback
+    return candidate
+
 
 def _schema_path(version: int = 2) -> Path:
     return _project_root() / "schemas" / f"challenge_question_output.v{version}.schema.json"
@@ -2035,7 +2060,7 @@ def _package_bound_model_invocation_receipt_refs(
     locator = str(package_metadata.get("locator") or "").strip()
     if not locator:
         return {}
-    package_path = Path(locator)
+    package_path = _resolve_result_package_path(str(record.get("teamId") or ""), locator)
     package_payload = _read_json(package_path)
     if not package_payload or not package_path.is_file():
         return {}
@@ -2376,7 +2401,7 @@ def get_challenge_question_run_detail(
     result_package_artifact = None
     package_metadata = selected_record.get("resultPackage")
     if isinstance(package_metadata, dict):
-        package_path = Path(str(package_metadata.get("locator") or ""))
+        package_path = _resolve_result_package_path(team_id, str(package_metadata.get("locator") or ""))
         package_payload = _read_json(package_path)
         try:
             from core.research.competition.question_result_package import (
@@ -3016,7 +3041,7 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
                     raise ValueError(
                         "Challenge question run already exists without a canonical result package."
                     )
-                existing_package_path = Path(str(existing_package_metadata.get("locator") or ""))
+                existing_package_path = _resolve_result_package_path(team_id, str(existing_package_metadata.get("locator") or ""))
                 existing_package = _read_json(existing_package_path)
                 try:
                     from core.research.competition.question_result_package import (
