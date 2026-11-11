@@ -128,6 +128,12 @@ def register_web_routers_from_modules(app: FastAPI, modules: list[Any]) -> None:
             continue
         app.include_router(module.router, prefix="/api")
         registered.add(router_id)
+        # A module may also expose a root-level router for paths an external
+        # client already hard-codes (the phone posts to /pair/enroll).
+        root_router = getattr(module, "root_router", None)
+        if root_router is not None and id(root_router) not in registered:
+            app.include_router(root_router)
+            registered.add(id(root_router))
 
 
 def register_web_routers(app: FastAPI) -> None:

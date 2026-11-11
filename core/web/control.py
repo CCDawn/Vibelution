@@ -14,6 +14,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, Response
 
 CONTROL_TOKEN_HEADER = "X-Vibelution-Control-Token"
+# The Codex Remote phone client hard-codes its own header name. Accept it
+# as an alias so a paired phone can call this workbench without a client
+# rebuild; the comparison stays one constant-time check against one token.
+PHONE_TOKEN_HEADERS = ("X-Vibelution-Control-Token", "X-Codex-Bridge-Token")
 # GET endpoints that must stay reachable without a token: the health probe
 # and the token bootstrap itself (requiring a token there deadlocks).
 _TOKEN_EXEMPT_GET_PATHS = {"/api/health", "/api/control-token"}
@@ -145,7 +149,12 @@ def validate_control_request(request: Request) -> ControlGuardError | None:
     if source_error is not None:
         return source_error
 
-    submitted = str(request.headers.get(CONTROL_TOKEN_HEADER) or "").strip()
+    submitted = ""
+    for header_name in PHONE_TOKEN_HEADERS:
+        candidate = str(request.headers.get(header_name) or "").strip()
+        if candidate:
+            submitted = candidate
+            break
     if not submitted or not secrets.compare_digest(submitted, get_control_token()):
         return ControlGuardError(403, "Missing or invalid web control token")
     return None

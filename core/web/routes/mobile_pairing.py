@@ -41,7 +41,7 @@ def _local_lan_address() -> str:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
             probe.connect(("192.0.2.1", 65535))
             address = probe.getsockname()[0]
-    except Exception:
+    except OSError:
         return "127.0.0.1"
     return address or "127.0.0.1"
 
@@ -85,4 +85,38 @@ def mobile_pairing_claim(payload: PairingClaimPayload) -> dict[str, Any]:
         "baseUrl": f"http://{session['host']}:{session['port']}",
         "header": CONTROL_TOKEN_HEADER,
         "controlToken": get_control_token(),
+    }
+
+
+class PairEnrollPayload(BaseModel):
+    """Body the Codex Remote phone app sends after scanning a pairing QR.
+
+    The field names are fixed by that client, not by us: it posts
+    {pairingCode, deviceName, appVersion} and expects a token back.
+    """
+
+    pairingCode: str = ""
+    deviceName: str = ""
+    appVersion: str = ""
+
+
+# Mounted without the /api prefix: the phone composes ``${baseUrl}/pair/enroll``
+# from the QR payload, so the path has to match what it already ships.
+root_router = APIRouter()
+
+
+@root_router.post("/pair/enroll")
+def pair_enroll(payload: PairEnrollPayload) -> dict[str, Any]:
+    """Redeem a scanned pairing code in the shape the phone client expects."""
+    session = mobile_pairing_service.claim_pairing_code(payload.pairingCode)
+    if session is None:
+        raise HTTPException(status_code=403, detail="配对码无效、已过期或尝试次数过多")
+    device_name = payload.deviceName.strip() or "phone"
+    return {
+        "deviceId": device_name,
+        "deviceName": device_name,
+        "pairedAt": str(session.get("claimedAt") or ""),
+        "token": get_control_token(),
+        # The phone tolerates an empty secret; this bridge has no TOTP layer.
+        "totpSecret": "",
     }
