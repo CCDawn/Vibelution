@@ -518,7 +518,7 @@ describe("Electron main Launcher IPC facade", () => {
     expect(promoteBody).toContain('shellKind: "packaged"');
     // Active work still gates the promotion: only an operator restart may
     // interrupt running tasks on this lane.
-    expect(promoteBody).toContain('operation === "restart" && provenance === "operator"');
+    expect(promoteBody).toContain("restartInterruptsActiveWork(operation, provenance)");
   });
 
   it("keeps the shell-kind fallback for non-lifecycle update callers", () => {
@@ -610,9 +610,29 @@ describe("Electron main Launcher IPC facade", () => {
     const branchBody = mainSource.slice(branchStart, branchEnd);
     expect(branchBody).toContain('provenance: LauncherLifecycleProvenance = "operator"');
     expect(branchBody).toContain("orchestrateLauncherLifecycle(operation, payload, provenance, signal)");
-    expect(branchBody).toContain(
-      'interruptActiveWork: provenance === "operator-restart" || (operation === "restart" && provenance === "operator")'
+    expect(branchBody).toContain("interruptActiveWork: restartInterruptsActiveWork(operation, provenance)");
+    // The shared predicate keeps the original gate: operator-restart may
+    // interrupt, and so may a plain restart the operator asked for; no
+    // automatic lane may.
+    const helperBody = mainSource.slice(
+      mainSource.indexOf("function restartInterruptsActiveWork"),
+      mainSource.indexOf("function scheduleLaunchRequestQueueTimeout")
     );
+    expect(helperBody).toContain('provenance === "operator-restart"');
+    expect(helperBody).toContain('operation === "restart" && provenance === "operator"');
+    // A queued restart must become a visible failure rather than sitting on
+    // "dispatched" for as long as the operator keeps working.
+    const queueHelperBody = mainSource.slice(
+      mainSource.indexOf("function scheduleLaunchRequestQueueTimeout"),
+      mainSource.indexOf("/** Observe the existing owner")
+    );
+    expect(queueHelperBody).toContain("restart_queue_timeout");
+    expect(queueHelperBody).toContain("LAUNCH_REQUEST_QUEUE_TIMEOUT_MS");
+    const launchBody = mainSource.slice(
+      mainSource.indexOf("async function handleMainLineLaunchRequest"),
+      mainSource.indexOf("/** Observe the existing owner")
+    );
+    expect(launchBody).toContain("scheduleLaunchRequestQueueTimeout(receipt)");
 
     const slotStart = mainSource.indexOf("async function applyPendingProjectSlotImpl");
     const slotEnd = mainSource.indexOf("async function", slotStart + 1);
