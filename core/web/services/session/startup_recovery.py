@@ -1084,17 +1084,23 @@ def _ledger_modified_ns(s: Any, session_id: str) -> int:
 
     ``-1`` means "unknown"; the caller must then inspect the session instead of
     trusting a missing timestamp.
+
+    Only the modification time is needed here. Asking the journal bridge for
+    its signature also computed ``latest_ledger_sequence`` for every session,
+    which turned the 362-session prefilter into a cold-cache journal scan: it
+    spent 20.9s of a 21s sweep before a single candidate was inspected.
     """
 
+    from pathlib import Path
+
+    from core.chat.conversation_ledger import conversation_ledger_path
+
     try:
-        signature = s._journal_bridge.session_conversation_events_signature(session_id)
-    except Exception:  # noqa: BLE001 - unknown signature means "must inspect"
+        path = conversation_ledger_path(Path(s.PROJECT_ROOT), session_id)
+        return int(path.stat().st_mtime_ns)
+    except OSError:
         return -1
-    if not isinstance(signature, tuple) or len(signature) < 4:
-        return -1
-    try:
-        return int(signature[2])
-    except (TypeError, ValueError):
+    except Exception:  # noqa: BLE001 - unknown mtime means "must inspect"
         return -1
 
 
