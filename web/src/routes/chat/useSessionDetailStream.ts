@@ -1244,7 +1244,11 @@ export function useSessionDetailStream({
       pendingDetailTrace = null;
       assistantDeltaScheduler.cancel();
       sessionStreamRecovery.dispose();
-      setSessionStreamConnected(false);
+      // This cleanup parks the stream in the warm registry (readyState stays
+      // OPEN) and a remount resumes the same connection, so it must not report
+      // a disconnect. Flipping the connected state on every effect re-run made
+      // the workbench repaint a false drop on each park/resume cycle; real
+      // drops are reported by the stream onerror handler and forceClose.
       if (activeStreamRef.current?.stream === stream) {
         activeStreamRef.current = null;
       }
