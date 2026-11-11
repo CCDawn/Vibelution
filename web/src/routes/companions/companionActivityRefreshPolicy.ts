@@ -1,6 +1,10 @@
 import type { Query } from "@tanstack/react-query";
 
-export const COMPANION_ACTIVITY_NORMAL_POLL_MS = 5_000;
+// The companion-activity projection is a background lane, not a live feed:
+// one backend pass can take tens of seconds, so a 5s cadence only piles work
+// onto the shared thread pool. 30s matches the backend cache TTL, so a poll is
+// normally a cheap cache hit.
+export const COMPANION_ACTIVITY_NORMAL_POLL_MS = 30_000;
 export const COMPANION_ACTIVITY_ERROR_BACKOFF_STEPS_MS = [30_000, 60_000, 120_000, 300_000] as const;
 
 /**

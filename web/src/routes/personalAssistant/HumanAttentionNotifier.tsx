@@ -61,7 +61,7 @@ export function HumanAttentionNotifier({ startupReady = true }: { startupReady?:
     queryKey: queryKeys.personalAssistantHumanAttention(),
     queryFn: ({ signal }) => fetchPersonalAssistantHumanAttention({ signal }),
     enabled: startupReady,
-    refetchInterval: 5000,
+    refetchInterval: 30_000,
     // 双通道通知的主场景就是工作台最小化/助理窗关闭：此时窗口 hidden 会暂停
     // 默认后台轮询，人类关注事项将永远无法升级为系统 toast，因此显式保持轮询
     // （Chromium 对隐藏窗口的定时器节流把实际节奏降到约每分钟一次，可接受）。

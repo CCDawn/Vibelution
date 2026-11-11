@@ -45,7 +45,7 @@ _COMPANION_ACTIVITY_STAMP_CACHE_MAX_ENTRIES = 256
 # pays one directory-store page query plus per-companion journal stats. A 10s
 # memo shared by the activity and companion endpoints halves that work while
 # keeping a new activity stamp visible within two polls.
-_COMPANION_ACTIVITY_ROWS_CACHE_TTL_SECONDS = 10.0
+_COMPANION_ACTIVITY_ROWS_CACHE_TTL_SECONDS = 30.0
 _COMPANION_ACTIVITY_ROWS_CACHE_MAX_ENTRIES = 8
 _COMPANION_ACTIVITY_ROWS_CACHE: dict[tuple[tuple[str, str], ...], dict[str, Any]] = {}
 _COMPANION_ACTIVITY_ROWS_CACHE_LOCK = threading.Lock()
