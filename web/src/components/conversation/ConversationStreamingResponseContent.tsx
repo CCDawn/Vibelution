@@ -1,4 +1,4 @@
-import { memo, useMemo, type ReactNode } from "react";
+import { memo, useMemo, useRef, type ReactNode } from "react";
 
 import { createCodexStreamController } from "./codexStreamController";
 import type { ConversationMarkdownClassNames } from "./conversationMarkdownTypes";
@@ -81,15 +81,36 @@ export function ConversationStreamingResponseContent({
   onOpenRailFile,
 }: ConversationStreamingResponseContentProps) {
   const visibleText = String(content ?? "");
+
+  /**
+   * Incremental feed state: the Codex controller already accumulates the text
+   * pushed into it, so a later frame reuses it and only pushes the new
+   * suffix. Rebuilding a fresh controller per frame re-scanned the whole
+   * message on every token (quadratic work on long answers).
+   */
+  const streamFeedRef = useRef<{
+    controller: ReturnType<typeof createCodexStreamController>;
+    fedSource: string;
+  } | null>(null);
   const streamProjection = useMemo(() => {
     if (!isStreaming) {
       // Settled: the whole message goes through the shared stable renderer —
       // no Codex holdback split, no live tail, no incomplete-markdown repair.
+      streamFeedRef.current = null;
       return { stableText: visibleText, liveText: "" };
     }
-    const controller = createCodexStreamController();
-    controller.push(visibleText);
-    const snapshot = controller.snapshot();
+    let feed = streamFeedRef.current;
+    if (!feed || !visibleText.startsWith(feed.fedSource)) {
+      // First frame, or the content was replaced/rewound rather than appended:
+      // drop the cached controller and rebuild from the full text.
+      feed = { controller: createCodexStreamController(), fedSource: "" };
+      streamFeedRef.current = feed;
+    }
+    if (visibleText.length > feed.fedSource.length) {
+      feed.controller.push(visibleText.slice(feed.fedSource.length));
+      feed.fedSource = visibleText;
+    }
+    const snapshot = feed.controller.snapshot();
     const stableText = snapshot.queuedStableText || snapshot.emittedStableText;
     const liveText = snapshot.liveTailText;
     if (!stableText && !liveText) {
