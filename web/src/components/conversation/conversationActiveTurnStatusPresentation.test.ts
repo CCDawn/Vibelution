@@ -16,6 +16,7 @@ import {
   planActiveTurnStageSwitch,
   resolveActiveTurnDisconnectSeconds,
   resolveActiveTurnProgressStage,
+  resolveActiveTurnReasoningSummary,
   resolveActiveTurnRetryProgress,
   resolveActiveTurnRouteFallback,
   resolveActiveTurnStallSeconds,
@@ -46,6 +47,14 @@ describe("conversationActiveTurnStatusPresentation", () => {
     expect(formatActiveTurnHeartbeatText("model_thinking", 12, "zh")).toBe("思考中 · 12 秒");
     expect(formatActiveTurnHeartbeatText("stopping", 3, "zh")).toBe("正在终止 · 3 秒");
     expect(formatActiveTurnHeartbeatText("agent_prepare", null, "en")).toBe("Preparing agent");
+  });
+
+  it("previews the newest reasoning line, not the head of the stream", () => {
+    expect(resolveActiveTurnReasoningSummary("")).toBe("");
+    expect(resolveActiveTurnReasoningSummary("   \n  \n")).toBe("");
+    expect(resolveActiveTurnReasoningSummary("first line")).toBe("first line");
+    expect(resolveActiveTurnReasoningSummary("older\nnewest\n\n")).toBe("newest");
+    expect(resolveActiveTurnReasoningSummary("a\r\nb\r\n")).toBe("b");
   });
 
   it("starts the counter at one second and grades it past a minute", () => {

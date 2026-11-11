@@ -15,6 +15,7 @@ function renderNote(options: {
   companionMode?: boolean;
   advisoriesOnly?: boolean;
   lang?: "zh" | "en";
+  reasoningText?: string;
 }) {
   const {
     message = { timestamp: new Date(Date.now() - 5_000).toISOString(), status: "running", turnItems: [] },
@@ -29,6 +30,7 @@ function renderNote(options: {
         companionMode={companionMode}
         advisoriesOnly={options.advisoriesOnly}
         statusLabel="状态"
+        reasoningText={options.reasoningText}
         message={message as never}
       />
     </ActiveTurnStreamStateContext.Provider>
@@ -38,6 +40,7 @@ function renderNote(options: {
       companionMode={companionMode}
       advisoriesOnly={options.advisoriesOnly}
       statusLabel="状态"
+      reasoningText={options.reasoningText}
       message={message as never}
     />
   );
@@ -274,6 +277,37 @@ describe("ConversationActiveTurnStatusNote stream advisories", () => {
     // paint "0 秒".
     expect(html).toContain("思考中");
     expect(html).not.toContain("0 秒");
+    // ZCode keeps a live reasoning stream counter-free: the wait itself is the
+    // message, the duration belongs to the settled block.
+    expect(html).not.toContain("秒");
+  });
+
+  it("previews the newest reasoning line and exposes an expand trigger", () => {
+    const message = {
+      timestamp: new Date().toISOString(),
+      status: "running",
+      metadata: { processStage: "model_thinking" },
+    };
+    const html = renderNote({
+      message,
+      reasoningText: "第一行思考\n第二行思考\n\n最新的那一行",
+    });
+    expect(html).toContain("最新的那一行");
+    expect(html).not.toContain("第一行思考");
+    expect(html).toContain('data-testid="active-turn-heartbeat"');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('data-active-turn-thinking-chevron="collapsed"');
+  });
+
+  it("keeps the counter on stages that are not the reasoning stream", () => {
+    const message = {
+      timestamp: new Date(Date.now() - 12_000).toISOString(),
+      status: "running",
+      metadata: { processStage: "model_request" },
+    };
+    const html = renderNote({ message });
+    expect(html).toContain("秒");
+    expect(html).not.toContain('data-active-turn-thinking-chevron="collapsed"');
   });
 
   it("prefers the live activity-stamp getter over the legacy delta timestamp", () => {

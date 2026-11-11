@@ -391,6 +391,22 @@ export function formatActiveTurnElapsedDuration(totalSeconds: number, zh: boolea
  * Splits the heartbeat into its label and its duration so the row can render
  * two type levels: the label is the message, the counter is metadata.
  */
+/**
+ * ZCode reasoning-preview rule: the collapse-trigger shows the LAST non-empty
+ * line of the live reasoning stream, because that line is where the model is
+ * right now. Returns the newest line, never a truncated head.
+ */
+export function resolveActiveTurnReasoningSummary(text: string) {
+  const lines = String(text || "").replace(/\r\n?/gu, "\n").split("\n");
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index]?.trim() ?? "";
+    if (line) {
+      return line;
+    }
+  }
+  return "";
+}
+
 export function splitActiveTurnHeartbeatText(text: string) {
   const separator = text.lastIndexOf(" · ");
   if (separator <= 0) {

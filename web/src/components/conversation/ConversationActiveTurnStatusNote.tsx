@@ -1,7 +1,7 @@
-import { Brain, RotateCw } from "lucide-react";
+import { Brain, ChevronRight, RotateCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { VButton, VStatusChip } from "../vui";
+import { VButton, VNativeButton, VStatusChip } from "../vui";
 import { dictionaryChat } from "../../i18n/domains/dictionaryChat";
 import {
   ACTIVE_TURN_RECONNECT_ACTION_COOLDOWN_MS,
@@ -14,6 +14,7 @@ import {
   resolveActiveTurnProgressStage,
   resolveActiveTurnRetryProgress,
   resolveActiveTurnRouteFallback,
+  resolveActiveTurnReasoningSummary,
   resolveActiveTurnStallSeconds,
   shouldShowActiveTurnReconnectAction,
   splitActiveTurnHeartbeatText,
@@ -36,6 +37,8 @@ export type ConversationActiveTurnStatusNoteProps = {
   phase?: string;
   /** A visible work disclosure owns routine progress; keep only exceptional feedback here. */
   advisoriesOnly?: boolean;
+  /** Live reasoning text for the current turn: drives the streaming preview and the expandable body. */
+  reasoningText?: string;
 };
 
 /**
@@ -50,6 +53,7 @@ export function ConversationActiveTurnStatusNote({
   companionMode = false,
   phase = "",
   advisoriesOnly = false,
+  reasoningText = "",
 }: ConversationActiveTurnStatusNoteProps) {
   const resolvedStage = resolveActiveTurnProgressStage(message);
   const stopping = phase === "stopping";
@@ -58,6 +62,10 @@ export function ConversationActiveTurnStatusNote({
   const stageShownAtRef = useRef(Date.now());
   const [nowMs, setNowMs] = useState(() => Date.now());
   const streamState = useActiveTurnStreamState();
+  // ZCode keeps the reasoning block collapsed while streaming, so the row shows
+  // one preview line and the full text only on an explicit open.
+  const [thinkingExpanded, setThinkingExpanded] = useState(false);
+  const summaryViewportRef = useRef<HTMLSpanElement | null>(null);
 
   useEffect(() => {
     if (companionMode || stopping) {
@@ -131,6 +139,29 @@ export function ConversationActiveTurnStatusNote({
   // heartbeat can live for minutes, and a rotating loader next to the avatar
   // becomes a second focal point that never settles.
   const heartbeatActive = activeTurnStageBarPhase(displayStage) === "thinking";
+  // ZCode shows the shimmering label alone while the reasoning stream is live;
+  // the duration belongs to the settled block, not to the wait. Other stages
+  // (queued / requesting / generating / stopping) keep their counter.
+  const visibleDuration = heartbeatActive ? "" : heartbeatDuration;
+  const displayHeartbeatText = visibleDuration
+    ? `${heartbeatHead} · ${visibleDuration}`
+    : heartbeatHead;
+  const reasoningSummary = !advisoriesOnly && heartbeatActive
+    ? resolveActiveTurnReasoningSummary(reasoningText)
+    : "";
+  const canExpandThinking = !companionMode
+    && !advisoriesOnly
+    && heartbeatActive
+    && Boolean(reasoningText.trim());
+
+  useEffect(() => {
+    const viewport = summaryViewportRef.current;
+    if (!viewport) {
+      return;
+    }
+    // The newest tokens must win the single line; older text slides left.
+    viewport.scrollLeft = viewport.scrollWidth;
+  }, [reasoningSummary]);
   const resolvedStatusLabel = statusLabel
     || (lang === "en" ? "Status" : "状态");
 
@@ -210,7 +241,7 @@ export function ConversationActiveTurnStatusNote({
       className={showHeartbeat ? styles.note : styles.advisoryNote}
       role="status"
       aria-live="polite"
-      aria-label={companionMode || !showHeartbeat ? undefined : [resolvedStatusLabel, heartbeatText].filter(Boolean).join(" · ")}
+      aria-label={companionMode || !showHeartbeat ? undefined : [resolvedStatusLabel, displayHeartbeatText].filter(Boolean).join(" · ")}
       data-active-turn-stage={displayStage}
       data-active-turn-elapsed-seconds={elapsedSeconds ?? ""}
       data-active-turn-retry-attempt={visibleRetryProgress ? visibleRetryProgress.attempt : undefined}
@@ -222,7 +253,20 @@ export function ConversationActiveTurnStatusNote({
       {!companionMode && showHeartbeat ? <span className={styles.label}>{resolvedStatusLabel}</span> : null}
       <div className={styles.body}>
         {showHeartbeat ? (
-          <span className={styles.textRow}>
+          <VNativeButton
+            className={styles.textRow}
+            aria-expanded={canExpandThinking ? thinkingExpanded : undefined}
+            aria-label={canExpandThinking
+              ? (langKey === "zh"
+                ? (thinkingExpanded ? "收起思考" : "展开思考")
+                : (thinkingExpanded ? "Hide reasoning" : "Show reasoning"))
+              : undefined}
+            data-testid="active-turn-heartbeat"
+            data-active-turn-thinking-expanded={thinkingExpanded ? "true" : undefined}
+            onClick={canExpandThinking
+              ? () => setThinkingExpanded((current) => !current)
+              : undefined}
+          >
             <Brain className={styles.icon} size={16} aria-hidden="true" />
             <span className={styles.text}>
               <span
@@ -232,11 +276,36 @@ export function ConversationActiveTurnStatusNote({
               >
                 {heartbeatHead}
               </span>
-              {heartbeatDuration ? (
-                <span className={styles.duration}>{` · ${heartbeatDuration}`}</span>
+              {visibleDuration ? (
+                <span className={styles.duration}>{` · ${visibleDuration}`}</span>
               ) : null}
             </span>
-          </span>
+            {reasoningSummary && !thinkingExpanded ? (
+              <>
+                <span className={styles.duration}>·</span>
+                <span
+                  ref={summaryViewportRef}
+                  className={styles.summary}
+                  data-active-turn-reasoning-summary="true"
+                >
+                  <span className={styles.summaryText}>{reasoningSummary}</span>
+                </span>
+              </>
+            ) : null}
+            {canExpandThinking ? (
+              <ChevronRight
+                className={styles.chevron}
+                data-active-turn-thinking-chevron={thinkingExpanded ? "expanded" : "collapsed"}
+                size={14}
+                aria-hidden="true"
+              />
+            ) : null}
+          </VNativeButton>
+        ) : null}
+        {canExpandThinking && thinkingExpanded && reasoningText.trim() ? (
+          <div className={styles.thinkingBody} data-active-turn-thinking-body="true">
+            {reasoningText}
+          </div>
         ) : null}
         {disconnectSeconds !== null ? (
           <VStatusChip

@@ -963,6 +963,22 @@ export function createConversationTimelineRows({
               </div>
             ) : null;
             const hasVisibleWorkDisclosure = Boolean(codexTranscript?.hasWorkDisclosure);
+            // ZCode reasoning-preview source: the newest projected reasoning cell
+            // for this message is the live thinking lane. It feeds the preview
+            // line and the expandable body behind the waiting heartbeat.
+            const activeReasoningText = (() => {
+              for (let index = codexTranscriptCells.length - 1; index >= 0; index -= 1) {
+                const cell = codexTranscriptCells[index];
+                if (cell?.kind !== "reasoning_summary") {
+                  continue;
+                }
+                const cellText = String(cell.text || "").trim();
+                if (cellText) {
+                  return cellText;
+                }
+              }
+              return "";
+            })();
             const showWorkAdvisories = hasVisibleWorkDisclosure && assistantTurnIsInFlight(message) && !turnErrorMessage;
             const compactActiveTurnPlaceholderNode = !companionMode && (showCompactActiveTurnPlaceholder || showWorkAdvisories) ? (
               <ConversationActiveTurnStatusNote
@@ -971,6 +987,7 @@ export function createConversationTimelineRows({
                 phase={phase}
                 advisoriesOnly={hasVisibleWorkDisclosure}
                 statusLabel={lang === "zh" ? "状态" : "Status"}
+                reasoningText={activeReasoningText}
               />
             ) : null;
             // Turn-envelope dividers above the row: model switches ride the
