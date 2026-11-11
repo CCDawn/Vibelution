@@ -182,10 +182,11 @@ import styles from "./ConversationView.styles";
 
 
 // Virtual timeline (react-virtual): rows rendered beyond the measured viewport
-// per direction, vertical rhythm matching the timelineContent grid gap, the
-// scroll container's top padding before the virtual host, and a
-// generous SSR/first-paint rect so server-rendered windows stay deterministic.
-const TIMELINE_VIRTUAL_OVERSCAN = 8;
+// Rows rendered beyond the visible window. Aligned with the local zai-org/ZCode
+// reference (ModelTrajectoryTimeline.tsx: `estimateSize: () => 240, overscan: 3`).
+// The previous value of 8 was chosen for SSR/first-paint determinism and is 2.7x
+// the reference, so it multiplies the row DOM committed whenever the timeline remounts.
+const TIMELINE_VIRTUAL_OVERSCAN = 3;
 const TIMELINE_NARROW_VIEWPORT_QUERY = "(max-width: 719px)";
 const TIMELINE_VIRTUAL_ROW_GAP_PX = 28;
 const TIMELINE_VIRTUAL_SCROLL_MARGIN_PX = 28;
