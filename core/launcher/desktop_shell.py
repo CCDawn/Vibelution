@@ -1871,6 +1871,7 @@ def _run_owned_process(
     deadline: float,
     label: str,
     env: dict[str, str] | None = None,
+    temp_root: Path | None = None,
 ) -> subprocess.CompletedProcess:
     """Run a bounded, console-free process tree with disk-backed output tails."""
 
@@ -1878,7 +1879,16 @@ def _run_owned_process(
     if remaining <= DESKTOP_SHELL_BUILD_CLEANUP_RESERVE_SECONDS:
         raise TimeoutError(f"{label} could not start within the desktop build deadline")
     owner: OwnedProcess | None = None
-    with tempfile.TemporaryFile(mode="w+b") as stdout_log, tempfile.TemporaryFile(mode="w+b") as stderr_log:
+    # A sandboxed parent's TEMP can be retired while the detached build helper
+    # is still spawning, which surfaces as ENOENT on the capture files. Pin both
+    # the parent's capture files and the child environment to the workspace
+    # temp tree here instead of trusting every caller to do it.
+    capture_dir: str | None = None
+    if temp_root is not None:
+        capture_dir = str(_stable_build_temp_dir(temp_root))
+        env = _stabilize_build_temp(temp_root, dict(env if env is not None else os.environ))
+    with tempfile.TemporaryFile(mode="w+b", dir=capture_dir) as stdout_log, \
+            tempfile.TemporaryFile(mode="w+b", dir=capture_dir) as stderr_log:
         try:
             owner = OwnedProcess.spawn(
                 command,
@@ -1996,7 +2006,8 @@ def _build_assistant_payload_once(
     command = [builder_python, "-B", "-c",
                ("import sys; from scripts.build_assistant_runtime import build_launcher_assistant_payload; "
                 "build_launcher_assistant_payload(sys.argv[1], sys.argv[2])"), str(root), str(payload)]
-    _run_owned_process(command, cwd=root, deadline=deadline, label="desktop assistant payload", env=env)
+    _run_owned_process(command, cwd=root, deadline=deadline, label="desktop assistant payload", env=env,
+                       temp_root=root)
     assistant_payload = _assistant_payload_builder()
     path = assistant_payload._checked(assistant_payload._trusted_root(payload), "manifest.json")
     if not path.is_file() or path.stat().st_size > 32 * 1024 * 1024:
@@ -2047,6 +2058,7 @@ def _run_desktop_shell_package_build(root: Path, *, mode: str, deadline: float) 
             deadline=deadline,
             label=f"desktop shell package:{mode}",
             env=env,
+            temp_root=root,
         )
         return session
     except BuildProcessRetirementError as exc:
@@ -3292,6 +3304,7 @@ def _rebuild_unpackaged_electron(project_root: Path, *, prepare_only: bool = Fal
                     env=env,
                     deadline=deadline,
                     label="checkout Electron main build",
+                    temp_root=project_root,
                 )
             except BuildProcessRetirementError as exc:
                 _register_pending_build_retirement(
