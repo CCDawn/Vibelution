@@ -93,3 +93,35 @@ def test_hint_write_survives_a_missing_journal(tmp_path: Path) -> None:
     )
 
     assert not journal_hint_path(journal).exists()
+
+
+def test_hint_write_refuses_a_journal_that_moved(tmp_path: Path) -> None:
+    journal = tmp_path / "session-moved" / "turn_journal.jsonl"
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    journal.write_text("{}\n", encoding="utf-8")
+    stat = journal.stat()
+    signature = (int(stat.st_mtime_ns), int(stat.st_size))
+
+    write_journal_hint(
+        journal,
+        turn_id="turn-1",
+        turn_state="terminal",
+        terminal_type="turn_completed",
+        event_type="turn_completed",
+        sequence=1,
+        expected_signature=(signature[0], signature[1] + 1),
+    )
+    assert not journal_hint_path(journal).exists()
+
+    write_journal_hint(
+        journal,
+        turn_id="turn-1",
+        turn_state="terminal",
+        terminal_type="turn_completed",
+        event_type="turn_completed",
+        sequence=1,
+        expected_signature=signature,
+    )
+    hint = read_journal_hint(journal)
+    assert hint is not None
+    assert hint["terminalType"] == "turn_completed"

@@ -401,7 +401,7 @@ _TAIL_TERMINAL_EVENT_TYPES = frozenset(
 
 def _tail_ledger_rows(
     s: Any, session_id: str, *, limit_bytes: int = _TAIL_READ_BYTES
-) -> tuple[list[dict[str, Any]], bool]:
+) -> tuple[list[dict[str, Any]], bool, tuple[int, int] | None]:
     """Newest rows of the session ledger, without loading the whole journal.
 
     Startup recovery only needs the newest turn-level fact: a settled turn, a
@@ -416,14 +416,22 @@ def _tail_ledger_rows(
 
     path = Path(turn_journal_path(s.PROJECT_ROOT, session_id))
     try:
-        size = path.stat().st_size
+        before = path.stat()
+        size = before.st_size
         with path.open("rb") as handle:
             truncated = size > limit_bytes
             if truncated:
                 handle.seek(size - limit_bytes)
             chunk = handle.read()
+        after = path.stat()
     except OSError:
-        return [], False
+        return [], False, None
+    signature = (
+        (int(before.st_mtime_ns), int(before.st_size))
+        if before.st_mtime_ns == after.st_mtime_ns
+        and before.st_size == after.st_size
+        else None
+    )
     lines = chunk.split(b"\n")
     if truncated and lines:
         # The tail window cut the oldest row mid-record.
@@ -439,7 +447,7 @@ def _tail_ledger_rows(
             continue
         if isinstance(parsed, dict):
             rows.append(parsed)
-    return rows, truncated
+    return rows, truncated, signature
 
 
 def _tail_resumed_turn_ids(rows: list[dict[str, Any]]) -> set[str]:
@@ -492,6 +500,65 @@ def _hint_may_need_resume(s: Any, session_id: str) -> tuple[bool, int] | None:
     return None
 
 
+def _backfill_hint(
+    s: Any,
+    session_id: str,
+    *,
+    rows: list[dict[str, Any]],
+    signature: tuple[int, int] | None,
+) -> None:
+    """Persist a settled tail verdict so later sweeps skip this journal.
+
+    Only a settled verdict is backfilled: an open or restart-interrupted
+    turn still needs the resumed-chain detail the hint does not carry, so
+    it keeps using the tail. A missing signature means the journal moved
+    while we read it, and then no hint is written at all.
+    """
+
+    if signature is None:
+        return
+    from pathlib import Path
+
+    from core.chat.turn_journal import (
+        TURN_STATE_OPEN,
+        TURN_STATE_TERMINAL,
+        turn_journal_path,
+    )
+    from core.chat.turn_journal_hint import write_journal_hint
+
+    for row in reversed(rows):
+        event_type = str(row.get("eventType") or "").strip()
+        if (
+            event_type not in _TAIL_TERMINAL_EVENT_TYPES
+            and event_type != "turn_started"
+        ):
+            continue
+        turn_id = str(row.get("turnId") or "").strip()
+        if not turn_id:
+            return
+        try:
+            sequence = int(row.get("sequence") or 0)
+        except (TypeError, ValueError):
+            sequence = 0
+        terminal_type = (
+            event_type if event_type in _TAIL_TERMINAL_EVENT_TYPES else ""
+        )
+        try:
+            path = Path(turn_journal_path(s.PROJECT_ROOT, session_id))
+        except Exception:  # noqa: BLE001 - no path means no hint
+            return
+        write_journal_hint(
+            path,
+            turn_id=turn_id,
+            turn_state=TURN_STATE_TERMINAL if terminal_type else TURN_STATE_OPEN,
+            terminal_type=terminal_type,
+            event_type=event_type,
+            sequence=sequence,
+            expected_signature=signature,
+        )
+        return
+
+
 def _tail_may_need_resume(s: Any, session_id: str) -> tuple[bool | None, int]:
     """``False`` when the ledger tail proves nothing is resumable.
 
@@ -504,18 +571,23 @@ def _tail_may_need_resume(s: Any, session_id: str) -> tuple[bool | None, int]:
     hinted = _hint_may_need_resume(s, session_id)
     if hinted is not None:
         return hinted
-    rows, truncated = _tail_ledger_rows(s, session_id)
+    rows, truncated, signature = _tail_ledger_rows(s, session_id)
     if not rows:
         return False, 0
     verdict, resumed_skips = _tail_verdict(rows)
     if verdict is None and truncated:
         # A narrow probe keeps every settled session cheap; only a tail
         # without a single turn-level row pays for the wide window.
-        wide_rows, _wide_truncated = _tail_ledger_rows(
+        wide_rows, _wide_truncated, wide_signature = _tail_ledger_rows(
             s, session_id, limit_bytes=_TAIL_READ_BYTES_MAX
         )
         if wide_rows:
+            rows, signature = wide_rows, wide_signature
             verdict, resumed_skips = _tail_verdict(wide_rows)
+    if verdict is False:
+        # Settled sessions are the bulk of every sweep; recording the
+        # verdict here is what retires their journal tail from startup.
+        _backfill_hint(s, session_id, rows=rows, signature=signature)
     return verdict, resumed_skips
 
 

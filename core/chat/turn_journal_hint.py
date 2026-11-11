@@ -41,6 +41,7 @@ def write_journal_hint(
     terminal_type: str,
     event_type: str,
     sequence: int = 0,
+    expected_signature: tuple[int, int] | None = None,
 ) -> None:
     """Record the newest turn fact plus the journal signature it describes.
 
@@ -52,6 +53,13 @@ def write_journal_hint(
     try:
         stat = path.stat()
     except OSError:
+        return
+    if expected_signature is not None and (
+        int(expected_signature[0]) != int(stat.st_mtime_ns)
+        or int(expected_signature[1]) != int(stat.st_size)
+    ):
+        # The journal moved after the caller read it, so this payload
+        # would claim a file state it does not describe.
         return
     payload = {
         "schemaVersion": HINT_SCHEMA_VERSION,
