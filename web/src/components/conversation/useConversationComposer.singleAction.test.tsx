@@ -134,4 +134,15 @@ describe("one composer action across native hosts", () => {
     expect(view.onSafeGuidance).not.toHaveBeenCalled();
     view.primary();
   });
+  it("queues the draft on Enter while the previous send still awaits acknowledgement", async () => {
+    const view = await composer({ composerActionMode: "stop", composerPending: true, composerSubmitPending: true });
+    await view.render({ composerValue: "second message" });
+    const textarea = container.querySelector("textarea")!;
+    await act(async () => textarea.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    ));
+    expect(view.onSubmit).toHaveBeenCalledOnce();
+    expect(view.onStop).not.toHaveBeenCalled();
+  });
+
 });

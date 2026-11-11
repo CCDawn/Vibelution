@@ -1434,7 +1434,18 @@ export function useConversationComposer({
               });
               if (composerEnterDelivery !== "none") {
                 event.preventDefault();
-                if (primaryPending) return;
+                if (primaryPending) {
+                  // ZCode parity: an acknowledged-but-unsettled send keeps the draft.
+                  // Bare Enter hands it to the queue channel instead of swallowing the key,
+                  // so typing + Enter never waits for the ACK round trip.
+                  if (
+                    composerSubmitPending
+                    && (composerValue.trim() || hasComposerAttachments || hasComposerReferences)
+                  ) {
+                    handleQueueSubmit();
+                  }
+                  return;
+                }
                 if (composerEnterDelivery === "continue") {
                   if (!resolvedActionDisabled && onContinueTurn) {
                     onContinueTurn();
