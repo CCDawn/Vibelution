@@ -205,6 +205,31 @@ def _recover_stale_subagent_addresses_on_startup(
     return recover_stale_subagent_addresses_on_startup(should_stop=should_stop)
 
 
+def _report_dirty_main_worktree_on_startup() -> bool:
+    """Surface a dirty shared main checkout once per workbench boot.
+
+    The CLI preflight reports the same evidence before an agent starts, but a
+    workbench boot never runs that path: without this the operator only learns
+    about a dirty main when a later ``task_closeout`` refuses to merge, and by
+    then every other task is already blocked.
+
+    Block mode stays advisory here even when the operator set it. A workbench
+    that refuses to boot because a checkout is dirty cannot show the message
+    that explains why, so startup stays recoverable and the report is logged.
+    """
+
+    from core.infrastructure.main_worktree_guard import report_dirty_main_worktree
+
+    project_root = Path(
+        str(os.environ.get("VIBELUTION_WORKSPACE_ROOT") or Path(__file__).resolve().parents[2])
+    ).resolve()
+    try:
+        return report_dirty_main_worktree(project_root, surface="startup")
+    except RuntimeError as exc:
+        logger.warning("%s", exc)
+        return True
+
+
 def _validate_challenge_fence_config_on_startup() -> int | None:
     """Validate the operator per-call fence pin once at backend boot.
 
@@ -878,6 +903,9 @@ async def web_workbench_lifespan(app: FastAPI | None):
     startup_challenge_fence_validation_task = startup_jobs.start_thread(
         "startup-challenge-fence-validation", _validate_challenge_fence_config_on_startup
     )
+    startup_main_worktree_guard_task = startup_jobs.start_thread(
+        "startup-main-worktree-guard", _report_dirty_main_worktree_on_startup
+    )
     startup_external_agent_reconcile_task = startup_jobs.start_async(
         "startup-external-agent-reconcile",
         reconcile_external_agent_tasks_forever(startup_jobs=startup_jobs),
@@ -919,6 +947,11 @@ async def web_workbench_lifespan(app: FastAPI | None):
                 task, message="Runtime scene retention task failed during startup."
             )
         )
+    startup_main_worktree_guard_task.add_done_callback(
+        lambda task: consume_startup_task_result(
+            task, message="main worktree guard failed during startup."
+        )
+    )
     startup_cli_reconcile_task.add_done_callback(
         lambda task: consume_startup_task_result(
             task, message="CLI agent terminal reconcile failed during startup."
