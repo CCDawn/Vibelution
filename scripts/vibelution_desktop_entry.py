@@ -2065,6 +2065,12 @@ def _run_launcher_api_bridge(args: argparse.Namespace) -> dict[str, object]:
             response = launcher_service.apply_launcher_maintenance_plan(body)
         elif path == "status" and method == "GET":
             response = launcher_service.get_launcher_status()
+        elif path == "active-work" and method == "GET":
+            # The update guard only needs the canonical active-work projection.
+            # Full status additionally scans every residual process, which is a
+            # multi-second psutil walk on Windows and has no bearing on whether
+            # a restart may proceed.
+            response = launcher_service.get_launcher_active_work_status()
         elif path == "freshness" and method == "GET":
             from core.launcher.freshness import get_launcher_freshness
 
