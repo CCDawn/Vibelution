@@ -599,9 +599,7 @@ describe("Electron main Launcher IPC facade", () => {
     const lifecycleStart = mainSource.indexOf("async function orchestrateLauncherLifecycle");
     const lifecycleEnd = mainSource.indexOf("async function orchestrateBranchInstanceLifecycle");
     const lifecycleBody = mainSource.slice(lifecycleStart, lifecycleEnd);
-    expect(lifecycleBody).toContain(
-      'interruptActiveWork: provenance === "operator-restart" || (operation === "restart" && provenance === "operator")'
-    );
+    expect(lifecycleBody).toContain("interruptActiveWork: restartInterruptsActiveWork(operation, provenance)");
   });
 
   it("preserves restart provenance through isolated branch retirement", () => {
@@ -628,9 +626,10 @@ describe("Electron main Launcher IPC facade", () => {
     );
     expect(queueHelperBody).toContain("restart_queue_timeout");
     expect(queueHelperBody).toContain("LAUNCH_REQUEST_QUEUE_TIMEOUT_MS");
+    const launchStart = mainSource.indexOf("async function handleMainLineLaunchRequest");
     const launchBody = mainSource.slice(
-      mainSource.indexOf("async function handleMainLineLaunchRequest"),
-      mainSource.indexOf("/** Observe the existing owner")
+      launchStart,
+      mainSource.indexOf('app.on("open-url"', launchStart)
     );
     expect(launchBody).toContain("scheduleLaunchRequestQueueTimeout(receipt)");
 

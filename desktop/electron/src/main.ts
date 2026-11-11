@@ -5867,6 +5867,21 @@ async function orchestrateLauncherLifecycle(
     : execute();
 }
 
+/**
+ * Whether this lifecycle pass may interrupt running work.
+ *
+ * ``operator-restart`` always may: it is the provenance Electron's own
+ * operator-restart retirement uses. A plain ``restart`` from the operator UI
+ * carries the same meaning, so both are treated alike; every automatic path
+ * keeps its guard.
+ */
+function restartInterruptsActiveWork(
+  operation: string,
+  provenance: LauncherLifecycleProvenance
+): boolean {
+  return provenance === "operator-restart" || (operation === "restart" && provenance === "operator");
+}
+
 async function orchestrateLauncherLifecycleImpl(
   operation: string,
   payload: LauncherIpcInvokePayload,
@@ -8380,21 +8395,6 @@ async function handleSecondInstanceLifecycleCommand(
 }
 
 const LAUNCH_REQUEST_QUEUE_TIMEOUT_MS = 20_000;
-
-/**
- * Whether this lifecycle pass may interrupt running work.
- *
- * ``operator-restart`` always may: it is the provenance Electron's own
- * operator-restart retirement uses. A plain ``restart`` from the operator UI
- * carries the same meaning, so both are treated alike; every automatic path
- * keeps its guard.
- */
-function restartInterruptsActiveWork(
-  operation: string,
-  provenance: LauncherLifecycleProvenance
-): boolean {
-  return provenance === "operator-restart" || (operation === "restart" && provenance === "operator");
-}
 
 /**
  * Bound how long a queued restart may sit on ``dispatched``.
