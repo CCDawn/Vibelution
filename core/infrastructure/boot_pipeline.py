@@ -90,35 +90,14 @@ def _report_dirty_main_worktree(root: Path) -> None:
     then every other task is blocked and nobody knows whom to ask. Reporting the
     same attribution here makes the owner visible at startup instead.
 
-    The default is a warning, not a failure. A checkout is often dirty during a
-    merge, and refusing startup would keep every session out of the project --
-    strictly worse than the block this check exists to explain. Set
-    ``VIBELUTION_MAIN_GUARD=block`` to turn it into a refusal.
+    The report body and the ``VIBELUTION_MAIN_GUARD=block`` switch live in
+    ``core.infrastructure.main_worktree_guard`` so the workbench boot path
+    renders exactly the same evidence.
     """
 
-    try:
-        from scripts import main_guard
+    from core.infrastructure.main_worktree_guard import report_dirty_main_worktree
 
-        payload = main_guard.inspect_main_checkout(root)
-    except (OSError, RuntimeError, ValueError, ImportError):
-        # A packaged build has no git checkout, and a coordination outage must
-        # never become a startup failure. The guard is advisory by nature.
-        return
-    if payload.get("status") == "clean":
-        return
-    file_lines = [str(line) for line in payload.get("fileLines") or []]
-    owners = [str(owner) for owner in payload.get("owners") or []]
-    detail = "\n".join(
-        [
-            f"main 工作区有未提交改动（{len(file_lines)} 处）",
-            *file_lines,
-            *(f"dirty_main_suspected_owner: {owner}" for owner in owners),
-            f"处理建议: {payload.get('nextAction') or '先让所属会话提交或撤销这些改动。'}",
-        ]
-    )
-    if os.environ.get(_MAIN_GUARD_BLOCK_ENV, "").strip().lower() == "block":
-        raise RuntimeError(f"main 工作区不干净，已阻止启动:\n{detail}")
-    print(f"[preflight] {detail}", file=sys.stderr)
+    report_dirty_main_worktree(root, surface="preflight")
 
 
 def run_preflight_doctor(config: AppConfig, *, project_root: Path | None = None) -> None:
