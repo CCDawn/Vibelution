@@ -387,14 +387,17 @@ def _latest_continuable_turn(events: list[Any]) -> tuple[str, str, int]:
     return "", "", already_resumed_skips
 
 
-_TAIL_READ_BYTES = 256 * 1024
+_TAIL_READ_BYTES = 32 * 1024
+_TAIL_READ_BYTES_MAX = 256 * 1024
 
 _TAIL_TERMINAL_EVENT_TYPES = frozenset(
     {"turn_completed", "turn_failed", "turn_interrupted"}
 )
 
 
-def _tail_ledger_rows(s: Any, session_id: str) -> tuple[list[dict[str, Any]], bool]:
+def _tail_ledger_rows(
+    s: Any, session_id: str, *, limit_bytes: int = _TAIL_READ_BYTES
+) -> tuple[list[dict[str, Any]], bool]:
     """Newest rows of the session ledger, without loading the whole journal.
 
     Startup recovery only needs the newest turn-level fact: a settled turn, a
@@ -411,9 +414,9 @@ def _tail_ledger_rows(s: Any, session_id: str) -> tuple[list[dict[str, Any]], bo
     try:
         size = path.stat().st_size
         with path.open("rb") as handle:
-            truncated = size > _TAIL_READ_BYTES
+            truncated = size > limit_bytes
             if truncated:
-                handle.seek(size - _TAIL_READ_BYTES)
+                handle.seek(size - limit_bytes)
             chunk = handle.read()
     except OSError:
         return [], False
@@ -464,9 +467,27 @@ def _tail_may_need_resume(s: Any, session_id: str) -> tuple[bool | None, int]:
     genuine recovery.
     """
 
-    rows, _truncated = _tail_ledger_rows(s, session_id)
+    rows, truncated = _tail_ledger_rows(s, session_id)
     if not rows:
         return False, 0
+    verdict, resumed_skips = _tail_verdict(rows)
+    if verdict is None and truncated:
+        # A narrow probe keeps every settled session cheap; only a tail
+        # without a single turn-level row pays for the wide window.
+        wide_rows, _wide_truncated = _tail_ledger_rows(
+            s, session_id, limit_bytes=_TAIL_READ_BYTES_MAX
+        )
+        if wide_rows:
+            verdict, resumed_skips = _tail_verdict(wide_rows)
+    return verdict, resumed_skips
+
+
+def _tail_verdict(rows: list[dict[str, Any]]) -> tuple[bool | None, int]:
+    """Decide from one ledger tail whether any turn may need a resume.
+
+    ``False`` means settled, ``True`` an open turn, ``None`` cannot tell.
+    """
+
     resumed_turn_ids = _tail_resumed_turn_ids(rows)
     for row in reversed(rows):
         event_type = str(row.get("eventType") or "").strip()
