@@ -596,6 +596,12 @@ export function useChatComposerTurnMutations({
           // Optimistic queue projection: the row lands in the follow-up queue
           // bar immediately (from the response's queue facts); the
           // listSessionQueuedTurns rebase below refreshes the authoritative rows.
+          //
+          // A direct submit can still have painted an optimistic transcript row
+          // when the client believed the turn was idle but the backend queued it
+          // instead. The queue bar owns the message from that point on, so drop
+          // the paint that would otherwise render the same text twice.
+          removeOptimisticUserMessageFromCache(queryClient, variables.sessionId, variables);
           const queuedAt = acceptedTurn.queuedAt || acceptedTurn.acceptedAt || new Date().toISOString();
           queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), detailState =>
             acceptSessionSubmit(detailState, variables, { ...acceptedTurn, queuedAt }));
