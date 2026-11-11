@@ -347,6 +347,7 @@ export class LauncherStateStore {
   private pendingMainRetirementEpoch: number | null = null;
   private freshnessEpoch = 0;
   private freshnessObservation: LauncherFreshnessSourceObservation | null = null;
+  private completedAtMs = 0;
 
   constructor(
     private readonly loader: LauncherStateLoader,
@@ -386,6 +387,16 @@ export class LauncherStateStore {
 
   observationEpoch(): number {
     return this.freshnessEpoch;
+  }
+
+  /**
+   * Age of the last successful status load. Callers that are about to make a
+   * one-shot decision (update guard, shutdown proof) use this to avoid
+   * repeating the multi-second branch/residual inventory scan when the
+   * periodic poll already produced fresh data.
+   */
+  snapshotAgeMs(nowMs = Date.now()): number {
+    return this.completedAtMs > 0 ? Math.max(0, nowMs - this.completedAtMs) : Number.POSITIVE_INFINITY;
   }
 
   projectFreshnessObservation(): LauncherFreshnessSourceObservation | null {
@@ -507,6 +518,7 @@ export class LauncherStateStore {
         const branchInstances = unwrapSource(sources.branchInstances);
         const freshness = sources.freshness === undefined ? null : unwrapSource(sources.freshness);
         const cleanup = sources.cleanup === undefined ? null : unwrapSource(sources.cleanup);
+        if (status.ok) this.completedAtMs = Date.now();
         const mainChanged = mainLifecycleEpoch !== this.mainLifecycleEpoch || this.pendingMainRetirementEpoch !== null;
         this.freshnessObservation = {
           observedAtMs, epoch: freshnessEpoch,

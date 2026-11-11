@@ -624,6 +624,7 @@ describe("Launcher freshness serves the settled state-refresh snapshot before sp
       projectFreshnessObservation: () => ({ observedAtMs: observedAt.getTime(), epoch: 0, valid: overrides.valid ?? true }),
       projectStatus: () => ({ lifecycleProof: { activeWorkRuns: { count: 0, items: [] } } }),
       projectBranchInstances: () => ({ schemaVersion: 1, items: [] }),
+      snapshotAgeMs: () => 0,
     };
   }
 
@@ -668,7 +669,7 @@ describe("Launcher freshness serves the settled state-refresh snapshot before sp
       listActiveWorkRuns: vi.fn(() => []),
       // The extracted region declares the real resolveLauncherUpdateActiveWork,
       // so the fallback's task probe flows through this path-aware bridge mock.
-      orchestrateLauncherApi: vi.fn(async (path: string, _payload?: unknown) => path === "status"
+      orchestrateLauncherApi: vi.fn(async (path: string, _payload?: unknown) => path === "active-work"
         ? { lifecycleProof: { activeWorkRuns: { count: 0, items: [] } } }
         : { current: false, reason: "backend_behind_local_code", ...candidate }),
       inspectCurrentDesktopShell: vi.fn(),
@@ -730,7 +731,7 @@ describe("Launcher freshness serves the settled state-refresh snapshot before sp
     expect(results).toEqual(Array(3).fill(expect.objectContaining({ current: true })));
     expect(input.inspectCurrentDesktopShell).toHaveBeenCalledOnce();
     expect(input.orchestrateLauncherApi.mock.calls.filter(([path]) => path.startsWith("freshness?"))).toHaveLength(1);
-    expect(input.orchestrateLauncherApi.mock.calls.filter(([path]) => path === "status")).toHaveLength(1);
+    expect(input.orchestrateLauncherApi.mock.calls.filter(([path]) => path === "active-work")).toHaveLength(1);
     expect(input.recordSupervisorEventFallbackLocally).toHaveBeenCalledOnce();
   });
 

@@ -4931,8 +4931,17 @@ async function performLauncherUpdate(
 
 async function resolveLauncherUpdateActiveWork(refreshBranches = false): Promise<ActiveWorkStatus> {
   try {
-    if (refreshBranches) await launcherStateStore.refresh("launcher_update_guard");
-    const payload = await orchestrateLauncherApi("status", { schemaVersion: 1, path: "status" });
+    // Update admission runs this check twice (before and after preparation).
+    // A full branch/residual refresh costs seconds, and preparation now takes
+    // about a second, so a second identical refresh only delays the stop.
+    // Reuse the periodic snapshot unless it is genuinely stale.
+    if (refreshBranches && launcherStateStore.snapshotAgeMs() > LAUNCHER_UPDATE_GUARD_SNAPSHOT_MAX_AGE_MS) {
+      await launcherStateStore.refresh("launcher_update_guard");
+    }
+    // The canonical active-work projection is enough for admission. Full
+    // status also walks every residual process, which adds seconds without
+    // changing the answer.
+    const payload = await orchestrateLauncherApi("active-work", { schemaVersion: 1, path: "active-work" });
     const main = activeWorkStatusFromLauncherStatus(
       typeof payload === "object" && payload !== null ? payload as Record<string, unknown> : {}
     );
@@ -4942,6 +4951,12 @@ async function resolveLauncherUpdateActiveWork(refreshBranches = false): Promise
     return { state: "unknown", message: "Launcher task status is unavailable." };
   }
 }
+
+// Update admission rechecks active work right after preparation. Preparation
+// now takes about a second, so a full branch/residual refresh between the two
+// checks only delays the stop. Instance changes refresh the store through the
+// file watcher, so reuse the periodic snapshot unless it is genuinely old.
+const LAUNCHER_UPDATE_GUARD_SNAPSHOT_MAX_AGE_MS = 300_000;
 
 function combineLauncherActiveWorkStatus(main: ActiveWorkStatus, branchInstances: unknown): ActiveWorkStatus {
   if (main.state === "unknown") return main;
