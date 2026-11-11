@@ -8420,7 +8420,7 @@ async function handleMainLineLaunchRequest(
         // queued this restart is itself the active work: bound the wait so a
         // restart never sits on "dispatched" for as long as the operator works.
         const queueTimer = setTimeout(() => {
-          receipt.failed(
+          receipt?.failed(
             "restart_queue_timeout",
             "重启请求排队超过 20 秒仍未执行：当前有任务在运行。请先点「停止任务」再重启，或等待该任务结束。"
           );
