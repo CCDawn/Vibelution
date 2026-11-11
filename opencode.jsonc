@@ -8,7 +8,6 @@
   "provider": {
     "opencode-go": {
       "options": {
-        "apiKey": "{env:OPENCODE_API_KEY}",
         "timeout": 180000
       }
     }
