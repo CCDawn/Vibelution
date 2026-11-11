@@ -5006,7 +5006,82 @@ const observeLauncherFreshness = createLauncherFreshnessObservation(launcherFres
   return { rawResult, shellResult, activeWorkResult, observedAtMs, identity };
 });
 
+type FrontendPrewarmState = {
+  identity: string;
+  startedAt: number;
+  promise: Promise<void>;
+};
+
+const FRONTEND_PREWARM_RETRY_MS = 5 * 60_000;
+let frontendPrewarm: FrontendPrewarmState | null = null;
+let frontendPrewarmReady: string | null = null;
+let frontendPrewarmFailure: { identity: string; at: number } | null = null;
+
+/**
+ * Build the pending frontend release while the current window is still fully
+ * usable. This only publishes an immutable release; it never stops the
+ * workbench or replaces the shell. The update banner's eventual restart then
+ * reuses that release instead of paying for the whole build inside the click.
+ */
+function scheduleFrontendPrewarm(freshness: Record<string, unknown>): void {
+  if (shellRefreshInFlight || shutdownApproved || frontendPrewarm !== null) return;
+  if (freshness.updateInProgress === true || freshness.updateAvailable !== true) return;
+  // A ready build needs no preparation; a "not_built" or unknown pending build
+  // is the only shape that can make the next restart wait for compilation.
+  if (freshness.availableBuildState === "ready") return;
+  const head = String(freshness.diskHeadCommit ?? freshness.diskHeadShort ?? freshness.headCommit ?? "").trim() || "pending";
+  const available = freshness.availableBuild as { id?: unknown } | null | undefined;
+  const identity = `${head}:${String(available?.id ?? "")}`;
+  if (frontendPrewarmReady === identity) return;
+  const failed = frontendPrewarmFailure;
+  if (failed?.identity === identity && Date.now() - failed.at < FRONTEND_PREWARM_RETRY_MS) return;
+  const pythonPath = desktopPythonPath();
+  if (!pythonPath) return;
+  const state: FrontendPrewarmState = {
+    identity,
+    startedAt: Date.now(),
+    promise: Promise.resolve()
+  };
+  recordSupervisorEventFallbackLocally({
+    eventCode: "electron.launcher.frontend_prewarm.started",
+    message: "Preparing the pending frontend release in the background.",
+    fields: { head }
+  });
+  state.promise = (async () => {
+    let detail = "";
+    try {
+      await ensureFrontendRelease({
+        workspaceRoot: createDesktopPathsForApp().workspaceRoot,
+        pythonPath,
+        // Background preparation must not compete at normal priority with the
+        // chat turn or tool run the user is still using.
+        env: { ...process.env, VIBELUTION_FRONTEND_BUILD_LOW_PRIORITY: "1" }
+      });
+      frontendPrewarmReady = identity;
+      frontendPrewarmFailure = null;
+    } catch (error: unknown) {
+      // The explicit update still retries with visible failure reporting.
+      detail = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
+      frontendPrewarmFailure = { identity, at: Date.now() };
+    } finally {
+      recordSupervisorEventFallbackLocally({
+        eventCode: "electron.launcher.frontend_prewarm.settled",
+        message: "Background frontend preparation settled.",
+        fields: { head, durationMs: Date.now() - state.startedAt, ok: detail === "", detail }
+      });
+      if (frontendPrewarm === state) frontendPrewarm = null;
+    }
+  })();
+  frontendPrewarm = state;
+}
+
 async function currentLauncherUpdateFreshness(): Promise<Record<string, unknown>> {
+  const freshness = await computeLauncherUpdateFreshness();
+  scheduleFrontendPrewarm(freshness);
+  return freshness;
+}
+
+async function computeLauncherUpdateFreshness(): Promise<Record<string, unknown>> {
   // Phase reads must not wait behind version inspection, build locks or a
   // shutting-down assistant. Cached versions here are display-only; update
   // admission still performs its own checks in executeLauncherUpdate.

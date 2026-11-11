@@ -2131,6 +2131,9 @@ def _ensure_frontend_build(
     identity = source_identity or _runtime_source_identity()
     build = ensure_frontend_build(PROJECT_ROOT, package_manager=_frontend_package_manager())
     _assert_runtime_source_identity(identity)
+    timings = dict(build.get("timingsMs") or {})
+    if os.environ.get("VIBELUTION_LAUNCHER_TIMINGS") == "1":
+        print(f"Frontend build timings (ms): {json.dumps(timings, sort_keys=True)}", flush=True)
     provenance = dict(build.get("provenance") or {})
     return {
         "schemaVersion": 2,
@@ -2144,6 +2147,7 @@ def _ensure_frontend_build(
         "buildInputs": provenance.get("buildInputs") or build.get("buildInputs") or {},
         "release": build.get("dist") or "",
         "rebuilt": bool(build.get("rebuilt")),
+        "timingsMs": timings,
         "validatedAt": _now_iso(),
         "requireCurrent": bool(require_current),
     }

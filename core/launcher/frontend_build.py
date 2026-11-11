@@ -1483,10 +1483,29 @@ def _build_frontend_release(
                 ("vite build", [node, str(web_dir / "node_modules" / "vite" / "bin" / "vite.js"), "build", "--config", "vite.config.ts", "--outDir", str(stage)]),
             ]
         outputs: dict[str, str] = {}
-        for label, command in commands:
-            _require_frontend_build_time(deadline, label)
-            outputs[label] = _run_checked(command, cwd=web_dir, label=label)
-            _require_frontend_build_time(deadline, label)
+        # TypeScript and Vite read the same sources and write disjoint outputs
+        # (tsbuildinfo vs the staging release), so overlap them instead of
+        # serializing the shorter leg behind the longer one. Every worker gets
+        # its own copy of the build context so the deadline still applies, and
+        # the pool joins both legs even when one fails before publication.
+        with ThreadPoolExecutor(max_workers=max(1, len(commands)), thread_name_prefix="frontend-build") as pool:
+            futures: list[tuple[str, Any]] = []
+            for label, command in commands:
+                _require_frontend_build_time(deadline, label)
+                context = contextvars.copy_context()
+                futures.append((label, pool.submit(
+                    context.run, _run_checked, command, cwd=web_dir, label=label
+                )))
+            failure: Exception | None = None
+            for label, future in futures:
+                try:
+                    outputs[label] = future.result()
+                except Exception as exc:  # noqa: BLE001 - re-raise the first build failure after both legs join
+                    if failure is None:
+                        failure = exc
+            _require_frontend_build_time(deadline, "build steps")
+            if failure is not None:
+                raise failure
 
         # Recompute after build: toolchain/source drift must not be stamped as current.
         _require_frontend_build_time(deadline, "final build inspection")

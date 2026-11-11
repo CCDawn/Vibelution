@@ -2456,8 +2456,19 @@ def _configure_utf8_stdio() -> None:
                 reconfigure(encoding="utf-8", errors="replace")
 
 
+def _apply_background_build_priority() -> None:
+    """Keep an automatic preparation build below the work the user is doing."""
+
+    if os.name != "nt" or os.environ.get("VIBELUTION_FRONTEND_BUILD_LOW_PRIORITY") != "1":
+        return
+    with contextlib.suppress(OSError, AttributeError, ValueError):
+        # BELOW_NORMAL_PRIORITY_CLASS; children inherit the class on Windows.
+        ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x00004000)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    _apply_background_build_priority()
     action = str(args.action or "launcher").strip().lower()
     if action not in {
         "launcher",

@@ -154,10 +154,15 @@ export function projectLauncherUpdateFreshness(input: {
       availableBuild: availableBuildState === "ready" ? availableBuild : null,
       availableBuildState,
       // Commit fields remain source metadata; never refill them from a short-lived bridge's HEAD.
+      // Keep the launcher's disk HEAD under separate names: a pending build has
+      // no artifact commit yet, but callers still need to tell a frontend-only
+      // build from a stale backend.
       runningCommit: input.runningBuild?.sourceCommit ?? "",
       runningShort: input.runningBuild?.sourceCommit?.slice(0, 12) ?? "",
       headCommit: availableBuild?.sourceCommit ?? "",
       headShort: availableBuild?.sourceCommit?.slice(0, 12) ?? "",
+      diskHeadCommit: String(raw.headCommit ?? "").trim(),
+      diskHeadShort: String(raw.headShort ?? "").trim(),
     } : {}),
   };
 }

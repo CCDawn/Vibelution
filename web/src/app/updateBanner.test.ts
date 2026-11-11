@@ -45,6 +45,30 @@ describe("resolveUpdateRestartTarget", () => {
     const error = new Error("offline");
     await expect(resolveUpdateRestartTarget({ hasBridge: true, readFreshness: async () => { throw error; } })).rejects.toBe(error);
   });
+
+  it("uses the short workbench restart when only the frontend release differs", () => {
+    expect(updateRestartTarget({
+      current: false,
+      label: "frontend",
+      runningBuild: { id: "old-release", sourceCommit: "b".repeat(40) } as never,
+      availableBuild: { id: "new-release", sourceCommit: "b".repeat(40) } as never,
+      availableBuildState: "ready",
+      diskHeadCommit: "b".repeat(40),
+      updateAvailable: true,
+    })).toBe("workbench");
+  });
+
+  it("keeps the shell path when the backend source is behind", () => {
+    expect(updateRestartTarget({
+      current: false,
+      label: "backend",
+      runningBuild: { id: "old-release", sourceCommit: "a".repeat(40) } as never,
+      availableBuild: { id: "new-release", sourceCommit: "b".repeat(40) } as never,
+      availableBuildState: "ready",
+      diskHeadCommit: "b".repeat(40),
+      updateAvailable: true,
+    })).toBe("shell");
+  });
 });
 
 describe("updateBanner verdict gate", () => {

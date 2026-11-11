@@ -1247,6 +1247,9 @@ export type LauncherFreshness = {
   label: string;
   runningShort?: string;
   headShort?: string;
+  headCommit?: string;
+  diskHeadShort?: string;
+  diskHeadCommit?: string;
   runningBuild?: LauncherBuild | null;
   availableBuild?: LauncherBuild | null;
   availableBuildState?: "ready" | "not_built" | "unknown";

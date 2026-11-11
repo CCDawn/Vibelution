@@ -21,10 +21,24 @@ export function isLauncherUpdateAvailable(freshness: LauncherFreshness | undefin
   return Boolean(freshness && (freshness.current === false || freshness.shellStale || freshness.updateAvailable));
 }
 
-/** Shell replacement also reloads the project; prefer it when both owners are behind. */
+/**
+ * Shell replacement also reloads the project; prefer it only when the desktop
+ * shell itself or the backend source is behind. A release that differs only in
+ * the built frontend can be applied by the much shorter workbench restart.
+ */
 export function updateRestartTarget(freshness: LauncherFreshness | undefined | null): "shell" | "workbench" | "unknown" {
-  if (isLauncherUpdateAvailable(freshness)) return "shell";
-  return freshness?.current === true ? "workbench" : "unknown";
+  if (!freshness) return "unknown";
+  if (freshness.shellStale === true) return "shell";
+  const runningCommit = String(freshness.runningBuild?.sourceCommit ?? "").trim();
+  const headCommit = String(freshness.diskHeadCommit ?? freshness.headCommit ?? "").trim();
+  const backendSourceBehind = Boolean(
+    runningCommit && headCommit && !headCommit.startsWith(runningCommit) && !runningCommit.startsWith(headCommit),
+  );
+  if (backendSourceBehind) return "shell";
+  // Without commit evidence, a stale launcher stays on the conservative shell path.
+  if (freshness.current === false && (!runningCommit || !headCommit)) return "shell";
+  if (freshness.updateAvailable === true || freshness.current === true) return "workbench";
+  return "unknown";
 }
 
 export async function resolveUpdateRestartTarget({

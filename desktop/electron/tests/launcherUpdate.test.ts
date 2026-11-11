@@ -627,13 +627,20 @@ describe("Launcher freshness serves the settled state-refresh snapshot before sp
     };
   }
 
-  function snapshotFreshnessHarness(launcherStateStore: ReturnType<typeof settledSnapshotStore>, afterObservation?: () => void) {
+  function snapshotFreshnessHarness(
+    launcherStateStore: ReturnType<typeof settledSnapshotStore>,
+    afterObservation?: () => void,
+    availableBuildState: "ready" | "not_built" | "unknown" = "ready",
+  ) {
     const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
     const region = main.slice(main.indexOf("async function resolveLauncherUpdateActiveWork"), main.indexOf("async function exitAndRelaunchLauncherShell"));
     const app = { isPackaged: false };
     const build = () => ({ kind: app.isPackaged ? "packaged" as const : "unpackaged" as const,
       id: "c".repeat(64), electronTree: "a".repeat(40), sourceCommit: "b".repeat(40) });
-    const candidate = { get availableBuild() { return build(); }, availableBuildState: "ready" };
+    const candidate = {
+      get availableBuild() { return availableBuildState === "ready" ? build() : null; },
+      availableBuildState,
+    };
     const sandbox = {
       app,
       get runningLauncherBuild() { return build(); },
@@ -647,6 +654,10 @@ describe("Launcher freshness serves the settled state-refresh snapshot before sp
         return async () => { const result = await observe(); afterObservation?.(); return result; };
       },
       createDesktopPathsForApp: () => ({ workspaceRoot: "test-workspace" }),
+      desktopPythonPath: () => "test-python",
+      ensureFrontendRelease: vi.fn().mockResolvedValue({ skipped: true, rebuilt: false }),
+      shutdownApproved: false,
+      process: { env: {} },
       recordSupervisorEventFallbackLocally: vi.fn(),
       projectLauncherUpdateFreshness,
       retainKnownDesktopShell,
@@ -756,6 +767,28 @@ describe("Launcher freshness serves the settled state-refresh snapshot before sp
     input.shellRefreshInFlight = true;
     finish({ current: true });
     expect(await reading).toMatchObject({ updateInProgress: true });
+  });
+
+  it("prepares a pending frontend build in the background without touching lifecycle state", async () => {
+    const input = snapshotFreshnessHarness(settledSnapshotStore({ valid: false }), undefined, "not_built");
+    expect(await input.readFreshness()).toMatchObject({
+      updateAvailable: true,
+      availableBuildState: "not_built",
+      updateInProgress: false,
+    });
+    await vi.waitFor(() => expect(input.ensureFrontendRelease).toHaveBeenCalledOnce());
+    expect(input.ensureFrontendRelease).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceRoot: "test-workspace",
+      pythonPath: "test-python",
+      env: expect.objectContaining({ VIBELUTION_FRONTEND_BUILD_LOW_PRIORITY: "1" }),
+    }));
+  });
+
+  it("does not start a background build when the frontend release is already ready", async () => {
+    const input = snapshotFreshnessHarness(settledSnapshotStore({ valid: false }), undefined, "ready");
+    expect(await input.readFreshness()).toMatchObject({ availableBuildState: "ready" });
+    await Promise.resolve();
+    expect(input.ensureFrontendRelease).not.toHaveBeenCalled();
   });
 
   it("rechecks version inputs if the epoch changes during the fast-path native task probe", async () => {
