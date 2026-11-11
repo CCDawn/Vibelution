@@ -7,7 +7,6 @@ import { MobilePairingDialog } from "./MobilePairingDialog";
 
 export type MobilePairingTopBarEntryProps = {
   lang?: string;
-  className?: string;
 };
 
 /**
@@ -17,7 +16,7 @@ export type MobilePairingTopBarEntryProps = {
  * its own open state and the dialog it controls. That keeps the shell diff to
  * an import plus one line instead of threading new state through AppShell.
  */
-export function MobilePairingTopBarEntry({ lang = "zh", className }: MobilePairingTopBarEntryProps) {
+export function MobilePairingTopBarEntry({ lang = "zh" }: MobilePairingTopBarEntryProps) {
   const [open, setOpen] = useState(false);
   const label = lang === "en" ? "Connect a phone" : "连接手机";
 
@@ -26,7 +25,6 @@ export function MobilePairingTopBarEntry({ lang = "zh", className }: MobilePairi
       <VIconButton
         type="button"
         variant="secondary"
-        className={className}
         onPress={() => setOpen(true)}
         label={label}
         title={label}
