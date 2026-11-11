@@ -17,6 +17,10 @@ CONTROL_TOKEN_HEADER = "X-Vibelution-Control-Token"
 # GET endpoints that must stay reachable without a token: the health probe
 # and the token bootstrap itself (requiring a token there deadlocks).
 _TOKEN_EXEMPT_GET_PATHS = {"/api/health", "/api/control-token"}
+# The phone holds no control token before pairing, so the claim endpoint
+# must be reachable without one. Its safety comes from the code itself:
+# single use, five minute TTL, rate limited. Nothing else is exempt.
+_TOKEN_EXEMPT_POST_PATHS = {"/api/mobile/pairing/claim"}
 # Browser-native image loads and CSS background URLs cannot attach a custom
 # control-token header. These routes serve only validated image files and keep
 # their trusted-source check; all other API reads still require the token.
@@ -172,9 +176,13 @@ class WebControlGuardMiddleware(BaseHTTPMiddleware):
                 return JSONResponse({"detail": error.detail}, status_code=error.status_code)
             return await call_next(request)
 
-        requires_token = method in _MUTATING_METHODS or (
+        normalized_path = request.url.path.rstrip("/")
+        requires_token = (
+            method in _MUTATING_METHODS
+            and not (method == "POST" and normalized_path in _TOKEN_EXEMPT_POST_PATHS)
+        ) or (
             method == "GET"
-            and request.url.path.rstrip("/") not in _TOKEN_EXEMPT_GET_PATHS
+            and normalized_path not in _TOKEN_EXEMPT_GET_PATHS
         )
         if requires_token:
             error = validate_control_request(request)
