@@ -462,6 +462,36 @@ def _tail_resumed_turn_ids(rows: list[dict[str, Any]]) -> set[str]:
     return resumed
 
 
+def _hint_may_need_resume(s: Any, session_id: str) -> tuple[bool, int] | None:
+    """Verdict from the journal sidecar hint, or ``None`` when it is stale.
+
+    The journal append path writes the hint beside the file it describes, so a
+    matching signature means the newest turn fact on disk is exactly what the
+    hint says. Anything else (missing, damaged, foreign append) returns
+    ``None`` and the caller falls back to reading the journal tail.
+    """
+
+    from pathlib import Path
+
+    from core.chat.turn_journal import turn_journal_path
+    from core.chat.turn_journal_hint import hint_matches_journal, read_journal_hint
+
+    try:
+        path = Path(turn_journal_path(s.PROJECT_ROOT, session_id))
+    except Exception:  # noqa: BLE001 - unknown path means "must inspect"
+        return None
+    hint = read_journal_hint(path)
+    if hint is None or not hint_matches_journal(path, hint):
+        return None
+    terminal_type = str(hint.get("terminalType") or "").strip()
+    if terminal_type and terminal_type != EVENT_TURN_INTERRUPTED:
+        # A completed or failed turn holds nothing to resume.
+        return False, 0
+    # An interrupted or open turn also needs the resumed-chain detail that
+    # this hint deliberately does not carry, so the journal tail decides.
+    return None
+
+
 def _tail_may_need_resume(s: Any, session_id: str) -> tuple[bool | None, int]:
     """``False`` when the ledger tail proves nothing is resumable.
 
@@ -471,6 +501,9 @@ def _tail_may_need_resume(s: Any, session_id: str) -> tuple[bool | None, int]:
     genuine recovery.
     """
 
+    hinted = _hint_may_need_resume(s, session_id)
+    if hinted is not None:
+        return hinted
     rows, truncated = _tail_ledger_rows(s, session_id)
     if not rows:
         return False, 0

@@ -615,6 +615,9 @@ def append_turn_events(
     hard_rejection: dict[str, Any] | None = None
     post_terminal_error: TurnJournalPostTerminalWriteError | None = None
     events: list[TurnJournalEvent] = []
+    hint_turn_id = ""
+    hint_event_type = ""
+    hint_sequence = 0
     with _journal_thread_lock(path):
         with _journal_file_lock(path):
             for spec in specs:
@@ -696,7 +699,17 @@ def append_turn_events(
                 else:
                     _refresh_terminal_cache_signature(path)
                 _remember_turn_transition_summary(path, normalized_turn_id, normalized_event_type)
+                if normalized_event_type in _HINT_EVENT_TYPES:
+                    hint_turn_id = normalized_turn_id
+                    hint_event_type = normalized_event_type
+                    hint_sequence = sequence
                 events.append(event)
+            if hint_event_type:
+                # Written inside the file lock so the hint signature matches the
+                # journal state this append produced, never a later one.
+                _write_recovery_hint(
+                    path, hint_turn_id, hint_event_type, hint_sequence
+                )
     if post_terminal_error is not None:
         raise post_terminal_error
     if hard_rejection is not None:
@@ -884,6 +897,37 @@ def _cached_turn_transition_summary(
     with _TURN_TRANSITION_CACHE_LOCK:
         _TURN_TRANSITION_CACHE[key] = (summaries, mtime_ns, size)
     return summaries.get(turn_id, (0, False, ""))
+
+
+# Only turn-level events change the recovery verdict; marking every token
+# delta would turn the hint into a hot write amplifier.
+_HINT_EVENT_TYPES = frozenset(
+    {
+        EVENT_TURN_STARTED,
+        EVENT_TURN_COMPLETED,
+        EVENT_TURN_FAILED,
+        EVENT_TURN_INTERRUPTED,
+        EVENT_SESSION_RECOVERY_RESUMED,
+    }
+)
+
+
+def _write_recovery_hint(
+    path: Path, turn_id: str, event_type: str, sequence: int
+) -> None:
+    """Refresh the recovery sidecar hint for the newest turn-level event."""
+
+    from core.chat.turn_journal_hint import write_journal_hint
+
+    terminal_type = event_type if event_type in TERMINAL_EVENTS else ""
+    write_journal_hint(
+        path,
+        turn_id=turn_id,
+        turn_state=TURN_STATE_TERMINAL if terminal_type else TURN_STATE_OPEN,
+        terminal_type=terminal_type,
+        event_type=event_type,
+        sequence=sequence,
+    )
 
 
 def _remember_turn_transition_summary(path: Path, turn_id: str, event_type: str) -> None:
