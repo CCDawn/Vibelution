@@ -1107,3 +1107,19 @@ def test_restart_interruption_does_not_spend_retry_budget(
     assert summary["retryLimitSkipCount"] == 0
     assert summary["resumedCount"] == 1
     assert len(submit_calls) == 1
+
+
+def test_tail_verdict_decides_from_the_probe_alone() -> None:
+    """The narrow probe must decide a settled tail without the wide window."""
+
+    settled = [
+        {"eventType": "turn_started", "turnId": "turn-1"},
+        {"eventType": "turn_completed", "turnId": "turn-1"},
+    ]
+    open_turn = [{"eventType": "turn_started", "turnId": "turn-2"}]
+    undecided = [{"eventType": "assistant_message", "turnId": "turn-2"}]
+
+    assert startup_recovery._tail_verdict(settled) == (False, 0)
+    assert startup_recovery._tail_verdict(open_turn) == (True, 0)
+    assert startup_recovery._tail_verdict(undecided) == (None, 0)
+    assert startup_recovery._tail_verdict([]) == (None, 0)
