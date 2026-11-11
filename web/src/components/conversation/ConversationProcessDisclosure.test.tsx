@@ -72,9 +72,9 @@ describe("ConversationProcessDisclosure", () => {
     expect(html).toContain('data-codex-process-work-expanded="false"');
     expect(html).toContain('hidden="" inert="" aria-hidden="true"');
     expect(html).not.toContain("3 步");
-    expect(html.indexOf("工具记录")).toBeLessThan(html.indexOf("已工作"));
+    expect(html.indexOf("已工作")).toBeLessThan(html.indexOf("工具记录"));
     expect(styles.flowWorkToggle).toContain("!p-0");
-    expect(styles.flowStatusRow).not.toContain("border-b");
+    expect(styles.flowStatusRow).toContain("border-b");
   });
 
   it("keeps failed flow evidence visible without adding an empty thought toggle", () => {

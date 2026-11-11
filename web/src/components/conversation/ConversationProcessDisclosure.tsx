@@ -391,29 +391,6 @@ export function ConversationProcessDisclosure({
           }
         }}
       >
-        <div className={styles.flowWorkContent} ref={workContentRef} id={`${contentId}-work`}>
-          {segments ? segments.map((segment) => (
-            segment.kind === "narration" ? (
-              <div key={segment.key} data-codex-narration-row="true" className={styles.flowContent}>
-                {segment.node}
-              </div>
-            ) : (
-              <div
-                key={segment.key}
-                className={styles.flowContent}
-                hidden={!workExpanded}
-                inert={!workExpanded}
-                aria-hidden={!workExpanded}
-              >
-                {segment.node}
-              </div>
-            )
-          )) : (
-            <div ref={contentRef} id={contentId} className={styles.flowContent} hidden={!workExpanded} inert={!workExpanded} aria-hidden={!workExpanded}>
-              {content}
-            </div>
-          )}
-        </div>
         <div className={[
           styles.flowStatusRow,
           running ? styles.flowStatusRowRunning : state === "failed" ? styles.flowStatusRowFailed : "",
@@ -448,6 +425,29 @@ export function ConversationProcessDisclosure({
               aria-hidden="true"
             />
           </VButton>
+        </div>
+        <div className={styles.flowWorkContent} ref={workContentRef} id={`${contentId}-work`}>
+          {segments ? segments.map((segment) => (
+            segment.kind === "narration" ? (
+              <div key={segment.key} data-codex-narration-row="true" className={styles.flowContent}>
+                {segment.node}
+              </div>
+            ) : (
+              <div
+                key={segment.key}
+                className={styles.flowContent}
+                hidden={!workExpanded}
+                inert={!workExpanded}
+                aria-hidden={!workExpanded}
+              >
+                {segment.node}
+              </div>
+            )
+          )) : (
+            <div ref={contentRef} id={contentId} className={styles.flowContent} hidden={!workExpanded} inert={!workExpanded} aria-hidden={!workExpanded}>
+              {content}
+            </div>
+          )}
         </div>
       </div>
     );

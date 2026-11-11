@@ -205,7 +205,8 @@ describe("ConversationView visible progress flow", () => {
     expect(Array.from(flow().querySelectorAll("[data-codex-transcript-cell-kind]"))
       .map((cell) => cell.getAttribute("data-codex-transcript-cell-kind")))
       .toEqual(["reasoning_summary", "assistant_markdown", "tool_call", "assistant_markdown", "reasoning_summary"]);
-    expect(thought().compareDocumentPosition(flow().querySelector('[data-codex-process-work-status="true"]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // ZCode parity: the work-status line heads the block it summarizes.
+    expect(flow().querySelector('[data-codex-process-work-status="true"]')!.compareDocumentPosition(thought()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await act(async () => tool?.querySelector("summary")?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
     expect(tool?.open).toBe(true);
     expect(tool?.querySelector('[data-codex-tool-detail-body="true"]')).not.toBeNull();
