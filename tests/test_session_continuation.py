@@ -77,8 +77,9 @@ def test_rejected_continuation_never_opens_optional_control_store(stopped_sessio
     sid, expected, scheduled = stopped_session
     monkeypatch.setattr(submit, "get_development_submission_admission_runtime",
                         lambda *_: pytest.fail("control store may create state before CAS rejection"))
-    with pytest.raises(session_service.SessionBusyError):
+    with pytest.raises(session_service.SessionBusyError) as stale:
         _continue(sid, {**expected, "ledgerSeq": 1})
+    assert stale.value.code == "session_snapshot_stale"
     assert not scheduled
 
 

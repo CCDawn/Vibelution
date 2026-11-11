@@ -96,6 +96,11 @@ describe("chat coding route view model", () => {
   it("classifies direct submit failures by status and transport kind", () => {
     const httpError = (status: number) => new FetchJsonHttpError("raw transport text", { status });
     expect(classifyChatSubmitErrorKind(httpError(409))).toBe("turn_in_progress");
+    expect(
+      classifyChatSubmitErrorKind(
+        new FetchJsonHttpError("raw transport text", { status: 409, code: "session_snapshot_stale" }),
+      ),
+    ).toBe("stale_snapshot");
     expect(classifyChatSubmitErrorKind(httpError(401))).toBe("auth_failed");
     expect(classifyChatSubmitErrorKind(httpError(403))).toBe("auth_failed");
     expect(classifyChatSubmitErrorKind(httpError(429))).toBe("rate_limited");

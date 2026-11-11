@@ -42,8 +42,9 @@ def validate_continuation(s, session_id: str, expected: dict[str, Any]) -> None:
     This guard never reconciles or repairs. Only an exact, settled ordinary
     session snapshot can enter the unchanged native new-message acceptance.
     """
-    def conflict() -> None:
-        raise s.SessionBusyError("会话已推进或当前状态不能继续，请刷新后重试。")
+    def conflict(code: str = "session_snapshot_stale",
+                 message: str = "会话状态已更新，请刷新后重试。") -> None:
+        raise s.SessionBusyError(message, code=code)
 
     conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
     if conversation is None:
@@ -51,11 +52,13 @@ def validate_continuation(s, session_id: str, expected: dict[str, Any]) -> None:
     s._ensure_session_mutable(session_id, conversation=conversation)
     _ensure_ordinary_owner(s, conversation, expected)
     events = journal_bridge.load_session_conversation_events_snapshot(session_id, project_root=s.PROJECT_ROOT)
-    if (not events or events[-1].sequence != expected["ledgerSeq"]
-            or s._is_session_running(session_id) or latest_open_turn_id(events)
+    if not events or events[-1].sequence != expected["ledgerSeq"]:
+        conflict()
+    if (s._is_session_running(session_id) or latest_open_turn_id(events)
             or session_queued_turn_rows(conversation)
             or session_has_active_work_run(s, session_id, expected["turnId"])):
-        conflict()
+        conflict("session_turn_in_progress",
+                 "已有一轮正在生成，这条消息没有发出；请等本轮结束或先停止再发送。")
     view = analyze_conversation_branches(events)
     active = fold_active_events(events)
     terminals = [event for event in active if event.event_type in TERMINAL_EVENTS]

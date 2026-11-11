@@ -511,5 +511,8 @@ async function readFailureDetails(response: Response): Promise<FailureDetails> {
   if (!message && !attemptedJsonRead) {
     message = await response.text();
   }
+  if (!code) {
+    code = response.headers.get("x-vibelution-error-code");
+  }
   return { message, code, payload };
 }

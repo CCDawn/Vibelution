@@ -1105,7 +1105,13 @@ def session_submit_message(session_id: str, payload: SessionMessagePayload, requ
         # llm-options list; distinct from the generic 422 payload shape error.
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except SessionBusyError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+            headers={
+                "X-Vibelution-Error-Code": getattr(exc, "code", "") or "session_turn_in_progress",
+            },
+        ) from exc
     except SessionValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

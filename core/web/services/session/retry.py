@@ -44,7 +44,8 @@ def retry_session_message(
 
 
 def _conflict(s):
-    raise s.SessionBusyError("会话已推进或当前状态不能安全重试，请刷新后重试。")
+    raise s.SessionBusyError("会话已推进或当前状态不能安全重试，请刷新后重试。",
+                                 code="session_snapshot_stale")
 
 
 def _ensure_ordinary_owner(s, conversation: dict, expected: dict) -> None:
@@ -69,7 +70,8 @@ def _ensure_ordinary_owner(s, conversation: dict, expected: dict) -> None:
                 or metadata.get("lifeStewardForAgentId") or binding.get("enabled") is True):
             _conflict(s)
     except (OSError, ValueError, TypeError, AttributeError) as exc:
-        raise s.SessionBusyError("无法确认普通Session身份，请刷新后重试。") from exc
+        raise s.SessionBusyError("无法确认普通Session身份，请刷新后重试。",
+                                     code="session_snapshot_stale") from exc
 
 
 

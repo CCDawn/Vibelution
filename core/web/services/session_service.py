@@ -1601,6 +1601,10 @@ class SessionNotFoundError(ValueError):
 class SessionBusyError(RuntimeError):
     """Raised when a session already has an active running turn."""
 
+    def __init__(self, message: str = "", *, code: str = "") -> None:
+        super().__init__(message)
+        self.code = code
+
 
 class SessionLeaseConflictError(SessionBusyError):
     """Raised when a turn's resource leases are held by another active run.

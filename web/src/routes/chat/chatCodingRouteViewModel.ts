@@ -87,6 +87,7 @@ export function describeChatRouteError(error: unknown, fallback: string) {
 
 export type ChatSubmitErrorKind =
   | "turn_in_progress"
+  | "stale_snapshot"
   | "auth_failed"
   | "rate_limited"
   | "upstream_unavailable"
@@ -99,6 +100,7 @@ const CHAT_SUBMIT_SERVER_DETAIL_MAX_LENGTH = 200;
 /** Chat dictionary keys for each submit failure category. */
 export const CHAT_SUBMIT_ERROR_KIND_KEYS: Record<ChatSubmitErrorKind, TranslationKey> = {
   turn_in_progress: "composerErrorTurnInProgress",
+  stale_snapshot: "composerErrorStaleSnapshot",
   auth_failed: "composerErrorAuthFailed",
   rate_limited: "composerErrorRateLimited",
   upstream_unavailable: "composerErrorUpstreamUnavailable",
@@ -116,7 +118,9 @@ export function classifyChatSubmitErrorKind(error: unknown): ChatSubmitErrorKind
   if (isFetchJsonHttpError(error)) {
     const status = Number(error.status) || 0;
     if (status === 409) {
-      return "turn_in_progress";
+      return error.code === "session_snapshot_stale"
+        ? "stale_snapshot"
+        : "turn_in_progress";
     }
     if (status === 401 || status === 403) {
       return "auth_failed";
