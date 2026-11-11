@@ -792,6 +792,11 @@ export function AgentSessionTabStrip({
                   sessionActive ? styles.agentSessionTabGroupPanelItemActive : "",
                 ].filter(Boolean).join(" ")}
                 title={session.title}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onContextMenu(event, session);
+                }}
                 onPress={() => {
                   onOpenDirectSession(session.id);
                   setGroupOpen(section.groupId, false);
@@ -829,7 +834,10 @@ export function AgentSessionTabStrip({
         id: "rename",
         label: lang === "zh" ? "重命名分组" : "Rename group",
         icon: <Pencil size={12} />,
-        onSelect: () => startGroupRename(section),
+        onSelect: () => {
+          setGroupMenu(null);
+          startGroupRename(section);
+        },
       },
       ...TAB_GROUP_COLORS.map((color) => ({
         id: `color-${color}`,
@@ -855,11 +863,15 @@ export function AgentSessionTabStrip({
         id: "delete",
         label: lang === "zh" ? "删除分组" : "Delete group",
         icon: <Trash2 size={12} />,
-        onSelect: () =>
-          applyGroupMutation((state) => deleteAgentSessionTabGroup(state, section.groupId)),
+        onSelect: () => {
+          setGroupOpen(section.groupId, false);
+          setGroupMenu(null);
+          applyGroupMutation((state) => deleteAgentSessionTabGroup(state, section.groupId));
+        },
       },
     ];
     return (
+      <>
       <VPopover
         open={isOpen}
         onOpenChange={(open) => setGroupOpen(section.groupId, open)}
@@ -912,24 +924,25 @@ export function AgentSessionTabStrip({
             <span className={styles.agentSessionTabGroupChevron} aria-hidden="true" data-group-chevron>
               {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
             </span>
-            {menu ? (
-              <VDropdownMenu
-                open
-                position={{ x: menu.x, y: menu.y }}
-                items={menuItems}
-                aria-label={lang === "zh" ? "分组设置" : "Group settings"}
-                onOpenChange={(next) => {
-                  if (!next) {
-                    setGroupMenu(null);
-                  }
-                }}
-              />
-            ) : null}
           </div>
         }
       >
         {renderGroupPopoverList(section)}
       </VPopover>
+      {menu ? (
+        <VDropdownMenu
+          open
+          position={{ x: menu.x, y: menu.y }}
+          items={menuItems}
+          aria-label={lang === "zh" ? "分组设置" : "Group settings"}
+          onOpenChange={(next) => {
+            if (!next) {
+              setGroupMenu(null);
+            }
+          }}
+        />
+      ) : null}
+      </>
     );
   };
   const commitTabOrderDrop = useCallback((targetId: string, position: "before" | "after") => {
