@@ -770,7 +770,7 @@ export function AgentSessionTabStrip({
   /** Vertical group panel: mouse-first, one click switches the session and closes the panel. */
   const renderGroupPopoverList = (section: AgentSessionTabGroupSection) => {
     const activeColor = sessionTabGroupColorFor(groupState, section.groupId);
-    const tintClass = activeColor ? GROUP_TINT_CLASS[activeColor] : "";
+    const tintStyle = activeColor ? GROUP_TINT_CLASS[activeColor] : "";
     if (!section.sessions.length) {
       return (
         <p className={styles.agentSessionTabGroupPanelEmpty}>
@@ -779,7 +779,7 @@ export function AgentSessionTabStrip({
       );
     }
     return (
-      <ul className={[styles.agentSessionTabGroupPanelList, tintClass].filter(Boolean).join(" ")}>
+      <ul className={[styles.agentSessionTabGroupPanelList, tintStyle].filter(Boolean).join(" ")}>
         {section.sessions.map((session) => {
           const sessionActive = activeSessionId === session.id;
           return (
@@ -820,11 +820,11 @@ export function AgentSessionTabStrip({
     const dropActive = groupDropTarget === section.groupId;
     const aggregateTone = groupAggregateTone(section);
     const activeColor = sessionTabGroupColorFor(groupState, section.groupId);
-    const tintClass = activeColor ? GROUP_TINT_CLASS[activeColor] : "";
+    const tintStyle = activeColor ? GROUP_TINT_CLASS[activeColor] : "";
     const isOpen = groupIsOpen(section.groupId);
     const headerClassName = [
       styles.agentSessionTabGroupHeader,
-      tintClass,
+      tintStyle,
       dropActive ? styles.agentSessionTabGroupHeaderDropTarget : "",
       isOpen ? styles.agentSessionTabGroupHeaderOpen : "",
     ].filter(Boolean).join(" ");
