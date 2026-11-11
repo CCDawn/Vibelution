@@ -774,6 +774,7 @@ from core.web.services.session.signals_format import (
     _restore_missing_session_turn_control,
     _safe_tool_argument_details,
     _session_last_cache_composition,
+    _session_ledger_last_message_is_stopped_turn,
     _session_ledger_visible_messages,
     _session_prompt_cache_log_fields,
     _session_prompt_cache_scope,

@@ -442,19 +442,43 @@ def _retire_for_user_restart_harvest(
     deadline = time.monotonic() + SHUTDOWN_HARVEST_TOTAL_WAIT_SECONDS
     # Stop orchestrators before their chat turns so they cannot enqueue a new
     # child turn between the chat harvest and backend retirement.
-    additional = _stop_additional_work_for_restart(deadline=deadline)
-    evolution = _stop_active_evolution_runs_before_shutdown(deadline=deadline)
-    sources = _stop_active_source_collection_runs_before_shutdown(deadline=deadline)
-    rooms = _stop_active_chat_room_rounds_before_shutdown(deadline=deadline)
-    turns = _stop_active_chat_turns_before_shutdown(
-        deadline=deadline, persist_partials=True, stop_reason=source,
+    step_timings: dict[str, float] = {}
+
+    def _timed_step(name: str, step):
+        started = time.monotonic()
+        try:
+            return step()
+        finally:
+            step_timings[name] = round((time.monotonic() - started) * 1000, 1)
+
+    additional = _timed_step(
+        "additionalWorkMs", lambda: _stop_additional_work_for_restart(deadline=deadline)
+    )
+    evolution = _timed_step(
+        "evolutionMs", lambda: _stop_active_evolution_runs_before_shutdown(deadline=deadline)
+    )
+    sources = _timed_step(
+        "sourceCollectionMs",
+        lambda: _stop_active_source_collection_runs_before_shutdown(deadline=deadline),
+    )
+    rooms = _timed_step(
+        "chatRoomMs", lambda: _stop_active_chat_room_rounds_before_shutdown(deadline=deadline)
+    )
+    turns = _timed_step(
+        "chatTurnsMs",
+        lambda: _stop_active_chat_turns_before_shutdown(
+            deadline=deadline, persist_partials=True, stop_reason=source,
+        ),
     )
     results = [*rooms, *turns, *sources, *evolution, *additional]
     failures = [item for item in results if item.get("error") or item.get("status") in {"failed", "timeout", "skipped"}]
     # Never turn an incomplete/missing owner stop into a 202 pause receipt.
+    readback_started = time.monotonic()
     read_completed, remaining, read_error = _run_with_bounded_wait(
         _restart_guard_active_work_runs, timeout_seconds=_remaining_harvest_seconds(deadline),
     )
+    step_timings["readbackMs"] = round((time.monotonic() - readback_started) * 1000, 1)
+    step_timings["totalMs"] = round((time.monotonic() - (deadline - SHUTDOWN_HARVEST_TOTAL_WAIT_SECONDS)) * 1000, 1)
     if not read_completed or read_error is not None:
         failures.append({"kind": "active_work_readback", "status": "failed", "error": "restart_pause_readback_failed"})
     else:
@@ -465,7 +489,13 @@ def _retire_for_user_restart_harvest(
         message=f"Operator {action} task cleanup settled." if not failures else f"Operator {action} task cleanup failed.",
         outcome="accepted" if not failures else "failed",
         level="info" if not failures else "error",
-        fields={"source": source, "taskCount": len(results), "failedCount": len(failures), "pauseResults": results},
+        fields={
+            "source": source,
+            "taskCount": len(results),
+            "failedCount": len(failures),
+            "pauseResults": results,
+            "timingsMs": step_timings,
+        },
     )
     if failures:
         raise RuntimeRestartPauseFailed(failures)
@@ -1856,6 +1886,7 @@ def _stop_active_chat_turns_before_shutdown(
             "sessionId": session_id,
             "runId": run_id,
         }
+        started = time.monotonic()
         try:
             if persist_partials:
                 _stop_and_persist_chat_turn_for_restart(session_id, stop_reason=stop_reason)
@@ -1865,6 +1896,7 @@ def _stop_active_chat_turns_before_shutdown(
             entry.update({"status": "failed", "error": f"{type(exc).__name__}: {exc}"})
         else:
             entry.update({"status": "stopped"})
+        entry["elapsedMs"] = round((time.monotonic() - started) * 1000, 1)
         with results_lock:
             results[session_id] = entry
 
