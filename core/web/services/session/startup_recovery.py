@@ -119,6 +119,10 @@ def _new_summary() -> dict[str, Any]:
         "noActiveTurnSkipCount": 0,
         "journalInterruptResumeCount": 0,
         "continuableResumeCount": 0,
+        "phaseCompanionMs": 0,
+        "phaseActiveMs": 0,
+        "phasePrefilterMs": 0,
+        "phaseCandidatesMs": 0,
         "alreadyResumedSkipCount": 0,
         "unreadableSessionSkipCount": 0,
         "queuedDrainScheduledCount": 0,
@@ -1271,7 +1275,9 @@ def recover_interrupted_session_turns_on_startup(
         if not is_session_recovery_enabled():
             summary["enabled"] = False
             return summary
+        _phase_start = time.perf_counter()
         companion_session_ids = _companion_session_ids(s)
+        summary["phaseCompanionMs"] = int((time.perf_counter() - _phase_start) * 1000)
         if companion_session_ids is None:
             summary["skipped"] = "companion_scope_unavailable"
             return summary
@@ -1285,7 +1291,9 @@ def recover_interrupted_session_turns_on_startup(
             for turn_ids in restart_pending_map.values()
             for turn_id in turn_ids
         }
+        _phase_start = time.perf_counter()
         active_turn_session_ids = _active_chat_turn_session_ids(s)
+        summary["phaseActiveMs"] = int((time.perf_counter() - _phase_start) * 1000)
         if active_turn_session_ids is not None and restart_pending_session_ids:
             active_turn_session_ids = (
                 set(active_turn_session_ids) | restart_pending_session_ids
@@ -1308,6 +1316,7 @@ def recover_interrupted_session_turns_on_startup(
         ]
         session_ids = [session_id for session_id in session_ids if session_id]
         summary["sessionIndexCount"] = len(session_ids)
+        _phase_start = time.perf_counter()
         candidates, prefiltered = _prefilter_session_ids(
             s,
             session_ids,
@@ -1315,6 +1324,7 @@ def recover_interrupted_session_turns_on_startup(
             lower_bound_ns=lower_bound_ns,
         )
         summary["prefilterSkippedCount"] = prefiltered
+        summary["phasePrefilterMs"] = int((time.perf_counter() - _phase_start) * 1000)
         summary["candidateCount"] = len(candidates)
         cpu_count = os.cpu_count() or 4
         worker_count = (
@@ -1323,6 +1333,7 @@ def recover_interrupted_session_turns_on_startup(
             else min(_SWEEP_MAX_WORKERS, max(2, cpu_count), len(candidates))
         )
         summary["workerCount"] = worker_count
+        _phase_start = time.perf_counter()
         results = _run_session_candidates(
             s,
             candidates,
@@ -1332,6 +1343,7 @@ def recover_interrupted_session_turns_on_startup(
             active_turn_session_ids=active_turn_session_ids,
             pending_turn_ids=restart_pending_turn_ids,
         )
+        summary["phaseCandidatesMs"] = int((time.perf_counter() - _phase_start) * 1000)
         _merge_recovery_summaries(summary, results)
     except Exception as exc:  # noqa: BLE001 - the sweep must never fail startup
         summary["errorCount"] = int(summary.get("errorCount") or 0) + 1
@@ -1387,6 +1399,10 @@ def _record_sweep_scene_event(s: Any, summary: dict[str, Any]) -> None:
                 "continuableResumeCount": max(
                     0, int(summary.get("continuableResumeCount") or 0)
                 ),
+                "phaseCompanionMs": max(0, int(summary.get("phaseCompanionMs") or 0)),
+                "phaseActiveMs": max(0, int(summary.get("phaseActiveMs") or 0)),
+                "phasePrefilterMs": max(0, int(summary.get("phasePrefilterMs") or 0)),
+                "phaseCandidatesMs": max(0, int(summary.get("phaseCandidatesMs") or 0)),
                 "alreadyResumedSkipCount": max(
                     0, int(summary.get("alreadyResumedSkipCount") or 0)
                 ),
