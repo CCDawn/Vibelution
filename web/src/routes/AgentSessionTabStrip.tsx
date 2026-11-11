@@ -17,7 +17,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { AgentInstance, SessionReferenceAttachment, SessionSummary, Team } from "../api/types";
 import type { AgentSessionTabGroupState } from "./agentSessionTabGroups";
-import { VButton, VIconButton, VNativeInput } from "../components/vui";
+import { VButton, VHoverCard, VIconButton, VNativeInput } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import { sessionAgentDisplayInfo } from "./agentDisplay";
 
@@ -41,6 +41,11 @@ import {
   sessionTabGroupIdFor,
   setAgentSessionTabGroupCollapsed,
   writeAgentSessionTabGroupState,
+  TAB_GROUP_COLORS,
+  mergeSessionsIntoTabGroup,
+  sessionTabGroupColorFor,
+  setAgentSessionTabGroupColor,
+  type AgentSessionTabGroupColor,
   type AgentSessionTabGroupSection,
 } from "./agentSessionTabGroups";
 import {
@@ -49,7 +54,18 @@ import {
   type SessionActivityTone,
 } from "./sessionActivityIndicator";
 import styles from "./AgentSessionTabStrip.styles";
+
+/** Palette accent per group colour; the swatch colours live in the styles module. */
+const GROUP_SWATCH_CLASS: Record<AgentSessionTabGroupColor, string> = {
+  gray: styles.agentSessionTabGroupSwatchGray,
+  blue: styles.agentSessionTabGroupSwatchBlue,
+  green: styles.agentSessionTabGroupSwatchGreen,
+  amber: styles.agentSessionTabGroupSwatchAmber,
+  violet: styles.agentSessionTabGroupSwatchViolet,
+  rose: styles.agentSessionTabGroupSwatchRose,
+};
 import "./AgentSessionTabStrip.armed.css";
+import "./AgentSessionTabStrip.groups.css";
 import { sessionBlocksMutation } from "./sessionActivityState";
 import {
   PANE_DOCK_MIME,
@@ -297,6 +313,7 @@ export function AgentSessionTabStrip({
   })();
   const [groupTick, setGroupTick] = useState(0);
   const [groupDropTarget, setGroupDropTarget] = useState<string | null>(null);
+  const [mergeTargetSessionId, setMergeTargetSessionId] = useState<string | null>(null);
   const [renamingGroupId, setRenamingGroupId] = useState<string | null>(null);
   const [groupNameDraft, setGroupNameDraft] = useState("");
   const groupState = (() => {
@@ -350,6 +367,31 @@ export function AgentSessionTabStrip({
       setDragOrderSessionId(null);
     },
     [applyGroupMutation, dragOrderSessionId],
+  );
+  /**
+   * Dropping on the middle band of another tab merges the two sessions into a
+   * brand-new group. Folder semantics forbid extending the target's group, so a
+   * new group is always created and can be renamed from its header.
+   */
+  const commitMergeDrop = useCallback(
+    (targetSessionId: string) => {
+      const sourceSessionId = dragOrderSessionId;
+      setMergeTargetSessionId(null);
+      setGroupDropTarget(null);
+      setDropTarget(null);
+      setDragOrderSessionId(null);
+      if (!sourceSessionId || sourceSessionId === targetSessionId) {
+        return;
+      }
+      applyGroupMutation((state) =>
+        mergeSessionsIntoTabGroup(
+          state,
+          [sourceSessionId, targetSessionId],
+          defaultAgentSessionTabGroupName(state, lang === "zh" ? "分组" : "Group"),
+        ).state,
+      );
+    },
+    [applyGroupMutation, dragOrderSessionId, lang],
   );
   const startGroupCreate = useCallback(() => {
     const current = readAgentSessionTabGroupState(agentTabScopeId);
@@ -540,6 +582,7 @@ export function AgentSessionTabStrip({
         role="presentation"
         data-selected={tabActive ? "true" : undefined}
         data-agent-session-tab-container
+        data-session-tab-merge-target={mergeTargetSessionId === session.id ? "true" : undefined}
         {...dragReferenceProps}
         onDragOver={(event) => {
           if (!dragOrderSessionId) {
@@ -556,6 +599,14 @@ export function AgentSessionTabStrip({
             return;
           }
           const bounds = event.currentTarget.getBoundingClientRect();
+          const ratio = (event.clientX - bounds.left) / Math.max(1, bounds.width);
+          if (ratio > 1 / 3 && ratio < 2 / 3) {
+            // Middle band means merge, not reorder.
+            setDropTarget(null);
+            setMergeTargetSessionId(session.id);
+            return;
+          }
+          setMergeTargetSessionId(null);
           const position = event.clientX < bounds.left + bounds.width / 2 ? "before" : "after";
           setDropTarget((current) => (
             current && current.sessionId === session.id && current.position === position
@@ -574,6 +625,11 @@ export function AgentSessionTabStrip({
             return;
           }
           const bounds = event.currentTarget.getBoundingClientRect();
+          const ratio = (event.clientX - bounds.left) / Math.max(1, bounds.width);
+          if (ratio > 1 / 3 && ratio < 2 / 3) {
+            commitMergeDrop(session.id);
+            return;
+          }
           const position = event.clientX < bounds.left + bounds.width / 2 ? "before" : "after";
           commitTabOrderDrop(session.id, position);
           setDropTarget(null);
@@ -680,6 +736,59 @@ export function AgentSessionTabStrip({
     );
   };
 
+  const renderGroupPeek = (section: AgentSessionTabGroupSection) => {
+    const activeColor = sessionTabGroupColorFor(groupState, section.groupId);
+    const mergeHint = lang === "zh"
+      ? "把一个页签拖到另一个页签中间，即可合并成新分组"
+      : "Drop a tab on the middle of another tab to merge them into a new group";
+    return (
+      <div className={styles.agentSessionTabGroupPeek}>
+        {section.ungrouped ? null : (
+          <div className={styles.agentSessionTabGroupPalette}>
+            {TAB_GROUP_COLORS.map((color) => (
+              <VButton
+                key={color}
+                type="button"
+                contentLayout="plain"
+                className={[
+                  styles.agentSessionTabGroupSwatch,
+                  GROUP_SWATCH_CLASS[color],
+                  activeColor === color ? styles.agentSessionTabGroupSwatchActive : "",
+                ].filter(Boolean).join(" ")}
+                aria-label={color}
+                title={color}
+                onPress={() =>
+                  applyGroupMutation((state) =>
+                    setAgentSessionTabGroupColor(
+                      state,
+                      section.groupId,
+                      activeColor === color ? null : color,
+                    ),
+                  )
+                }
+              />
+            ))}
+          </div>
+        )}
+        <ul className={styles.agentSessionTabGroupPeekList}>
+          {section.sessions.map((session) => (
+            <li key={session.id}>
+              <VButton
+                type="button"
+                contentLayout="plain"
+                className={styles.agentSessionTabGroupPeekItem}
+                title={session.title}
+                onPress={() => onOpenDirectSession(session.id)}
+              >
+                <span className={styles.agentSessionTabGroupPeekTitle}>{session.title}</span>
+              </VButton>
+            </li>
+          ))}
+        </ul>
+        <p className={styles.agentSessionTabGroupPeekHint}>{mergeHint}</p>
+      </div>
+    );
+  };
   const renderSessionTabGroupHeader = (section: AgentSessionTabGroupSection) => {
     const renaming = renamingGroupId === section.groupId;
     const dropActive = groupDropTarget === section.groupId;
@@ -737,7 +846,16 @@ export function AgentSessionTabStrip({
             onBlur={() => commitGroupRename(section.groupId)}
           />
         ) : (
-          <span className={styles.agentSessionTabGroupName}>{sectionTitle}</span>
+          <VHoverCard
+            side="bottom"
+            align="start"
+            openDelay={180}
+            closeDelay={140}
+            width="wide"
+            content={renderGroupPeek(section)}
+          >
+            <span className={styles.agentSessionTabGroupName}>{sectionTitle}</span>
+          </VHoverCard>
         )}
         <span className={styles.agentSessionTabGroupCount}>{section.sessions.length}</span>
         {section.ungrouped ? null : (
@@ -926,6 +1044,7 @@ export function AgentSessionTabStrip({
           ].filter(Boolean).join(" ")}
           data-session-tab-group={section.groupId}
           data-session-tab-group-ungrouped={section.ungrouped ? "true" : undefined}
+          data-group-color={sessionTabGroupColorFor(groupState, section.groupId) ?? undefined}
           onDragOver={(event) => {
             if (!dragOrderSessionId) {
               return;

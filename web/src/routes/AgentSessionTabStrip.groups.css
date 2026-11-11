@@ -1,0 +1,39 @@
+/* Group visuals that Tailwind cannot express as utilities: per-color section
+   rails driven by a data attribute, and the merge drop highlight. */
+
+.agentSessionTabGroupSection {
+  border-left-width: 3px;
+  border-left-style: solid;
+  border-left-color: color-mix(in srgb, var(--fg-primary) 18%, transparent);
+}
+
+.agentSessionTabGroupSection[data-group-color="gray"] {
+  border-left-color: hsl(220 10% 55%);
+}
+
+.agentSessionTabGroupSection[data-group-color="blue"] {
+  border-left-color: hsl(212 72% 55%);
+}
+
+.agentSessionTabGroupSection[data-group-color="green"] {
+  border-left-color: hsl(148 55% 45%);
+}
+
+.agentSessionTabGroupSection[data-group-color="amber"] {
+  border-left-color: hsl(38 85% 52%);
+}
+
+.agentSessionTabGroupSection[data-group-color="violet"] {
+  border-left-color: hsl(268 60% 58%);
+}
+
+.agentSessionTabGroupSection[data-group-color="rose"] {
+  border-left-color: hsl(340 70% 56%);
+}
+
+/* Merge drop: the pointer sits on the middle band of a tab, meaning
+   "put these two sessions in one new group" rather than reorder. */
+[data-session-tab-container][data-session-tab-merge-target="true"] {
+  outline: 2px dashed hsl(212 72% 55%);
+  outline-offset: -2px;
+}

@@ -21,10 +21,18 @@ const STORAGE_KEY = "vibelution.agentSessionTabGroups.v1";
 /** Section id of the fixed fallback bucket (sessions without a group). */
 export const UNGROUPED_SECTION_ID = "ungrouped";
 
+/**
+ * Fixed palette. Group colour is an accent only: it tints the section rail
+ * and the header dot, never the tab selection ring (that stays the VUI accent).
+ */
+export const TAB_GROUP_COLORS = ["gray", "blue", "green", "amber", "violet", "rose"] as const;
+export type AgentSessionTabGroupColor = (typeof TAB_GROUP_COLORS)[number];
+
 export type AgentSessionTabGroup = {
   id: string;
   name: string;
   collapsed: boolean;
+  color?: AgentSessionTabGroupColor;
 };
 
 export type AgentSessionTabGroupState = {
@@ -66,7 +74,13 @@ function sanitizeGroup(raw: unknown): AgentSessionTabGroup | null {
   if (!id || !name) {
     return null;
   }
-  return { id, name, collapsed: candidate.collapsed === true };
+  const rawColor = String(candidate.color ?? "").trim();
+  const base = { id, name, collapsed: candidate.collapsed === true };
+  if (!(TAB_GROUP_COLORS as readonly string[]).includes(rawColor)) {
+    return base;
+  }
+  // Unknown colours degrade to the default accent instead of failing the load.
+  return { ...base, color: rawColor as AgentSessionTabGroupColor };
 }
 
 function sanitizeState(raw: unknown): AgentSessionTabGroupState {
@@ -387,4 +401,72 @@ export function resolveSessionTabGroupSections(
     });
   }
   return sections;
+}
+
+export function setAgentSessionTabGroupColor(
+  state: AgentSessionTabGroupState,
+  groupId: string,
+  color: AgentSessionTabGroupColor | null,
+): AgentSessionTabGroupState {
+  const target = state.groups.find((group) => group.id === groupId);
+  if (!target || (target.color ?? null) === (color ?? null)) {
+    return state;
+  }
+  return {
+    groups: state.groups.map((group) => {
+      if (group.id !== groupId) {
+        return group;
+      }
+      if (!color) {
+        const stripped: AgentSessionTabGroup = {
+          id: group.id,
+          name: group.name,
+          collapsed: group.collapsed,
+        };
+        return stripped;
+      }
+      return { ...group, color };
+    }),
+    membership: { ...state.membership },
+  };
+}
+
+/**
+ * Folder-style merge: put every listed session into one brand-new group.
+ *
+ * Used by "drop a tab on the middle of another tab", which must not extend an
+ * existing group (one session belongs to one group). Fewer than two distinct
+ * sessions is a no-op so a stray drop cannot create an empty group.
+ */
+export function mergeSessionsIntoTabGroup(
+  state: AgentSessionTabGroupState,
+  sessionIds: readonly string[],
+  name: string,
+  options?: { id?: string },
+): { state: AgentSessionTabGroupState; groupId: string } {
+  const unique: string[] = [];
+  for (const raw of sessionIds) {
+    const key = String(raw || "").trim();
+    if (key && !unique.includes(key)) {
+      unique.push(key);
+    }
+  }
+  if (unique.length < 2) {
+    return { state, groupId: "" };
+  }
+  const created = createAgentSessionTabGroup(state, name, options);
+  let next = created.state;
+  for (const sessionId of unique) {
+    next = assignSessionToTabGroup(next, sessionId, created.groupId);
+  }
+  return { state: next, groupId: created.groupId };
+}
+
+/** Accent colour of a group, or null when the group has no colour set. */
+export function sessionTabGroupColorFor(
+  state: AgentSessionTabGroupState,
+  groupId: string,
+): AgentSessionTabGroupColor | null {
+  const group = state.groups.find((item) => item.id === groupId);
+  return group?.color ?? null;
 }

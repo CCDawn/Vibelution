@@ -79,3 +79,80 @@ const STORAGE_KEY = "vibelution.agentSessionTabGroups.v1";
 ### 已知边界（v1 不做）
 
 分组颜色、组内/组间拖拽排序、一个会话多组（标签式）、自动规则分组、跨设备同步。
+
+## 分组颜色
+
+### 功能
+
+每个分组可选一个固定色板色（灰/蓝/绿/黄/橙紫/玫红，共 6 色）。颜色只作强调：
+染分组区块左侧 3px 色条 + 浮层色点，不改页签选中环、状态点与文字主色，
+避免和 VUI 的选中/状态语义打架。
+
+### 使用方式
+
+色点在组头的悬浮浮层里选，同一浮层兼顾「看成员」和「换颜色」，不额外占顶栏宽度。
+再点当前色即清除颜色（回到默认强调色）。
+
+```ts
+export const TAB_GROUP_COLORS = ["gray", "blue", "green", "amber", "violet", "rose"] as const;
+export type AgentSessionTabGroupColor = (typeof TAB_GROUP_COLORS)[number];
+
+setAgentSessionTabGroupColor(state, groupId, color | null); // null = 清除
+sessionTabGroupColorFor(state, groupId); // 渲染读取，未知组回落 null
+```
+
+读取时未知颜色降级为默认色而不是报错，所以色板后续增删不会让旧存档失效。
+色条与合并高亮写在 `AgentSessionTabStrip.groups.css`：颜色由 `data-group-color`
+属性驱动，Tailwind 无法为 data 属性生成配色，故走属性选择器。
+
+## 悬浮下拉预览
+
+### 功能
+
+鼠标停在组名上弹出浮层：上半部是色板，下半部是该组会话列表（标题可点击跳转），
+底部一行提示「把页签拖到另一个页签中间即可合并成新分组」。折叠组同样可用浮层预览成员，
+不必先展开。
+
+### 使用方式
+
+复用 VUI 既有 `VHoverCard`（Radix hover-card 封装），不新增依赖、不引入第二套浮层协议：
+
+```tsx
+<VHoverCard side="bottom" align="start" openDelay={180} closeDelay={140} width="wide"
+  content={renderGroupPeek(section)}>
+  <span className={styles.agentSessionTabGroupName}>{sectionTitle}</span>
+</VHoverCard>
+```
+
+浮层内控件仍是 VUI 元素（`VButton`），点击不关闭浮层，允许连续换色。
+「未分组」区块没有色板，只列成员。
+
+## 拖拽合并成组
+
+### 功能
+
+把一个页签拖到另一个页签的中间三分之一区域，两者立即合成为一个新分组
+（自动命名「分组 N」，可再重命名）。落在左右两侧三分之一仍是排序，
+落在组区块任意位置仍是移组。
+
+### 使用方式
+
+落点判定在既有排序判定上加一段中带（dnd-kit 与 Chrome 标签条的经典三区间做法），
+不引入拖拽库：
+
+```tsx
+const ratio = (event.clientX - bounds.left) / Math.max(1, bounds.width);
+if (ratio > 1 / 3 && ratio < 2 / 3) {
+  commitMergeDrop(session.id); // 合并：源会话 + 目标会话 -> 新组
+  return;
+}
+// 两侧：沿用 commitTabOrderDrop(session.id, position)
+```
+
+```ts
+mergeSessionsIntoTabGroup(state, [sourceId, targetId], name); // 少于两个会话为 no-op
+```
+
+合并总是新建分组，不扩展目标所在的组——文件夹式语义下一个会话只能属于一个组；
+源会话原本所在的组若因此变空，只是不再渲染，组定义保留。
+落点反馈用 `data-session-tab-merge-target="true"` + 虚线描边，与排序插入线区分。

@@ -5,6 +5,9 @@ import type { SessionSummary } from "../api/types";
 import {
   UNGROUPED_SECTION_ID,
   assignSessionToTabGroup,
+  mergeSessionsIntoTabGroup,
+  sessionTabGroupColorFor,
+  setAgentSessionTabGroupColor,
   createAgentSessionTabGroup,
   defaultAgentSessionTabGroupName,
   deleteAgentSessionTabGroup,
@@ -154,5 +157,44 @@ describe("agentSessionTabGroups", () => {
   it("survives corrupt storage payloads", () => {
     window.localStorage.setItem("vibelution.agentSessionTabGroups.v1", "{not json");
     expect(readAgentSessionTabGroupState("agent-a")).toEqual(emptyAgentSessionTabGroupState());
+  });
+
+  it("sets and clears a group colour, degrading unknown colours from storage", () => {
+    let state = createAgentSessionTabGroup(emptyAgentSessionTabGroupState(), "A", {
+      id: "ga",
+    }).state;
+    state = setAgentSessionTabGroupColor(state, "ga", "blue");
+    expect(state.groups[0].color).toBe("blue");
+    expect(sessionTabGroupColorFor(state, "ga")).toBe("blue");
+    state = setAgentSessionTabGroupColor(state, "ga", null);
+    expect(state.groups[0].color).toBeUndefined();
+    expect(sessionTabGroupColorFor(state, "ga")).toBeNull();
+
+    window.localStorage.setItem(
+      "vibelution.agentSessionTabGroups.v1",
+      JSON.stringify({
+        "agent-x": {
+          groups: [{ id: "g", name: "A", collapsed: false, color: "chartreuse" }],
+          membership: {},
+        },
+      }),
+    );
+    expect(readAgentSessionTabGroupState("agent-x").groups[0].color).toBeUndefined();
+  });
+
+  it("merges two sessions into a brand-new group, moving them out of the old one", () => {
+    let state = createAgentSessionTabGroup(emptyAgentSessionTabGroupState(), "旧组", {
+      id: "old",
+    }).state;
+    state = assignSessionToTabGroup(state, "s1", "old");
+    const merged = mergeSessionsIntoTabGroup(state, ["s1", "s2"], "分组 2", { id: "new" });
+    expect(merged.groupId).toBe("new");
+    expect(merged.state.membership).toEqual({ s1: "new", s2: "new" });
+    expect(merged.state.groups.map((group) => group.id)).toEqual(["old", "new"]);
+  });
+
+  it("does not create a group when fewer than two sessions are dropped", () => {
+    const state = emptyAgentSessionTabGroupState();
+    expect(mergeSessionsIntoTabGroup(state, ["s1", "s1"], "分组 1", { id: "n" }).state).toBe(state);
   });
 });

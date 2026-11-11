@@ -119,6 +119,34 @@ const styles = {
     "vui-routes-chatcodingroute agentSessionTabGroupAction h-6 w-5 shrink-0",
   agentSessionTabGroupCreateButton:
     "vui-routes-chatcodingroute agentSessionTabGroupCreateButton h-6 w-6 shrink-0",
+  agentSessionTabGroupPeek:
+    "vui-routes-chatcodingroute agentSessionTabGroupPeek flex w-[16rem] flex-col gap-2 p-0.5",
+  agentSessionTabGroupPalette:
+    "vui-routes-chatcodingroute agentSessionTabGroupPalette flex items-center gap-1.5",
+  agentSessionTabGroupSwatch:
+    "vui-routes-chatcodingroute agentSessionTabGroupSwatch h-4 min-h-4 w-4 min-w-4 shrink-0 rounded-full border border-transparent p-0 shadow-none",
+  agentSessionTabGroupSwatchActive:
+    "vui-routes-chatcodingroute agentSessionTabGroupSwatchActive ring-2 ring-[var(--fg-primary)] ring-offset-1 ring-offset-[var(--vui-surface-chat)]",
+  agentSessionTabGroupSwatchGray:
+    "vui-routes-chatcodingroute agentSessionTabGroupSwatchGray !bg-[hsl(220_10%_55%)]",
+  agentSessionTabGroupSwatchBlue:
+    "vui-routes-chatcodingroute agentSessionTabGroupSwatchBlue !bg-[hsl(212_72%_55%)]",
+  agentSessionTabGroupSwatchGreen:
+    "vui-routes-chatcodingroute agentSessionTabGroupSwatchGreen !bg-[hsl(148_55%_45%)]",
+  agentSessionTabGroupSwatchAmber:
+    "vui-routes-chatcodingroute agentSessionTabGroupSwatchAmber !bg-[hsl(38_85%_52%)]",
+  agentSessionTabGroupSwatchViolet:
+    "vui-routes-chatcodingroute agentSessionTabGroupSwatchViolet !bg-[hsl(268_60%_58%)]",
+  agentSessionTabGroupSwatchRose:
+    "vui-routes-chatcodingroute agentSessionTabGroupSwatchRose !bg-[hsl(340_70%_56%)]",
+  agentSessionTabGroupPeekList:
+    "vui-routes-chatcodingroute agentSessionTabGroupPeekList m-0 flex max-h-[14rem] list-none flex-col gap-0.5 overflow-y-auto p-0",
+  agentSessionTabGroupPeekItem:
+    "vui-routes-chatcodingroute agentSessionTabGroupPeekItem flex w-full min-w-0 items-center justify-start rounded-[var(--radius-control)] px-1.5 py-1 text-left text-[12px] text-[var(--fg-secondary)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)]",
+  agentSessionTabGroupPeekTitle:
+    "vui-routes-chatcodingroute agentSessionTabGroupPeekTitle truncate",
+  agentSessionTabGroupPeekHint:
+    "vui-routes-chatcodingroute agentSessionTabGroupPeekHint m-0 text-[11px] leading-snug text-[var(--fg-tertiary)]",
 } as const;
 
 export default styles;
