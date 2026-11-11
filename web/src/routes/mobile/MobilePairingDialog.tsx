@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 
 import { VButton, VDialog } from "../../components/vui";
 
+import styles from "./MobilePairingDialog.styles";
+
 const CONTROL_TOKEN_HEADER = "X-Vibelution-Control-Token";
 
 export type PairingCodeResponse = {
@@ -85,44 +87,44 @@ export function MobilePairingDialog({ open, onOpenChange, lang = "zh" }: MobileP
       onOpenChange={onOpenChange}
       title={zh ? "连接手机" : "Connect a phone"}
     >
-      <div className="flex flex-col gap-3 text-sm">
-        <p className="m-0 text-vui-fg-secondary">
+      <div className={styles.content}>
+        <p className={styles.hint}>
           {zh
             ? `在手机 App 里打开配对入口，输入下面的配对码。配对码 ${expiresMinutes} 分钟内有效，只能用一次。`
             : `Open the pairing screen in the phone app and enter the code below. It stays valid for ${expiresMinutes} minutes and works once.`}
         </p>
 
         {pending ? (
-          <p className="m-0 text-vui-fg-secondary">{zh ? "正在生成配对码…" : "Creating a pairing code…"}</p>
+          <p className={styles.hint}>{zh ? "正在生成配对码…" : "Creating a pairing code…"}</p>
         ) : null}
 
         {error ? (
-          <p className="m-0 text-vui-danger" role="alert">
+          <p className={styles.error} role="alert">
             {error}
           </p>
         ) : null}
 
         {code ? (
-          <div className="flex flex-col gap-2 rounded-vui-md border border-vui-border bg-vui-surface-sunken p-3">
-            <span className="text-xs uppercase tracking-wide text-vui-fg-tertiary">
+          <div className={styles.codeCard}>
+            <span className={styles.codeLabel}>
               {zh ? "配对码" : "Pairing code"}
             </span>
-            <span className="font-mono text-2xl font-semibold tracking-[0.2em] text-vui-fg-primary" data-testid="mobile-pairing-code">
+            <span className={styles.codeValue} data-testid="mobile-pairing-code">
               {code}
             </span>
-            <span className="text-xs text-vui-fg-tertiary">
+            <span className={styles.codeMeta}>
               {pairing ? `${pairing.host}:${pairing.port}` : ""}
             </span>
           </div>
         ) : null}
 
         {pairing ? (
-          <p className="m-0 break-all text-xs text-vui-fg-tertiary">
+          <p className={styles.payload}>
             {zh ? "扫码内容" : "Payload"}: <code>{pairing.payload}</code>
           </p>
         ) : null}
 
-        <div className="flex justify-end gap-2 pt-1">
+        <div className={styles.actions}>
           <VButton variant="secondary" onPress={() => onOpenChange(false)}>
             {zh ? "关闭" : "Close"}
           </VButton>
