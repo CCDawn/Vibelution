@@ -159,6 +159,7 @@ export function createConversationCodexSurface({
             text,
             assistantTurnIsStreaming(message),
             imageArtifactUrlsBeforeMessage.get(message.id),
+            message.id,
           )}
           {renderAssistantFileReferenceChips(message, text)}
         </section>

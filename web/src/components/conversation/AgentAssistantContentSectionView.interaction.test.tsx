@@ -130,7 +130,7 @@ describe("AgentAssistantContentSectionView long answer collapse", () => {
     });
   }
 
-  it("collapses an oversized answer by default with fade and ghost expand toggle", async () => {
+  it("keeps an oversized answer expanded by default and clamps only on demand", async () => {
     measuredHeight = ASSISTANT_MESSAGE_COLLAPSE_THRESHOLD_PX + 600;
     await renderView(
       <AgentAssistantContentSectionView>
@@ -140,11 +140,11 @@ describe("AgentAssistantContentSectionView long answer collapse", () => {
 
     const button = toggleButton();
     expect(button).not.toBeNull();
-    expect(button?.getAttribute("aria-expanded")).toBe("false");
-    expect(button?.textContent).toBe("展开回答");
+    expect(button?.getAttribute("aria-expanded")).toBe("true");
+    expect(button?.textContent).toBe("收起回答");
     expect(button?.className).toContain(styles.assistantCollapseToggle);
-    expect(contentWrapper()?.classList.contains("assistantMessageBodyClamped")).toBe(true);
-    expect(container?.querySelector(".assistantMessageCollapseFade")).not.toBeNull();
+    expect(contentWrapper()?.classList.contains("assistantMessageBodyWrap")).toBe(true);
+    expect(container?.querySelector(".assistantMessageCollapseFade")).toBeNull();
     expect(container?.textContent).toContain("一段非常长的助手回答");
   });
 
@@ -161,7 +161,7 @@ describe("AgentAssistantContentSectionView long answer collapse", () => {
     expect(container?.querySelector(".assistantMessageCollapseFade")).toBeNull();
   });
 
-  it("expands and re-collapses through the ghost toggle without re-measuring", async () => {
+  it("collapses and re-expands through the ghost toggle without re-measuring", async () => {
     measuredHeight = ASSISTANT_MESSAGE_COLLAPSE_THRESHOLD_PX + 600;
     await renderView(
       <AgentAssistantContentSectionView>
@@ -171,16 +171,16 @@ describe("AgentAssistantContentSectionView long answer collapse", () => {
 
     const readsAfterMount = layoutReads;
     await clickToggle();
-    expect(toggleButton()?.getAttribute("aria-expanded")).toBe("true");
-    expect(toggleButton()?.textContent).toBe("收起回答");
-    expect(contentWrapper()?.classList.contains("assistantMessageBodyWrap")).toBe(true);
-    expect(container?.querySelector(".assistantMessageCollapseFade")).toBeNull();
+    expect(toggleButton()?.getAttribute("aria-expanded")).toBe("false");
+    expect(toggleButton()?.textContent).toBe("展开回答");
+    expect(contentWrapper()?.classList.contains("assistantMessageBodyClamped")).toBe(true);
+    expect(container?.querySelector(".assistantMessageCollapseFade")).not.toBeNull();
     // Toggling is a class flip, not a layout read.
     expect(layoutReads).toBe(readsAfterMount);
 
     await clickToggle();
-    expect(toggleButton()?.getAttribute("aria-expanded")).toBe("false");
-    expect(contentWrapper()?.classList.contains("assistantMessageBodyClamped")).toBe(true);
+    expect(toggleButton()?.getAttribute("aria-expanded")).toBe("true");
+    expect(contentWrapper()?.classList.contains("assistantMessageBodyWrap")).toBe(true);
   });
 
   it("follows later growth from async media without a remount", async () => {
@@ -197,7 +197,9 @@ describe("AgentAssistantContentSectionView long answer collapse", () => {
       notifyResize();
     });
     expect(toggleButton()).not.toBeNull();
-    expect(contentWrapper()?.classList.contains("assistantMessageBodyClamped")).toBe(true);
+    // Growth past the threshold offers the toggle but never hides the answer
+    // the reader is already looking at.
+    expect(contentWrapper()?.classList.contains("assistantMessageBodyWrap")).toBe(true);
   });
 });
 

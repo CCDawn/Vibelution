@@ -1,3 +1,4 @@
+import { ChevronDown } from "lucide-react";
 import React, { ReactNode, useLayoutEffect, useRef, useState } from "react";
 
 import { useAppI18n } from "../../i18n/useAppI18n";
@@ -7,24 +8,40 @@ import styles from "./AgentAssistantContentSectionView.styles";
 
 type AgentAssistantContentSectionViewProps = {
   children: ReactNode;
+  /** Message identity, so an explicit expand/collapse survives remounts. */
+  messageId?: string;
 };
 
 /**
- * Assistant answer shell (markdown children pass-through). Mirrors the
- * ZCode-aligned long-message handling that the user bubble already has, so both
- * halves of the transcript keep a bounded row height: past the collapse
- * threshold the body clamps behind a bottom fade with a small ghost
- * expand/collapse toggle. Collapsed state is measurement-driven (ResizeObserver
- * natural height, including async media growth) and never persisted — every
- * mount starts collapsed again.
+ * Explicit user choices only. A message the reader never touched always opens
+ * expanded, which is why the default is not written here.
+ */
+const assistantAnswerExpansion = new Map<string, boolean>();
+
+function readAssistantAnswerExpansion(messageId?: string) {
+  if (!messageId) {
+    return true;
+  }
+  return assistantAnswerExpansion.get(messageId) ?? true;
+}
+
+/**
+ * Assistant answer shell (markdown children pass-through).
  *
- * A bounded answer is also what keeps virtualization honest. An unclamped 20 KB
- * answer measures thousands of pixels while the list estimates the row at a
- * fixed size; that gap is what stacks rows on top of each other for a frame
- * after a session switch.
+ * The answer is the content the reader asked for, so it opens expanded and only
+ * clamps after an explicit collapse. The bound exists to keep virtualization
+ * honest (an unclamped 20 KB answer measures thousands of pixels while the list
+ * estimates a fixed row height), not to hide the answer: the threshold, the
+ * bottom fade and the toggle are a viewport guard, and the user's own choice is
+ * what decides the state afterwards.
+ *
+ * Measurement is still ResizeObserver-driven (async media growth counts) and the
+ * clamp is only applied once the natural height is known to exceed the
+ * threshold, so a short answer never paints clamped for a frame.
  */
 export function AgentAssistantContentSectionView({
   children,
+  messageId,
 }: AgentAssistantContentSectionViewProps) {
   const { t } = useAppI18n({ domains: ["chat"] });
   const measuredContentRef = useRef<HTMLDivElement | null>(null);
@@ -33,8 +50,10 @@ export function AgentAssistantContentSectionView({
   // `null` means "not measured yet", which stays collapsed: a tall answer
   // should not paint at full height and then snap shut.
   const [overflows, setOverflows] = useState<boolean | null>(null);
-  const [expanded, setExpanded] = useState(false);
-  const collapsed = overflows !== false && !expanded;
+  const [expanded, setExpanded] = useState(() => readAssistantAnswerExpansion(messageId));
+  // `overflows === null` is "not measured yet": stay expanded instead of
+  // clamping on the first paint and snapping open a frame later.
+  const collapsed = overflows === true && !expanded;
 
   useLayoutEffect(() => {
     const element = measuredContentRef.current;
@@ -80,8 +99,22 @@ export function AgentAssistantContentSectionView({
           className={styles.assistantCollapseToggle}
           aria-expanded={expanded}
           data-testid="assistant-message-collapse-toggle"
-          onClick={() => setExpanded((current) => !current)}
+          onClick={() => {
+            setExpanded((current) => {
+              const next = !current;
+              if (messageId) {
+                assistantAnswerExpansion.set(messageId, next);
+              }
+              return next;
+            });
+          }}
         >
+          <ChevronDown
+            className={styles.assistantCollapseChevron}
+            data-assistant-content-collapse-chevron={expanded ? "expanded" : "collapsed"}
+            size={14}
+            aria-hidden="true"
+          />
           {expanded ? t("collapseAssistantMessage") : t("expandAssistantMessage")}
         </VNativeButton>
       ) : null}

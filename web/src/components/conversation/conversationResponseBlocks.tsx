@@ -116,6 +116,7 @@ export function createConversationResponseBlocks({
     content: string,
     isStreaming: boolean,
     duplicateImageUrls?: Set<string>,
+    messageId?: string,
   ) {
     if (!content) {
       return null;
@@ -143,7 +144,7 @@ export function createConversationResponseBlocks({
       return rendered;
     }
     return (
-      <AgentAssistantContentSectionView>{rendered}</AgentAssistantContentSectionView>
+      <AgentAssistantContentSectionView messageId={messageId}>{rendered}</AgentAssistantContentSectionView>
     );
   }
 
