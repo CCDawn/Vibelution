@@ -880,6 +880,12 @@ def _resume_interrupted_turn(
             },
             message_source="hot_restart_resume",
             include_started_turn_id=True,
+            # Accept the turn at the scheduler instead of waiting for its worker
+            # to start. The started-turn-id request made each resume block for
+            # the whole worker handshake, and because a single agent runs its
+            # turns serially five recoveries cost 43s of a restart. The light
+            # response still returns the turn id assigned at admission.
+            lightweight_response=True,
         )
     except Exception as exc:  # noqa: BLE001 - one bad resume must not stop the sweep
         summary["errorCount"] += 1
