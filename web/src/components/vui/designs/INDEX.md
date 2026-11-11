@@ -58,6 +58,7 @@
 | `VSessionSearchDialog` | [product/session-search-dialog.md](./product/session-search-dialog.md#vsessionsearchdialog) |
 | 会话标签关闭两段式确认 | [product/session-tab-close-confirm.md](./product/session-tab-close-confirm.md#会话标签关闭两段式确认) |
 | 会话标签急速连关窗口 | [product/session-tab-close-confirm.md](./product/session-tab-close-confirm.md#急速连关窗口rapid-close-burst) |
+| 会话页签分组 | [product/session-tab-groups.md](./product/session-tab-groups.md#会话页签分组) |
 | 会话起点卡 | [product/conversation-starter-cards.md](./product/conversation-starter-cards.md#会话起点卡) |
 | 内置斜杠命令 | [product/conversation-starter-cards.md](./product/conversation-starter-cards.md#内置斜杠命令) |
 | ConversationForkSessionDialog | [product/conversation.md](./product/conversation.md#conversationforksessiondialog) |

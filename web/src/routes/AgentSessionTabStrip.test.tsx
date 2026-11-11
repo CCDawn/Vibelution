@@ -791,4 +791,51 @@ describe("AgentSessionTabStrip two-stage close confirm", () => {
     expect(onDeleteSession.mock.calls[2]?.[0]?.id).toBe("session-third");
     expect(onDeleteSession.mock.calls[2]?.[1]).toEqual({ confirmed: true });
   });
+
+  it("renders sessions inside their group and keeps the ungrouped section last", () => {
+    localStorage.setItem(
+      "vibelution.agentSessionTabGroups.v1",
+      JSON.stringify({
+        "agent-1": {
+          groups: [{ id: "ga", name: "评审", collapsed: false }],
+          membership: { "session-child": "ga" },
+        },
+      }),
+    );
+    const markup = renderStrip();
+    expect(markup).toContain('data-session-tab-group="ga"');
+    expect(markup).toContain("评审");
+    expect(markup).toContain("未分组");
+    expect(markup.indexOf("评审")).toBeLessThan(markup.indexOf("未分组"));
+  });
+
+  it("hides the members of a collapsed group but keeps its header", () => {
+    localStorage.setItem(
+      "vibelution.agentSessionTabGroups.v1",
+      JSON.stringify({
+        "agent-1": {
+          groups: [{ id: "ga", name: "评审", collapsed: true }],
+          membership: { "session-child": "ga" },
+        },
+      }),
+    );
+    const markup = renderStrip();
+    expect(markup).toContain("评审");
+    expect(markup).not.toContain("子任务标题");
+  });
+
+  it("skips empty groups and always offers a create-group control", () => {
+    localStorage.setItem(
+      "vibelution.agentSessionTabGroups.v1",
+      JSON.stringify({
+        "agent-1": {
+          groups: [{ id: "ga", name: "空组", collapsed: false }],
+          membership: {},
+        },
+      }),
+    );
+    const markup = renderStrip();
+    expect(markup).not.toContain("空组");
+    expect(markup).toContain('aria-label="新建分组"');
+  });
 });

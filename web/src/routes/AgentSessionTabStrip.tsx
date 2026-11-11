@@ -1,8 +1,22 @@
-import { Bot, Check, GripVertical, LoaderCircle, Plus, SquareTerminal, X } from "lucide-react";
+import {
+  Bot,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  FolderPlus,
+  GripVertical,
+  LoaderCircle,
+  Pencil,
+  Plus,
+  SquareTerminal,
+  Trash2,
+  X,
+} from "lucide-react";
 import type { DragEvent, KeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { AgentInstance, SessionReferenceAttachment, SessionSummary, Team } from "../api/types";
+import type { AgentSessionTabGroupState } from "./agentSessionTabGroups";
 import { VButton, VIconButton, VNativeInput } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import { sessionAgentDisplayInfo } from "./agentDisplay";
@@ -14,6 +28,21 @@ import {
   persistAgentSessionTabOrder,
   reorderSessionIds,
 } from "./agentSessionTabOrder";
+import {
+  UNGROUPED_SECTION_ID,
+  assignSessionToTabGroup,
+  createAgentSessionTabGroup,
+  defaultAgentSessionTabGroupName,
+  deleteAgentSessionTabGroup,
+  pruneSessionTabGroupMembership,
+  readAgentSessionTabGroupState,
+  renameAgentSessionTabGroup,
+  resolveSessionTabGroupSections,
+  sessionTabGroupIdFor,
+  setAgentSessionTabGroupCollapsed,
+  writeAgentSessionTabGroupState,
+  type AgentSessionTabGroupSection,
+} from "./agentSessionTabGroups";
 import {
   resolveSessionActivityTone,
   sessionActivityLabel,
@@ -266,6 +295,482 @@ export function AgentSessionTabStrip({
     void manualOrderTick;
     return applyAgentSessionTabOrder(sessions, agentTabScopeId);
   })();
+  const [groupTick, setGroupTick] = useState(0);
+  const [groupDropTarget, setGroupDropTarget] = useState<string | null>(null);
+  const [renamingGroupId, setRenamingGroupId] = useState<string | null>(null);
+  const [groupNameDraft, setGroupNameDraft] = useState("");
+  const groupState = (() => {
+    void groupTick;
+    return readAgentSessionTabGroupState(agentTabScopeId);
+  })();
+  const applyGroupMutation = useCallback(
+    (mutate: (state: AgentSessionTabGroupState) => AgentSessionTabGroupState) => {
+      const current = readAgentSessionTabGroupState(agentTabScopeId);
+      const next = mutate(current);
+      if (next === current) {
+        return;
+      }
+      writeAgentSessionTabGroupState(agentTabScopeId, next);
+      setGroupTick((tick) => tick + 1);
+    },
+    [agentTabScopeId],
+  );
+  const groupSections = (() => {
+    const resolved = resolveSessionTabGroupSections(visibleSessions, groupState, {
+      ungroupedName: lang === "zh" ? "未分组" : "Ungrouped",
+    });
+    if (!renamingGroupId || resolved.some((section) => section.groupId === renamingGroupId)) {
+      return resolved;
+    }
+    // A freshly created group has no members yet; keep its header visible so the
+    // inline rename field has somewhere to live.
+    const pending = groupState.groups.find((group) => group.id === renamingGroupId);
+    if (!pending) {
+      return resolved;
+    }
+    const pendingSection: AgentSessionTabGroupSection = {
+      groupId: pending.id,
+      name: pending.name,
+      collapsed: false,
+      ungrouped: false,
+      sessions: [],
+    };
+    return [...resolved, pendingSection];
+  })();
+  const commitGroupDrop = useCallback(
+    (sectionGroupId: string) => {
+      const sessionId = dragOrderSessionId;
+      setGroupDropTarget(null);
+      setDropTarget(null);
+      if (!sessionId) {
+        return;
+      }
+      const targetGroupId = sectionGroupId === UNGROUPED_SECTION_ID ? null : sectionGroupId;
+      applyGroupMutation((state) => assignSessionToTabGroup(state, sessionId, targetGroupId));
+      setDragOrderSessionId(null);
+    },
+    [applyGroupMutation, dragOrderSessionId],
+  );
+  const startGroupCreate = useCallback(() => {
+    const current = readAgentSessionTabGroupState(agentTabScopeId);
+    const name = defaultAgentSessionTabGroupName(current, lang === "zh" ? "分组" : "Group");
+    const created = createAgentSessionTabGroup(current, name);
+    writeAgentSessionTabGroupState(agentTabScopeId, created.state);
+    setGroupTick((tick) => tick + 1);
+    setRenamingGroupId(created.groupId);
+    setGroupNameDraft(name);
+  }, [agentTabScopeId, lang]);
+  const startGroupRename = useCallback((section: AgentSessionTabGroupSection) => {
+    setRenamingGroupId(section.groupId);
+    setGroupNameDraft(section.name);
+  }, []);
+  const commitGroupRename = useCallback(
+    (groupId: string) => {
+      const next = groupNameDraft.trim();
+      setRenamingGroupId(null);
+      setGroupNameDraft("");
+      if (!next) {
+        return;
+      }
+      applyGroupMutation((state) => renameAgentSessionTabGroup(state, groupId, next));
+    },
+    [applyGroupMutation, groupNameDraft],
+  );
+  useEffect(() => {
+    if (!agentTabScopeId) {
+      return;
+    }
+    const current = readAgentSessionTabGroupState(agentTabScopeId);
+    const pruned = pruneSessionTabGroupMembership(
+      current,
+      visibleSessions.map((session) => session.id),
+    );
+    if (pruned === current) {
+      return;
+    }
+    writeAgentSessionTabGroupState(agentTabScopeId, pruned);
+    setGroupTick((tick) => tick + 1);
+  }, [agentTabScopeId, visibleSessions]);
+  const renderSessionTab = (session: SessionSummary, sectionGroupId: string) => {
+    const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
+    const sessionDisplay = sessionAgentDisplayInfo(session, sessionAgent, lang, resolveModelLabel);
+    const sessionStatus = session.status;
+    const needsApproval = approvalSessionIds.has(session.id);
+    const isRuntimeRunning = runtimeSessionIds.has(session.id);
+    const tabActive = activeSessionId === session.id && workspaceActiveTab === "agent" && !activeCliAgentRunId;
+    const statusTone = agentSessionStatusTone(String(sessionStatus || ""), {
+      needsApproval,
+      isRuntimeRunning,
+      session,
+      // Blue/unread clears for the open conversation, even if a file tab is in front.
+      isActive: activeSessionId === session.id,
+    });
+    const statusShortLabel = agentSessionStatusShortLabel(statusTone, lang);
+    const sessionTitle =
+      session.title
+      || sessionDisplay.name
+      || t("agentSession");
+    const sessionSummary =
+      session.taskSummary
+      || session.resultCard?.summary
+      || sessionDisplay.modelLabel
+      || "";
+    const sessionHoverTitle = [sessionTitle, statusShortLabel, sessionSummary, sessionDisplay.modelLabel]
+      .filter(Boolean)
+      .join(" · ");
+    const tabContextTarget = contextMenuSessionId === session.id;
+    const tabEditing = editingSessionId === session.id;
+    const keyboardIndex = keyboardTabs.findIndex((tab) => tab.kind === "session" && tab.id === session.id);
+    const sessionDeletePending = Boolean(
+      deletePending
+      || (deletePendingSessionId && deletePendingSessionId === session.id),
+    );
+    const deleteDisabled = sessionBlocksMutation(session) || sessionDeletePending;
+    const tabCloseArmed = !deleteDisabled && armedCloseSessionId === session.id;
+    const tabCloseTitle = deleteDisabled
+      ? t("deleteSessionBusy")
+      : tabCloseArmed
+        ? t("deleteSessionConfirmArmed")
+        : t("deleteSession");
+    const tabClassName = [
+      styles.agentSessionTab,
+      styles.agentSessionTabRoot,
+      tabActive ? styles.agentSessionTabActive : "",
+      tabContextTarget && !tabActive ? styles.agentSessionTabContextTarget : "",
+      tabEditing ? styles.agentSessionTabEditing : "",
+      dragOrderSessionId === session.id ? styles.agentSessionTabDragging : "",
+      dropTarget && dropTarget.sessionId === session.id
+        ? dropTarget.position === "before"
+          ? styles.agentSessionTabDropBefore
+          : styles.agentSessionTabDropAfter
+        : "",
+    ].filter(Boolean).join(" ");
+    const tabMainActionClassName = [
+      styles.agentSessionTabMainAction,
+      tabActive ? styles.agentSessionTabMainActionActive : "",
+      tabContextTarget && !tabActive ? styles.agentSessionTabMainActionContextTarget : "",
+    ].filter(Boolean).join(" ");
+    if (tabEditing) {
+      const sessionRenamePending = renamePending && renameSessionId === session.id;
+      return (
+        <div
+          key={session.id}
+          className={tabClassName}
+          role="presentation"
+          data-selected={tabActive ? "true" : undefined}
+          data-agent-session-tab-container
+          onContextMenu={(event) => onContextMenu(event, session)}
+        >
+          <span className={styles.agentSessionTabIcon} aria-hidden="true">
+            <Bot size={14} />
+          </span>
+          <VNativeInput
+            className={styles.agentSessionTabTitleInput}
+            value={editingSessionTitle}
+            maxLength={120}
+            autoFocus
+            placeholder={lang === "zh" ? "会话名称" : "Session name"}
+            onChange={(event) => onRenameTitleChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                onSubmitRename(session, { reason: "explicit" });
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                onCancelRename();
+              }
+            }}
+            onBlur={(event) => {
+              const nextFocus = event.relatedTarget;
+              if (nextFocus instanceof Node && event.currentTarget.closest("[data-agent-session-tab-container]")?.contains(nextFocus)) {
+                return;
+              }
+              onSubmitRename(session, { reason: "blur" });
+            }}
+            aria-label={t("renameSession")}
+          />
+          <span className={styles.agentSessionTabEditActions}>
+            <VIconButton
+              type="button"
+              variant="ghost"
+              className={styles.agentSessionTabEditButton}
+              onPress={() => onSubmitRename(session, { reason: "explicit" })}
+              isDisabled={sessionRenamePending}
+              title={t("saveSessionName")}
+              label={`${t("saveSessionName")} ${sessionTitle}`}
+              icon={<Check size={13} />}
+            />
+            <VIconButton
+              type="button"
+              variant="ghost"
+              className={styles.agentSessionTabEditButton}
+              onPress={onCancelRename}
+              isDisabled={sessionRenamePending}
+              title={t("cancelRenameSession")}
+              label={t("cancelRenameSession")}
+              icon={<X size={13} />}
+            />
+          </span>
+        </div>
+      );
+    }
+    const dragReferenceProps = {
+      draggable: true,
+      onDragStart: (event: DragEvent<HTMLDivElement>) => {
+        onDragReference(
+          event,
+          buildSessionReferencePayload(session, sessionDisplay.name, sessionSummary),
+        );
+        writePaneDock(event.dataTransfer, {
+          v: 1,
+          source: "session",
+          sessionId: session.id,
+          title: sessionTitle,
+        });
+        if (event.dataTransfer) {
+          event.dataTransfer.effectAllowed = "copyMove";
+        }
+      },
+    };
+    return (
+      <div
+        key={session.id}
+        className={`${tabClassName} ${styles.agentSessionTabClosable}`}
+        role="presentation"
+        data-selected={tabActive ? "true" : undefined}
+        data-agent-session-tab-container
+        {...dragReferenceProps}
+        onDragOver={(event) => {
+          if (!dragOrderSessionId) {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          event.dataTransfer.dropEffect = "move";
+          if (sessionTabGroupIdFor(groupState, dragOrderSessionId) !== sectionGroupId) {
+            // Cross-group drag: highlight the section instead of showing an
+            // insertion caret, because the drop moves the session, not the order.
+            setDropTarget(null);
+            setGroupDropTarget(sectionGroupId);
+            return;
+          }
+          const bounds = event.currentTarget.getBoundingClientRect();
+          const position = event.clientX < bounds.left + bounds.width / 2 ? "before" : "after";
+          setDropTarget((current) => (
+            current && current.sessionId === session.id && current.position === position
+              ? current
+              : { sessionId: session.id, position }
+          ));
+        }}
+        onDrop={(event) => {
+          if (!dragOrderSessionId) {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          if (sessionTabGroupIdFor(groupState, dragOrderSessionId) !== sectionGroupId) {
+            commitGroupDrop(sectionGroupId);
+            return;
+          }
+          const bounds = event.currentTarget.getBoundingClientRect();
+          const position = event.clientX < bounds.left + bounds.width / 2 ? "before" : "after";
+          commitTabOrderDrop(session.id, position);
+          setDropTarget(null);
+        }}
+        onDragLeave={() => {
+          setDropTarget((current) => (current?.sessionId === session.id ? null : current));
+        }}
+        onContextMenu={(event) => onContextMenu(event, session)}
+      >
+          <span
+            className={styles.agentSessionTabDragHandle}
+            aria-hidden="true"
+            draggable
+            title={lang === "zh" ? "拖拽调整会话顺序" : "Drag to reorder session"}
+            onDragStart={(event) => {
+              event.stopPropagation();
+              setDragOrderSessionId(session.id);
+              event.dataTransfer.effectAllowed = "move";
+              event.dataTransfer.setData(SESSION_TAB_ORDER_MIME, session.id);
+            }}
+            onDragEnd={() => {
+              setDragOrderSessionId(null);
+              setDropTarget(null);
+            }}
+          >
+            <GripVertical size={12} aria-hidden="true" />
+          </span>
+        <VButton
+          type="button"
+          contentLayout="plain"
+          className={tabMainActionClassName}
+          id={agentSessionTabElementId("session", session.id)}
+          role="tab"
+          aria-selected={tabActive}
+          aria-current={tabActive ? "true" : undefined}
+          tabIndex={keyboardIndex === activeKeyboardTabIndex ? 0 : -1}
+          onKeyDown={(event) => handleTabKeyDown(event, keyboardIndex)}
+          data-session-tab-active={tabActive ? "true" : "false"}
+          onPointerEnter={() => onPrefetchDirectSession?.(session.id)}
+          onFocus={() => onPrefetchDirectSession?.(session.id)}
+          onPress={() => {
+            if (activeSessionId === session.id) {
+              onSetActiveTab(session.id, "agent");
+              return;
+            }
+            onOpenDirectSession(session.id);
+          }}
+          title={sessionHoverTitle}
+          aria-label={
+            tabActive
+              ? (statusShortLabel
+                ? `${lang === "zh" ? "当前会话" : "Current session"}: ${sessionTitle} · ${statusShortLabel}`
+                : `${lang === "zh" ? "当前会话" : "Current session"}: ${sessionTitle}`)
+              : (statusShortLabel ? `${sessionTitle} · ${statusShortLabel}` : sessionTitle)
+          }
+        >
+          <span
+            className={[
+              styles.agentSessionTabIcon,
+              tabActive ? styles.agentSessionTabIconActive : "",
+            ].filter(Boolean).join(" ")}
+            aria-hidden="true"
+          >
+            <Bot size={14} />
+          </span>
+          <span className={styles.agentSessionTabTitleBlock}>
+            <span
+              className={[
+                styles.agentSessionTabTitle,
+                tabActive ? styles.agentSessionTabTitleActive : "",
+              ].filter(Boolean).join(" ")}
+            >{sessionTitle}</span>
+          </span>
+          {renderAgentSessionStatusSlot(statusTone)}
+        </VButton>
+        <SessionTeamBindingTag session={session} lang={lang} teams={teams} />
+        <VIconButton
+          type="button"
+          variant="ghost"
+          className={[
+            styles.agentSessionTabCloseButton,
+            tabCloseArmed ? styles.agentSessionTabCloseButtonArmed : "",
+          ].filter(Boolean).join(" ")}
+          data-session-tab-close-armed={tabCloseArmed ? "true" : undefined}
+          onClick={(event) => {
+            event.stopPropagation();
+            // Rapid-close burst: once one tab close was confirmed, an
+            // immediate × click on any tab is a deliberate close.
+            const inRapidCloseBurst = !tabCloseArmed && Date.now() < rapidCloseUntilRef.current;
+            if (tabCloseArmed || inRapidCloseBurst) {
+              disarmCloseConfirm();
+              rapidCloseUntilRef.current = Date.now() + RAPID_CLOSE_BURST_WINDOW_MS;
+              onDeleteSession(session, { confirmed: true });
+              return;
+            }
+            setArmedCloseSessionId(session.id);
+          }}
+          isDisabled={deleteDisabled}
+          title={tabCloseTitle}
+          label={`${tabCloseTitle} ${sessionTitle}`}
+          icon={<X size={13} />}
+        />
+      </div>
+    );
+  };
+
+  const renderSessionTabGroupHeader = (section: AgentSessionTabGroupSection) => {
+    const renaming = renamingGroupId === section.groupId;
+    const dropActive = groupDropTarget === section.groupId;
+    const sectionTitle = section.ungrouped
+      ? (lang === "zh" ? "未分组" : "Ungrouped")
+      : section.name;
+    const headerClassName = [
+      styles.agentSessionTabGroupHeader,
+      dropActive ? styles.agentSessionTabGroupHeaderDropTarget : "",
+    ].filter(Boolean).join(" ");
+    const collapseTitle = section.collapsed
+      ? (lang === "zh" ? "展开分组" : "Expand group")
+      : (lang === "zh" ? "折叠分组" : "Collapse group");
+    return (
+      <div
+        className={headerClassName}
+        data-session-tab-group-header={section.groupId}
+        data-session-tab-group-collapsed={section.collapsed ? "true" : undefined}
+      >
+        {section.ungrouped ? null : (
+          <VIconButton
+            type="button"
+            variant="ghost"
+            className={styles.agentSessionTabGroupAction}
+            onPress={() =>
+              applyGroupMutation((state) =>
+                setAgentSessionTabGroupCollapsed(state, section.groupId, !section.collapsed),
+              )
+            }
+            title={collapseTitle}
+            label={collapseTitle}
+            icon={section.collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+          />
+        )}
+        {renaming ? (
+          <VNativeInput
+            className={styles.agentSessionTabGroupNameInput}
+            value={groupNameDraft}
+            maxLength={40}
+            autoFocus
+            placeholder={lang === "zh" ? "分组名称" : "Group name"}
+            aria-label={lang === "zh" ? "分组名称" : "Group name"}
+            onChange={(event) => setGroupNameDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                commitGroupRename(section.groupId);
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setRenamingGroupId(null);
+                setGroupNameDraft("");
+              }
+            }}
+            onBlur={() => commitGroupRename(section.groupId)}
+          />
+        ) : (
+          <span className={styles.agentSessionTabGroupName}>{sectionTitle}</span>
+        )}
+        <span className={styles.agentSessionTabGroupCount}>{section.sessions.length}</span>
+        {section.ungrouped ? null : (
+          <>
+            <VIconButton
+              type="button"
+              variant="ghost"
+              className={styles.agentSessionTabGroupAction}
+              onPress={() => startGroupRename(section)}
+              title={lang === "zh" ? "重命名分组" : "Rename group"}
+              label={lang === "zh" ? "重命名分组" : "Rename group"}
+              icon={<Pencil size={11} />}
+            />
+            <VIconButton
+              type="button"
+              variant="ghost"
+              className={styles.agentSessionTabGroupAction}
+              onPress={() =>
+                applyGroupMutation((state) => deleteAgentSessionTabGroup(state, section.groupId))
+              }
+              title={
+                lang === "zh"
+                  ? "删除分组（会话回到未分组）"
+                  : "Delete group (sessions return to ungrouped)"
+              }
+              label={lang === "zh" ? "删除分组" : "Delete group"}
+              icon={<Trash2 size={11} />}
+            />
+          </>
+        )}
+      </div>
+    );
+  };
   const commitTabOrderDrop = useCallback((targetId: string, position: "before" | "after") => {
     if (!dragOrderSessionId || dragOrderSessionId === targetId) {
       setDragOrderSessionId(null);
@@ -412,283 +917,51 @@ export function AgentSessionTabStrip({
           onPaneDockDrop(payload);
         }}
       >
-      {visibleSessions.map((session) => {
-        const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
-        const sessionDisplay = sessionAgentDisplayInfo(session, sessionAgent, lang, resolveModelLabel);
-        const sessionStatus = session.status;
-        const needsApproval = approvalSessionIds.has(session.id);
-        const isRuntimeRunning = runtimeSessionIds.has(session.id);
-        const tabActive = activeSessionId === session.id && workspaceActiveTab === "agent" && !activeCliAgentRunId;
-        const statusTone = agentSessionStatusTone(String(sessionStatus || ""), {
-          needsApproval,
-          isRuntimeRunning,
-          session,
-          // Blue/unread clears for the open conversation, even if a file tab is in front.
-          isActive: activeSessionId === session.id,
-        });
-        const statusShortLabel = agentSessionStatusShortLabel(statusTone, lang);
-        const sessionTitle =
-          session.title
-          || sessionDisplay.name
-          || t("agentSession");
-        const sessionSummary =
-          session.taskSummary
-          || session.resultCard?.summary
-          || sessionDisplay.modelLabel
-          || "";
-        const sessionHoverTitle = [sessionTitle, statusShortLabel, sessionSummary, sessionDisplay.modelLabel]
-          .filter(Boolean)
-          .join(" · ");
-        const tabContextTarget = contextMenuSessionId === session.id;
-        const tabEditing = editingSessionId === session.id;
-        const keyboardIndex = keyboardTabs.findIndex((tab) => tab.kind === "session" && tab.id === session.id);
-        const sessionDeletePending = Boolean(
-          deletePending
-          || (deletePendingSessionId && deletePendingSessionId === session.id),
-        );
-        const deleteDisabled = sessionBlocksMutation(session) || sessionDeletePending;
-        const tabCloseArmed = !deleteDisabled && armedCloseSessionId === session.id;
-        const tabCloseTitle = deleteDisabled
-          ? t("deleteSessionBusy")
-          : tabCloseArmed
-            ? t("deleteSessionConfirmArmed")
-            : t("deleteSession");
-        const tabClassName = [
-          styles.agentSessionTab,
-          styles.agentSessionTabRoot,
-          tabActive ? styles.agentSessionTabActive : "",
-          tabContextTarget && !tabActive ? styles.agentSessionTabContextTarget : "",
-          tabEditing ? styles.agentSessionTabEditing : "",
-          dragOrderSessionId === session.id ? styles.agentSessionTabDragging : "",
-          dropTarget && dropTarget.sessionId === session.id
-            ? dropTarget.position === "before"
-              ? styles.agentSessionTabDropBefore
-              : styles.agentSessionTabDropAfter
-            : "",
-        ].filter(Boolean).join(" ");
-        const tabMainActionClassName = [
-          styles.agentSessionTabMainAction,
-          tabActive ? styles.agentSessionTabMainActionActive : "",
-          tabContextTarget && !tabActive ? styles.agentSessionTabMainActionContextTarget : "",
-        ].filter(Boolean).join(" ");
-        if (tabEditing) {
-          const sessionRenamePending = renamePending && renameSessionId === session.id;
-          return (
-            <div
-              key={session.id}
-              className={tabClassName}
-              role="presentation"
-              data-selected={tabActive ? "true" : undefined}
-              data-agent-session-tab-container
-              onContextMenu={(event) => onContextMenu(event, session)}
-            >
-              <span className={styles.agentSessionTabIcon} aria-hidden="true">
-                <Bot size={14} />
-              </span>
-              <VNativeInput
-                className={styles.agentSessionTabTitleInput}
-                value={editingSessionTitle}
-                maxLength={120}
-                autoFocus
-                placeholder={lang === "zh" ? "会话名称" : "Session name"}
-                onChange={(event) => onRenameTitleChange(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    onSubmitRename(session, { reason: "explicit" });
-                  }
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    onCancelRename();
-                  }
-                }}
-                onBlur={(event) => {
-                  const nextFocus = event.relatedTarget;
-                  if (nextFocus instanceof Node && event.currentTarget.closest("[data-agent-session-tab-container]")?.contains(nextFocus)) {
-                    return;
-                  }
-                  onSubmitRename(session, { reason: "blur" });
-                }}
-                aria-label={t("renameSession")}
-              />
-              <span className={styles.agentSessionTabEditActions}>
-                <VIconButton
-                  type="button"
-                  variant="ghost"
-                  className={styles.agentSessionTabEditButton}
-                  onPress={() => onSubmitRename(session, { reason: "explicit" })}
-                  isDisabled={sessionRenamePending}
-                  title={t("saveSessionName")}
-                  label={`${t("saveSessionName")} ${sessionTitle}`}
-                  icon={<Check size={13} />}
-                />
-                <VIconButton
-                  type="button"
-                  variant="ghost"
-                  className={styles.agentSessionTabEditButton}
-                  onPress={onCancelRename}
-                  isDisabled={sessionRenamePending}
-                  title={t("cancelRenameSession")}
-                  label={t("cancelRenameSession")}
-                  icon={<X size={13} />}
-                />
-              </span>
-            </div>
-          );
-        }
-        const dragReferenceProps = {
-          draggable: true,
-          onDragStart: (event: DragEvent<HTMLDivElement>) => {
-            onDragReference(
-              event,
-              buildSessionReferencePayload(session, sessionDisplay.name, sessionSummary),
-            );
-            writePaneDock(event.dataTransfer, {
-              v: 1,
-              source: "session",
-              sessionId: session.id,
-              title: sessionTitle,
-            });
-            if (event.dataTransfer) {
-              event.dataTransfer.effectAllowed = "copyMove";
+      {groupSections.map((section) => (
+        <div
+          key={section.groupId}
+          className={[
+            styles.agentSessionTabGroupSection,
+            section.collapsed ? styles.agentSessionTabGroupSectionCollapsed : "",
+          ].filter(Boolean).join(" ")}
+          data-session-tab-group={section.groupId}
+          data-session-tab-group-ungrouped={section.ungrouped ? "true" : undefined}
+          onDragOver={(event) => {
+            if (!dragOrderSessionId) {
+              return;
             }
-          },
-        };
-        return (
-          <div
-            key={session.id}
-            className={`${tabClassName} ${styles.agentSessionTabClosable}`}
-            role="presentation"
-            data-selected={tabActive ? "true" : undefined}
-            data-agent-session-tab-container
-            {...dragReferenceProps}
-            onDragOver={(event) => {
-              if (!dragOrderSessionId) {
-                return;
-              }
-              event.preventDefault();
-              event.stopPropagation();
-              event.dataTransfer.dropEffect = "move";
-              const bounds = event.currentTarget.getBoundingClientRect();
-              const position = event.clientX < bounds.left + bounds.width / 2 ? "before" : "after";
-              setDropTarget((current) => (
-                current && current.sessionId === session.id && current.position === position
-                  ? current
-                  : { sessionId: session.id, position }
-              ));
-            }}
-            onDrop={(event) => {
-              if (!dragOrderSessionId) {
-                return;
-              }
-              event.preventDefault();
-              event.stopPropagation();
-              const bounds = event.currentTarget.getBoundingClientRect();
-              const position = event.clientX < bounds.left + bounds.width / 2 ? "before" : "after";
-              commitTabOrderDrop(session.id, position);
-              setDropTarget(null);
-            }}
-            onDragLeave={() => {
-              setDropTarget((current) => (current?.sessionId === session.id ? null : current));
-            }}
-            onContextMenu={(event) => onContextMenu(event, session)}
-          >
-              <span
-                className={styles.agentSessionTabDragHandle}
-                aria-hidden="true"
-                draggable
-                title={lang === "zh" ? "拖拽调整会话顺序" : "Drag to reorder session"}
-                onDragStart={(event) => {
-                  event.stopPropagation();
-                  setDragOrderSessionId(session.id);
-                  event.dataTransfer.effectAllowed = "move";
-                  event.dataTransfer.setData(SESSION_TAB_ORDER_MIME, session.id);
-                }}
-                onDragEnd={() => {
-                  setDragOrderSessionId(null);
-                  setDropTarget(null);
-                }}
-              >
-                <GripVertical size={12} aria-hidden="true" />
-              </span>
-            <VButton
-              type="button"
-              contentLayout="plain"
-              className={tabMainActionClassName}
-              id={agentSessionTabElementId("session", session.id)}
-              role="tab"
-              aria-selected={tabActive}
-              aria-current={tabActive ? "true" : undefined}
-              tabIndex={keyboardIndex === activeKeyboardTabIndex ? 0 : -1}
-              onKeyDown={(event) => handleTabKeyDown(event, keyboardIndex)}
-              data-session-tab-active={tabActive ? "true" : "false"}
-              onPointerEnter={() => onPrefetchDirectSession?.(session.id)}
-              onFocus={() => onPrefetchDirectSession?.(session.id)}
-              onPress={() => {
-                if (activeSessionId === session.id) {
-                  onSetActiveTab(session.id, "agent");
-                  return;
-                }
-                onOpenDirectSession(session.id);
-              }}
-              title={sessionHoverTitle}
-              aria-label={
-                tabActive
-                  ? (statusShortLabel
-                    ? `${lang === "zh" ? "当前会话" : "Current session"}: ${sessionTitle} · ${statusShortLabel}`
-                    : `${lang === "zh" ? "当前会话" : "Current session"}: ${sessionTitle}`)
-                  : (statusShortLabel ? `${sessionTitle} · ${statusShortLabel}` : sessionTitle)
-              }
-            >
-              <span
-                className={[
-                  styles.agentSessionTabIcon,
-                  tabActive ? styles.agentSessionTabIconActive : "",
-                ].filter(Boolean).join(" ")}
-                aria-hidden="true"
-              >
-                <Bot size={14} />
-              </span>
-              <span className={styles.agentSessionTabTitleBlock}>
-                <span
-                  className={[
-                    styles.agentSessionTabTitle,
-                    tabActive ? styles.agentSessionTabTitleActive : "",
-                  ].filter(Boolean).join(" ")}
-                >{sessionTitle}</span>
-              </span>
-              {renderAgentSessionStatusSlot(statusTone)}
-            </VButton>
-            <SessionTeamBindingTag session={session} lang={lang} teams={teams} />
-            <VIconButton
-              type="button"
-              variant="ghost"
-              className={[
-                styles.agentSessionTabCloseButton,
-                tabCloseArmed ? styles.agentSessionTabCloseButtonArmed : "",
-              ].filter(Boolean).join(" ")}
-              data-session-tab-close-armed={tabCloseArmed ? "true" : undefined}
-              onClick={(event) => {
-                event.stopPropagation();
-                // Rapid-close burst: once one tab close was confirmed, an
-                // immediate × click on any tab is a deliberate close.
-                const inRapidCloseBurst = !tabCloseArmed && Date.now() < rapidCloseUntilRef.current;
-                if (tabCloseArmed || inRapidCloseBurst) {
-                  disarmCloseConfirm();
-                  rapidCloseUntilRef.current = Date.now() + RAPID_CLOSE_BURST_WINDOW_MS;
-                  onDeleteSession(session, { confirmed: true });
-                  return;
-                }
-                setArmedCloseSessionId(session.id);
-              }}
-              isDisabled={deleteDisabled}
-              title={tabCloseTitle}
-              label={`${tabCloseTitle} ${sessionTitle}`}
-              icon={<X size={13} />}
-            />
-          </div>
-        );
-      })}
+            event.preventDefault();
+            event.stopPropagation();
+            event.dataTransfer.dropEffect = "move";
+            setGroupDropTarget(section.groupId);
+          }}
+          onDragLeave={() => {
+            setGroupDropTarget((current) => (current === section.groupId ? null : current));
+          }}
+          onDrop={(event) => {
+            if (!dragOrderSessionId) {
+              return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            commitGroupDrop(section.groupId);
+          }}
+        >
+          {renderSessionTabGroupHeader(section)}
+          {section.collapsed
+            ? null
+            : section.sessions.map((session) => renderSessionTab(session, section.groupId))}
+        </div>
+      ))}
+      <VIconButton
+        type="button"
+        variant="ghost"
+        className={styles.agentSessionTabGroupCreateButton}
+        onPress={startGroupCreate}
+        title={lang === "zh" ? "新建分组" : "New group"}
+        label={lang === "zh" ? "新建分组" : "New group"}
+        icon={<FolderPlus size={14} />}
+      />
       {paneDockChips.map((chip) => {
         const tabClassName = [
           styles.agentSessionTab,

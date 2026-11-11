@@ -101,6 +101,24 @@ const styles = {
   // Inline tab rename field: strip dense form chrome so it reads as a tab title, not a dialog.
   agentSessionTabTitleInput:
     "vui-routes-chatcodingroute agentSessionTabTitleInput min-w-0 flex-1 !h-7 !min-h-7 !w-[8.5rem] max-w-[10rem] !rounded-[var(--radius-control)] !border-0 !bg-transparent !px-1.5 !py-0 ![font-size:var(--vui-font-xs)] !font-medium !leading-none !text-[var(--fg-primary)] !shadow-none placeholder:!font-normal placeholder:!text-[var(--fg-tertiary)] focus-visible:!outline-none focus-visible:!ring-1 focus-visible:!ring-[color-mix(in_srgb,var(--accent-cool)_55%,transparent)]",
+  agentSessionTabGroupSection:
+    "vui-routes-chatcodingroute agentSessionTabGroupSection inline-flex min-w-0 shrink-0 items-center gap-1 rounded-[8px] border border-[color-mix(in_srgb,var(--fg-primary)_10%,transparent)] bg-[color-mix(in_srgb,var(--fg-primary)_3%,transparent)] px-1 py-0.5",
+  agentSessionTabGroupSectionCollapsed:
+    "vui-routes-chatcodingroute agentSessionTabGroupSectionCollapsed",
+  agentSessionTabGroupHeader:
+    "vui-routes-chatcodingroute agentSessionTabGroupHeader inline-flex h-7 min-w-0 shrink-0 items-center gap-0.5 rounded-[6px] px-1 text-[11px] text-[var(--fg-secondary)]",
+  agentSessionTabGroupHeaderDropTarget:
+    "vui-routes-chatcodingroute agentSessionTabGroupHeaderDropTarget bg-[color-mix(in_srgb,var(--fg-primary)_10%,transparent)] ring-1 ring-[color-mix(in_srgb,var(--fg-primary)_35%,transparent)]",
+  agentSessionTabGroupName:
+    "vui-routes-chatcodingroute agentSessionTabGroupName max-w-[9rem] truncate font-medium",
+  agentSessionTabGroupNameInput:
+    "vui-routes-chatcodingroute agentSessionTabGroupNameInput h-6 w-[7.5rem] min-w-0 text-[11px]",
+  agentSessionTabGroupCount:
+    "vui-routes-chatcodingroute agentSessionTabGroupCount tabular-nums text-[10px] text-[var(--fg-tertiary)]",
+  agentSessionTabGroupAction:
+    "vui-routes-chatcodingroute agentSessionTabGroupAction h-6 w-5 shrink-0",
+  agentSessionTabGroupCreateButton:
+    "vui-routes-chatcodingroute agentSessionTabGroupCreateButton h-6 w-6 shrink-0",
 } as const;
 
 export default styles;
