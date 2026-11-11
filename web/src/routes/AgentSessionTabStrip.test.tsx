@@ -804,9 +804,12 @@ describe("AgentSessionTabStrip two-stage close confirm", () => {
     );
     const markup = renderStrip();
     expect(markup).toContain('data-session-tab-group="ga"');
-    expect(markup).toContain("评审");
-    expect(markup).toContain("未分组");
-    expect(markup.indexOf("评审")).toBeLessThan(markup.indexOf("未分组"));
+    // An expanded group keeps no permanent label: the name only shows when collapsed.
+    expect(markup).not.toContain("评审");
+    // The ungrouped bucket is the default surface and renders no header label at all.
+    expect(markup).not.toContain("未分组");
+    expect(markup.indexOf('data-session-tab-group="ga"'))
+      .toBeLessThan(markup.indexOf('data-session-tab-group="ungrouped"'));
   });
 
   it("hides the members of a collapsed group but keeps its header", () => {

@@ -4,7 +4,6 @@ import {
   ChevronDown,
   ChevronRight,
   FolderPlus,
-  GripVertical,
   LoaderCircle,
   Pencil,
   Plus,
@@ -17,7 +16,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { AgentInstance, SessionReferenceAttachment, SessionSummary, Team } from "../api/types";
 import type { AgentSessionTabGroupState } from "./agentSessionTabGroups";
-import { VButton, VHoverCard, VIconButton, VNativeInput } from "../components/vui";
+import { VButton, VDropdownMenu, VHoverCard, VIconButton, VNativeInput } from "../components/vui";
+import type { VDropdownMenuItem } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import { sessionAgentDisplayInfo } from "./agentDisplay";
 
@@ -110,6 +110,17 @@ export type CliAgentRunTab = {
  * Selection is a separate border/ring on the active tab.
  */
 export type AgentSessionStatusTone = SessionActivityTone;
+
+/** Header aggregate: approval outranks running, then error, unread, idle. */
+const GROUP_TONE_PRIORITY: Record<AgentSessionStatusTone, number> = {
+  approval: 6,
+  running: 5,
+  stopping: 4,
+  error: 3,
+  completed: 2,
+  paused: 1,
+  none: 0,
+};
 
 export function agentSessionStatusTone(
   status: string,
@@ -584,6 +595,18 @@ export function AgentSessionTabStrip({
         data-agent-session-tab-container
         data-session-tab-merge-target={mergeTargetSessionId === session.id ? "true" : undefined}
         {...dragReferenceProps}
+        onDragStart={(event) => {
+          // The whole tab is the drag handle: keep the reference payload and add the
+          // reorder/group payload, so the drop target decides between reference,
+          // reorder and regrouping.
+          dragReferenceProps.onDragStart(event);
+          setDragOrderSessionId(session.id);
+          event.dataTransfer.setData(SESSION_TAB_ORDER_MIME, session.id);
+        }}
+        onDragEnd={() => {
+          setDragOrderSessionId(null);
+          setDropTarget(null);
+        }}
         onDragOver={(event) => {
           if (!dragOrderSessionId) {
             return;
@@ -639,24 +662,6 @@ export function AgentSessionTabStrip({
         }}
         onContextMenu={(event) => onContextMenu(event, session)}
       >
-          <span
-            className={styles.agentSessionTabDragHandle}
-            aria-hidden="true"
-            draggable
-            title={lang === "zh" ? "拖拽调整会话顺序" : "Drag to reorder session"}
-            onDragStart={(event) => {
-              event.stopPropagation();
-              setDragOrderSessionId(session.id);
-              event.dataTransfer.effectAllowed = "move";
-              event.dataTransfer.setData(SESSION_TAB_ORDER_MIME, session.id);
-            }}
-            onDragEnd={() => {
-              setDragOrderSessionId(null);
-              setDropTarget(null);
-            }}
-          >
-            <GripVertical size={12} aria-hidden="true" />
-          </span>
         <VButton
           type="button"
           contentLayout="plain"
@@ -736,40 +741,31 @@ export function AgentSessionTabStrip({
     );
   };
 
+  const groupSessionTone = (session: SessionSummary): AgentSessionStatusTone =>
+    agentSessionStatusTone(String(session.status || ""), {
+      needsApproval: approvalSessionIds.has(session.id),
+      isRuntimeRunning: runtimeSessionIds.has(session.id),
+      session,
+      isActive: activeSessionId === session.id,
+    });
+
+  const groupAggregateTone = (section: AgentSessionTabGroupSection): AgentSessionStatusTone =>
+    section.sessions.reduce<AgentSessionStatusTone>(
+      (worst, session) => {
+        const tone = groupSessionTone(session);
+        return GROUP_TONE_PRIORITY[tone] > GROUP_TONE_PRIORITY[worst] ? tone : worst;
+      },
+      "none",
+    );
+
+  /** Hover surface carries members only; configuration lives in the right-click menu. */
   const renderGroupPeek = (section: AgentSessionTabGroupSection) => {
-    const activeColor = sessionTabGroupColorFor(groupState, section.groupId);
-    const mergeHint = lang === "zh"
-      ? "把一个页签拖到另一个页签中间，即可合并成新分组"
-      : "Drop a tab on the middle of another tab to merge them into a new group";
+    const peekTitle = section.ungrouped
+      ? (lang === "zh" ? "未分组" : "Ungrouped")
+      : section.name;
     return (
       <div className={styles.agentSessionTabGroupPeek}>
-        {section.ungrouped ? null : (
-          <div className={styles.agentSessionTabGroupPalette}>
-            {TAB_GROUP_COLORS.map((color) => (
-              <VButton
-                key={color}
-                type="button"
-                contentLayout="plain"
-                className={[
-                  styles.agentSessionTabGroupSwatch,
-                  GROUP_SWATCH_CLASS[color],
-                  activeColor === color ? styles.agentSessionTabGroupSwatchActive : "",
-                ].filter(Boolean).join(" ")}
-                aria-label={color}
-                title={color}
-                onPress={() =>
-                  applyGroupMutation((state) =>
-                    setAgentSessionTabGroupColor(
-                      state,
-                      section.groupId,
-                      activeColor === color ? null : color,
-                    ),
-                  )
-                }
-              />
-            ))}
-          </div>
-        )}
+        <p className={styles.agentSessionTabGroupPeekHeading}>{peekTitle}</p>
         <ul className={styles.agentSessionTabGroupPeekList}>
           {section.sessions.map((session) => (
             <li key={session.id}>
@@ -780,21 +776,27 @@ export function AgentSessionTabStrip({
                 title={session.title}
                 onPress={() => onOpenDirectSession(session.id)}
               >
+                {renderAgentSessionStatusSlot(groupSessionTone(session))}
                 <span className={styles.agentSessionTabGroupPeekTitle}>{session.title}</span>
               </VButton>
             </li>
           ))}
         </ul>
-        <p className={styles.agentSessionTabGroupPeekHint}>{mergeHint}</p>
       </div>
     );
   };
   const renderSessionTabGroupHeader = (section: AgentSessionTabGroupSection) => {
+    // The ungrouped bucket is the default surface: no header, no label, no chrome.
+    if (section.ungrouped) {
+      return null;
+    }
     const renaming = renamingGroupId === section.groupId;
     const dropActive = groupDropTarget === section.groupId;
     const sectionTitle = section.ungrouped
       ? (lang === "zh" ? "未分组" : "Ungrouped")
       : section.name;
+    const aggregateTone = groupAggregateTone(section);
+    const activeColor = sessionTabGroupColorFor(groupState, section.groupId);
     const headerClassName = [
       styles.agentSessionTabGroupHeader,
       dropActive ? styles.agentSessionTabGroupHeaderDropTarget : "",
@@ -802,11 +804,65 @@ export function AgentSessionTabStrip({
     const collapseTitle = section.collapsed
       ? (lang === "zh" ? "展开分组" : "Expand group")
       : (lang === "zh" ? "折叠分组" : "Collapse group");
+    const menu = groupMenu && groupMenu.groupId === section.groupId ? groupMenu : null;
+    const menuItems: VDropdownMenuItem[] = [
+      {
+        id: "rename",
+        label: lang === "zh" ? "重命名分组" : "Rename group",
+        icon: <Pencil size={12} />,
+        onSelect: () => startGroupRename(section),
+      },
+      ...TAB_GROUP_COLORS.map((color) => ({
+        id: `color-${color}`,
+        label: (
+          <span className={styles.agentSessionTabGroupMenuItem}>
+            <span
+              className={[
+                styles.agentSessionTabGroupSwatch,
+                GROUP_SWATCH_CLASS[color],
+                activeColor === color ? styles.agentSessionTabGroupSwatchActive : "",
+              ].filter(Boolean).join(" ")}
+              aria-hidden="true"
+            />
+            {color}
+          </span>
+        ),
+        onSelect: () =>
+          applyGroupMutation((state) =>
+            setAgentSessionTabGroupColor(state, section.groupId, activeColor === color ? null : color),
+          ),
+      })),
+      {
+        id: "collapse",
+        label: collapseTitle,
+        icon: section.collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />,
+        onSelect: () =>
+          applyGroupMutation((state) =>
+            setAgentSessionTabGroupCollapsed(state, section.groupId, !section.collapsed),
+          ),
+      },
+      {
+        id: "delete",
+        label: lang === "zh" ? "删除分组" : "Delete group",
+        icon: <Trash2 size={12} />,
+        onSelect: () =>
+          applyGroupMutation((state) => deleteAgentSessionTabGroup(state, section.groupId)),
+      },
+    ];
     return (
       <div
         className={headerClassName}
         data-session-tab-group-header={section.groupId}
         data-session-tab-group-collapsed={section.collapsed ? "true" : undefined}
+        data-session-tab-group-tone={aggregateTone}
+        onContextMenu={(event) => {
+          if (section.ungrouped) {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          setGroupMenu({ groupId: section.groupId, x: event.clientX, y: event.clientY });
+        }}
       >
         {section.ungrouped ? null : (
           <VIconButton
@@ -823,6 +879,7 @@ export function AgentSessionTabStrip({
             icon={section.collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
           />
         )}
+        {renderAgentSessionStatusSlot(aggregateTone)}
         {renaming ? (
           <VNativeInput
             className={styles.agentSessionTabGroupNameInput}
@@ -845,7 +902,7 @@ export function AgentSessionTabStrip({
             }}
             onBlur={() => commitGroupRename(section.groupId)}
           />
-        ) : (
+        ) : section.ungrouped || section.collapsed ? (
           <VHoverCard
             side="bottom"
             align="start"
@@ -856,36 +913,23 @@ export function AgentSessionTabStrip({
           >
             <span className={styles.agentSessionTabGroupName}>{sectionTitle}</span>
           </VHoverCard>
-        )}
-        <span className={styles.agentSessionTabGroupCount}>{section.sessions.length}</span>
-        {section.ungrouped ? null : (
-          <>
-            <VIconButton
-              type="button"
-              variant="ghost"
-              className={styles.agentSessionTabGroupAction}
-              onPress={() => startGroupRename(section)}
-              title={lang === "zh" ? "重命名分组" : "Rename group"}
-              label={lang === "zh" ? "重命名分组" : "Rename group"}
-              icon={<Pencil size={11} />}
-            />
-            <VIconButton
-              type="button"
-              variant="ghost"
-              className={styles.agentSessionTabGroupAction}
-              onPress={() =>
-                applyGroupMutation((state) => deleteAgentSessionTabGroup(state, section.groupId))
+        ) : null}
+        {section.collapsed || section.ungrouped ? (
+          <span className={styles.agentSessionTabGroupCount}>{section.sessions.length}</span>
+        ) : null}
+        {menu ? (
+          <VDropdownMenu
+            open
+            position={{ x: menu.x, y: menu.y }}
+            items={menuItems}
+            aria-label={lang === "zh" ? "分组设置" : "Group settings"}
+            onOpenChange={(next) => {
+              if (!next) {
+                setGroupMenu(null);
               }
-              title={
-                lang === "zh"
-                  ? "删除分组（会话回到未分组）"
-                  : "Delete group (sessions return to ungrouped)"
-              }
-              label={lang === "zh" ? "删除分组" : "Delete group"}
-              icon={<Trash2 size={11} />}
-            />
-          </>
-        )}
+            }}
+          />
+        ) : null}
       </div>
     );
   };
@@ -907,6 +951,8 @@ export function AgentSessionTabStrip({
   const tabGroupRef = useRef<HTMLDivElement>(null);
   // Two-stage inline confirm for tab close: at most one armed control at a time.
   const [armedCloseSessionId, setArmedCloseSessionId] = useState<string | null>(null);
+  /** Right-click config surface for a tab group: rename / colour / collapse / delete. */
+  const [groupMenu, setGroupMenu] = useState<{ groupId: string; x: number; y: number } | null>(null);
   const rapidCloseUntilRef = useRef(0);
   const disarmCloseConfirm = useCallback(() => setArmedCloseSessionId(null), []);
   useEffect(() => {

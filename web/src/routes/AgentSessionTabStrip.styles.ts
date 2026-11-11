@@ -119,6 +119,10 @@ const styles = {
     "vui-routes-chatcodingroute agentSessionTabGroupAction h-6 w-5 shrink-0",
   agentSessionTabGroupCreateButton:
     "vui-routes-chatcodingroute agentSessionTabGroupCreateButton h-6 w-6 shrink-0",
+  agentSessionTabGroupPeekHeading:
+    "vui-routes-chatcodingroute agentSessionTabGroupPeekHeading m-0 truncate px-1.5 pb-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--fg-tertiary)]",
+  agentSessionTabGroupMenuItem:
+    "vui-routes-chatcodingroute agentSessionTabGroupMenuItem inline-flex min-w-0 items-center gap-2",
   agentSessionTabGroupPeek:
     "vui-routes-chatcodingroute agentSessionTabGroupPeek flex w-[16rem] flex-col gap-2 p-0.5",
   agentSessionTabGroupPalette:
