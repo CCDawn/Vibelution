@@ -9,6 +9,7 @@ import { useChatStartupPresentation } from "./useChatStartupPresentation";
 import { LazyConversationView } from "../../components/conversation/LazyConversationView";
 import {
   createComposerDraftStore,
+  registerComposerDraftStore,
   syncComposerDraftStoreFromUpstream,
 } from "../../components/conversation/composerDraftStore";
 import type { ComposerQueueItem } from "../../components/conversation/composerFollowupQueueModel";
@@ -298,6 +299,11 @@ export const ChatConversationComposerBridge = memo(function ChatConversationComp
   useEffect(() => {
     syncComposerDraftStoreFromUpstream(draftStore, composer.value);
   }, [composer.value, draftStore]);
+  // The submit path can clear the upstream draft without a state change:
+  // typing reaches `composer.value` after the typing pause, so a submit
+  // inside that window leaves both values empty and this sync never runs.
+  // Registration lets the submit path clear the mounted store directly.
+  useEffect(() => registerComposerDraftStore(sessionId, draftStore), [draftStore, sessionId]);
 
   return (
     <LazyConversationView

@@ -1,6 +1,10 @@
 import { useMutation, type QueryClient, type UseMutationResult } from "@tanstack/react-query";
 import { clearLiveComposerDraft, clearLiveComposerDraftIfEquals, readLiveComposerDraft, writeLiveComposerDraft } from "./composerLiveDraft";
 import {
+  clearRegisteredComposerDraft,
+  restoreRegisteredComposerDraft,
+} from "../../components/conversation/composerDraftStore";
+import {
   useRef,
   type Dispatch,
   type SetStateAction,
@@ -134,6 +138,9 @@ export function restoreSubmittedDraftAfterFailure(
   if (liveDraft === null || liveDraft === "") {
     writeLiveComposerDraft(sessionId, content);
   }
+  // The composer island owns the visible text and was cleared when the
+  // submit started, so the failure has to put it back there as well.
+  restoreRegisteredComposerDraft(sessionId, content);
   setSessionDrafts((current) => restoreSubmittedDraftIfComposerStillEmpty(current, sessionId, content));
 }
 
@@ -862,6 +869,7 @@ export function useChatComposerTurnMutations({
         [variables.sessionId]: "",
       }));
       clearLiveComposerDraftIfEquals(variables.sessionId, variables.content);
+      clearRegisteredComposerDraft(variables.sessionId, variables.content);
       removeStoredSessionDraft(variables.sessionId);
       setSessionImageAttachments((current) => clearSessionImageAttachments(current, variables.sessionId));
       setSessionReferenceAttachments((current) => clearSessionReferenceAttachments(current, variables.sessionId));
@@ -1238,6 +1246,7 @@ export function useChatComposerTurnMutations({
         [variables.sessionId]: "",
       }));
       clearLiveComposerDraftIfEquals(variables.sessionId, variables.content);
+      clearRegisteredComposerDraft(variables.sessionId, variables.content);
       removeStoredSessionDraft(variables.sessionId);
       syncSessionDetail(nextDetail);
       if (variables.steeredQueuedTurnId) {

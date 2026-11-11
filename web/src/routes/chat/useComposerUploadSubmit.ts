@@ -41,6 +41,7 @@ import { postSubmitTelemetry } from "./chatSubmitTelemetry";
 import { loadTurnStatusTailConfig } from "./turnStatusTailModel";
 import type { EditResubmitVariables, SubmitTurnVariables } from "./useChatComposerSubmit";
 import { clearLiveComposerDraft, clearLiveComposerDraftIfEquals } from "./composerLiveDraft";
+import { clearRegisteredComposerDraft } from "../../components/conversation/composerDraftStore";
 
 export type UseSubmitTurnWithAttachmentsInput = {
   queryClient: QueryClient;
@@ -151,6 +152,10 @@ export function useSubmitTurnWithAttachments({
     setSessionDrafts((current) => clearSessionDraftForSubmittedTurn(current, sessionId));
     // The submitted draft must not resurrect from localStorage after a reload.
     clearLiveComposerDraftIfEquals(sessionId, content);
+    // The composer island owns the visible text, and the upstream clear above
+    // may not be a state change when the draft was still inside the typing
+    // pause, so clear the mounted store from the submit itself.
+    clearRegisteredComposerDraft(sessionId, content);
     removeStoredSessionDraft(sessionId);
     let draftRecoveryGuard = beginSessionDraftRecoveryGuard(sessionId);
     let mutationOwnsRecoveryGuard = false;
