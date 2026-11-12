@@ -871,29 +871,45 @@ export function useChatComposerSubmitActions({
     releaseComposerSessionPreviewUrls,
   ]);
 
-  // Editing survives list re-projections. This effect used to drop the target
-  // whenever the projected row identity changed (a stop, a branch re-key, a new
-  // turn landing), which blanked the editor mid-edit and disabled its submit.
-  // The target now belongs to the session that opened it, so only leaving that
-  // session clears it.
+  // Editing survives a re-projection, but not a consumed edit. The old guard
+  // matched only the projected row id, so a stop or a branch re-key retired the
+  // editor mid-edit and left the user with an empty box and a dead submit. The
+  // row is recognised by its id OR its original text now: the text survives the
+  // re-key, and a landed edit-resubmit replaces it, which is the real exit.
+  const editTargetSessionRef = useRef<string | null>(null);
   useEffect(() => {
-    setSessionEditTargets((current) => {
-      if (!activeSessionId || !(activeSessionId in current)) {
-        return current;
-      }
-      const { [activeSessionId]: _removed, ...remaining } = current;
-      return remaining;
-    });
-  }, [activeSessionId, setSessionEditTargets]);
-
-  // A landed edit-resubmit consumes its target: the row it pointed at has been
-  // replaced by the edited copy, so the editor leaves with the submission. This
-  // is the explicit exit that the removed message-id inference used to fake.
-  useEffect(() => {
-    if (!activeSessionId || !editResubmitMutation.isSuccess) {
+    const leavingSession = editTargetSessionRef.current !== (activeSessionId ?? null);
+    editTargetSessionRef.current = activeSessionId ?? null;
+    if (!activeSessionId) {
       return;
     }
-    if (editResubmitMutation.variables?.sessionId !== activeSessionId) {
+    if (leavingSession) {
+      setSessionEditTargets((current) => {
+        if (!(activeSessionId in current)) {
+          return current;
+        }
+        const { [activeSessionId]: _removed, ...remaining } = current;
+        return remaining;
+      });
+      return;
+    }
+    if (!detail || !activeEditTarget) {
+      return;
+    }
+    const original = String(activeEditTarget.original ?? "").trim();
+    const targetId = String(activeEditTarget.messageId ?? "").trim();
+    const stillThere = (detail.messages ?? []).some((message) => {
+      if (String(message.role ?? "").toLowerCase() !== "user") {
+        return false;
+      }
+      const messageId = String(message.id ?? "").trim();
+      if (targetId && messageId === targetId) {
+        return true;
+      }
+      const messageContent = String((message as { content?: unknown }).content ?? "").trim();
+      return Boolean(original) && messageContent === original;
+    });
+    if (stillThere) {
       return;
     }
     setSessionEditTargets((current) => {
@@ -903,12 +919,7 @@ export function useChatComposerSubmitActions({
       const { [activeSessionId]: _removed, ...remaining } = current;
       return remaining;
     });
-  }, [
-    activeSessionId,
-    editResubmitMutation.isSuccess,
-    editResubmitMutation.variables?.sessionId,
-    setSessionEditTargets,
-  ]);
+  }, [activeEditTarget, activeSessionId, detail, setSessionEditTargets]);
 
   const handleCancelEditMessage = useCallback(() => {
     if (!activeSessionId) {
