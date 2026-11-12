@@ -14,12 +14,15 @@ import { resolvePollingInterval, usePageVisibility } from "../../app/pollingPoli
 import { useShellI18n } from "../../i18n/useShellI18n";
 import { auxTaskKindLabel } from "../../routes/auxConversations/auxTaskPresentation";
 import { requestChatRightRailOpen } from "../../routes/chat/chatRightRailRequests";
-import { VButton, VChip, VConfirmDialog } from "../vui";
+import { VButton, VChip, VConfirmDialog, VRouteLinkButton } from "../vui";
 import styles from "./ConversationRunningTasks.styles";
 import { activeTurnElapsedSeconds } from "./conversationActiveTurnStatusPresentation";
 
 /** Foreground poll beat; hidden conversation panes stop polling. */
 export const CONVERSATION_RUNNING_TASKS_POLL_MS = 4_000;
+
+/** Fallback jump target for running tasks that do not own a child session. */
+const AUX_CENTER_HREF = "/aux";
 
 const COPY = {
   zh: {

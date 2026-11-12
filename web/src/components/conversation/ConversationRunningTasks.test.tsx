@@ -144,11 +144,11 @@ describe("ConversationRunningTasks", () => {
       expect.anything(),
       expect.anything(),
     );
-    // The ended directory probe is session-scoped too and only reads the count
-    // (its cache entry starts unseeded, so the previous-payload arg is undefined).
-    expect(runtimeApi.listRuntimeTasksRevisionAware).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "ended", parentSessionId: SESSION_ID, limit: 1 }),
-      undefined,
+    // Finished tasks live in the right rail task panel, so the tail strip
+    // never probes the ended bucket.
+    expect(runtimeApi.listRuntimeTasksRevisionAware).not.toHaveBeenCalledWith(
+      expect.objectContaining({ status: "ended" }),
+      expect.anything(),
       expect.anything(),
     );
     expect(host?.querySelector('[data-conversation-running-tasks="true"]')).toBeNull();
