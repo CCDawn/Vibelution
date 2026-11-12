@@ -330,6 +330,11 @@ def _classify_hot_restart_wake_failure(error_type: str, message: str) -> str:
     return "permanent"
 
 
+# Lifecycle commands do not refuse because work is active. A planned close or
+# restart first persists what the interruption needs (chat turns get a
+# restart-resume marker, evolution runs settle through their shutdown owner),
+# then retires the backend. Only hot restart keeps a scoped guard: it wakes one
+# requester's turn and must not silently disturb other sessions.
 def _filter_active_work_for_lifecycle_command(
     active_work_runs: list[dict[str, str]],
     *,
@@ -337,7 +342,7 @@ def _filter_active_work_for_lifecycle_command(
     args: dict[str, Any],
 ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
     if command_type != "hot_restart_workbench":
-        return active_work_runs, []
+        return [], active_work_runs
     requester = _hot_restart_requester_fields(args)
     blocked: list[dict[str, str]] = []
     allowed: list[dict[str, str]] = []
@@ -349,8 +354,43 @@ def _filter_active_work_for_lifecycle_command(
     return blocked, allowed
 
 
+def _settle_active_work_for_lifecycle_stop() -> dict[str, Any]:
+    """Persist interruption state before a lifecycle command retires the backend.
+
+    Chat turns get the same restart-resume marker a graceful shutdown writes;
+    evolution runs settle through their existing shutdown owner. This runs
+    before the fast-path stop so a terminated process cannot drop that state.
+    """
+
+    from core.web.services import session_service
+
+    try:
+        session_service.record_restart_resume_pending(replace=False)
+    except Exception as exc:  # noqa: BLE001 - resume is best effort, stop still proceeds
+        _append_event(
+            "workbench.lifecycle.restart_resume_record_failed",
+            {"errorType": type(exc).__name__, "message": str(exc)},
+        )
+    return {"closedEvolutionRuns": _close_active_evolution_runs_for_shutdown()}
+
+
+def _resolve_backend_freshness_for_open() -> dict[str, Any]:
+    """Best-effort running-vs-disk code check for launcher takeover."""
+
+    try:
+        from core.web.services.code_freshness import resolve_backend_freshness
+
+        return resolve_backend_freshness(project_root=PROJECT_ROOT)
+    except Exception as exc:  # noqa: BLE001 - freshness must never block opening
+        _append_event(
+            "workbench.open.backend_freshness_failed",
+            {"errorType": type(exc).__name__, "message": str(exc)},
+        )
+        return {"available": False, "reason": type(exc).__name__}
+
+
 def _runtime_manager_active_work_runs() -> list[dict[str, str]]:
-    """Return active project work that must block destructive lifecycle commands."""
+    """Return active work that a lifecycle stop interrupts and settles."""
 
     items: list[dict[str, str]] = []
     seen: set[tuple[str, str]] = set()
@@ -3198,6 +3238,34 @@ class RuntimeManagerDaemon:
                     }
                 },
             )
+        if bool(args.get("deferredUntilActiveWorkClear")) and active_work_runs:
+            event_verb = {
+                "close_workbench": "close",
+                "restart_workbench": "restart",
+                "hot_restart_workbench": "hot_restart",
+                "toggle_workbench": "toggle",
+            }.get(command_type, "lifecycle")
+            _append_event(
+                f"workbench.{event_verb}.deferred_active_work_wait",
+                {
+                    "commandId": command_id,
+                    "commandType": command_type,
+                    "reason": str(args.get("reason") or "").strip(),
+                    "source": str(args.get("source") or "").strip(),
+                    "activeWorkCount": len(active_work_runs),
+                    "activeWorkRuns": active_work_runs[:8],
+                },
+            )
+            return {
+                "commandId": command_id,
+                "accepted": True,
+                "completed": False,
+                "ok": False,
+                "message": _ACTIVE_WORK_LIFECYCLE_BLOCKED_MESSAGE,
+                "deferCommandUntilActiveWorkClear": True,
+                "activeWorkRuns": active_work_runs,
+                "allowedActiveWorkRuns": [],
+            }
         blocked_active_work_runs, allowed_active_work_runs = _filter_active_work_for_lifecycle_command(
             active_work_runs,
             command_type=command_type,
@@ -3208,8 +3276,18 @@ class RuntimeManagerDaemon:
                 event_verb = {
                     "hot_restart_workbench": "hot_restart",
                 }.get(command_type, "lifecycle")
+                event_name = (
+                    "allowed_requester_active_work"
+                    if command_type == "hot_restart_workbench"
+                    else "interrupting_active_work"
+                )
+                settle = (
+                    _settle_active_work_for_lifecycle_stop()
+                    if command_type != "hot_restart_workbench"
+                    else {}
+                )
                 _append_event(
-                    f"workbench.{event_verb}.allowed_requester_active_work",
+                    f"workbench.{event_verb}.{event_name}",
                     {
                         "commandId": command_id,
                         "commandType": command_type,
@@ -3217,6 +3295,7 @@ class RuntimeManagerDaemon:
                         "source": str(args.get("source") or "").strip(),
                         "allowedActiveWorkCount": len(allowed_active_work_runs),
                         "allowedActiveWorkRuns": allowed_active_work_runs[:8],
+                        **settle,
                     },
                 )
             return None
@@ -3237,18 +3316,6 @@ class RuntimeManagerDaemon:
         }
         if allowed_active_work_runs:
             event_payload["allowedActiveWorkRuns"] = allowed_active_work_runs[:8]
-        if bool(args.get("deferredUntilActiveWorkClear")):
-            _append_event(f"workbench.{event_verb}.deferred_active_work_wait", event_payload)
-            return {
-                "commandId": command_id,
-                "accepted": True,
-                "completed": False,
-                "ok": False,
-                "message": _ACTIVE_WORK_LIFECYCLE_BLOCKED_MESSAGE,
-                "deferCommandUntilActiveWorkClear": True,
-                "activeWorkRuns": blocked_active_work_runs,
-                "allowedActiveWorkRuns": allowed_active_work_runs,
-            }
         _append_event(f"workbench.{event_verb}.blocked_active_work", event_payload)
         return self._finish_command(
             command_id,
@@ -3682,6 +3749,49 @@ class RuntimeManagerDaemon:
         should_probe_before_launch = _open_should_probe_before_launch(workbench, no_browser=no_browser)
         observation = _observe_workbench_for_open(workbench) if should_probe_before_launch else {}
         frontend_release_changed = build_preflight.get("skipped") is False
+        backend_freshness = _resolve_backend_freshness_for_open()
+        backend_code_stale = bool(
+            backend_freshness.get("available") and backend_freshness.get("behind")
+        )
+        if (
+            backend_code_stale
+            and observation
+            and str(observation.get("observedState") or "closed") in {"open", "partial"}
+            and not force_frontend_rebuild
+        ):
+            # A launcher takeover must not keep serving the previous checkout.
+            # The settle step records resumable turns before the backend retires,
+            # so active work no longer vetoes switching to current code.
+            blocked = self._block_lifecycle_command_if_active_work(
+                command_id=command_id,
+                command_type="restart_workbench",
+                args={
+                    **args,
+                    "reason": str(args.get("reason") or "backend_code_stale"),
+                    "source": str(args.get("source") or "runtime_manager"),
+                },
+            )
+            if blocked is not None:
+                return blocked
+            restart_data = self._perform_restart_workbench(
+                command_id=command_id,
+                args={
+                    **args,
+                    "reason": str(args.get("reason") or "backend_code_stale"),
+                    "source": str(args.get("source") or "runtime_manager"),
+                    "skipFrontendBuildPreflight": True,
+                },
+            )
+            return self._finish_command(
+                command_id,
+                ok=True,
+                message="Workbench restarted with the current backend code.",
+                result_data={
+                    "buildPreflight": build_preflight,
+                    "backendFreshness": backend_freshness,
+                    **restart_data,
+                },
+            )
         if frontend_release_changed and observation and str(observation.get("observedState") or "closed") in {"open", "partial"}:
             # Publishing a new release invalidates the already-open fast path:
             # the running backend has pinned the previous dist.  Reuse the
