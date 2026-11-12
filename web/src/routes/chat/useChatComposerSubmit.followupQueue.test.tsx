@@ -440,8 +440,8 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
     expect(submitTurn).not.toHaveBeenCalled();
   });
 
-  it("queues images and references with the follow-up instead of rejecting them", async () => {
-    const { mutations, submitTurn } = createMutations();
+  it("steers images and references into the running turn instead of rejecting them", async () => {
+    const { mutations, submitTurn, guidance } = createMutations();
     let errors: Record<string, string> = {};
     await mount({
       busy: true,
@@ -469,18 +469,19 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
       await Promise.resolve();
     });
 
-    expect(submitTurn).toHaveBeenCalledTimes(1);
-    expect(submitTurn.mock.calls[0]?.[0]).toMatchObject({
+    expect(guidance).toHaveBeenCalledTimes(1);
+    expect(guidance.mock.calls[0]?.[0]).toMatchObject({
       sessionId: "session-1",
       content: "describe this image",
-      queuedBehindActiveTurn: true,
+      mode: "safe",
       attachmentIds: ["artifact-1"],
     });
+    expect(submitTurn).not.toHaveBeenCalled();
     expect(errors["session-1"] ?? "").not.toContain("仅支持文本");
   });
 
   it.each(["image", "attachment", "reference"] as const)(
-    "queues an empty-text %s submission instead of steering the existing queue",
+    "steers an empty-text %s submission into the running turn instead of the existing queue",
     async (payloadKind) => {
       const { mutations, submitTurn, guidance } = createMutations();
       await mount({
@@ -519,16 +520,16 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
         await Promise.resolve();
       });
 
-      expect(submitTurn).toHaveBeenCalledTimes(1);
-      expect(submitTurn.mock.calls[0]?.[0]).toMatchObject({
+      expect(guidance).toHaveBeenCalledTimes(1);
+      expect(guidance.mock.calls[0]?.[0]).toMatchObject({
         sessionId: "session-1",
         content: "",
-        queuedBehindActiveTurn: true,
+        mode: "safe",
         ...(payloadKind === "reference"
           ? { references: [expect.objectContaining({ sessionId: "referenced" })] }
           : { attachmentIds: [payloadKind === "image" ? "artifact-1" : "artifact-document-1"] }),
       });
-      expect(guidance).not.toHaveBeenCalled();
+      expect(submitTurn).not.toHaveBeenCalled();
     },
   );
 

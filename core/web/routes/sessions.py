@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Literal
+from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request, status
@@ -368,6 +368,8 @@ class SessionStopPayload(BaseModel):
 class SessionGuidancePayload(BaseModel):
     content: str = ""
     mode: str = "safe"
+    attachmentIds: list[str] = Field(default_factory=list)
+    references: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class SessionUpdatePayload(BaseModel):
@@ -1529,7 +1531,13 @@ def session_trust_development_tools(session_id: str, request_id: str) -> dict:
 )
 def session_submit_guidance(session_id: str, payload: SessionGuidancePayload) -> dict:
     try:
-        return submit_session_guidance(session_id, payload.content, mode=payload.mode)
+        return submit_session_guidance(
+            session_id,
+            payload.content,
+            mode=payload.mode,
+            attachment_ids=payload.attachmentIds,
+            references=payload.references,
+        )
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except SessionValidationError as exc:

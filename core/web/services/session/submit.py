@@ -1132,8 +1132,21 @@ def _append_initial_session_journal_markers(
     }
 
 
-def submit_session_guidance(session_id: str, content: str, *, mode: str = "safe") -> dict:
-    """Record operator guidance for a running turn, optionally interrupting it."""
+def submit_session_guidance(
+    session_id: str,
+    content: str,
+    *,
+    mode: str = "safe",
+    attachment_ids: list[str] | None = None,
+    references: list[dict[str, Any]] | None = None,
+) -> dict:
+    """Record operator guidance for a running turn, optionally interrupting it.
+
+    Guidance rides the same EVENT_USER_MESSAGE payload as a normal turn, so
+    attachments and session references are resolved here instead of being
+    dropped. The running model picks them up on its next request, which keeps
+    an insert-with-attachment equivalent to an insert-with-text.
+    """
 
     s = _service()
     lang = s.get_web_language()
@@ -1146,7 +1159,11 @@ def submit_session_guidance(session_id: str, content: str, *, mode: str = "safe"
         raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
 
     guidance_text = str(content or "").strip()
-    if not guidance_text:
+    normalized_attachment_ids = [
+        str(item).strip() for item in (attachment_ids or []) if str(item or "").strip()
+    ]
+    normalized_references = [dict(item) for item in (references or []) if isinstance(item, dict)]
+    if not guidance_text and not normalized_attachment_ids and not normalized_references:
         raise s.SessionValidationError(s.text_for(lang, zh="引导内容不能为空。", en="Guidance content cannot be empty."))
 
     normalized_mode = str(mode or "").strip().lower().replace("-", "_")
@@ -1196,6 +1213,66 @@ def submit_session_guidance(session_id: str, content: str, *, mode: str = "safe"
         )
 
     guidance_kind = "user_interrupt_guidance" if normalized_mode == "interrupt" else "user_guidance"
+    guidance_attachments: list[dict[str, Any]] = []
+    guidance_references: list[dict[str, Any]] = []
+    if normalized_attachment_ids or normalized_references:
+        guidance_conversation = s.load_session_chat_state(s.PROJECT_ROOT, conversation_id)
+        if guidance_conversation is None:
+            raise s.SessionNotFoundError(
+                s.text_for(lang, zh="未找到当前会话。", en="Session not found.")
+            )
+        turn_attachment_ids, secret_attachment_ids = _partition_secret_attachment_ids(
+            normalized_attachment_ids
+        )
+        image_ids, document_ids = document_attachments.partition_session_attachment_ids(
+            guidance_conversation,
+            turn_attachment_ids,
+        )
+        guidance_attachments = [
+            *s._resolve_session_image_attachments(
+                conversation_id,
+                image_ids,
+                conversation=guidance_conversation,
+            ),
+            *document_attachments._resolve_session_document_attachments(
+                conversation_id,
+                document_ids,
+                conversation=guidance_conversation,
+            ),
+        ]
+        guidance_agent_id = str(
+            guidance_conversation.get("agent_id") or guidance_conversation.get("agentId") or ""
+        ).strip()
+        guidance_agent = (
+            s.get_agent(guidance_agent_id, include_archived=False) if guidance_agent_id else None
+        )
+        guidance_attachments = [
+            *guidance_attachments,
+            *(
+                {**row, "artifactId": row["attachmentId"]}
+                for row in _resolve_secret_attachment_rows(secret_attachment_ids, agent=guidance_agent)
+            ),
+        ]
+        session_reference_rows, knowledge_file_rows = (
+            conversation_references.partition_conversation_references(normalized_references)
+        )
+        guidance_references = [
+            *s._resolve_session_references(
+                conversation_id,
+                session_reference_rows,
+                conversations=_session_reference_conversation_rows(
+                    s,
+                    conversation_id,
+                    guidance_conversation,
+                    session_reference_rows,
+                ),
+                lang=lang,
+            ),
+            *conversation_references.strip_reference_content(
+                conversation_references.normalize_knowledge_file_references(knowledge_file_rows),
+                keep_quote=True,
+            ),
+        ]
     if active_turn_id:
         from . import turn_steer
 
@@ -1218,8 +1295,8 @@ def submit_session_guidance(session_id: str, content: str, *, mode: str = "safe"
                 status="recorded",
                 payload={
                     "content": guidance_text,
-                    "attachments": [],
-                    "references": [],
+                    "attachments": guidance_attachments,
+                    "references": guidance_references,
                     "metadata": {
                         "kind": guidance_kind,
                         "source": "steer",

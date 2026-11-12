@@ -7,7 +7,8 @@ import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction 
 import type { QueryClient } from "@tanstack/react-query";
 
 import { queryKeys } from "../../api/queryKeys";
-import type { ConversationAttachment, SessionDetail, SessionModelSelection, SessionReferenceAttachment } from "../../api/types";
+import type { ConversationAttachment, SessionDetail, SessionGuidanceMode, SessionModelSelection, SessionReferenceAttachment } from "../../api/types";
+
 import {
   createOptimisticActiveTurnLayer,
   setActiveTurnLayerForSession,
@@ -69,9 +70,22 @@ export type UseSubmitTurnWithAttachmentsInput = {
   setSessionDrafts: Dispatch<SetStateAction<Record<string, string>>>;
   setActiveTurnLayersBySession?: Dispatch<SetStateAction<Record<string, ActiveTurnLayerState>>>;
   submitTurnMutation: { mutate: (variables: SubmitTurnVariables) => void };
+  sessionGuidanceMutation?: {
+    mutate: (
+      variables: {
+        sessionId: string;
+        content: string;
+        mode: SessionGuidanceMode;
+        attachmentIds?: string[];
+        references?: SessionReferenceAttachment[];
+      },
+      options?: { onError?: () => void },
+    ) => void;
+  };
 };
 
 export function useSubmitTurnWithAttachments({
+  sessionGuidanceMutation,
   queryClient,
   lang,
   describeError,
@@ -104,6 +118,7 @@ export function useSubmitTurnWithAttachments({
     clientSubmissionId: string,
     queuedBehindActiveTurn = false,
     modelSelection: SessionModelSelection | null = null,
+    steerIntoActiveTurn = false,
   ) => {
     if (!isMountedRef.current || isModelParametersSavePendingNow()) {
       return;
@@ -313,6 +328,30 @@ export function useSubmitTurnWithAttachments({
           clientSubmissionId,
         },
       );
+      if (
+        steerIntoActiveTurn
+        && sessionGuidanceMutation
+        && (content || uploadedAttachmentIds.length || references.length)
+      ) {
+        // Codex steer with attachment parity: the upload already produced real
+        // attachment ids, so the guidance POST carries them and the running model
+        // reads text, images and references together on its next request.
+        sessionGuidanceMutation.mutate(
+          {
+            sessionId: submittedSessionId,
+            content,
+            mode: "safe",
+            attachmentIds: uploadedAttachmentIds,
+            references,
+          },
+          {
+            onError: () => {
+              if (isMountedRef.current) restoreAttachmentsAfterFailure();
+            },
+          },
+        );
+        return;
+      }
       submitTurnMutation.mutate({
         sessionId: submittedSessionId,
         clientSubmissionId,

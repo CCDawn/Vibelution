@@ -549,6 +549,7 @@ export function useChatComposerSubmitActions({
     setSessionDrafts,
     setActiveTurnLayersBySession,
     submitTurnMutation,
+    sessionGuidanceMutation,
   });
 
   const {
@@ -606,30 +607,36 @@ export function useChatComposerSubmitActions({
         }));
         return;
       }
-      // Codex steer: plain text joins the running turn as safe guidance instead of
-      // waiting for the drain, so the agent keeps working and picks the sentence up
-      // on its next model request. Guidance cannot carry attachments or session
-      // references, so those still queue behind the current turn.
-      if (!companionAgentId && !hasAttachmentsOrReferences) {
-        sessionGuidanceMutation.mutate({
-          sessionId: activeSessionId,
+      if (companionAgentId) {
+        // Companion turns keep the queue: their mailbox owns delivery order and
+        // guidance must not reorder it.
+        void submitTurnWithAttachments(
+          activeSessionId,
           content,
-          mode: "safe",
-        });
+          [],
+          [],
+          mentalModelEnabledForNextTurn,
+          runtimeStatusEnabledForNextTurn,
+          createClientSubmissionId(activeSessionId),
+          true,
+          turnModelSelection,
+        );
         return;
       }
-      // The backend owns the queue: this POST lands in the server queue when the
-      // requested turn is still running and drains after the turn settles.
+      // Codex steer: text, images and session references all join the running turn
+      // as safe guidance instead of waiting for the drain. The upload hook resolves
+      // attachment ids first, so the model reads them on its next request.
       void submitTurnWithAttachments(
         activeSessionId,
         content,
-        companionAgentId ? [] : activeImageAttachments,
-        companionAgentId ? [] : activeReferenceAttachments,
+        activeImageAttachments,
+        activeReferenceAttachments,
         mentalModelEnabledForNextTurn,
         runtimeStatusEnabledForNextTurn,
         createClientSubmissionId(activeSessionId),
         true,
         turnModelSelection,
+        true,
       );
       return;
     }

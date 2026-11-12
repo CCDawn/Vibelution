@@ -1222,14 +1222,18 @@ export function useChatComposerTurnMutations({
         sessionId,
         content,
         mode,
+        attachmentIds,
+        references,
       }: {
         sessionId: string;
         content: string;
         mode: SessionGuidanceMode;
         steeredQueuedTurnId?: string;
+        attachmentIds?: string[];
+        references?: SessionReferenceAttachment[];
       },
     ) =>
-      submitSessionGuidance(sessionId, { content, mode }),
+      submitSessionGuidance(sessionId, { content, mode, attachmentIds, references }),
     onMutate: (variables) => ({
       telemetry: startUserAction("session_guidance_submit", {
         sessionId: variables.sessionId,

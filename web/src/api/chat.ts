@@ -1,5 +1,5 @@
 import { fetchJson, fetchJsonWithTimeout, isFetchJsonHttpError } from "./client";
-import type {
+import type { SessionReferenceAttachment,
   ChatRoomDetail,
   ChatRoomMode,
   ChatRoomPurpose,
@@ -765,7 +765,12 @@ export function forkSessionFromNode(
 
 export function submitSessionGuidance(
   sessionId: string,
-  payload: { content: string; mode: SessionGuidanceMode },
+  payload: {
+    content: string;
+    mode: SessionGuidanceMode;
+    attachmentIds?: string[];
+    references?: SessionReferenceAttachment[];
+  },
 ): Promise<SessionDetail> {
   return fetchJson<SessionDetail>(
     `/api/sessions/${encodeURIComponent(sessionId)}/guidance`,
