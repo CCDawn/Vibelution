@@ -10303,84 +10303,95 @@ def test_force_stop_snapshots_share_canonical_lifecycle_fields_for_every_kind(tm
     assert "runtimeStatus" not in stored
 
 
-def test_handle_close_workbench_blocks_active_chat_turn_before_close(monkeypatch):
-    runtime_daemon = daemon.RuntimeManagerDaemon()
-    state = {
-        "command": {"activeCommandId": "cmd-close"},
-        "workbench": {
-            "desiredState": "open",
-            "observedState": "open",
-            "phase": "steady",
+def test_lifecycle_commands_interrupt_active_work_instead_of_blocking():
+    runs = [
+        {"kind": "chat_turn", "runId": "chat-live", "status": "running", "sessionId": "session-a"},
+        {"kind": "formal_run", "runId": "formal-live", "status": "running"},
+    ]
+
+    blocked, allowed = daemon._filter_active_work_for_lifecycle_command(
+        runs,
+        command_type="close_workbench",
+        args={"reason": "launcher_stop"},
+    )
+
+    assert blocked == []
+    assert allowed == runs
+
+
+def test_settle_active_work_records_chat_turn_resume_before_stop(monkeypatch):
+    from core.web.services import session_service
+
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "record_restart_resume_pending",
+        lambda **kwargs: calls.append(kwargs),
+    )
+    monkeypatch.setattr(
+        daemon,
+        "_close_active_evolution_runs_for_shutdown",
+        lambda: [{"kind": "self_evolution_run", "runId": "evo-live", "status": "stopped"}],
+    )
+
+    result = daemon._settle_active_work_for_lifecycle_stop()
+
+    assert calls == [{"replace": False}]
+    assert result["closedEvolutionRuns"][0]["runId"] == "evo-live"
+
+
+@pytest.mark.parametrize(
+    ("freshness", "expected"),
+    [
+        ({"available": True, "reason": "", "behind": False}, True),
+        ({"available": True, "reason": "", "behind": True}, False),
+        ({"available": False, "reason": "no_running_fingerprint"}, False),
+        ({"available": False, "reason": "git_probe_failed"}, True),
+    ],
+)
+def test_electron_window_open_reuses_backend_only_when_it_runs_current_code(
+    monkeypatch, freshness, expected
+):
+    monkeypatch.setattr(
+        workbench_controller,
+        "observe_workbench",
+        lambda **kwargs: {
+            "backendHealthy": True,
+            "backendObserved": True,
+            "backendPortConflict": False,
         },
-    }
-    events: list[tuple[str, dict]] = []
-    close_calls: list[str] = []
-
-    monkeypatch.setattr(daemon, "load_state", lambda: state)
-    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
-    monkeypatch.setattr(daemon, "observe_workbench", lambda: {"observedState": "open"})
+    )
     monkeypatch.setattr(
-        daemon,
-        "_runtime_manager_active_work_runs",
-        lambda: [{"kind": "chat_turn", "runId": "chat-live", "status": "running", "sessionId": "session-a"}],
+        "core.web.services.code_freshness.resolve_backend_freshness",
+        lambda **kwargs: freshness,
     )
-    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+
+    reused = workbench_controller._can_reuse_backend_for_electron_window_open(
+        action="internal-start",
+        session={"desktopSessionId": "desktop-live"},
+    )
+
+    assert reused is expected
+
+
+def test_electron_window_open_does_not_reuse_unhealthy_backend(monkeypatch):
     monkeypatch.setattr(
-        daemon,
-        "close_workbench",
-        lambda: close_calls.append("close") or subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
-    )
-
-    result = runtime_daemon._handle_close_workbench(
-        command_id="cmd-close",
-        args={"reason": "launcher_stop", "source": "launcher_ps", "stopManager": True},
-    )
-
-    assert result["ok"] is False
-    assert result["errorType"] == "ActiveWorkBlocked"
-    assert result["message"] == "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
-    assert result["activeWorkRuns"]["items"][0]["runId"] == "chat-live"
-    assert close_calls == []
-    assert events[0][0] == "workbench.close.blocked_active_work"
-    assert events[0][1]["activeWorkCount"] == 1
-    assert state["lastError"]["scope"] == "active_work"
-    assert state["workbench"]["phase"] != "failed"
-
-
-def test_handle_toggle_workbench_blocks_active_chat_turn_when_open(monkeypatch):
-    runtime_daemon = daemon.RuntimeManagerDaemon()
-    state = {
-        "command": {"activeCommandId": "cmd-toggle"},
-        "workbench": {
-            "desiredState": "open",
-            "observedState": "open",
-            "phase": "steady",
+        workbench_controller,
+        "observe_workbench",
+        lambda **kwargs: {
+            "backendHealthy": False,
+            "backendObserved": True,
+            "backendPortConflict": False,
         },
-    }
-    events: list[tuple[str, dict]] = []
-    close_calls: list[str] = []
-
-    monkeypatch.setattr(daemon, "load_state", lambda: state)
-    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
-    monkeypatch.setattr(daemon, "observe_workbench", lambda: {"observedState": "open"})
-    monkeypatch.setattr(
-        daemon,
-        "_runtime_manager_active_work_runs",
-        lambda: [{"kind": "chat_turn", "runId": "chat-live", "status": "running", "sessionId": "session-a"}],
-    )
-    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
-    monkeypatch.setattr(
-        daemon,
-        "close_workbench",
-        lambda: close_calls.append("close") or subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
     )
 
-    result = runtime_daemon._handle_toggle_workbench(command_id="cmd-toggle", args={"reason": "launcher_toggle"})
-
-    assert result["ok"] is False
-    assert result["errorType"] == "ActiveWorkBlocked"
-    assert close_calls == []
-    assert events[0][0] == "workbench.toggle.blocked_active_work"
+    assert (
+        workbench_controller._can_reuse_backend_for_electron_window_open(
+            action="internal-start",
+            session={"desktopSessionId": "desktop-live"},
+        )
+        is False
+    )
 
 
 def test_handle_close_workbench_closes_active_evolution_runs(monkeypatch):

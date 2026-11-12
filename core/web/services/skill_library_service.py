@@ -741,6 +741,209 @@ def _read_text(path: Path) -> str:
         return ""
 
 
+GIT_SOURCE_KIND = "git_repo"
+
+
+def _git_subprocess_kwargs() -> dict[str, Any]:
+    """Windows must never pop a console for git; same policy as windowless helpers."""
+
+    import subprocess
+
+    kwargs: dict[str, Any] = {}
+    if os.name != "nt":
+        return kwargs
+    kwargs["creationflags"] = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = subprocess.SW_HIDE
+    kwargs["startupinfo"] = startupinfo
+    return kwargs
+
+
+def _run_git(args: list[str], *, cwd: Path | None = None) -> str:
+    import subprocess
+
+    from core.infrastructure.no_console_git import resolve_git_executable
+
+    completed = subprocess.run(
+        [resolve_git_executable(), *args],
+        cwd=str(cwd) if cwd is not None else None,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        **_git_subprocess_kwargs(),
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "").strip().replace("\n", " ")
+        raise SkillLibraryError(f"git {args[0]} failed: {detail[:400]}")
+    return (completed.stdout or "").strip()
+
+
+def _clone_git_source(repo: str, ref: str, target: Path) -> str:
+    args = ["clone", "--depth", "1", "--single-branch", "--no-recurse-submodules"]
+    if ref:
+        args.extend(["--branch", ref])
+    args.extend([repo, str(target)])
+    _run_git(args)
+    return _run_git(["rev-parse", "HEAD"], cwd=target)
+
+
+def _git_skill_dirs(base: Path) -> list[Path]:
+    return sorted({path.parent for path in base.rglob("SKILL.md") if path.is_file()})
+
+
+def import_git_skill_collection(
+    repo: str,
+    *,
+    ref: str = "",
+    subpath: str = "",
+    scope_type: str = "shared",
+    owner_id: str = "",
+    root: Path | None = None,
+    overwrite: bool = True,
+    skill_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    """Clone one git repo and import every SKILL.md below ``subpath`` as a managed skill."""
+
+    import tempfile
+
+    repo_url = str(repo or "").strip()
+    if not repo_url:
+        raise SkillLibraryError("Git skill source requires a repository URL.")
+    library_root = skill_library_root(root)
+    initialize_skill_library(root=library_root)
+    normalized_scope = _normalize_scope(scope_type)
+    normalized_owner = _safe_id(owner_id, default="default") if normalized_scope in {"team", "agent"} else ""
+    wanted = {str(item).strip() for item in (skill_ids or []) if str(item).strip()}
+    imported: list[str] = []
+    clone_dir = Path(tempfile.mkdtemp(prefix="vibelution-skill-source-"))
+    try:
+        commit = _clone_git_source(repo_url, ref, clone_dir)
+        scan_root = (clone_dir / subpath) if subpath else clone_dir
+        if not scan_root.is_dir():
+            raise SkillLibraryError(f"Skill subpath does not exist in {repo_url}: {subpath}")
+        for skill_dir in _git_skill_dirs(scan_root):
+            skill_name = skill_dir.name
+            if wanted and skill_name not in wanted:
+                continue
+            import_managed_skill(
+                skill_dir,
+                scope_type=normalized_scope,
+                owner_id=normalized_owner,
+                skill_id=skill_name,
+                root=library_root,
+                overwrite=overwrite,
+            )
+            target_dir = _managed_skill_dir(library_root, normalized_scope, normalized_owner, skill_name)
+            _write_json(
+                target_dir / "source_ref.json",
+                {
+                    "schemaVersion": SCHEMA_VERSION,
+                    "sourceKind": GIT_SOURCE_KIND,
+                    "repo": repo_url,
+                    "ref": ref or "HEAD",
+                    "commit": commit,
+                    "subpath": skill_dir.relative_to(clone_dir).as_posix(),
+                    "importedAt": _utc_now_iso(),
+                },
+            )
+            imported.append(skill_name)
+    finally:
+        shutil.rmtree(clone_dir, ignore_errors=True)
+    index_result = rebuild_skill_indexes(root=library_root)
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "status": "imported",
+        "repo": repo_url,
+        "ref": ref or "HEAD",
+        "commit": commit,
+        "subpath": subpath,
+        "imported": sorted(imported),
+        "importedCount": len(imported),
+        "index": index_result,
+        "updatedAt": _utc_now_iso(),
+    }
+
+
+def list_managed_sources(*, root: Path | None = None) -> dict[str, Any]:
+    """Aggregate git-backed managed skills by repository."""
+
+    library_root = skill_library_root(root)
+    managed_root = library_root / "managed"
+    sources: dict[str, dict[str, Any]] = {}
+    if managed_root.is_dir():
+        for ref_file in managed_root.rglob("source_ref.json"):
+            payload = _read_json(ref_file)
+            if payload.get("sourceKind") != GIT_SOURCE_KIND:
+                continue
+            repo = str(payload.get("repo") or "").strip()
+            if not repo:
+                continue
+            skill_dir = ref_file.parent
+            entry = sources.setdefault(
+                repo,
+                {
+                    "repo": repo,
+                    "ref": str(payload.get("ref") or "HEAD"),
+                    "commits": set(),
+                    "skills": [],
+                    "lastImportedAt": "",
+                },
+            )
+            commit = str(payload.get("commit") or "").strip()
+            if commit:
+                entry["commits"].add(commit)
+            entry["skills"].append(skill_dir.name)
+            imported_at = str(payload.get("importedAt") or "")
+            if imported_at > str(entry["lastImportedAt"] or ""):
+                entry["lastImportedAt"] = imported_at
+    items: list[dict[str, Any]] = []
+    for repo, entry in sorted(sources.items()):
+        commits = sorted(str(item) for item in entry["commits"] if str(item))
+        skills = sorted(str(item) for item in entry["skills"])
+        items.append(
+            {
+                "repo": repo,
+                "ref": entry["ref"],
+                "commit": commits[-1] if commits else "",
+                "commitCount": len(commits),
+                "skills": skills,
+                "skillCount": len(skills),
+                "lastImportedAt": entry["lastImportedAt"],
+            }
+        )
+    return {"schemaVersion": SCHEMA_VERSION, "sources": items, "updatedAt": _utc_now_iso()}
+
+
+def sync_managed_sources(*, root: Path | None = None, repo: str = "") -> dict[str, Any]:
+    """Re-import every git-backed managed source, optionally limited to one repository."""
+
+    library_root = skill_library_root(root)
+    target = str(repo or "").strip()
+    results: list[dict[str, Any]] = []
+    for source in list_managed_sources(root=library_root)["sources"]:
+        source_repo = str(source.get("repo") or "")
+        if target and source_repo != target:
+            continue
+        ref = str(source.get("ref") or "HEAD")
+        results.append(
+            import_git_skill_collection(
+                source_repo,
+                ref="" if ref == "HEAD" else ref,
+                root=library_root,
+                overwrite=True,
+            )
+        )
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "synced": results,
+        "syncedCount": len(results),
+        "updatedAt": _utc_now_iso(),
+    }
+
+
 def _read_json(path: Path) -> dict[str, Any]:
     try:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))

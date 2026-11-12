@@ -2113,6 +2113,27 @@ def _electron_window_action_for_launcher_action(action: str) -> str:
     return ""
 
 
+def _backend_runs_current_code() -> bool:
+    """Whether the live backend pinned the checkout now on disk.
+
+    A launcher takeover must not keep serving the previous checkout. Refusing
+    reuse is safe: the lifecycle stop records restart-resume markers before the
+    process retires, so interrupted turns resume on the new backend.
+    """
+
+    try:
+        from core.web.services.code_freshness import resolve_backend_freshness
+
+        payload = resolve_backend_freshness(project_root=PROJECT_ROOT)
+    except Exception:  # noqa: BLE001 - a probe failure must not churn restarts
+        return True
+    if not payload.get("available"):
+        # Only a missing fingerprint is decidable as "old backend": one restart
+        # writes it. Git/probe failures stay on the reuse side to avoid a loop.
+        return str(payload.get("reason") or "") != "no_running_fingerprint"
+    return not bool(payload.get("behind"))
+
+
 def _can_reuse_backend_for_electron_window_open(*, action: str, session: dict[str, Any]) -> bool:
     if not session or str(action or "").strip().lower() not in {"internal-start", "start"}:
         return False
@@ -2123,11 +2144,13 @@ def _can_reuse_backend_for_electron_window_open(*, action: str, session: dict[st
         )
     except (OSError, RuntimeError, TypeError, ValueError):
         return False
-    return bool(
+    if not (
         observation.get("backendHealthy")
         and observation.get("backendObserved")
         and not observation.get("backendPortConflict")
-    )
+    ):
+        return False
+    return _backend_runs_current_code()
 
 
 def _electron_desktop_action_payload(*, action: str, session: dict[str, Any]) -> dict[str, Any]:

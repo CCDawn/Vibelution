@@ -22,3 +22,21 @@ class SkillLibraryDetailResponse(BaseModel):
 
     command: str = ""
     name: str = ""
+
+
+class SkillLibrarySourcesResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    schemaVersion: int = 0
+    sources: list[dict] = []
+
+
+class SkillLibrarySyncRequest(BaseModel):
+    repo: str = ""
+
+
+class SkillLibrarySyncResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    schemaVersion: int = 0
+    syncedCount: int = 0
