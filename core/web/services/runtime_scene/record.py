@@ -23,6 +23,25 @@ from core.logging.trace_context import current_trace_fields, merge_current_trace
 from core.logging.value_redaction import redact_sensitive_text, redact_sensitive_values
 
 _TOOL_ARGUMENT_TELEMETRY_KEYS = frozenset({"tool_args", "toolargs", "arguments"})
+
+_SCENE_PATH_CACHE_LOCK = threading.Lock()
+_SCENE_PATH_RESOLVED: dict[str, str] = {}
+
+
+def _resolved_scene_path(path: Path) -> str:
+    """Resolve a scene path once: realpath dominates the event write CPU."""
+    if not path.is_absolute():
+        return str(path.resolve())
+    key = str(path)
+    with _SCENE_PATH_CACHE_LOCK:
+        cached = _SCENE_PATH_RESOLVED.get(key)
+    if cached is not None:
+        return cached
+    resolved = str(path.resolve())
+    with _SCENE_PATH_CACHE_LOCK:
+        _SCENE_PATH_RESOLVED[key] = resolved
+    return resolved
+
 _TRUNCATED_TELEMETRY_VALUE = "[truncated]"
 
 
@@ -126,7 +145,7 @@ def _append_scene_event(scene_dir: Path, component: str, payload: dict[str, Any]
     with s.pipeline_metrics.measure("append", priority="normal"):
         with s.RUNTIME_SCENE_EVENT_WRITE_LOCK:
             event_path = scene_dir / "events" / f"{component}.jsonl"
-            cache_key = str(event_path.resolve())
+            cache_key = _resolved_scene_path(event_path)
             sequenced_payload = dict(payload)
             sequenced_payload["seq"] = s._next_scene_event_seq(
                 scene_dir, component, event_path=event_path, cache_key=cache_key
