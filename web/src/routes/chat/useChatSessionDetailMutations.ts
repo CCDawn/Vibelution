@@ -136,8 +136,12 @@ export function useChatSessionDetailMutations({
         });
       }
       refreshAgentModelOptions(variables.sessionId, expected.expectedAgentId, cacheMatched);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
+      // Mark the Agent surfaces stale without refetching them on every save:
+      // the write only touches one model-keyed metadata entry, so pulling the
+      // whole Agent list and config workspace each time is pure jank. They
+      // refetch on their next mount/focus instead.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agents(), refetchType: "none" });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace(), refetchType: "none" });
     },
     onError: (_error, variables) => {
       const isRevisionConflict = isFetchJsonHttpError(_error) && _error.status === 409;

@@ -143,16 +143,27 @@ export function ConversationTurnModelControl({
     || !reasoningEffortValid
     || (parsedContextWindow === contextWindow && reasoningEffortDraft === effectiveEffort);
 
-  // Releasing the capsule commits the effort instead of asking the operator to
-  // travel to the save button: "drag means saved". The same applies to keyboard
-  // arrow/Home/End releases so the control behaves identically without a mouse.
+  // Releasing a capsule commits that parameter instead of asking the operator
+  // to travel to the save button: "drag means saved". A parameter that is not
+  // named keeps its current draft, and a no-op change never reaches the writer.
   // Validation stays in the shared writer, so an unsupported stop is still
   // rejected there rather than silently persisted.
-  const commitEffort = useCallback((nextEffort: string) => {
+  const commitParameters = useCallback((next: { contextWindow?: number; reasoningEffort?: string }) => {
     if (!canConfigure || pending || !contextWindowValid) return;
-    if (nextEffort === effectiveEffort) return;
-    onSave({ contextWindow: parsedContextWindow, reasoningEffort: nextEffort });
-  }, [canConfigure, pending, contextWindowValid, effectiveEffort, onSave, parsedContextWindow]);
+    const nextContextWindow = next.contextWindow ?? parsedContextWindow;
+    const nextEffort = next.reasoningEffort ?? reasoningEffortDraft;
+    if (nextContextWindow === contextWindow && nextEffort === effectiveEffort) return;
+    onSave({ contextWindow: nextContextWindow, reasoningEffort: nextEffort });
+  }, [
+    canConfigure,
+    pending,
+    contextWindowValid,
+    parsedContextWindow,
+    reasoningEffortDraft,
+    contextWindow,
+    effectiveEffort,
+    onSave,
+  ]);
 
   useEffect(() => {
     setOpen(false);
@@ -195,6 +206,7 @@ export function ConversationTurnModelControl({
     if (pending || cancelledNumberEditRef.current || !contextWindowValid) return;
     setContextStops((current) => [...new Set([...current, parsedContextWindow])].sort((a, b) => a - b));
     setEditingContext(false);
+    commitParameters({ contextWindow: parsedContextWindow });
   }
 
   return (
@@ -250,7 +262,11 @@ export function ConversationTurnModelControl({
                   className={styles.resetButton}
                   icon={<RotateCcw size={15} aria-hidden="true" />}
                   isDisabled={pending || !reasoningEffortDraft}
-                  onPress={() => { setReasoningEffortDraft(""); setDirty(true); }}
+                  onPress={() => {
+                    setReasoningEffortDraft("");
+                    setDirty(true);
+                    commitParameters({ reasoningEffort: "" });
+                  }}
                 />
               </div>
               <VNativeInput
@@ -270,12 +286,12 @@ export function ConversationTurnModelControl({
                   setDirty(true);
                 }}
                 onPointerUp={(event) => {
-                  commitEffort(supportedEfforts[Number(event.currentTarget.value)]);
+                  commitParameters({ reasoningEffort: supportedEfforts[Number(event.currentTarget.value)] });
                 }}
                 onKeyUp={(event) => {
                   const key = event.key;
                   if (key !== "ArrowLeft" && key !== "ArrowRight" && key !== "Home" && key !== "End") return;
-                  commitEffort(supportedEfforts[Number(event.currentTarget.value)]);
+                  commitParameters({ reasoningEffort: supportedEfforts[Number(event.currentTarget.value)] });
                 }}
               />
             </div>
@@ -323,7 +339,12 @@ export function ConversationTurnModelControl({
                 className={styles.resetButton}
                 icon={<RotateCcw size={15} aria-hidden="true" />}
                 isDisabled={pending || (contextWindowValid && parsedContextWindow === maxContextWindow)}
-                onPress={() => { setContextWindowDraft(String(maxContextWindow)); setEditingContext(false); setDirty(true); }}
+                onPress={() => {
+                  setContextWindowDraft(String(maxContextWindow));
+                  setEditingContext(false);
+                  setDirty(true);
+                  commitParameters({ contextWindow: maxContextWindow });
+                }}
               />
             </div>
             <span className={styles.fieldCaption}>{zh ? "上下文上限" : "Context window"}</span>
@@ -340,6 +361,14 @@ export function ConversationTurnModelControl({
               aria-valuetext={`${sliderContextWindow.toLocaleString(zh ? "zh-CN" : "en-US")} tokens`}
               data-vui="model-context-window-slider"
               onChange={(event) => { setContextWindowDraft(String(visibleContextStops[Number(event.target.value)])); setEditingContext(false); setDirty(true); }}
+              onPointerUp={(event) => {
+                commitParameters({ contextWindow: visibleContextStops[Number(event.currentTarget.value)] });
+              }}
+              onKeyUp={(event) => {
+                const key = event.key;
+                if (key !== "ArrowLeft" && key !== "ArrowRight" && key !== "Home" && key !== "End") return;
+                commitParameters({ contextWindow: visibleContextStops[Number(event.currentTarget.value)] });
+              }}
             />
             {contextWindowError ? <span id={contextWindowErrorId} className={styles.error} role="alert">{contextWindowError}</span> : null}
           </div>
