@@ -978,7 +978,7 @@ class AgentConfig(BaseModel):
         max_runtime: 最大运行时间（秒），0 表示无限制
         auto_backup: 是否启用自动备份
         backup_interval: 自动备份间隔（秒）
-        auto_restart_threshold: 自动重启阈值（错误次数），0 表示禁用
+        auto_restart_threshold: 已退役（保留字段兼容；本版不按错误次数自动重启）
         exploration_mode: 是否启用探索模式
     """
     model_config = ConfigDict(extra="ignore")
@@ -1015,10 +1015,12 @@ class AgentConfig(BaseModel):
         gt=0,
         description="自动备份间隔（秒）"
     )
+    # 本版没有错误计数自动重启机制：重启只有 Agent 主动请求
+    # (tools/rebirth_tools.py) 和 Launcher 控制面两条入口。
     auto_restart_threshold: int = Field(
         default=0,
         ge=0,
-        description="自动重启阈值，0 表示禁用"
+        description="已退役兼容字段：本版不按错误次数自动重启；重启由 Agent 主动请求或 Launcher 控制面触发",
     )
     exploration_mode: bool = Field(
         default=False,
@@ -1978,22 +1980,26 @@ class MemoryConfig(BaseModel):
 
     storage_dir: str = Field(
         default="workspace/memory",
-        description="记忆存储目录"
+        description="已退役兼容字段：记忆路径由 WorkspaceManager 决定（<workspace>/memory），本字段不参与解析"
     )
     memory_file: str = Field(
         default="memory.json",
-        description="记忆文件名称"
+        description="已退役兼容字段：索引文件名固定为 memory.json；需要改整个索引路径请用 VIBELUTION_MEMORY_INDEX_PATH"
     )
     archive_dir: str = Field(
         default="workspace/memory/archives",
-        description="归档目录"
+        description="已退役兼容字段：归档目录由 WorkspaceManager.archives_dir 决定（<workspace>/memory/archives）"
     )
     max_entries: int = Field(
         default=1000,
         gt=0,
         description="最大记忆条目数"
     )
-    history_persistence: bool = Field(default=True, description="是否持久化会话历史")
+    # 会话历史持久化由 turn journal 决定，此开关从未参与该链路。
+    history_persistence: bool = Field(
+        default=True,
+        description="已退役兼容字段：会话历史持久化由 turn journal 决定，本开关不生效",
+    )
     semantic_memory_enabled: bool = Field(default=False, description="是否启用语义记忆")
     llm_extraction_enabled: bool = Field(default=False, description="是否启用 LLM 记忆提取")
     llm_summary_enabled: bool = Field(default=False, description="是否启用 LLM 记忆摘要")

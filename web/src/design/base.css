@@ -75,7 +75,7 @@ pre {
 }
 
 ::selection {
-  background: color-mix(in srgb, var(--accent-warm) 34%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 22%, transparent);
   color: var(--fg-primary);
 }
 
