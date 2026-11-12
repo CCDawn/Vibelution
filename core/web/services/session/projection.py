@@ -31,12 +31,93 @@ from core.web.services.session.timebase import parse_timestamp_utc
 from core.web.services.session import conversation_references
 from core.web.services.session import control as _stop_control
 from core.web.services.session import pending_question
+from core.web.services.session.journal_bridge import (
+    _cache_key as _ledger_events_shared_cache_key,
+)
 
 
 logger = logging.getLogger(__name__)
 
 _SESSION_SUMMARY_MESSAGE_SCAN_LIMIT = 12
 _SESSION_SUMMARY_EVENT_SCAN_LIMIT = 64
+
+# Ledger projection snapshot cache: the detail transcript pipeline replays the
+# full journal on every request (branch analysis + model-visible replay +
+# guidance restore + full stat-message normalization). Journal parsing itself
+# already reuses the append-only prefix cache; the remaining cost is the
+# projection work, so the finished projection is cached keyed on the same
+# ledger signature the events cache uses. Any append changes the signature and
+# the next read rebuilds exactly once — no invalidation hooks, no journal
+# semantics change. Bounded LRU keeps memory flat across sessions.
+_LEDGER_PROJECTION_CACHE_MAX_ENTRIES = 32
+_LEDGER_PROJECTION_CACHE_LOCK = threading.Lock()
+_LEDGER_PROJECTION_CACHE: dict[str, dict[str, Any]] = {}
+
+
+def _ledger_projection_cache_key(session_id: str) -> str:
+    """Share the events cache key namespace (resolved root + session id)."""
+
+    return _ledger_events_shared_cache_key(Path(_service().PROJECT_ROOT), session_id)
+
+
+def _ledger_projection_cache_entry(
+    session_id: str,
+    signature: tuple[Any, ...],
+) -> dict[str, Any] | None:
+    """Return the signature-valid projection snapshot for one session read."""
+
+    cache_key = _ledger_projection_cache_key(session_id)
+    now = time.perf_counter()
+    with _LEDGER_PROJECTION_CACHE_LOCK:
+        entry = _LEDGER_PROJECTION_CACHE.get(cache_key)
+        if entry is None or tuple(entry.get("signature") or ()) != tuple(signature):
+            return None
+        entry["last_access"] = now
+        return entry
+
+
+def _store_ledger_projection_cache_entry(
+    session_id: str,
+    signature: tuple[Any, ...],
+    **fields: Any,
+) -> None:
+    """Fill one projection snapshot under the signature captured at read time.
+
+    The (unlocked) rebuild can overlap a journal append; a stored entry whose
+    signature no longer matches simply misses on the next read and rebuilds,
+    so correctness never depends on the rebuilt result still being current.
+    A rebuild racing a fresher snapshot keeps the fresh one instead of
+    overwriting it with a stale-signature fill.
+    """
+
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return
+    cache_key = _ledger_projection_cache_key(normalized_session_id)
+    with _LEDGER_PROJECTION_CACHE_LOCK:
+        entry = _LEDGER_PROJECTION_CACHE.get(cache_key)
+        if entry is None:
+            entry = {
+                "signature": tuple(signature),
+                "messages": None,
+                "active_leaf_id": "",
+                "active_branch_id": "",
+                "stat_messages": None,
+                "last_access": time.perf_counter(),
+            }
+            _LEDGER_PROJECTION_CACHE[cache_key] = entry
+        elif tuple(entry.get("signature") or ()) != tuple(signature):
+            return
+        entry.update(fields)
+        entry["last_access"] = time.perf_counter()
+        while len(_LEDGER_PROJECTION_CACHE) > _LEDGER_PROJECTION_CACHE_MAX_ENTRIES:
+            oldest_key = min(
+                _LEDGER_PROJECTION_CACHE,
+                key=lambda key: float(
+                    _LEDGER_PROJECTION_CACHE.get(key, {}).get("last_access") or 0.0
+                ),
+            )
+            _LEDGER_PROJECTION_CACHE.pop(oldest_key, None)
 
 
 def _service():
@@ -2413,6 +2494,12 @@ def _session_detail_messages_with_window(
     fallback_items: Any = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any], list[dict[str, Any]]]:
     s = _service()
+    normalized_window_session_id = str(session_id or "").strip()
+    ledger_signature = (
+        s._session_conversation_events_signature(normalized_window_session_id)
+        if normalized_window_session_id
+        else None
+    )
     raw_messages = s._ledger_visible_messages_for_session(session_id)
     if not raw_messages:
         raw_messages = list(fallback_items or [])
@@ -2464,16 +2551,33 @@ def _session_detail_messages_with_window(
     if live_message is not None and start_index <= total_messages <= end_index:
         detail_messages = s._without_live_turn_ledger_partials(detail_messages, live_message) + [live_message]
 
-    stat_messages = s._normalize_messages(
-        session_id,
-        raw_messages,
-        transcript_scope="none",
-        include_timeline=False,
-        # Metrics still need canonical turn items, filtering and coalescing,
-        # but never historical file checkpoints or per-turn work headers.
-        include_display_metadata=False,
-        journal_projection=journal_projection,
+    stat_messages = None
+    cache_entry = (
+        _ledger_projection_cache_entry(normalized_window_session_id, ledger_signature)
+        if ledger_signature is not None
+        else None
     )
+    if cache_entry is not None and cache_entry.get("stat_messages") is not None:
+        stat_messages = list(cache_entry["stat_messages"])
+    else:
+        stat_messages = s._normalize_messages(
+            session_id,
+            raw_messages,
+            transcript_scope="none",
+            include_timeline=False,
+            # Metrics still need canonical turn items, filtering and coalescing,
+            # but never historical file checkpoints or per-turn work headers.
+            include_display_metadata=False,
+            journal_projection=journal_projection,
+        )
+        if ledger_signature is not None:
+            # Cache under the signature captured before the raw read; a journal
+            # append mid-rebuild leaves the entry stale and it simply misses.
+            _store_ledger_projection_cache_entry(
+                normalized_window_session_id,
+                ledger_signature,
+                stat_messages=tuple(stat_messages),
+            )
     if live_message is not None:
         stat_messages = s._without_live_turn_ledger_partials(stat_messages, live_message) + [live_message]
 
@@ -5439,13 +5543,25 @@ def _ledger_visible_messages_for_session(session_id: str) -> list[dict[str, Any]
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
         return []
+    signature = s._session_conversation_events_signature(normalized_session_id)
+    entry = _ledger_projection_cache_entry(normalized_session_id, signature)
+    if entry is not None and entry.get("messages") is not None:
+        return list(entry["messages"])
     events = s._load_session_conversation_events_cached(normalized_session_id)
     if not events:
         return []
     messages, _active_leaf_id, _active_branch_id = s.visible_messages_with_branch_info(events)
     from .turn_steer import restore_guidance_display_messages
 
-    return restore_guidance_display_messages(messages, events)
+    messages = restore_guidance_display_messages(messages, events)
+    _store_ledger_projection_cache_entry(
+        normalized_session_id,
+        signature,
+        messages=tuple(messages),
+        active_leaf_id=str(_active_leaf_id or ""),
+        active_branch_id=str(_active_branch_id or ""),
+    )
+    return messages
 
 
 def _session_branch_metadata(session_id: str) -> tuple[str, str]:
@@ -5455,10 +5571,20 @@ def _session_branch_metadata(session_id: str) -> tuple[str, str]:
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
         return "", ""
+    signature = s._session_conversation_events_signature(normalized_session_id)
+    entry = _ledger_projection_cache_entry(normalized_session_id, signature)
+    if entry is not None and entry.get("messages") is not None:
+        return str(entry.get("active_leaf_id") or ""), str(entry.get("active_branch_id") or "")
     events = s._load_session_conversation_events_cached(normalized_session_id)
     if not events:
         return "", ""
     view = s.analyze_conversation_branches(events)
+    _store_ledger_projection_cache_entry(
+        normalized_session_id,
+        signature,
+        active_leaf_id=str(view.active_leaf_id or ""),
+        active_branch_id=str(view.active_branch_id or ""),
+    )
     return view.active_leaf_id, view.active_branch_id
 
 

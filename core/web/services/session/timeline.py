@@ -612,6 +612,21 @@ def _assistant_timeline_events_by_turn(conversation_id: str) -> dict[str, list[d
     normalized_session_id = str(conversation_id or "").strip()
     if not normalized_session_id:
         return {}
+    # The by-turn timeline projection is a pure function of the journal events,
+    # so it joins the ledger projection snapshot cache: unchanged sessions skip
+    # the full-journal scan + sanitize replay on every detail window read.
+    signature = s._session_conversation_events_signature(normalized_session_id)
+    from .projection import (
+        _ledger_projection_cache_entry,
+        _store_ledger_projection_cache_entry,
+    )
+
+    cache_entry = _ledger_projection_cache_entry(normalized_session_id, signature)
+    if cache_entry is not None and cache_entry.get("timeline_events_by_turn") is not None:
+        return {
+            turn_id: list(items)
+            for turn_id, items in cache_entry["timeline_events_by_turn"].items()
+        }
     events_by_turn: dict[str, list[dict[str, Any]]] = {}
     tool_event_keys: dict[str, dict[str, int]] = {}
     journal_events = list(s._load_session_conversation_events_cached(normalized_session_id))
@@ -688,11 +703,19 @@ def _assistant_timeline_events_by_turn(conversation_id: str) -> dict[str, list[d
                 if tool_key:
                     tool_event_keys.setdefault(turn_id, {})[tool_key] = len(items)
                 items.append(tool_event)
-    return {
+    result = {
         turn_id: sorted(items, key=lambda item: s._coerce_nonnegative_int(item.get("sequence")))
         for turn_id, items in events_by_turn.items()
         if any(str(item.get("kind") or "") in {"assistant_text", "thought"} for item in items)
     }
+    _store_ledger_projection_cache_entry(
+        normalized_session_id,
+        signature,
+        timeline_events_by_turn={
+            turn_id: tuple(items) for turn_id, items in result.items()
+        },
+    )
+    return result
 
 
 def _is_assistant_timeline_segment_event(event: Any) -> bool:

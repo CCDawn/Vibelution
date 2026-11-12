@@ -66,7 +66,11 @@ def test_light_running_poll_skips_directory_write_and_repair_reload(monkeypatch:
     assert calls["sync"] == []
     assert calls["reconcile"] == [(
         ("session-poll",),
-        {"active_turn_id": "turn-poll", "reason": "detail_loaded_after_restart"},
+        {
+            "active_turn_id": "turn-poll",
+            "reason": "process_restarted",
+            "trigger": "detail_loaded_after_restart",
+        },
     )]
     assert calls["target"][0][1]["repair"] is False
     assert calls["lookup"] == [{"session_id": "session-poll", "agent_ids": ("agent-poll",)}]
@@ -97,7 +101,11 @@ def test_light_idle_poll_keeps_reconcile_reload_and_repair(monkeypatch: pytest.M
     assert calls["sync"] == []
     assert calls["reconcile"] == [(
         ("session-poll",),
-        {"active_turn_id": "", "reason": "detail_loaded_after_restart"},
+        {
+            "active_turn_id": "",
+            "reason": "process_restarted",
+            "trigger": "detail_loaded_after_restart",
+        },
     )]
     assert calls["target"][0][1]["repair"] is True
 
