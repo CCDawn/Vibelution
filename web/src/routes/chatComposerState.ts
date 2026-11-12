@@ -36,30 +36,24 @@ export function latestUserMessageId(messages: MessageIdentity[] | null | undefin
 }
 
 /**
- * An edit target stays valid while its message is still on the active path.
- * Branch mode edits any visible message, not just the latest one, so presence
- * (not recency) is what decides whether the composer keeps editing mode.
+ * The edit target owns the editor. Validity used to be re-derived from the
+ * projected message list, so a stop or a re-projection that re-keyed the row
+ * dropped the seeded text and left a visible but unusable editor. Presence is
+ * now only decided when the user opens or cancels the edit.
  */
 export function resolveActiveEditTarget(
   editTarget: ChatEditTarget | null | undefined,
-  messages: MessageIdentity[] | null | undefined,
+  _messages: MessageIdentity[] | null | undefined,
 ): ChatEditTarget | null {
-  if (!editTarget) {
-    return null;
-  }
-  const present = (messages ?? []).some(
-    (message) => String(message?.id ?? "").trim() === editTarget.messageId,
-  );
-  return present ? editTarget : null;
+  return editTarget ?? null;
 }
 
 export function resolveComposerDraftValue(
   draft: string,
-  editTarget: ChatEditTarget | null | undefined,
-  resolvedEditTarget: ChatEditTarget | null,
+  _editTarget: ChatEditTarget | null | undefined,
+  _resolvedEditTarget: ChatEditTarget | null,
 ): string {
-  if (editTarget && !resolvedEditTarget) {
-    return "";
-  }
+  // The draft already carries the seeded original; blanking it here is what
+  // turned a visible editor into an empty one with a disabled submit button.
   return draft;
 }

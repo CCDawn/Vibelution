@@ -1345,8 +1345,10 @@ timeline:
   turnEditBadge: `vui-components-conversationview turnEditBadge min-w-0 ${vuiOpaqueRowClass} p-2 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full bg-[var(--vui-control-muted)] px-2 text-vui-xs font-semibold leading-none text-[var(--fg-secondary)]`,
   turnEditing:
     "vui-components-conversationview turnEditing min-w-0 [&_.userMessageBody]:border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),var(--vui-border-subtle))] [&_.userMessageBody]:bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-faint),var(--vui-surface-panel))] [&_.userMessageBody]:ring-1 [&_.userMessageBody]:ring-inset [&_.userMessageBody]:ring-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint),transparent)]",
+  // The editor is the user bubble, not a form dropped next to it: same width,
+  // radius, padding and sheen, with the accent border marking edit mode.
   turnInlineEditor:
-    "vui-components-conversationview turnInlineEditor grid min-w-0 max-w-full gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-faint),var(--vui-surface-panel))] p-1.5 shadow-none",
+    "vui-components-conversationview turnInlineEditor grid w-full min-w-0 max-w-full gap-2 rounded-[12px] border border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-faint),var(--vui-surface-chat))] px-4 py-3 text-left shadow-[var(--vui-sheen)]",
   turnInlineEditorActions:
     "vui-components-conversationview turnInlineEditorActions flex min-w-0 flex-wrap items-center justify-end gap-1.5",
   turnInlineEditorChip:

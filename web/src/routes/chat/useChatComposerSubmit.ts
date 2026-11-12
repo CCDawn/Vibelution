@@ -871,26 +871,20 @@ export function useChatComposerSubmitActions({
     releaseComposerSessionPreviewUrls,
   ]);
 
+  // Editing survives list re-projections. This effect used to drop the target
+  // whenever the projected row identity changed (a stop, a branch re-key, a new
+  // turn landing), which blanked the editor mid-edit and disabled its submit.
+  // The target now belongs to the session that opened it, so only leaving that
+  // session clears it.
   useEffect(() => {
-    if (!activeSessionId || !detail || !activeEditTarget) {
-      return;
-    }
-    const targetStillVisible = (detail.messages ?? []).some(
-      (message) => String(message.id || "").trim() === activeEditTarget.messageId,
-    );
-    if (targetStillVisible) {
-      return;
-    }
     setSessionEditTargets((current) => {
+      if (!activeSessionId || !(activeSessionId in current)) {
+        return current;
+      }
       const { [activeSessionId]: _removed, ...remaining } = current;
       return remaining;
     });
-    clearLiveComposerDraft(activeSessionId);
-    setSessionDrafts((current) => ({
-      ...current,
-      [activeSessionId]: "",
-    }));
-  }, [activeEditTarget, activeSessionId, detail, setSessionDrafts, setSessionEditTargets]);
+  }, [activeSessionId, setSessionEditTargets]);
 
   const handleCancelEditMessage = useCallback(() => {
     if (!activeSessionId) {

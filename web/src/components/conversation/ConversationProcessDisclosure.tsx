@@ -180,6 +180,7 @@ export function processLabel(
   workSummary?: ConversationTurnWorkSummary | null,
   liveElapsedSeconds?: number | null,
   showTrailHints = true,
+  stopping = false,
 ) {
   const state = processState(cells, messageOrder, turnStreaming);
   const labels = language === "zh"
@@ -189,6 +190,7 @@ export function processLabel(
       failed: "工具失败",
       running: "工作中",
       runningWithDuration: "工作中",
+      stopping: "正在停止",
     }
     : {
       completed: "Processed",
@@ -196,6 +198,7 @@ export function processLabel(
       failed: "Tool failed",
       running: "Working",
       runningWithDuration: "Working for",
+      stopping: "Stopping",
     };
   const duration = processDuration(cells);
   // Live work uses the turn clock; a sum of tool durations cannot describe a
@@ -213,7 +216,12 @@ export function processLabel(
   // process summary never carries a retry row or a retry note.
   const retryFreeCells = cells.filter((cell) => !isRetryCell(cell));
   const traceLength = retryFreeCells.length;
-  const headline = durationLabel
+  // A stop request freezes the summary. The agent is still unwinding whatever
+  // tool call it was in, so 'Working for N' kept the clock climbing after the
+  // user had already asked it to stop.
+  const headline = stopping && state === "running"
+    ? labels.stopping
+    : durationLabel
     ? state === "completed"
       ? labels.completedWithDuration
       : state === "running"
@@ -304,7 +312,10 @@ export function ConversationProcessDisclosure({
   const lastRecordFocusRef = useRef<EventTarget | null>(null);
   // A settled disclosure has no counter to update, so it must not keep a
   // timer alive; the shared clock only runs while this surface needs it.
-  const clockActive = running && activeTurnElapsedSeconds(turnStartedAt, Date.now()) !== null;
+  // A stop request freezes the clock: the turn has not ended yet, but nothing
+  // is progressing, and a climbing timer read as "the stop did not work".
+  const stopping = String(activeStage ?? "") === "stopping";
+  const clockActive = running && !stopping && activeTurnElapsedSeconds(turnStartedAt, Date.now()) !== null;
   const nowMs = useNowTick(clockActive, 1_000, turnStartedAt);
   const elapsedSeconds = running ? activeTurnElapsedSeconds(turnStartedAt, nowMs) : null;
   const {
@@ -354,7 +365,7 @@ export function ConversationProcessDisclosure({
       summaryRef.current?.focus({ preventScroll: true });
     }
   }, [expanded]);
-  const label = processLabel(cells, language, messageOrder, turnStreaming, workSummary, elapsedSeconds, presentation !== "flow");
+  const label = processLabel(cells, language, messageOrder, turnStreaming, workSummary, elapsedSeconds, presentation !== "flow", stopping);
   const toggleLabel = language === "zh"
     ? "展开或收起处理记录"
     : "Expand or collapse process details";
