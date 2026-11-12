@@ -27,6 +27,13 @@ _TOOL_ARGUMENT_TELEMETRY_KEYS = frozenset({"tool_args", "toolargs", "arguments"}
 _SCENE_PATH_CACHE_LOCK = threading.Lock()
 _SCENE_PATH_RESOLVED: dict[str, str] = {}
 
+# Manifest reads sat on the per-event telemetry path: every lifecycle event
+# re-read and re-parsed the same manifest.json. The stamp keeps a rewritten
+# manifest honest without a parse per event.
+_SCENE_MANIFEST_CACHE_LOCK = threading.Lock()
+_SCENE_MANIFEST_CACHE_MAX_ENTRIES = 256
+_SCENE_MANIFEST_CACHE: dict[tuple[str, int, int], dict[str, Any]] = {}
+
 
 def _resolved_scene_path(path: Path) -> str:
     """Resolve a scene path once: realpath dominates the event write CPU."""
@@ -706,13 +713,35 @@ def _load_scene_json(path: Path) -> dict[str, Any]:
 
 
 def _load_scene_manifest(scene_dir: Path) -> dict:
+    """Read the scene manifest, reusing the parse while the file is unchanged.
+
+    Every lifecycle event resolved the manifest again: one read_text plus one
+    json.loads per event, on the same turn-preparation path that writes seven
+    of them back to back. A stat stamp (mtime + size) keeps a rewritten
+    manifest honest, and callers get a copy so a mutation cannot poison it.
+    """
     s = _service()
     manifest_path = scene_dir / "manifest.json"
     try:
+        stamp = manifest_path.stat()
+    except OSError:
+        return {}
+    cache_key = (str(manifest_path), stamp.st_mtime_ns, stamp.st_size)
+    with _SCENE_MANIFEST_CACHE_LOCK:
+        cached = _SCENE_MANIFEST_CACHE.get(cache_key)
+    if cached is not None:
+        return dict(cached)
+    try:
         payload = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError):
-        payload = {}
-    return payload if isinstance(payload, dict) else {}
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    with _SCENE_MANIFEST_CACHE_LOCK:
+        if len(_SCENE_MANIFEST_CACHE) >= _SCENE_MANIFEST_CACHE_MAX_ENTRIES:
+            _SCENE_MANIFEST_CACHE.clear()
+        _SCENE_MANIFEST_CACHE[cache_key] = payload
+    return dict(payload)
 
 
 def _looks_like_windows_absolute_path(value: str) -> bool:
