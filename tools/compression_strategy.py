@@ -377,10 +377,10 @@ def get_compression_strategy(
 
 def _summary_chars_by_level(summary_chars: dict[str, int]) -> dict[CompressionLevel, int]:
     return {
-        CompressionLevel.LIGHT: int(summary_chars.get("light") or 500),
-        CompressionLevel.STANDARD: int(summary_chars.get("standard") or 1000),
-        CompressionLevel.DEEP: int(summary_chars.get("deep") or 2000),
-        CompressionLevel.EMERGENCY: int(summary_chars.get("emergency") or 3000),
+        CompressionLevel.LIGHT: int(summary_chars.get("light") or 800),
+        CompressionLevel.STANDARD: int(summary_chars.get("standard") or 2000),
+        CompressionLevel.DEEP: int(summary_chars.get("deep") or 3500),
+        CompressionLevel.EMERGENCY: int(summary_chars.get("emergency") or 5000),
     }
 
 

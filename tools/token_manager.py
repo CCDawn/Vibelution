@@ -91,6 +91,10 @@ COMPRESSION_TARGET_RATIO = _token_defaults.get("COMPRESSION_TARGET_RATIO", 0.45)
 # 摘要配置
 MINIMAL_SUMMARY_CHARS = 80
 CORE_SUMMARY_CHARS = 200
+# Default summary ceiling for EnhancedTokenCompressor.compress.
+# Kept separate from CORE_SUMMARY_CHARS, which is the per-message trimming
+# budget used by smart_compress_message (not a summary budget).
+DEFAULT_SUMMARY_MAX_CHARS = 1000
 DETAILED_SUMMARY_CHARS = 500
 LIGHT_SUMMARY_CHARS = _token_defaults.get("LIGHT_SUMMARY_CHARS", 500)
 STANDARD_SUMMARY_CHARS = _token_defaults.get("STANDARD_SUMMARY_CHARS", 1000)
@@ -1129,7 +1133,7 @@ class EnhancedTokenCompressor:
     def compress(
         self,
         messages: List[Any],
-        max_chars: int = CORE_SUMMARY_CHARS,
+        max_chars: int = DEFAULT_SUMMARY_MAX_CHARS,
         reason: str = "",
         keep_count: int = 3,
         preserve_errors: bool = True,

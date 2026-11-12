@@ -1170,22 +1170,22 @@ class CompressionSummaryCharsConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     light: int = Field(
-        default=500,
+        default=800,
         ge=0,
         description="轻度压缩摘要字数"
     )
     standard: int = Field(
-        default=1000,
+        default=2000,
         ge=0,
         description="标准压缩摘要字数"
     )
     deep: int = Field(
-        default=2000,
+        default=3500,
         ge=0,
         description="深度压缩摘要字数"
     )
     emergency: int = Field(
-        default=3000,
+        default=5000,
         ge=0,
         description="紧急压缩摘要字数"
     )
@@ -1269,9 +1269,9 @@ class ContextCompressionConfig(BaseModel):
         description="保留最近的工具调用次数"
     )
     summary_max_chars: int = Field(
-        default=200,
+        default=1000,
         gt=0,
-        description="压缩摘要的最大字符数"
+        description="已退役兼容字段：摘要长度由 summary_chars 分级配置决定，本字段仅作旧配置兜底"
     )
     compression_model: str = Field(
         default="qwen-turbo",

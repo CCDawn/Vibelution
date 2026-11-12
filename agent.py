@@ -1055,7 +1055,11 @@ class AgentRuntime:
         if effective_limit > 0:
             cc.max_token_limit = effective_limit
             self._effective_max_token_limit = effective_limit
-        cc.enabled = bool(policy.get("enabled", getattr(cc, "enabled", True)))
+        # An unmaterialized policy means "not configured yet", never "compression
+        # denied": the feature gate reads context_compression.enabled, so writing
+        # False here would silently disable compression for this runtime.
+        if str(policy.get("mode") or "") != "unmaterialized":
+            cc.enabled = bool(policy.get("enabled", getattr(cc, "enabled", True)))
         max_compressions = policy.get("maxCompressionsPerSession")
         cc.max_compressions_per_session = int(
             max_compressions
@@ -1120,7 +1124,7 @@ class AgentRuntime:
                 "agentId": agent_id,
                 "policyMode": str(policy.get("mode") or "inherit"),
                 "policySource": str(policy.get("source") or "global"),
-                "enabled": bool(policy.get("enabled", True)),
+                "enabled": bool(getattr(cc, "enabled", True)),
                 "effectiveTokenLimit": self._effective_max_token_limit,
                 "contextWindowLimit": int(getattr(self, "_context_window_limit", 0) or 0),
             },
@@ -1129,9 +1133,9 @@ class AgentRuntime:
     def _automatic_context_compression_threshold(self) -> float:
         levels = getattr(getattr(self.config, "context_compression", None), "levels", None)
         try:
-            threshold = float(getattr(levels, "standard", 0.95))
+            threshold = float(getattr(levels, "standard", CompressionThresholds().standard_threshold))
         except (TypeError, ValueError):
-            threshold = 0.95
+            threshold = CompressionThresholds().standard_threshold
         return min(1.0, max(0.01, threshold))
 
     def _automatic_context_compression_threshold_tokens(self) -> int:
