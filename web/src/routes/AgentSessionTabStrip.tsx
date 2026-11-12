@@ -811,7 +811,10 @@ export function AgentSessionTabStrip({
       </ul>
     );
   };
-  const renderSessionTabGroupHeader = (section: AgentSessionTabGroupSection) => {
+  const renderSessionTabGroupHeader = (
+    section: AgentSessionTabGroupSection,
+    containsActive: boolean,
+  ) => {
     // The ungrouped bucket is the default surface: no header, no label, no chrome.
     if (section.ungrouped) {
       return null;
@@ -825,6 +828,7 @@ export function AgentSessionTabStrip({
     const headerClassName = [
       styles.agentSessionTabGroupHeader,
       tintClass,
+      containsActive ? styles.agentSessionTabGroupHeaderActive : "",
       dropActive ? styles.agentSessionTabGroupHeaderDropTarget : "",
       isOpen ? styles.agentSessionTabGroupHeaderOpen : "",
     ].filter(Boolean).join(" ");
@@ -1107,7 +1111,12 @@ export function AgentSessionTabStrip({
           onPaneDockDrop(payload);
         }}
       >
-      {groupSections.map((section) => (
+      {groupSections.map((section) => {
+        // The active session keeps a real tab on the rail: "where am I" never needs a click.
+        const pinnedSession = section.ungrouped
+          ? undefined
+          : section.sessions.find((session) => session.id === activeSessionId);
+        return (
         <div
           key={section.groupId}
           className={[
@@ -1138,12 +1147,15 @@ export function AgentSessionTabStrip({
             commitGroupDrop(section.groupId);
           }}
         >
-          {renderSessionTabGroupHeader(section)}
+          {renderSessionTabGroupHeader(section, Boolean(pinnedSession))}
           {section.ungrouped
             ? section.sessions.map((session) => renderSessionTab(session, section.groupId))
-            : null}
+            : pinnedSession
+              ? renderSessionTab(pinnedSession, section.groupId)
+              : null}
         </div>
-      ))}
+        );
+      })}
       <VIconButton
         type="button"
         variant="ghost"

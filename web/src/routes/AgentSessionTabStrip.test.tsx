@@ -812,7 +812,7 @@ describe("AgentSessionTabStrip two-stage close confirm", () => {
       .toBeLessThan(markup.indexOf('data-session-tab-group="ungrouped"'));
   });
 
-  it("hides the members of a collapsed group but keeps its header", () => {
+  it("keeps the active session pinned on the rail when its group is collapsed", () => {
     localStorage.setItem(
       "vibelution.agentSessionTabGroups.v1",
       JSON.stringify({
@@ -824,7 +824,36 @@ describe("AgentSessionTabStrip two-stage close confirm", () => {
     );
     const markup = renderStrip();
     expect(markup).toContain("评审");
-    expect(markup).not.toContain("子任务标题");
+    // The active session always keeps a real tab: "where am I" never needs a click.
+    expect(markup).toContain("子任务标题");
+    // The owning chip is haloed so the group tells the same story.
+    expect(markup).toContain("agentSessionTabGroupHeaderActive");
+  });
+
+  it("hides the non-active members of a collapsed group", () => {
+    localStorage.setItem(
+      "vibelution.agentSessionTabGroups.v1",
+      JSON.stringify({
+        "agent-1": {
+          groups: [{ id: "ga", name: "评审", collapsed: true }],
+          membership: { "session-root": "ga" },
+        },
+      }),
+    );
+    const markup = renderStrip({
+      sessions: [
+        session({ id: "session-root", title: "折叠组内的非活动会话" }),
+        session({
+          id: "session-child",
+          title: "子任务标题",
+          sessionKind: "child",
+          parentSessionId: "session-root",
+          rootSessionId: "session-root",
+        }),
+      ],
+    });
+    expect(markup).toContain("评审");
+    expect(markup).not.toContain("折叠组内的非活动会话");
   });
 
   it("skips empty groups and always offers a create-group control", () => {
