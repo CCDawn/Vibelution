@@ -581,12 +581,46 @@ function sameMessageContent(left: ConversationMessage, right: ConversationMessag
   }
 }
 
+function tailAppendOnlyMerge(
+  previousMessages: ConversationMessage[],
+  nextMessages: ConversationMessage[],
+): ConversationMessage[] | null {
+  // A poll or SSE frame usually only appends to the tail. Walking the shared
+  // prefix is O(n) and allocates nothing, while the general path below builds
+  // two Maps, a double-length array and a full sort to reach the same result.
+  // Any divergence - a rewritten message, a confirmed optimistic id, a shrunken
+  // window - returns null and falls back to the general merge.
+  if (previousMessages.length === 0 || nextMessages.length <= previousMessages.length) {
+    return null;
+  }
+  for (let index = 0; index < previousMessages.length; index += 1) {
+    const previous = previousMessages[index];
+    const candidate = nextMessages[index];
+    if (previous === candidate) {
+      continue;
+    }
+    if (String(previous.id || "").trim() !== String(candidate.id || "").trim()) {
+      return null;
+    }
+    if (!sameMessageContent(previous, candidate)) {
+      return null;
+    }
+  }
+  return [...previousMessages, ...nextMessages.slice(previousMessages.length)];
+}
+
 function mergeConversationMessageWindows(
   previousMessages: ConversationMessage[],
   nextMessages: ConversationMessage[],
   sessionId?: string,
 ): ConversationMessage[] {
-  const orderById = new Map<string, number>();  const mergedById = new Map<string, ConversationMessage>();
+  const appended = tailAppendOnlyMerge(previousMessages, nextMessages);
+  if (appended) {
+    reportUnsettledOptimisticUserWindow(appended, sessionId);
+    return appended;
+  }
+  const orderById = new Map<string, number>();
+  const mergedById = new Map<string, ConversationMessage>();
   const previousById = new Map<string, ConversationMessage>();
   for (const message of previousMessages) {
     const id = String(message.id || "").trim();
@@ -594,7 +628,19 @@ function mergeConversationMessageWindows(
       previousById.set(id, message);
     }
   }
-  for (const message of [...previousMessages, ...nextMessages]) {
+  // Two passes over the inputs instead of one pass over their concatenation:
+  // the old form allocated a double-length array on every merge.
+  for (const message of previousMessages) {
+    const id = String(message.id || "").trim();
+    if (!id) {
+      continue;
+    }
+    if (!orderById.has(id)) {
+      orderById.set(id, orderById.size);
+    }
+    mergedById.set(id, message);
+  }
+  for (const message of nextMessages) {
     const id = String(message.id || "").trim();
     if (!id) {
       continue;
@@ -605,10 +651,11 @@ function mergeConversationMessageWindows(
     const previous = previousById.get(id);
     mergedById.set(id, previous && sameMessageContent(previous, message) ? previous : message);
   }
-const settledMessages = removeSettledOptimisticUserMessages([...mergedById.values()]);
+  const settledMessages = removeSettledOptimisticUserMessages([...mergedById.values()]);
   reportUnsettledOptimisticUserWindow(settledMessages, sessionId);
   const ordered = settledMessages.sort((left, right) => {
-    const leftIndex = messageWindowIndex(left);    const rightIndex = messageWindowIndex(right);
+    const leftIndex = messageWindowIndex(left);
+    const rightIndex = messageWindowIndex(right);
     if (leftIndex !== rightIndex) {
       return leftIndex - rightIndex;
     }
