@@ -1325,6 +1325,8 @@ def _load_config_defaults() -> dict:
             "DEFAULT_TIMEOUT": cfg.tools.shell.default_timeout,
             "MAX_OUTPUT_LENGTH": cfg.tools.shell.max_output_length,
             "MAX_FILE_SIZE": cfg.tools.shell.max_file_size,
+            "SAFETY_CHECK": cfg.tools.shell.safety_check,
+            "DANGEROUS_PATTERN_CHECK": cfg.tools.shell.dangerous_pattern_check,
             "DANGEROUS_PATTERNS": cfg.security.dangerous_commands,
             "FORBIDDEN_PATTERNS": cfg.security.forbidden_patterns,
             "FORBIDDEN_DELETE_PATTERNS": cfg.security.forbidden_delete_patterns,
@@ -1358,6 +1360,12 @@ DANGEROUS_PATTERNS = _config_defaults.get("DANGEROUS_PATTERNS", [
 ])
 
 # 默认配置
+# tools.shell.safety_check: total gate for blacklist + whitelist checks.
+# tools.shell.dangerous_pattern_check: blacklist only; whitelist still runs.
+SAFETY_CHECK_ENABLED = bool(_config_defaults.get("SAFETY_CHECK", True))
+DANGEROUS_PATTERN_CHECK_ENABLED = bool(
+    _config_defaults.get("DANGEROUS_PATTERN_CHECK", True)
+)
 DEFAULT_TIMEOUT = _config_defaults.get("DEFAULT_TIMEOUT", 60)
 MAX_OUTPUT_LENGTH = _config_defaults.get("MAX_OUTPUT_LENGTH", 10000)
 MAX_FILE_SIZE = _config_defaults.get("MAX_FILE_SIZE", 10 * 1024 * 1024)
@@ -1386,8 +1394,30 @@ FORBIDDEN_DELETE_PATTERNS = _config_defaults.get("FORBIDDEN_DELETE_PATTERNS", [
 # 安全检查函数 - 双层验证（黑名单 + 白名单）
 # ============================================================================
 
-def _is_command_dangerous(command: str) -> tuple[bool, str]:
-    """检查命令是否危险（黑名单 + 白名单双层验证）"""
+def _check_command_whitelist(command: str) -> tuple[bool, str]:
+    """Whitelist validation shared by both danger gates."""
+    try:
+        from core.infrastructure.security import validate_shell_command
+        is_safe, error_msg = validate_shell_command(command, "powershell")
+        if not is_safe:
+            return True, f"[Whitelist Block] {error_msg}"
+    except Exception as e:
+        from core.logging import debug as _debug_logger
+        _debug_logger.warning(f"Security module load failed: {e}")
+    return False, ""
+
+
+def _is_command_dangerous(
+    command: str, *, pattern_check: bool = True
+) -> tuple[bool, str]:
+    """检查命令是否危险（黑名单 + 白名单双层验证）。
+
+    ``pattern_check=False`` skips only the blacklist; the whitelist still
+    validates the command. The caller turns the whole gate off through
+    ``SAFETY_CHECK_ENABLED`` instead.
+    """
+    if not pattern_check:
+        return _check_command_whitelist(command)
     cmd_lower = command.lower().strip()
     from core.infrastructure.security import command_invokes_executable
     if command_invokes_executable(command, "del") and re.search(r"\bdel\s+.*(?:/s\b|/q\b|/f\b)", cmd_lower) and (
@@ -1414,15 +1444,7 @@ def _is_command_dangerous(command: str) -> tuple[bool, str]:
                 matched = normalized_pattern in cmd_lower
         if matched:
             return True, f"危险命令拦截: {pattern}"
-    # Whitelist validation (new security module)
-    try:
-        from core.infrastructure.security import validate_shell_command
-        is_safe, error_msg = validate_shell_command(command, "powershell")
-        if not is_safe:
-            return True, f"[Whitelist Block] {error_msg}"
-    except Exception as e:
-        from core.logging import debug as _debug_logger; _debug_logger.warning(f"Security module load failed: {e}")
-    return False, ""
+    return _check_command_whitelist(command)
 
 
 def _resolve_project_path(path_str: str) -> Path:
@@ -1512,9 +1534,11 @@ def execute_shell_command(
     Returns:
         str: 合并后的命令输出（stdout + stderr）
     """
-    # 安全检查
-    if check_safety:
-        is_dangerous, msg = _is_command_dangerous(command)
+    # 安全检查：safety_check 是总闸，dangerous_pattern_check 只关黑名单。
+    if check_safety and SAFETY_CHECK_ENABLED:
+        is_dangerous, msg = _is_command_dangerous(
+            command, pattern_check=DANGEROUS_PATTERN_CHECK_ENABLED
+        )
         if is_dangerous:
             return f"[安全拦截] {msg}\n该危险命令已被系统安全策略禁止执行。"
 
