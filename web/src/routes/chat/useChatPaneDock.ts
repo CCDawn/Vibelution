@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { postBrowserTelemetry } from "../../app/browserTelemetry";
 import { isProjectUtilityKind } from "../../app/projectUtilityRail";
 import {
   classifySessionBarDrop,
+  shouldSuppressPaneDockOpen,
   type DockedSession,
   type PaneDockPayload,
   type SessionBarDockChip,
@@ -153,11 +155,39 @@ export function useChatPaneDock({
     });
   }, [railOwnerId, setRailsBySession, updateRailModel]);
 
+  // A re-derived dock presentation must not re-drive the route for the same
+  // session inside one burst: every extra route write parks the live stream
+  // and replays the transcript, which the user sees as the pane flickering.
+  const recentAutoOpenRef = useRef<{ sessionId: string; at: number } | null>(null);
+  const openSessionOnce = useCallback((sessionId: string, reason: string) => {
+    const now = Date.now();
+    const recent = recentAutoOpenRef.current;
+    if (recent && shouldSuppressPaneDockOpen(recent, sessionId, now)) {
+      postBrowserTelemetry({
+        phase: "pane_dock",
+        eventCode: "browser.pane_dock.open_suppressed",
+        message: "Repeated pane-dock open for the same session was suppressed.",
+        level: "info",
+        fields: { sessionId, reason, elapsedMs: now - recent.at },
+      });
+      return;
+    }
+    recentAutoOpenRef.current = { sessionId, at: now };
+    postBrowserTelemetry({
+      phase: "pane_dock",
+      eventCode: "browser.pane_dock.open_requested",
+      message: "Pane dock requested a session route change.",
+      level: "info",
+      fields: { sessionId, reason },
+    });
+    openSession(sessionId);
+  }, [openSession]);
+
   const presentCenter = useCallback((presentation: CenterPresentation) => {
     setCenterPresentation(presentation);
     setActiveDockedSessionId(null);
     if (presentation.scope === "session" && presentation.sessionId !== railOwnerId) {
-      openSession(presentation.sessionId);
+      openSessionOnce(presentation.sessionId, "present_center");
       return;
     }
     updateRailModel((current) => (
@@ -165,7 +195,7 @@ export function useChatPaneDock({
         ? { ...current, activeId: presentation.tabId }
         : current
     ));
-  }, [openSession, railOwnerId, updateRailModel]);
+  }, [openSessionOnce, railOwnerId, updateRailModel]);
 
   useEffect(() => {
     if (!centerPresentation || centerPresentation.scope !== "session" || centerPresentation.sessionId !== railOwnerId) {
@@ -221,14 +251,14 @@ export function useChatPaneDock({
     if (decision.action === "restore-session") {
       undockSession(decision.sessionId);
       dismissCenter();
-      openSession(decision.sessionId);
+      openSessionOnce(decision.sessionId, "session_bar_restore");
       return;
     }
     if (decision.action === "open-session") {
       const scope = payload.source === "rail" && payload.scope === "project" ? "project" : "session";
       closeOwnedTab(scope, payload.source === "rail" ? (payload.sessionId || railOwnerId) : railOwnerId, decision.closeTabId);
       dismissCenter();
-      openSession(decision.sessionId);
+      openSessionOnce(decision.sessionId, "session_bar_open");
       return;
     }
     if (decision.action === "show-in-center" && payload.source === "rail") {
@@ -237,7 +267,7 @@ export function useChatPaneDock({
       placeTab(scope, sessionId, decision.tabId, "center");
       presentCenter({ scope, sessionId, tabId: decision.tabId });
     }
-  }, [closeOwnedTab, dismissCenter, openSession, placeTab, presentCenter, projectModel, railModel, railOwnerId, railsBySession, undockSession]);
+  }, [closeOwnedTab, dismissCenter, openSessionOnce, placeTab, presentCenter, projectModel, railModel, railOwnerId, railsBySession, undockSession]);
 
   const chips = useMemo(() => {
     const sessionChips = Object.entries(railsBySession).flatMap(([sessionId, model]) => (

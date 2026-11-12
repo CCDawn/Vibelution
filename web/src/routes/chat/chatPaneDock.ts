@@ -125,3 +125,26 @@ export function classifySessionBarDrop(
   }
   return { action: "show-in-center", tabId: tab.id };
 }
+
+
+
+/** One burst of dock re-derivation must not reopen the same session twice. */
+export const PANE_DOCK_OPEN_DEDUPE_MS = 2_000;
+
+export type PaneDockRecentOpen = { sessionId: string; at: number };
+
+/**
+ * A re-derived dock presentation may ask for the same session repeatedly inside
+ * one burst. Every extra route write parks the live stream and replays the
+ * transcript, which the user sees as the pane flickering, so the repeat is
+ * suppressed instead of routed.
+ */
+export function shouldSuppressPaneDockOpen(
+  recent: PaneDockRecentOpen | null,
+  sessionId: string,
+  now: number,
+): boolean {
+  return Boolean(
+    recent && recent.sessionId === sessionId && now - recent.at < PANE_DOCK_OPEN_DEDUPE_MS,
+  );
+}
