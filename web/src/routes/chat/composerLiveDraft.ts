@@ -15,7 +15,13 @@
  * instead; this module only serves the workbench-level mirrors.
  */
 const liveDrafts = new Map<string, string>();
-const mirrorTimers = new Map<string, ReturnType<typeof setTimeout>>();
+/** The timer alone cannot move keys, so keep the text and writer it would apply. */
+type MirrorEntry = {
+  timer: ReturnType<typeof setTimeout>;
+  value: string;
+  apply: (sessionId: string, value: string) => void;
+};
+const mirrorTimers = new Map<string, MirrorEntry>();
 
 /** Long enough that a normal typing burst never reaches the React mirror. */
 const MIRROR_DELAY_MS = 400;
@@ -77,15 +83,20 @@ export function scheduleLiveDraftMirror(
   }
   const pending = mirrorTimers.get(id);
   if (pending) {
-    clearTimeout(pending);
+    clearTimeout(pending.timer);
   }
-  mirrorTimers.set(
-    id,
-    setTimeout(() => {
+  const entry: MirrorEntry = {
+    timer: setTimeout(() => {
+      if (mirrorTimers.get(id) !== entry) {
+        return;
+      }
       mirrorTimers.delete(id);
       apply(id, value);
     }, MIRROR_DELAY_MS),
-  );
+    value,
+    apply,
+  };
+  mirrorTimers.set(id, entry);
 }
 
 /** Flush a pending mirror right now (submit, blur, session switch). */
@@ -101,7 +112,7 @@ export function flushLiveDraftMirror(
   if (!pending) {
     return;
   }
-  clearTimeout(pending);
+  clearTimeout(pending.timer);
   mirrorTimers.delete(id);
   apply(id, liveDrafts.get(id) ?? "");
 }
@@ -113,11 +124,23 @@ export function moveLiveComposerDraft(
 ): void {
   const from = normalizeSessionId(fromSessionId);
   const to = normalizeSessionId(toSessionId);
-  if (!from || !to || from === to || !liveDrafts.has(from)) {
+  if (!from || !to || from === to) {
     return;
   }
-  liveDrafts.set(to, liveDrafts.get(from) as string);
-  liveDrafts.delete(from);
+  if (liveDrafts.has(from)) {
+    liveDrafts.set(to, liveDrafts.get(from) as string);
+    liveDrafts.delete(from);
+  }
+  // A create -> real-id rebase can land inside the mirror debounce window. Move
+  // the pending mirror with the text so the delayed write lands on the session
+  // the composer is about to render, never on the retired temp id.
+  const pending = mirrorTimers.get(from);
+  if (!pending) {
+    return;
+  }
+  clearTimeout(pending.timer);
+  mirrorTimers.delete(from);
+  pending.apply(to, liveDrafts.get(to) ?? pending.value);
 }
 
 /** Drop a session's draft (a submit consumed it, or the session is gone). */
@@ -140,15 +163,15 @@ export function clearLiveComposerDraft(sessionId: string | null | undefined): vo
   liveDrafts.delete(id);
   const pending = mirrorTimers.get(id);
   if (pending) {
-    clearTimeout(pending);
+    clearTimeout(pending.timer);
     mirrorTimers.delete(id);
   }
 }
 
 /** Test seam: timers and registry are module state. */
 export function resetLiveComposerDraftsForTests(): void {
-  for (const timer of mirrorTimers.values()) {
-    clearTimeout(timer);
+  for (const entry of mirrorTimers.values()) {
+    clearTimeout(entry.timer);
   }
   mirrorTimers.clear();
   liveDrafts.clear();

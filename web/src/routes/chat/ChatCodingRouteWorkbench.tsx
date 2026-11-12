@@ -1,5 +1,6 @@
 import { resolveSessionActivity, sessionBlocksMutation, sessionOwnsExecution } from "../sessionActivityState";
 import {
+  flushLiveDraftMirror,
   moveLiveComposerDraft,
   writeLiveComposerDraft,
 } from "./composerLiveDraft";
@@ -505,6 +506,13 @@ export function ChatCodingRouteWorkbench() {
     setTurnModelSelections((current) => ({ ...current, [sessionId]: selection }));
   }, []);
   const rebaseSessionComposerState = useCallback((fromId: string, toId: string) => {
+    // A create -> real-id rebase can land inside the 400ms mirror debounce, so
+    // the state entry for the temp id is still empty. Flush the live text into
+    // the old key first; the rekey below then carries the operator's newest
+    // keystrokes instead of blanking the session the composer is about to show.
+    flushLiveDraftMirror(fromId, (sessionId, value) => {
+      setSessionDrafts((current) => ({ ...current, [sessionId]: value }));
+    });
     rebaseComposerPreviewOwnersRef.current?.(fromId, toId);
     moveStoredSessionDraft(fromId, toId);
     moveLiveComposerDraft(fromId, toId);
