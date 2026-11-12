@@ -886,6 +886,30 @@ export function useChatComposerSubmitActions({
     });
   }, [activeSessionId, setSessionEditTargets]);
 
+  // A landed edit-resubmit consumes its target: the row it pointed at has been
+  // replaced by the edited copy, so the editor leaves with the submission. This
+  // is the explicit exit that the removed message-id inference used to fake.
+  useEffect(() => {
+    if (!activeSessionId || !editResubmitMutation.isSuccess) {
+      return;
+    }
+    if (editResubmitMutation.variables?.sessionId !== activeSessionId) {
+      return;
+    }
+    setSessionEditTargets((current) => {
+      if (!(activeSessionId in current)) {
+        return current;
+      }
+      const { [activeSessionId]: _removed, ...remaining } = current;
+      return remaining;
+    });
+  }, [
+    activeSessionId,
+    editResubmitMutation.isSuccess,
+    editResubmitMutation.variables?.sessionId,
+    setSessionEditTargets,
+  ]);
+
   const handleCancelEditMessage = useCallback(() => {
     if (!activeSessionId) {
       return;
