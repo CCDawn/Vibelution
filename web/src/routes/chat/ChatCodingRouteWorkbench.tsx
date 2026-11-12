@@ -338,6 +338,14 @@ import styles from "../ChatCodingRoute.styles";
 export type { CliAgentRunView, CliAgentTerminalSession } from "./cliAgentRunModel";
 export { canInputTerminal } from "./cliAgentRunModel";
 
+// Session context menu: the tab strip and the index panel both open the same
+// state, so the renderer lives in the workbench rather than inside either surface.
+const SessionContextMenuLazy = lazy(() =>
+  import("../SessionContextMenu").then((module) => ({
+    default: module.SessionContextMenu,
+  })),
+);
+
 const CliAgentRunTerminalPanel = lazy(() =>
   import("./CliAgentRunTerminalPanel").then((module) => ({
     default: module.CliAgentRunTerminalPanel,
@@ -3732,6 +3740,33 @@ export function ChatCodingRouteWorkbench() {
       )}
     >
       {sessionRowSpansRail ? <div className={styles.sessionRowSpan}>{sessionTabStrip}</div> : null}
+      {sessionContextMenu && contextMenuSession ? (
+        <Suspense fallback={null}>
+          <SessionContextMenuLazy
+            addToReviewDisabled={contextMenuAddToReviewDisabled}
+            addToReviewPending={contextMenuAddToReviewPending}
+            archivePending={contextMenuAgentArchivePending}
+            clearHistoryDisabled={contextMenuClearHistoryDisabled}
+            clearHistoryPending={contextMenuClearHistoryPending}
+            clearHistoryVisible={contextMenuClearHistoryVisible}
+            deleteDisabled={contextMenuDeleteDisabled}
+            lang={lang}
+            pinDisabled={pinSessionMutation.isPending}
+            position={sessionContextMenu}
+            session={contextMenuSession}
+            t={t}
+            onAddToReview={handleAddSessionToReview}
+            onArchive={handleArchiveSession}
+            onClearHistory={handleClearSessionHistory}
+            onDelete={handleDeleteSession}
+            onOpenAgentConfig={openSessionAgentConfig}
+            onOpenReportLibrary={openSessionReportLibrary}
+            onRename={beginRenameSession}
+            onTogglePin={handleTogglePinSession}
+            onDismiss={() => setSessionContextMenu(null)}
+          />
+        </Suspense>
+      ) : null}
     </ChatSessionWorkbenchShell>
     )}
       <ChatCodingWorkbenchDialogs
