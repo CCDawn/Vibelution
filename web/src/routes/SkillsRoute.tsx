@@ -1,10 +1,10 @@
 import "../design/route-css/workbench-secondary.tailwind.css";
 
-import { useQuery } from "@tanstack/react-query";
-import { BookOpen, CheckSquare, Copy, FileText, RefreshCw, Search, Sparkles, Square } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { BookOpen, CheckSquare, CloudDownload, Copy, FileText, RefreshCw, Search, Sparkles, Square } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { fetchSkillLibrary, fetchSkillLibraryDetail } from "../api/skills";
+import { fetchSkillLibrary, fetchSkillLibraryDetail, syncSkillLibrary } from "../api/skills";
 import { queryKeys } from "../api/queryKeys";
 import type { SkillLibraryItem } from "../api/types";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
@@ -96,6 +96,9 @@ function copyFor(lang: string) {
         eyebrow: "本地技能",
         subtitle: "查看本机可通过斜杠指令调用的 SKILL.md，不在这里安装、编辑或删除。",
         refresh: "刷新",
+        syncSources: "同步来源",
+        syncSourcesPending: "同步中…",
+        syncSourcesFailed: "同步失败",
         search: "搜索技能、别名或路径",
         listTitle: "可用 Skill",
         detailTitle: "Skill 详情",
@@ -132,6 +135,9 @@ function copyFor(lang: string) {
         eyebrow: "Local skills",
         subtitle: "Browse local SKILL.md files callable through slash commands. Install, edit, and delete are out of this page.",
         refresh: "Refresh",
+        syncSources: "Sync sources",
+        syncSourcesPending: "Syncing…",
+        syncSourcesFailed: "Sync failed",
         search: "Search skills, aliases, or paths",
         listTitle: "Available Skills",
         detailTitle: "Skill Detail",
@@ -175,6 +181,13 @@ export function SkillsRoute() {
   const [bulkSelectionMode, setBulkSelectionMode] = useState(false);
   const [selectedSkillKeys, setSelectedSkillKeys] = useState<Set<string>>(() => new Set());
 
+  const queryClient = useQueryClient();
+  const syncMutation = useMutation({
+    mutationFn: () => syncSkillLibrary(),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.skills() });
+    },
+  });
   const libraryQuery = useQuery({
     queryKey: queryKeys.skills(),
     queryFn: () => fetchSkillLibrary(),
@@ -286,6 +299,21 @@ export function SkillsRoute() {
         <AgentManagementModuleBar
           active="skills"
           actions={(
+            <>
+            <VIconButton
+              type="button"
+              className={styles.refreshButtonClass}
+              label={
+                syncMutation.isPending
+                  ? copy.syncSourcesPending
+                  : syncMutation.isError
+                    ? copy.syncSourcesFailed
+                    : copy.syncSources
+              }
+              icon={<CloudDownload size={15} />}
+              isDisabled={syncMutation.isPending}
+              onPress={() => syncMutation.mutate()}
+            />
             <VIconButton
               type="button"
               className={styles.refreshButtonClass}
@@ -294,6 +322,7 @@ export function SkillsRoute() {
               isDisabled={libraryQuery.isFetching}
               onPress={() => libraryQuery.refetch()}
             />
+            </>
           )}
         />
       )}
