@@ -2,6 +2,7 @@ import {
   Activity,
   ArrowUpRight,
   BookOpen,
+  Brain,
   BrainCircuit,
   Check,
   Clock3,
@@ -87,6 +88,8 @@ type ChatComposerCapabilities = {
   onMentalModelEnabledChange: (enabled: boolean) => void;
   onRuntimeStatusEnabledChange: (enabled: boolean) => void;
   onPromptSuggestionEnabledChange: (enabled: boolean) => void;
+  /** Needs no confirmation: the click submits one Agent-scoped consolidation turn. */
+  onConsolidateMemory?: () => void;
 };
 
 type ChatComposerCapabilityProps = ({ showCapabilities?: true } & ChatComposerCapabilities)
@@ -614,6 +617,16 @@ export function ChatComposerPlusMenu(props: ChatComposerPlusMenuProps) {
                 disabled: props.capabilityDisabled,
                 onChange: props.onPromptSuggestionEnabledChange,
               })}
+              {props.onConsolidateMemory ? renderAction({
+                id: "consolidate-memory",
+                label: lang === "zh" ? "整理记忆" : "Consolidate memory",
+                title: lang === "zh"
+                  ? "提炼本次会话里有价值的经验，归并进当前 Agent 的记忆根；已有条目按内容哈希去重。"
+                  : "Distill what is worth reusing from this session into the current Agent memory root; existing entries dedupe by content hash.",
+                icon: <Brain size={16} />,
+                disabled: props.capabilityDisabled,
+                onSelect: props.onConsolidateMemory,
+              }) : null}
               </> : null}
               {budget ? (
                 <ChatComposerBudgetPopover

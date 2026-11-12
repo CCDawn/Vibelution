@@ -199,6 +199,8 @@ export type ChatConversationSurfaceModelInput = {
   handleStopTurn: () => void;
   handleSubmitGuidance: (mode: SessionGuidanceMode) => void;
   handleSubmitTurn: () => void;
+  /** One-click Agent-scoped consolidation: draft the prompt and submit it in this session. */
+  handleConsolidateMemory?: () => void;
   handleContinueTurn?: () => void;
   handleSwitchMessageVersion: NonNullable<ConversationViewProps["onSwitchMessageVersion"]>;
   lang: "zh" | "en";
@@ -291,6 +293,7 @@ export function useChatConversationSurfaceModel({
   handleRuntimeStatusEnabledChange,
   handleStopTurn,
   handleSubmitGuidance,
+  handleConsolidateMemory,
   handleSubmitTurn,
   handleContinueTurn,
   handleSwitchMessageVersion,
@@ -380,6 +383,7 @@ export function useChatConversationSurfaceModel({
           lang={lang}
           attachmentDisabled={companionConversationComposer.attachmentInputDisabled}
           onAddAttachments={handleAddComposerAttachments}
+          onConsolidateMemory={handleConsolidateMemory}
           sessionReferences={composerSessionReferenceOptions}
           onAddSessionReference={handleAddComposerReference}
           knowledgeReferenceOptions={composerKnowledgeReferenceOptions}

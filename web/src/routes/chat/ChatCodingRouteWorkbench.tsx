@@ -3132,7 +3132,23 @@ export function ChatCodingRouteWorkbench() {
     });
   }, [activeGroupRoomId, activeSessionId, detail?.sessionKind, groupPanelActive, ordinaryChangeRail]);
 
+  // One-click memory consolidation: draft the prompt and submit it in this
+  // session, so the Agent's own tool call does the distill+merge under the
+  // normal tool permissions and no extra confirmation dialog.
+  const handleConsolidateMemory = useCallback(() => {
+    if (!activeSessionId) {
+      return;
+    }
+    handleComposerChange(
+      lang === "zh"
+        ? "请整理记忆：把这轮会话里值得复用的经验、结论和约束用 consolidate_agent_memory_tool 归并进当前 Agent 的记忆根，重复条目按内容哈希跳过；完成后说明新增与跳过的条数。"
+        : "Consolidate memory: use consolidate_agent_memory_tool to merge the reusable lessons, decisions and constraints from this session into this Agent memory root, skipping duplicates by content hash. Report how many entries were added and skipped.",
+    );
+    handleSubmitTurn();
+  }, [activeSessionId, lang, handleComposerChange, handleSubmitTurn]);
+
   const conversationModel = useChatConversationSurfaceModel({
+    handleConsolidateMemory,
     handleContinueTurn,
     activeAgentAvatarFallback,
     activeAgentAvatarImageUrl,
