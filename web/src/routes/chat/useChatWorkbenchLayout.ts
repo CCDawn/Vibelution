@@ -312,13 +312,16 @@ export function useChatWorkbenchLayout({
   const reclaimStatusRailTrack =
     statusRailCollapsed
     && responsiveLayout.mode === "wide";
-  // One session row only while the wide grid still has both the center and the docked rail.
-  const sessionRowSpansRail = responsiveLayout.mode === "wide" && statusRailDocked && indexRailEnabled;
+    // Docked session tabs are hosted by the center pane's own session row. They used to be
+  // lifted into a strip spanning the center column and the docked rail; that strip is a
+  // square band that covers the center pane's workbench radius and leaves the rail without
+  // its own chrome, so the row stays inside the pane and the rail keeps a full-height pane.
+  const sessionRowSpansRail =
+    responsiveLayout.mode === "wide" && statusRailDocked && indexRailEnabled;
   const chatLayoutClassName = [
     layoutModeClassName,
     reclaimStatusRailTrack ? styles.layoutStatusRailCollapsed : "",
     indexRailEnabled ? "" : styles.layoutConversationOnly,
-    sessionRowSpansRail ? styles.sessionRowHost : "",
   ].filter(Boolean).join(" ");
   // A one-column template (finance, overlay, mobile) must not also place this
   // pane on column 3. That placement creates an empty leading track.
@@ -327,7 +330,7 @@ export function useChatWorkbenchLayout({
     || !indexRailEnabled;
   const centerPaneClassName = `${centerOnFirstColumn
     ? `${styles.centerPane} ${styles.centerPaneOverlay}`
-    : `${styles.centerPane} ${styles.centerPaneDocked}`}${sessionRowSpansRail ? ` ${styles.centerPaneBodyRow}` : ""}`;
+    : `${styles.centerPane} ${styles.centerPaneDocked}`}`;
   // Critical: when docked status rail is collapsed, do NOT attach leftRail
   // (grid-column:5). A non-display:none item on column 5 creates implicit
   // grid tracks and a blank right strip after route remounts.
@@ -335,22 +338,14 @@ export function useChatWorkbenchLayout({
     ? `${styles.leftRail} ${styles.overlayPane} ${styles.overlayPaneRight}`
     : statusRailCollapsed
       ? styles.paneCollapsed
-      : sessionRowSpansRail
-        ? `${styles.leftRail} ${styles.statusRailBodyRow}`
-        : styles.leftRail;
+      : styles.leftRail;
   const conversationIndexPaneClassName = conversationIndexOverlayOpen
     ? `${rightPaneClassName} ${styles.overlayPane} ${styles.overlayPaneLeft}`
     : conversationIndexCollapsed
       ? styles.paneCollapsed
-      : sessionRowSpansRail
-        ? `${rightPaneClassName} ${styles.indexRailSpanRows}`
-        : rightPaneClassName;
-  const leftResizeHandleClassName = sessionRowSpansRail
-    ? `${styles.resizeHandleLeft} ${styles.resizeHandleLeftSpan}`
-    : styles.resizeHandleLeft;
-  const rightResizeHandleClassName = sessionRowSpansRail
-    ? `${styles.resizeHandleRight} ${styles.resizeHandleRightBody}`
-    : styles.resizeHandleRight;
+      : rightPaneClassName;
+  const leftResizeHandleClassName = styles.resizeHandleLeft;
+  const rightResizeHandleClassName = styles.resizeHandleRight;
 
   const closeResponsiveOverlayPane = useCallback(() => {
     const closingPane = responsiveOverlayPane;
