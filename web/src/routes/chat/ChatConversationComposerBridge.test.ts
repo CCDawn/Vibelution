@@ -53,6 +53,8 @@ describe("ChatConversationComposerBridge", () => {
     expect(emptyState.actionMode).toBe("send");
     expect(emptyState.disabled).toBe(false);
     expect(emptyState.actionDisabled).toBe(true);
+    // Structural lock stays false: the island live draft decides emptiness.
+    expect(emptyState.actionDisabledByState).toBe(false);
     expect(emptyState.placeholder).toBe("message");
 
     const attachmentState = buildConversationComposerBridgeState({
@@ -354,8 +356,24 @@ describe("ChatConversationComposerBridge", () => {
     })).toBe("model-x 明确不支持图像输入，无法发送图片。");
   });
 
+  it("keeps the empty-draft gate out of the bridge action lock", () => {
+    expect(bridgeSource).toContain("composerActionDisabled={composer.actionDisabledByState}");
+    expect(bridgeSource).not.toContain("composerActionDisabled={composer.actionDisabled}");
+  });
+
   it("marks the primary Chat composer as the Codex variant", () => {
     expect(bridgeSource).toContain('composerVariant="codex"');
+  });
+
+  it("keeps structural locks in the bridge action state", () => {
+    expect(buildConversationComposerBridgeState({ ...emptyStateInput(), readOnly: true, value: "draft" }).actionDisabledByState).toBe(true);
+    expect(buildConversationComposerBridgeState({ ...emptyStateInput(), submitPending: true, value: "draft" }).actionDisabledByState).toBe(true);
+    const stopState = buildConversationComposerBridgeState({ ...emptyStateInput(), sessionBusy: true, value: "draft", stopPending: true });
+    expect(stopState.actionMode).toBe("stop");
+    expect(stopState.actionDisabledByState).toBe(true);
+    const readyState = buildConversationComposerBridgeState({ ...emptyStateInput(), value: "draft" });
+    expect(readyState.actionDisabled).toBe(false);
+    expect(readyState.actionDisabledByState).toBe(false);
   });
 
   it("forwards the session workspace root through the props spread", () => {

@@ -232,6 +232,9 @@ from .session.submit import (
     submit_session_message,
     submit_session_message_lightweight,
 )
+from .session.limits import (
+    SESSION_AGENT_MAX_ACTIVE_TURNS,
+)
 from .session.proactive import (
     cancel_agent_plugin_proactive_turns,
     cancel_proactive_turn_context,
@@ -1263,7 +1266,7 @@ _SESSION_EXECUTOR_LIFECYCLE_LOCK = threading.RLock()
 _SESSION_EXECUTORS_CLOSED = False
 _SESSION_EXECUTOR_DRAIN_THREADS: list[threading.Thread] = []
 _SESSION_EXECUTOR_DRAIN_ERRORS: set[str] = set()
-_SESSION_AGENT_MAX_ACTIVE_TURNS = 8
+_SESSION_AGENT_MAX_ACTIVE_TURNS = SESSION_AGENT_MAX_ACTIVE_TURNS
 SOURCE_COLLECTION_STAGE_SESSION_TASK_KIND = "source_collection_stage_session_task"
 INTERNAL_AUTO_CONTINUE_MAX_TURNS = 3
 SOURCE_COLLECTION_STAGE_TASK_AUTO_CONTINUE_MAX_TURNS = 4

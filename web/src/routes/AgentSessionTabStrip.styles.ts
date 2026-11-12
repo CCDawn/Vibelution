@@ -107,6 +107,8 @@ const styles = {
     "vui-routes-chatcodingroute agentSessionTabGroupSectionCollapsed",
   agentSessionTabGroupHeader:
     "vui-routes-chatcodingroute agentSessionTabGroupHeader group/tabgroup inline-flex h-7 min-w-0 shrink-0 cursor-pointer items-center gap-1 rounded-[6px] px-1.5 text-[11px] text-[var(--fg-secondary)] transition-colors",
+  agentSessionTabGroupHeaderActive:
+    "vui-routes-chatcodingroute agentSessionTabGroupHeaderActive bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] ring-1 ring-[color-mix(in_srgb,var(--accent-cool)_45%,transparent)]",
   agentSessionTabGroupHeaderOpen:
     "vui-routes-chatcodingroute agentSessionTabGroupHeaderOpen [&_[data-group-chevron]]:opacity-100",
   agentSessionTabGroupChevron:

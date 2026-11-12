@@ -65,6 +65,8 @@ export type ChatConversationComposerBridgeInput = {
 export type ChatConversationComposerBridgeState = {
   readOnly?: boolean;
   actionDisabled: boolean;
+  /** Structural lock only; empty drafts come from the island live text. */
+  actionDisabledByState: boolean;
   actionMode: "send" | "stop" | "continue";
   attachmentInputDisabled: boolean;
   attachments: ConversationComposerAttachment[];
@@ -179,6 +181,14 @@ export function buildConversationComposerBridgeState(
       ? input.submitPending || input.sessionStopping || input.stopPending
       : input.submitPending || (actionMode !== "continue" && !hasDraftContent && !hasAttachments && !hasReferences)
   );
+  // Structural lock only: an empty draft is never decided here. The island
+  // reads the live draft, so a keystroke followed by Enter must not wait for
+  // the debounced mirror that produces input.value.
+  const actionDisabledByState = Boolean(input.readOnly) || !hasSession || (
+    actionMode === "stop"
+      ? input.submitPending || input.sessionStopping || input.stopPending
+      : input.submitPending
+  );
   // ZCode chatPlaceholder tri-state parity: while a turn runs the composer
   // always names the queueing semantics instead of going blank — the empty
   // queue shows the plain "queues and sends after this turn" hint, and once
@@ -198,6 +208,7 @@ export function buildConversationComposerBridgeState(
   return {
     readOnly: Boolean(input.readOnly),
     actionDisabled,
+    actionDisabledByState,
     actionMode,
     // Image capability applies to image files only. The route filters those
     // files individually, while document attachments remain available.
@@ -320,7 +331,7 @@ export const ChatConversationComposerBridge = memo(function ChatConversationComp
       composerDisabled={composer.disabled}
       regenerateDisabled={composer.disabled || props.regenerateDisabled}
       branchVersionSwitchDisabled={composer.disabled || props.branchVersionSwitchDisabled}
-      composerActionDisabled={composer.actionDisabled}
+      composerActionDisabled={composer.actionDisabledByState}
       composerActionMode={composer.actionMode}
       composerPending={composer.pending}
       composerSubmitPending={composer.submitPending}

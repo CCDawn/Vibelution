@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { dictionary } from "../../i18n/dictionary";
 import { queryKeys } from "../../api/queryKeys";
 import { ConversationView } from "./ConversationView";
+import { createComposerDraftStore } from "./composerDraftStore";
 
 vi.mock("./LazyConversationMarkdownRenderer", async () => {
   const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
@@ -339,5 +340,51 @@ describe("composer Enter delivery (running Enter sends immediately)", () => {
     const primary = container?.querySelector<HTMLButtonElement>('[data-testid="composer-primary-action"]');
     expect(primary?.getAttribute("aria-label")).toBe(dictionary.zh.queueFollowup);
     expect(primary?.getAttribute("data-composer-action")).toBe("queue");
+  });
+
+  it("sends from the live draft while the mirrored value is still empty", async () => {
+    const onSubmit = vi.fn();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    queryClient.setQueryData(queryKeys.configPublic(), { language: "zh" });
+    queryClient.setQueryData(["i18n", "dictionary-domains", "core,chat"], dictionary);
+    const draftStore = createComposerDraftStore("");
+    const renderWith = async (actionDisabled: boolean) => {
+      container = document.createElement("div");
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => {
+        root?.render(
+          <QueryClientProvider client={queryClient}>
+            <ConversationView sessionId="session-live-draft" title="Session" phase="ready" messages={[]}
+              showHeader={false} showSessionOverview={false} showComposer defaultFileContext="workspace"
+              composerDraftStore={draftStore} composerValue="" composerPlaceholder="" composerDisabled={false}
+              composerPending={false} composerActionMode="send" composerActionDisabled={actionDisabled}
+              onComposerChange={() => undefined} onSubmit={onSubmit} onEditUserMessage={() => undefined} />
+          </QueryClientProvider>,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      const textarea = container.querySelector<HTMLTextAreaElement>("textarea");
+      if (!textarea) {
+        throw new Error("composer textarea not mounted");
+      }
+      textarea.focus();
+      return textarea;
+    };
+    const liveTextarea = await renderWith(false);
+    await act(async () => typeIntoTextarea(liveTextarea, "立即发送"));
+    await act(async () => {
+      pressEnter(liveTextarea);
+    });
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    await act(async () => root?.unmount());
+    container?.remove();
+    // A mirror-derived empty-draft lock reproduces the reported stall.
+    const lockedTextarea = await renderWith(true);
+    await act(async () => typeIntoTextarea(lockedTextarea, "第二条"));
+    await act(async () => {
+      pressEnter(lockedTextarea);
+    });
+    expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 });

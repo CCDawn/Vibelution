@@ -41,6 +41,7 @@ from .continuation import (
     normalize_continuation_expected,
     validate_continuation,
 )
+from .limits import RECOVERY_TURN_MODE, RECOVERY_TURN_SCHEDULER_PRIORITY
 from .turn_model_parameters import capture_model_parameters, pin_agent_model_parameters
 from .accepted_prompt_config import (
     capture_accepted_prompt_config,
@@ -2489,6 +2490,10 @@ def submit_session_message(
             "submit_timing_fields": dict(submit_timing_fields),
             "submit_started_at_monotonic": submit_started_at,
         }
+        if turn_mode == RECOVERY_TURN_MODE:
+            # 启动恢复的 turn 是后台补偿：它已经错过了用户眼前这一轮，
+            # 不能再把新的交互式消息挤到队列后面（调度器按该值升序插队）。
+            context["_scheduler_priority"] = RECOVERY_TURN_SCHEDULER_PRIORITY
         # ContextVars do not cross SESSION_EXECUTOR threads.  Carry the Ledger
         # deadline only as an ephemeral scheduler field for workflow-scoped
         # Challenge turns; it must never enter message metadata, the turn journal,

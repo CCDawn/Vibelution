@@ -56,6 +56,7 @@ from core.session_recovery_flags import (
     is_session_recovery_enabled,
     session_recovery_max_auto_retries,
 )
+from core.web.services.session.limits import recovery_worker_limit
 
 logger = logging.getLogger(__name__)
 
@@ -1473,10 +1474,14 @@ def recover_interrupted_session_turns_on_startup(
         summary["phasePrefilterMs"] = int((time.perf_counter() - _phase_start) * 1000)
         summary["candidateCount"] = len(candidates)
         cpu_count = os.cpu_count() or 4
+        # 恢复是后台补偿：池子再大也不能吃光调度槽位，否则用户新发的
+        # 消息只能排在恢复出来的旧 turn 后面（见 limits.recovery_worker_limit）。
         worker_count = (
             1
             if len(candidates) <= 1
-            else min(_SWEEP_MAX_WORKERS, max(2, cpu_count), len(candidates))
+            else recovery_worker_limit(
+                min(_SWEEP_MAX_WORKERS, max(2, cpu_count), len(candidates))
+            )
         )
         summary["workerCount"] = worker_count
         _phase_start = time.perf_counter()
