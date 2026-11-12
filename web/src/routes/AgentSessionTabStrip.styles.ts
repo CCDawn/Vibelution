@@ -108,10 +108,12 @@ const styles = {
   agentSessionTabGroupSectionDropTarget:
     "vui-routes-chatcodingroute agentSessionTabGroupSectionDropTarget bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] ring-1 ring-[color-mix(in_srgb,var(--accent-cool)_50%,transparent)]",
   // Panel member row: whole row drags, and the remove control only shows on hover.
+  // Row owns the hover surface; the member button stays chrome-less so the row
+  // reads as one line instead of a stack of bordered boxes.
   agentSessionTabGroupPanelRow:
-    "vui-routes-chatcodingroute agentSessionTabGroupPanelRow flex min-w-0 items-center gap-1 rounded-[7px] [&>button]:min-w-0 [&>button]:flex-1 hover:bg-[color-mix(in_srgb,var(--fg-primary)_8%,transparent)] [&:hover_[data-group-remove]]:opacity-100",
+    "vui-routes-chatcodingroute agentSessionTabGroupPanelRow group/row relative flex min-w-0 items-center rounded-[7px] hover:bg-[color-mix(in_srgb,var(--fg-primary)_8%,transparent)]",
   agentSessionTabGroupPanelRemove:
-    "vui-routes-chatcodingroute agentSessionTabGroupPanelRemove shrink-0 opacity-0 transition-opacity",
+    "vui-routes-chatcodingroute agentSessionTabGroupPanelRemove absolute right-1 top-1/2 -translate-y-1/2 shrink-0 opacity-0 transition-opacity group-hover/row:opacity-100",
   agentSessionTabGroupHeader:
     "vui-routes-chatcodingroute agentSessionTabGroupHeader group/tabgroup inline-flex h-7 min-w-0 shrink-0 cursor-pointer items-center gap-1 rounded-[6px] px-1.5 text-[11px] text-[var(--fg-secondary)] transition-colors",
   agentSessionTabGroupHeaderActive:
@@ -140,7 +142,7 @@ const styles = {
   agentSessionTabGroupPanelList:
     "vui-routes-chatcodingroute agentSessionTabGroupPanelList m-0 flex max-h-[22rem] w-[15rem] list-none flex-col gap-0.5 overflow-y-auto rounded-[10px] p-1",
   agentSessionTabGroupPanelItem:
-    "vui-routes-chatcodingroute agentSessionTabGroupPanelItem flex w-full min-w-0 items-center gap-1.5 rounded-[7px] px-2 py-1.5 text-left text-[12px] leading-tight text-[var(--fg-primary)] hover:bg-[color-mix(in_srgb,var(--fg-primary)_10%,transparent)]",
+    "vui-routes-chatcodingroute agentSessionTabGroupPanelItem flex w-full min-w-0 items-center gap-1.5 !rounded-[7px] !border-0 !bg-transparent px-2 py-1.5 pr-7 text-left text-[12px] leading-tight text-[var(--fg-primary)] !shadow-none",
   agentSessionTabGroupPanelItemActive:
     "vui-routes-chatcodingroute agentSessionTabGroupPanelItemActive bg-[color-mix(in_srgb,var(--accent-cool)_12%,transparent)] ring-1 ring-[color-mix(in_srgb,var(--accent-cool)_45%,transparent)]",
   agentSessionTabGroupPanelTitle:
