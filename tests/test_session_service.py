@@ -1076,6 +1076,7 @@ def test_session_turn_prepare_timing_log_fields_are_bounded_and_non_sensitive():
             "syncedEnvNames": ["DO_NOT_LOG"],
             "agentContext.runtimeContextBlockMs": 173,
             "agentContext.episodicEventsMs": 24,
+            "agentRuntimeStaticFrozen": True,
             "agentContext.agentRuntimeStaticFrozen": True,
             "agentContext.nested": {"not": "numeric"},
             "unrelated": "not part of the bounded timing event",
@@ -1100,6 +1101,7 @@ def test_session_turn_prepare_timing_log_fields_are_bounded_and_non_sensitive():
         "chatStateReadMs": 11,
         "contextManagersMs": 29,
         "agentCreateMs": 431,
+        "agentRuntimeStaticFrozen": True,
         "agentContext.runtimeContextBlockMs": 173,
         "agentContext.episodicEventsMs": 24,
     }

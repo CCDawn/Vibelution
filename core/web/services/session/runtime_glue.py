@@ -2403,6 +2403,11 @@ def _session_turn_prepare_timing_log_fields(timings: dict[str, Any]) -> dict[str
         "promptSnapshotMs",
         "lightweightChatDecisionMs",
         "agentContextBuildMs",
+        # Session-frozen vs per-turn rebuilt for the Agent static context half.
+        # context_engine already writes this bool, but flat keys only survive
+        # this filter when they are listed: without it the answer to "is the
+        # static header actually frozen this turn" was unobservable.
+        "agentRuntimeStaticFrozen",
         "workspacePolicyMs",
         "llmKeyEnvSyncMs",
         "agentLlmResolveMs",
