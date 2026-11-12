@@ -1744,7 +1744,10 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
 
     @app.post("/api/assistant/messages")
     def message(payload: Message):
+        from core.chat.submit_command_contract import from_assistant_payload, validate_submit_command
         try:
+            # 共有语义走单一契约层；SubmitCommandError 是 ValueError，沿用本入口 422。
+            validate_submit_command(from_assistant_payload(payload))
             if payload.controlContinuation is not None:
                 return native.submit(payload.message, payload.requestId,
                                      control_continuation=payload.controlContinuation.model_dump())

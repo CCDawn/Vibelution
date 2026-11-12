@@ -1061,6 +1061,12 @@ async def session_upload_attachment(session_id: str, request: Request) -> dict:
     response_model_exclude_unset=True,
 )
 def session_submit_message(session_id: str, payload: SessionMessagePayload, request: Request) -> dict:
+    # 共有语义走单一契约层，wire 字段名仍由本入口保留。
+    from core.chat.submit_command_contract import SubmitCommandError, from_platform_payload, validate_submit_command
+    try:
+        validate_submit_command(from_platform_payload(payload))
+    except SubmitCommandError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     client_submission_id = str(payload.clientSubmissionId or "").strip() or _new_client_submission_id()
     model_selection = payload.modelSelection.model_dump() if payload.modelSelection is not None else None
     continuation = payload.continuation.model_dump() if payload.continuation is not None else None
