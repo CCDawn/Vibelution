@@ -2286,15 +2286,9 @@ var qrcode = function() {
 
 }();
 
-(function (factory) {
-  if (typeof define === 'function' && define.amd) {
-      define([], factory);
-  } else if (typeof exports === 'object') {
-      module.exports = factory();
-  }
-}(function () {
-    return qrcode;
-}));
+// UMD dispatch removed: this vendored bundle is imported as an ESM module
+// only, so the leftover CJS branch wrote to a read-only module namespace
+// under the test runner and broke every suite that transitively imported it.
 
 // ---------------------------------------------------------------------
 // Vendoring note (codex-harmony-local): vendored verbatim from
