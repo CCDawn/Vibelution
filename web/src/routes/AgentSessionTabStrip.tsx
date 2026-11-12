@@ -340,6 +340,9 @@ export function AgentSessionTabStrip({
   const [mergeTargetSessionId, setMergeTargetSessionId] = useState<string | null>(null);
   const [renamingGroupId, setRenamingGroupId] = useState<string | null>(null);
   const [groupNameDraft, setGroupNameDraft] = useState("");
+  // Group mutations write localStorage directly; this tick forces the next
+  // render to re-read it, mirroring manualOrderTick above.
+  const [, setGroupTick] = useState(0);
   const applyGroupMutation = useCallback(
     (mutate: (state: AgentSessionTabGroupState) => AgentSessionTabGroupState) => {
       setGroupState((current) => {
