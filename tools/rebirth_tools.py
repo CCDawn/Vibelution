@@ -802,19 +802,24 @@ def handle_restart_request(
         _close_restart_transaction(txn_id, "failed", f"environment gate error: {e}")
         return (f"[ENVIRONMENT GATE ERROR] {e}", None)
 
-    # 测试门控（仅当 Agent 产生过自我修改时触发）
+    # 测试门控（仅当 Agent 产生过自我修改时触发）。
+    # evolution.test_gate_enabled 可显式关闭；默认开启，超时取 test_gate_timeout。
     if self_modified:
-        try:
-            from core.infrastructure.test_gate import check_evolution_ready
-            passed, msg = check_evolution_ready()
-            if not passed:
-                _debug_logger.error("测试门控失败，禁止重启", tag="GATE")
-                _close_restart_transaction(txn_id, "failed", f"test gate failed: {msg}")
-                return (f"[TEST GATE FAILED] {msg}", None)
-        except Exception as e:
-            _debug_logger.error(f"测试门控执行失败: {e}", tag="GATE")
-            _close_restart_transaction(txn_id, "failed", f"test gate error: {e}")
-            return (f"[TEST GATE ERROR] {e}", None)
+        gate_enabled, gate_timeout = _evolution_test_gate_policy()
+        if gate_enabled:
+            try:
+                from core.infrastructure.test_gate import check_evolution_ready
+                passed, msg = check_evolution_ready(timeout=gate_timeout)
+                if not passed:
+                    _debug_logger.error("测试门控失败，禁止重启", tag="GATE")
+                    _close_restart_transaction(txn_id, "failed", f"test gate failed: {msg}")
+                    return (f"[TEST GATE FAILED] {msg}", None)
+            except Exception as e:
+                _debug_logger.error(f"测试门控执行失败: {e}", tag="GATE")
+                _close_restart_transaction(txn_id, "failed", f"test gate error: {e}")
+                return (f"[TEST GATE ERROR] {e}", None)
+        else:
+            _debug_logger.warning("测试门控已被 evolution.test_gate_enabled 关闭", tag="GATE")
 
     # 触发实际重启
     tool_result = trigger_self_restart_tool(**tool_args)
@@ -824,6 +829,22 @@ def handle_restart_request(
 
     _close_restart_transaction(txn_id, "failed", f"restart trigger failed: {tool_result}")
     return (tool_result, None)
+
+
+def _evolution_test_gate_policy() -> tuple[bool, int]:
+    """读取 evolution.test_gate_enabled / test_gate_timeout。
+
+    读取失败时保持默认开启，避免配置异常悄悄关掉重启前测试门控。
+    """
+    try:
+        from config import get_config
+
+        evolution = getattr(get_config(), "evolution", None)
+        enabled = bool(getattr(evolution, "test_gate_enabled", True))
+        timeout = int(getattr(evolution, "test_gate_timeout", 120) or 120)
+    except Exception:
+        return True, 120
+    return enabled, max(1, timeout)
 
 
 def enter_hibernation_tool(duration: int = 300) -> str:

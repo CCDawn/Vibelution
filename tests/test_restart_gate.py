@@ -48,6 +48,10 @@ def test_handle_restart_request_blocks_when_environment_smoke_fails(monkeypatch)
 def test_handle_restart_request_runs_full_test_gate_after_environment_smoke(monkeypatch):
     calls = []
     close_calls = []
+    # Ambient config must not decide whether this gate runs.
+    monkeypatch.setattr(
+        rebirth_module, "_evolution_test_gate_policy", lambda: (True, 120)
+    )
 
     monkeypatch.setattr(
         rebirth_module,
@@ -71,7 +75,7 @@ def test_handle_restart_request_runs_full_test_gate_after_environment_smoke(monk
         "core.infrastructure.test_gate",
         SimpleNamespace(
             check_environment_ready=lambda: (calls.append("env") or True, "env ok"),
-            check_evolution_ready=lambda: (calls.append("full") or True, "full ok"),
+            check_evolution_ready=lambda **_kwargs: (calls.append("full") or True, "full ok"),
         ),
     )
 
