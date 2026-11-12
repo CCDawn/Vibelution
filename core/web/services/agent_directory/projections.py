@@ -372,8 +372,10 @@ def build_agent_runtime_static_lines(
         f"AgentCode: {agent.get('agentCode') or ''}",
         f"AgentName: {agent.get('displayName') or ''}",
         f"AgentWorkspace: {agent.get('workspacePath') or ''}",
-        f"MemoryRoot: {memory_policy.get('privateMemoryRoot') or ''}",
-        f"ProjectMemoryUpdatesPath: {memory_policy.get('projectMemoryUpdatesPath') or ''}",
+        f"MemoryRoot: {memory_policy.get('privateMemoryRoot') or '(unconfigured)'}",
+        f"ProjectMemoryUpdatesPath: {memory_policy.get('projectMemoryUpdatesPath') or '(unconfigured)'}",
+        "- MemoryRoot 是 Agent 级文件记忆根（跨会话共享），由 consolidate_agent_memory_tool 按需创建；"
+        "它不保存运行中的实例记忆，两者不要混用。",
         *budget_lines,
         *_team_knowledge_access_lines(resolved_agent_id, memory_policy),
         "- Knowledge bodies are tool-readable only; do not treat team knowledge as prompt-injected memory.",

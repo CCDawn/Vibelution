@@ -44,6 +44,7 @@ from tools.memory_tools import (
     record_learning_tool as _record_learning_impl,
     search_memory_tool as _search_memory_impl,
     search_error_archive_tool as _search_error_archive_impl,
+    consolidate_agent_memory_tool as _consolidate_agent_memory_impl,
 )
 from tools.search_tools import grep_search_tool as _grep_search_impl
 from tools.web_search_tool import (
@@ -3894,6 +3895,24 @@ def _build_key_tools() -> List[BaseTool]:
         return _record_learning_impl(category=category, title=title, content=content, importance=importance)
 
     @tool
+    def consolidate_agent_memory_tool(agent_id: str = "", dry_run: bool = False) -> str:
+        """
+        【记忆整理】把本实例长期记忆归并进 Agent 级文件记忆。
+
+        同一 Agent 的多个会话各自持有实例级 SQLite 记忆；本工具按内容哈希去重，
+        把新增条目追加到 workspace/agents/<agentId>/memory/long-term-memory.md，
+        重复执行不会产生重复条目。任务收口、上下文压缩前主动调用。
+
+        Args:
+            agent_id: 目标 Agent，留空使用当前运行时 Agent
+            dry_run: 只统计不写文件
+
+        Returns:
+            JSON 格式的整理结果
+        """
+        return _consolidate_agent_memory_impl(agent_id=agent_id, dry_run=dry_run)
+
+    @tool
     def search_memory_tool(query: str, category: str = "") -> str:
         """
         【记忆搜索】搜索跨代长期记忆。
@@ -4098,6 +4117,7 @@ def _build_key_tools() -> List[BaseTool]:
         record_learning_tool,
         search_memory_tool,
         search_error_archive_tool,
+        consolidate_agent_memory_tool,
         # 上下文压缩
         compress_context_tool,
     ]
