@@ -813,6 +813,12 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "riskTags": ["memory_access"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
+    "consolidate_agent_memory_tool": {
+        "category": "memory_context",
+        "capabilityTags": ["memory_write", "consolidation"],
+        "riskTags": ["memory_access", "memory_write"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
     "compress_context_tool": {
         "category": "memory_context",
         "capabilityTags": ["context", "compaction"],
@@ -1445,6 +1451,7 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
             "github_project_library_clone_tool",
             "commit_compressed_memory_tool",
             "record_learning_tool",
+            "consolidate_agent_memory_tool",
             "compress_context_tool",
         ],
         "preferredToolNames": [

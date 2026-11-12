@@ -1133,3 +1133,25 @@ def test_tool_registry_signature_ignores_probe_status_string_but_not_availabilit
     web_items = [item for item in rebuilt["tools"] if item.get("name") == "web_search_tool"]
     for item in web_items:
         assert item.get("llmVisible") is False
+
+
+def test_every_registered_builtin_tool_has_catalog_metadata(tmp_path, monkeypatch):
+    """Key_Tools 注册的每个内置工具都必须有 TOOL_CATALOG 元数据。
+
+    回归背景（2026-11-12）：新增内置工具只注册进 Key_Tools 而漏登记
+    TOOL_CATALOG 时，注册表构建整体抛 ToolRegistryError，工具授权层
+    静默降级为零工具，会话 Agent 变成"只能说一句话就停"。该测试把
+    「注册清单 ⊆ 目录清单」钉成机器门。
+    """
+    monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
+    from tools.Key_Tools import _build_key_tools
+
+    payload = registry.get_tool_registry()
+    registered = {str(getattr(tool, "name", "") or "").strip() for tool in _build_key_tools()}
+    registered.discard("")
+    catalog_names = set(tool_catalog.TOOL_CATALOG)
+
+    missing = sorted(registered - catalog_names)
+    assert not missing, f"Key_Tools 已注册但 TOOL_CATALOG 缺少登记: {missing}"
+    assert "consolidate_agent_memory_tool" in catalog_names
+    assert "consolidate_agent_memory_tool" in registered
