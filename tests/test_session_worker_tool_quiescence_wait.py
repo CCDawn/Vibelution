@@ -18,6 +18,10 @@ class _RecordingService:
 
     def __init__(self) -> None:
         self.events: list[tuple[str, dict[str, Any]]] = []
+        self.stop_requested = False
+
+    def _is_session_stop_requested(self, session_id: str) -> bool:
+        return self.stop_requested
 
     def _record_session_turn_lifecycle_event(
         self, session_id: str, phase: str, **kwargs: Any
@@ -121,3 +125,70 @@ def test_quiescence_wait_budget_env_override(
         assert worker._tool_quiescence_wait_budget_seconds() == (
             worker.TOOL_QUIESCENCE_WAIT_BUDGET_SECONDS
         )
+
+
+def test_stop_budget_accessor_reads_env_and_allows_immediate_abandon(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(worker._TOOL_QUIESCENCE_STOP_WAIT_BUDGET_ENV, raising=False)
+    assert (
+        worker._tool_quiescence_stop_wait_budget_seconds()
+        == worker.TOOL_QUIESCENCE_STOP_WAIT_BUDGET_SECONDS
+    )
+
+    monkeypatch.setenv(worker._TOOL_QUIESCENCE_STOP_WAIT_BUDGET_ENV, "0")
+    assert worker._tool_quiescence_stop_wait_budget_seconds() == 0.0
+
+    monkeypatch.setenv(worker._TOOL_QUIESCENCE_STOP_WAIT_BUDGET_ENV, "not-a-number")
+    assert (
+        worker._tool_quiescence_stop_wait_budget_seconds()
+        == worker.TOOL_QUIESCENCE_STOP_WAIT_BUDGET_SECONDS
+    )
+
+
+def test_quiescence_wait_shrinks_to_the_stop_budget(
+    recording_service: _RecordingService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stop already registered before teardown must not wait out the full budget."""
+
+    scope, _future = _sealed_scope_with_pending_tool("leaked_grep")
+    recording_service.stop_requested = True
+    monkeypatch.setattr(worker, "_tool_quiescence_wait_budget_seconds", lambda: 10.0)
+    monkeypatch.setattr(worker, "_tool_quiescence_stop_wait_budget_seconds", lambda: 0.15)
+    started_at = time.monotonic()
+
+    worker._wait_for_tool_execution_quiescence(scope)
+    elapsed = time.monotonic() - started_at
+
+    assert elapsed < 1.0, elapsed
+    applied = recording_service.phases("tool_quiescence_wait_stop_budget_applied")
+    assert applied, "the shrunk budget must be observable"
+    assert applied[0]["fields"]["budgetSeconds"] == 0.15
+    exhausted = recording_service.phases("tool_quiescence_wait_budget_exhausted")
+    assert exhausted
+    assert exhausted[0]["fields"]["budgetSeconds"] == 0.15
+
+
+def test_quiescence_wait_shrinks_when_the_stop_arrives_mid_wait(
+    recording_service: _RecordingService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stop that lands after teardown started still cuts the remaining wait."""
+
+    scope, _future = _sealed_scope_with_pending_tool("leaked_grep")
+    monkeypatch.setattr(worker, "_tool_quiescence_wait_budget_seconds", lambda: 10.0)
+    monkeypatch.setattr(worker, "_tool_quiescence_stop_wait_budget_seconds", lambda: 0.15)
+    started_at = time.monotonic()
+
+    def request_stop() -> None:
+        recording_service.stop_requested = True
+
+    Timer(0.05, request_stop).start()
+    worker._wait_for_tool_execution_quiescence(scope)
+    elapsed = time.monotonic() - started_at
+
+    # One full poll slice may elapse before the stop is observed, then only the
+    # short stop budget remains.
+    assert elapsed < 2.0, elapsed
+    assert recording_service.phases("tool_quiescence_wait_stop_budget_applied")

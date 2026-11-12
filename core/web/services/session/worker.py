@@ -77,6 +77,13 @@ _MIN_INVOCATION_OUTPUT_TOKENS_ENV = "VIBELUTION_MIN_INVOCATION_OUTPUT_TOKENS"
 TOOL_QUIESCENCE_WAIT_BUDGET_SECONDS = 10.0
 _TOOL_QUIESCENCE_WAIT_BUDGET_ENV = "VIBELUTION_TOOL_QUIESCENCE_WAIT_BUDGET_SECONDS"
 
+# 用户主动停止时的 teardown 等待预算。正常结束仍用上面的完整预算等工具自然
+# 收尾；但 stop 表示用户已经放弃这一轮，结算不该被在途工具拖住：只给短暂
+# 宽限让已经响应取消的工具退出，其余线程被放弃，结果不再回灌到会话。
+# Override with VIBELUTION_TOOL_QUIESCENCE_STOP_WAIT_BUDGET_SECONDS.
+TOOL_QUIESCENCE_STOP_WAIT_BUDGET_SECONDS = 1.0
+_TOOL_QUIESCENCE_STOP_WAIT_BUDGET_ENV = "VIBELUTION_TOOL_QUIESCENCE_STOP_WAIT_BUDGET_SECONDS"
+
 _CONTINUATION_TOOL_FAILURE_STATUSES = frozenset(
     {"error", "failed", "failure", "timeout", "timed_out"}
 )
@@ -218,6 +225,20 @@ def _tool_quiescence_wait_budget_seconds() -> float:
         if value > 0:
             return value
     return TOOL_QUIESCENCE_WAIT_BUDGET_SECONDS
+
+
+def _tool_quiescence_stop_wait_budget_seconds() -> float:
+    """Budget applied once the user has stopped, including zero."""
+
+    raw = os.environ.get(_TOOL_QUIESCENCE_STOP_WAIT_BUDGET_ENV, "").strip()
+    if raw:
+        try:
+            value = float(raw)
+        except ValueError:
+            return TOOL_QUIESCENCE_STOP_WAIT_BUDGET_SECONDS
+        if value >= 0:
+            return value
+    return TOOL_QUIESCENCE_STOP_WAIT_BUDGET_SECONDS
 
 
 def _challenge_deadline_stop_reason(
@@ -1049,7 +1070,35 @@ def _wait_for_tool_execution_quiescence(scope: ToolExecutionScope) -> None:
     extended_wait_recorded = False
     budget_seconds = _tool_quiescence_wait_budget_seconds()
     budget_deadline = time.monotonic() + budget_seconds
+    stop_budget_applied = False
+
+    def _apply_stop_budget_if_needed() -> None:
+        """压短剩余等待：既覆盖进入 teardown 前已停止，也覆盖等待中途才停止。"""
+
+        nonlocal budget_seconds, budget_deadline, stop_budget_applied
+        if stop_budget_applied:
+            return
+        try:
+            stop_requested = bool(s._is_session_stop_requested(scope.session_id))
+        except Exception:
+            stop_requested = False
+        if not stop_requested:
+            return
+        stop_budget_applied = True
+        stop_budget = _tool_quiescence_stop_wait_budget_seconds()
+        budget_seconds = stop_budget
+        budget_deadline = min(budget_deadline, time.monotonic() + stop_budget)
+        s._record_session_turn_lifecycle_event(
+            scope.session_id,
+            "tool_quiescence_wait_stop_budget_applied",
+            turn_id=scope.turn_id,
+            outcome="stop_requested",
+            fields={**scope.snapshot(), "budgetSeconds": round(stop_budget, 3)},
+        )
+
+    _apply_stop_budget_if_needed()
     while True:
+        _apply_stop_budget_if_needed()
         remaining_budget = budget_deadline - time.monotonic()
         if remaining_budget <= 0:
             snapshot = scope.snapshot()
