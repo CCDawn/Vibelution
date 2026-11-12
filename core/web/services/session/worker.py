@@ -1190,7 +1190,12 @@ def _finish_session_turn_worker(
         "finished",
         details={"wasCurrentTurn": s._is_session_turn_current(session_id, turn_id)},
     )
-    # 轮次终局：释放停止阶段登记（无论正常结束还是停止收尾）。
+    # 轮次终局：先把停止分段耗时落日志，再释放阶段登记——登记一清，这段
+    # 数据就再也拿不到了，所以顺序不能反。
+    try:
+        _stop_control.log_session_stop_breakdown(session_id, turn_id)
+    except Exception:
+        pass
     try:
         _stop_control._clear_session_stop_stages(session_id, turn_id)
     except Exception:

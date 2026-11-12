@@ -14,7 +14,10 @@ import os
 import threading
 import time
 from contextlib import contextmanager
+from datetime import datetime
 from typing import Any
+
+import json
 
 
 _RUNTIME_STOP_REASONS = frozenset({"electron_user_restart", "electron_user_close", "runtime_shutdown"})
@@ -198,6 +201,73 @@ def _clear_session_stop_stages(session_id: str, turn_id: str) -> None:
         return
     with _STOP_STAGE_LOCK:
         _SESSION_STOP_STAGES.pop((normalized_session_id, normalized_turn_id), None)
+
+
+def build_session_stop_breakdown(session_id: str, turn_id: str) -> dict[str, Any]:
+    """分段耗时视图：把已登记的停止阶段换算成相邻阶段的时间差。
+
+    只读观测，不参与任何控制流。阶段登记本身已带 ``at`` 时间戳，这里补的是
+    人在复盘时真正想知道的那层——「点击停止 → provider 中止 → 工具退出 →
+    终态」每一段各花了多久，而不是只有一串时刻。
+    """
+
+    entries = _session_stop_stages_for_projection(session_id, turn_id)
+    if not entries:
+        return {}
+    parsed: list[tuple[str, float, dict[str, Any]]] = []
+    for entry in entries:
+        raw = str(entry.get("at") or "").strip()
+        if not raw:
+            continue
+        try:
+            moment = datetime.fromisoformat(raw).timestamp()
+        except ValueError:
+            continue
+        parsed.append((str(entry.get("stage") or "").strip(), moment, dict(entry)))
+    if not parsed:
+        return {}
+    segments = [
+        {
+            "from": previous_stage,
+            "to": stage,
+            "ms": max(0, int(round((moment - previous_moment) * 1000))),
+        }
+        for (previous_stage, previous_moment, _), (stage, moment, _) in zip(parsed, parsed[1:])
+    ]
+    return {
+        "sessionId": str(session_id or "").strip(),
+        "turnId": str(turn_id or "").strip(),
+        "stageCount": len(parsed),
+        "totalMs": max(0, int(round((parsed[-1][1] - parsed[0][1]) * 1000))),
+        "segments": segments,
+        "stages": [
+            {
+                **{key: value for key, value in entry.items() if key not in {"stage", "at"}},
+                "stage": stage,
+                "at": entry.get("at"),
+            }
+            for stage, _moment, entry in parsed
+        ],
+    }
+
+
+def log_session_stop_breakdown(session_id: str, turn_id: str) -> None:
+    """轮次 settle 前落一条停止分段耗时日志。
+
+    观测失败绝不影响停止收尾：调用方与这里都做兜底吞异常。日志先于阶段清除
+    执行，否则进程内登记一清，这段数据就再也拿不到了。
+    """
+
+    try:
+        breakdown = build_session_stop_breakdown(session_id, turn_id)
+        if not breakdown:
+            return
+        _LOGGER.info(
+            "session_stop_breakdown %s",
+            json.dumps(breakdown, ensure_ascii=False, sort_keys=True),
+        )
+    except Exception:
+        return
 
 
 def _stop_settlement_watchdog_seconds() -> float:
