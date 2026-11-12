@@ -416,7 +416,7 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
     ) as string[];
   }
 
-  it("queues the typed follow-up on the server while the turn is running", async () => {
+  it("steers the typed follow-up into the running turn instead of queueing it", async () => {
     const { mutations, submitTurn, guidance } = createMutations();
     await mount({
       busy: true,
@@ -429,13 +429,15 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
       container?.querySelector<HTMLButtonElement>('[data-testid="submit"]')?.click();
     });
 
-    expect(submitTurn).toHaveBeenCalledTimes(1);
-    expect(submitTurn.mock.calls[0]?.[0]).toMatchObject({
+    // Plain text joins the running turn as safe guidance: no server queue row,
+    // no drain wait, and the agent keeps working on the same turn.
+    expect(guidance).toHaveBeenCalledTimes(1);
+    expect(guidance.mock.calls[0]?.[0]).toMatchObject({
       sessionId: "session-1",
       content: "先不要改测试，只汇报改了哪些文件。",
-      queuedBehindActiveTurn: true,
+      mode: "safe",
     });
-    expect(guidance).not.toHaveBeenCalled();
+    expect(submitTurn).not.toHaveBeenCalled();
   });
 
   it("queues images and references with the follow-up instead of rejecting them", async () => {

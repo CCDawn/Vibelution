@@ -606,6 +606,18 @@ export function useChatComposerSubmitActions({
         }));
         return;
       }
+      // Codex steer: plain text joins the running turn as safe guidance instead of
+      // waiting for the drain, so the agent keeps working and picks the sentence up
+      // on its next model request. Guidance cannot carry attachments or session
+      // references, so those still queue behind the current turn.
+      if (!companionAgentId && !hasAttachmentsOrReferences) {
+        sessionGuidanceMutation.mutate({
+          sessionId: activeSessionId,
+          content,
+          mode: "safe",
+        });
+        return;
+      }
       // The backend owns the queue: this POST lands in the server queue when the
       // requested turn is still running and drains after the turn settles.
       void submitTurnWithAttachments(
