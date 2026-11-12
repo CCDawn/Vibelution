@@ -146,3 +146,30 @@ def test_threshold_env_override_is_floored(monkeypatch: pytest.MonkeyPatch) -> N
     assert claim_dormancy.dormancy_threshold_minutes() == 90
     monkeypatch.delenv(claim_dormancy._ENV_OVERRIDE, raising=False)
     assert claim_dormancy.dormancy_threshold_minutes() == 30
+
+
+def test_missing_worktree_is_dormant_even_with_fresh_claim_timestamp(
+    tmp_path: Path,
+) -> None:
+    """A cleaned-up worktree outranks a freshly refreshed heartbeat.
+
+    The timestamp check used to run first, so a worktree that had already been
+    deleted could keep holding its scopes for one more full threshold window.
+    Nobody can be working inside a directory that no longer exists.
+    """
+
+    gone = tmp_path / "removed-but-freshly-claimed"
+    claim = _claim()
+    claim["updatedAt"] = (NOW - timedelta(minutes=1)).isoformat().replace(
+        "+00:00", "Z"
+    )
+
+    verdict = claim_dormancy.assess_claim_dormancy(
+        claim,
+        _agents(gone),
+        now=NOW,
+        threshold_minutes=30,
+    )
+
+    assert verdict.dormant is True
+    assert "no longer exists" in verdict.reason

@@ -114,6 +114,24 @@ def assess_claim_dormancy(
             last_activity_at=last_activity,
         )
 
+    worktree = ""
+    for agent in agents:
+        if isinstance(agent, dict) and str(agent.get("id") or "") == agent_id:
+            worktree = str(agent.get("worktree") or "").strip()
+            break
+
+    # A registered worktree that no longer exists is settled evidence: nobody can
+    # be working inside a directory that is gone, so this outranks a freshly
+    # refreshed claim timestamp. Testing the timestamp first let a cleaned-up
+    # worktree hold its scopes for one more full threshold window after its last
+    # heartbeat, which is exactly the lockout this module exists to prevent.
+    if worktree and not Path(worktree).is_dir():
+        return verdict(
+            True,
+            "owner worktree no longer exists (cleaned up or abandoned checkout)",
+            worktree,
+        )
+
     updated = _parse_iso(claim.get("updatedAt"))
     if updated is not None and now - updated <= timedelta(minutes=threshold):
         return verdict(
@@ -122,11 +140,6 @@ def assess_claim_dormancy(
             "",
         )
 
-    worktree = ""
-    for agent in agents:
-        if isinstance(agent, dict) and str(agent.get("id") or "") == agent_id:
-            worktree = str(agent.get("worktree") or "").strip()
-            break
     if not worktree:
         return verdict(
             True,
@@ -135,12 +148,6 @@ def assess_claim_dormancy(
         )
 
     worktree_path = Path(worktree)
-    if not worktree_path.is_dir():
-        return verdict(
-            True,
-            "owner worktree no longer exists (cleaned up or abandoned checkout)",
-            worktree,
-        )
 
     last_activity = worktree_last_activity(worktree_path)
     if last_activity is None:
