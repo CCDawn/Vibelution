@@ -806,18 +806,15 @@ class TestEnhancedTokenCompressor:
         """测试压缩器初始化"""
         compressor = EnhancedTokenCompressor(
             token_budget=8000,
-            max_history_pairs=3,
             compression_llm=None  # 不使用 LLM
         )
         assert compressor is not None
         assert compressor.token_budget == 8000
-        assert compressor.max_history_pairs == 3
 
     def test_compressor_with_default_config(self):
         """测试默认配置"""
         compressor = EnhancedTokenCompressor()
         assert compressor.token_budget > 0
-        assert compressor.max_history_pairs > 0
 
     def test_compress_empty_messages(self):
         """测试压缩空消息列表"""
@@ -853,7 +850,7 @@ class TestEnhancedTokenCompressor:
             messages.append(FakeMessage(f"Human message {i}", msg_type="human"))
             messages.append(FakeMessage(f"AI response {i} with lots of content " * 10, msg_type="ai"))
         
-        compressor = EnhancedTokenCompressor(token_budget=2000, max_history_pairs=2)
+        compressor = EnhancedTokenCompressor(token_budget=2000)
         compressed, stats = stats = compressor.compress(messages)
         
         assert len(compressed) < len(messages)
@@ -867,7 +864,7 @@ class TestEnhancedTokenCompressor:
         for i in range(10):
             messages.append(AIMessage(content=f"A{i}"))
         
-        compressor = EnhancedTokenCompressor(token_budget=1000, max_history_pairs=2)
+        compressor = EnhancedTokenCompressor(token_budget=1000)
         compressed, _ = compressor.compress(messages)
         
         contents = [m.content for m in compressed]
@@ -890,7 +887,7 @@ class TestEnhancedTokenCompressor:
             AIMessage(content=f"step {i} " + ("x" * 400)) for i in range(6)
         )
 
-        compressor = EnhancedTokenCompressor(token_budget=1000, max_history_pairs=1)
+        compressor = EnhancedTokenCompressor(token_budget=1000)
         compressed, _ = compressor.compress(
             messages,
             keep_count=0,
@@ -918,7 +915,7 @@ class TestEnhancedTokenCompressor:
         for i in range(8):
             messages.append(AIMessage(content=f"step {i} " + ("x" * 500)))
 
-        compressor = EnhancedTokenCompressor(token_budget=1000, max_history_pairs=1)
+        compressor = EnhancedTokenCompressor(token_budget=1000)
         compressed, _ = compressor.compress(messages, keep_count=1, use_llm_summary=False)
 
         assert all(not isinstance(msg, HumanMessage) for msg in compressed)
@@ -932,7 +929,7 @@ class TestEnhancedTokenCompressor:
             AIMessage(content="旧回答 " + ("details " * 300)),
             build_external_request_message("当前任务锚点 ORBIT-71"),
         ]
-        compressor = EnhancedTokenCompressor(token_budget=1000, max_history_pairs=1)
+        compressor = EnhancedTokenCompressor(token_budget=1000)
 
         compressed, stats = compressor.compress(
             messages,
@@ -953,7 +950,7 @@ class TestEnhancedTokenCompressor:
             FakeMessage("已定位问题", msg_type="ai"),
         ]
 
-        compressor = EnhancedTokenCompressor(token_budget=1000, max_history_pairs=1)
+        compressor = EnhancedTokenCompressor(token_budget=1000)
         summary = compressor._rule_based_summary(messages, max_chars=300)
 
         assert "外部任务" in summary
@@ -1181,9 +1178,8 @@ class TestCreateCompressor:
 
     def test_create_with_custom_budget(self):
         """测试自定义预算"""
-        compressor = create_compressor(token_budget=10000, max_history_pairs=5)
+        compressor = create_compressor(token_budget=10000)
         assert compressor.token_budget == 10000
-        assert compressor.max_history_pairs == 5
 
 
 # ============================================================================
@@ -1198,7 +1194,6 @@ class TestTokenManagerIntegration:
         # 1. 创建压缩器
         compressor = EnhancedTokenCompressor(
             token_budget=3000,
-            max_history_pairs=2
         )
         
         # 2. 构造消息

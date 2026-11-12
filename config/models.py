@@ -1266,7 +1266,7 @@ class ContextCompressionConfig(BaseModel):
     keep_recent_steps: int = Field(
         default=2,
         ge=0,
-        description="保留最近的工具调用次数"
+        description="已退役兼容字段：压缩保留量由 preservation.keep_ai_messages 按级别决定，本字段不再生效"
     )
     summary_max_chars: int = Field(
         default=1000,

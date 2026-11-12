@@ -57,7 +57,6 @@ def _load_token_defaults() -> dict:
             "DEFAULT_TOKEN_BUDGET": cfg.context_compression.max_token_limit,
             "MAX_SYSTEM_PROMPT_TOKENS": 2000,
             "MAX_TOOL_RESULT_TOKENS": 400,
-            "MAX_HISTORY_PAIRS": cfg.context_compression.keep_recent_steps,
             "MAX_AI_RESPONSE_CHARS": 300,
             "MAX_TOOL_NAME_CHARS": 40,
             "MAX_EXTERNAL_REQUEST_CHARS": 400,
@@ -65,9 +64,6 @@ def _load_token_defaults() -> dict:
             "COMPRESSION_WARNING_RATIO": 0.5,
             "COMPRESSION_CRITICAL_RATIO": cfg.context_compression.levels.standard,
             "COMPRESSION_TARGET_RATIO": 0.45,
-            "LIGHT_SUMMARY_CHARS": cfg.context_compression.summary_chars.light,
-            "STANDARD_SUMMARY_CHARS": cfg.context_compression.summary_chars.standard,
-            "DEEP_SUMMARY_CHARS": cfg.context_compression.summary_chars.deep,
         }
     except Exception:
         return {}
@@ -79,7 +75,6 @@ _token_defaults = _load_token_defaults()
 DEFAULT_TOKEN_BUDGET = _token_defaults.get("DEFAULT_TOKEN_BUDGET", 8000)
 MAX_SYSTEM_PROMPT_TOKENS = _token_defaults.get("MAX_SYSTEM_PROMPT_TOKENS", 2000)
 MAX_TOOL_RESULT_TOKENS = _token_defaults.get("MAX_TOOL_RESULT_TOKENS", 400)
-MAX_HISTORY_PAIRS = _token_defaults.get("MAX_HISTORY_PAIRS", 3)
 
 # 压缩阈值（优化 - 更激进的阈值以避免超限）
 # 基于模型 32768 context window，配置 max_token_limit = 16000
@@ -89,16 +84,11 @@ COMPRESSION_CRITICAL_RATIO = _token_defaults.get("COMPRESSION_CRITICAL_RATIO", 0
 COMPRESSION_TARGET_RATIO = _token_defaults.get("COMPRESSION_TARGET_RATIO", 0.45)
 
 # 摘要配置
-MINIMAL_SUMMARY_CHARS = 80
 CORE_SUMMARY_CHARS = 200
 # Default summary ceiling for EnhancedTokenCompressor.compress.
 # Kept separate from CORE_SUMMARY_CHARS, which is the per-message trimming
 # budget used by smart_compress_message (not a summary budget).
 DEFAULT_SUMMARY_MAX_CHARS = 1000
-DETAILED_SUMMARY_CHARS = 500
-LIGHT_SUMMARY_CHARS = _token_defaults.get("LIGHT_SUMMARY_CHARS", 500)
-STANDARD_SUMMARY_CHARS = _token_defaults.get("STANDARD_SUMMARY_CHARS", 1000)
-DEEP_SUMMARY_CHARS = _token_defaults.get("DEEP_SUMMARY_CHARS", 2000)
 
 # 截断配置
 MAX_AI_RESPONSE_CHARS = _token_defaults.get("MAX_AI_RESPONSE_CHARS", 300)
@@ -1044,7 +1034,6 @@ class EnhancedTokenCompressor:
     def __init__(
         self,
         token_budget: int = DEFAULT_TOKEN_BUDGET,
-        max_history_pairs: int = MAX_HISTORY_PAIRS,
         compression_llm: Any = None,
         enable_preemptive: bool = True,
         summary_prompt_path: str = None,
@@ -1055,7 +1044,6 @@ class EnhancedTokenCompressor:
             total_budget=token_budget,
             reserved_tokens=int(token_budget * PRECOMPRESSION_BUFFER)
         )
-        self.max_history_pairs = max_history_pairs
         self.compression_llm = compression_llm
         self.enable_preemptive = enable_preemptive
         self.preemptive_threshold = preemptive_threshold
@@ -1623,14 +1611,12 @@ class EnhancedTokenCompressor:
 
 def create_compressor(
     token_budget: int = DEFAULT_TOKEN_BUDGET,
-    max_history_pairs: int = MAX_HISTORY_PAIRS,
     compression_llm: Any = None,
     enable_preemptive: bool = True,
 ) -> EnhancedTokenCompressor:
     """创建压缩器"""
     return EnhancedTokenCompressor(
         token_budget=token_budget,
-        max_history_pairs=max_history_pairs,
         compression_llm=compression_llm,
         enable_preemptive=enable_preemptive,
     )
