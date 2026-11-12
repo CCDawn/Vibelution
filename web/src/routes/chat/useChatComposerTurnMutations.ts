@@ -190,7 +190,10 @@ export type SubmitTurnVariables = {
 
 type ChatSubmitAcceptedResponse = SessionTurnAcceptedResponse & {
   queued?: boolean;
-  queueSequence?: number;
+  /** Server-assigned queue position: the authoritative slot this turn waits in.
+   *  The backend emits queuePosition; a stale queueSequence name here silently
+   *  dropped the fact and left the row to invent its own slot number. */
+  queuePosition?: number;
   /** Server timestamp for when the turn entered the session queue. */
   queuedAt?: string;
   /** Active turn id this queued turn waits behind (observability only). */
