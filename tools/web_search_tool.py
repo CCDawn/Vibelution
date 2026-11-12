@@ -48,6 +48,26 @@ _TOKEN_HEALTH_CACHE_TTL = 15.0
 _PUBLIC_SEARCH_URL = "https://www.bing.com/search"
 _PUBLIC_SEARCH_TIMEOUT = 12.0
 _PUBLIC_SEARCH_MAX_RESULTS = 20
+
+
+
+def _web_search_policy() -> tuple[bool, int, float]:
+    """Return (search_enabled, max_results, timeout_seconds) from tools.web.
+
+    Config failures keep search on with the historical defaults: a broken
+    config must not silently disable a capability, and must not widen limits.
+    """
+    try:
+        from config import get_config
+
+        web = get_config().tools.web
+        return (
+            bool(web.search_enabled),
+            max(1, int(web.max_search_results)),
+            max(1.0, float(web.search_timeout)),
+        )
+    except Exception:
+        return True, 10, 30.0
 _WEB_FETCH_TIMEOUT = 30.0
 _WEB_FETCH_MAX_BYTES = 2 * 1024 * 1024
 # Repository/oa full texts are routinely larger than the HTML safety cap; the
@@ -642,14 +662,23 @@ def public_web_search(
     """Use a keyless public search result page as a bounded no-quota fallback."""
     if not query or not query.strip():
         return "[错误] 搜索关键词不能为空"
-    limit = _clamp_int(max_results, default=10, minimum=1, maximum=_PUBLIC_SEARCH_MAX_RESULTS)
+    enabled, max_results_limit, request_timeout = _web_search_policy()
+    if not enabled:
+        return "[禁用] 网络搜索已在配置中关闭（tools.web.search_enabled=false）。"
+    public_timeout = min(_PUBLIC_SEARCH_TIMEOUT, request_timeout)
+    limit = _clamp_int(
+        max_results,
+        default=min(10, max_results_limit),
+        minimum=1,
+        maximum=min(_PUBLIC_SEARCH_MAX_RESULTS, max_results_limit),
+    )
     search_url = f"{_PUBLIC_SEARCH_URL}?q={quote_plus(query.strip())}&count={limit}"
     guard_error = _guard_validate_public_http_url(search_url)
     if guard_error:
         # 固定搜索端点被改成内网/非法目标时 fail closed，不发请求。
         return f"[错误] {guard_error}: {search_url}"
     try:
-        with httpx.Client(timeout=_PUBLIC_SEARCH_TIMEOUT, follow_redirects=True) as client:
+        with httpx.Client(timeout=public_timeout, follow_redirects=True) as client:
             try:
                 response = client.get(search_url, headers={"User-Agent": _USER_AGENT})
             except TypeError:
@@ -659,7 +688,7 @@ def public_web_search(
     except httpx.HTTPStatusError as exc:
         return f"[错误] 公开搜索页请求失败: HTTP {exc.response.status_code}"
     except httpx.TimeoutException:
-        return f"[错误] 公开搜索页请求超时 ({_PUBLIC_SEARCH_TIMEOUT:g}s)"
+        return f"[错误] 公开搜索页请求超时 ({public_timeout:g}s)"
     except httpx.RequestError as exc:
         return f"[错误] 公开搜索页请求失败: {exc}"
     except Exception as exc:
@@ -720,6 +749,10 @@ def web_search(query: str, max_results: int = 10) -> str:
     if not query or not query.strip():
         return "[错误] 搜索关键词不能为空"
 
+    # 0. 配置闸门：tools.web.search_enabled / search_timeout
+    enabled, _max_results_limit, request_timeout = _web_search_policy()
+    if not enabled:
+        return "[禁用] 网络搜索已在配置中关闭（tools.web.search_enabled=false）。"
     # 1. 获取 token
     try:
         token = _get_bearer_token()
@@ -732,7 +765,7 @@ def web_search(query: str, max_results: int = 10) -> str:
 
     # 3. 发起请求
     try:
-        with httpx.Client(timeout=_REQUEST_TIMEOUT) as client:
+        with httpx.Client(timeout=request_timeout) as client:
             response = client.post(_API_URL, headers=headers, content=payload)
             response.raise_for_status()
             data = response.json()
