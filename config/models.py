@@ -1244,8 +1244,8 @@ class ContextCompressionConfig(BaseModel):
         max_token_limit: Token 阈值，超过此值触发压缩
         keep_recent_steps: 保留最近的工具调用次数
         summary_max_chars: 压缩摘要的最大字符数
-        compression_model: 用于压缩的模型名称
-        compression_temperature: 压缩用模型温度
+        compression_model: 已退役；压缩模型由 Agent summary slot 决定
+        compression_temperature: 已退役；温度由 summary slot 模型配置决定
         max_compressions_per_session: 每会话最大压缩次数
         effectiveness_threshold: 压缩效率阈值
         llm_summary_failure_breaker_threshold: 压缩 LLM 摘要连败熔断阈值
@@ -1277,13 +1277,19 @@ class ContextCompressionConfig(BaseModel):
     )
     compression_model: str = Field(
         default="qwen-turbo",
-        description="用于压缩的轻量模型"
+        description=(
+            "已退役兼容字段：压缩模型由 Agent summary slot"
+            "（AGENT_LLM_SLOT_SUMMARY）决定，全局 compression profile 不是选择器"
+        )
     )
     compression_temperature: float = Field(
         default=0.3,
         ge=0.0,
         le=2.0,
-        description="压缩用模型温度"
+        description=(
+            "已退役兼容字段：压缩摘要温度由 summary slot 绑定模型的配置决定，"
+            "本字段不参与调用"
+        )
     )
     max_compressions_per_session: int = Field(
         default=20,
