@@ -4,7 +4,7 @@ const styles = {
   agentSessionTab:
     "vui-routes-chatcodingroute agentSessionTab min-w-0 inline-flex h-7 w-fit max-w-[14rem] shrink-0 items-center gap-0 rounded-[6px] border-0 bg-transparent pr-0.5 text-[var(--fg-secondary)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--vui-control-hover-fg)]",
   agentSessionTabActive:
-    "vui-routes-chatcodingroute agentSessionTabActive min-w-0 !bg-[color-mix(in_srgb,var(--fg-primary)_6%,var(--vui-surface-chat))] data-[selected=true]:!bg-[color-mix(in_srgb,var(--fg-primary)_6%,var(--vui-surface-chat))] text-[var(--fg-primary)] opacity-100 hover:text-[var(--fg-primary)]",
+    "vui-routes-chatcodingroute agentSessionTabActive min-w-0 !bg-[color-mix(in_srgb,var(--accent-cool)_12%,var(--vui-surface-chat))] data-[selected=true]:!bg-[color-mix(in_srgb,var(--accent-cool)_12%,var(--vui-surface-chat))] !ring-1 !ring-[color-mix(in_srgb,var(--accent-cool)_55%,transparent)] text-[var(--fg-primary)] opacity-100 hover:text-[var(--fg-primary)]",
   agentSessionTabChild:
     "vui-routes-chatcodingroute agentSessionTabChild min-w-0",
   agentSessionTabCli:
@@ -108,7 +108,7 @@ const styles = {
   agentSessionTabGroupHeader:
     "vui-routes-chatcodingroute agentSessionTabGroupHeader group/tabgroup inline-flex h-7 min-w-0 shrink-0 cursor-pointer items-center gap-1 rounded-[6px] px-1.5 text-[11px] text-[var(--fg-secondary)] transition-colors",
   agentSessionTabGroupHeaderActive:
-    "vui-routes-chatcodingroute agentSessionTabGroupHeaderActive bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] ring-1 ring-[color-mix(in_srgb,var(--accent-cool)_45%,transparent)]",
+    "vui-routes-chatcodingroute agentSessionTabGroupHeaderActive bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] ring-1 ring-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)]",
   agentSessionTabGroupHeaderOpen:
     "vui-routes-chatcodingroute agentSessionTabGroupHeaderOpen [&_[data-group-chevron]]:opacity-100",
   agentSessionTabGroupChevron:
@@ -135,7 +135,7 @@ const styles = {
   agentSessionTabGroupPanelItem:
     "vui-routes-chatcodingroute agentSessionTabGroupPanelItem flex w-full min-w-0 items-center gap-1.5 rounded-[7px] px-2 py-1.5 text-left text-[12px] leading-tight text-[var(--fg-primary)] hover:bg-[color-mix(in_srgb,var(--fg-primary)_10%,transparent)]",
   agentSessionTabGroupPanelItemActive:
-    "vui-routes-chatcodingroute agentSessionTabGroupPanelItemActive bg-[color-mix(in_srgb,var(--accent-cool)_16%,transparent)] ring-1 ring-[color-mix(in_srgb,var(--accent-cool)_45%,transparent)]",
+    "vui-routes-chatcodingroute agentSessionTabGroupPanelItemActive bg-[color-mix(in_srgb,var(--accent-cool)_12%,transparent)] ring-1 ring-[color-mix(in_srgb,var(--accent-cool)_45%,transparent)]",
   agentSessionTabGroupPanelTitle:
     "vui-routes-chatcodingroute agentSessionTabGroupPanelTitle min-w-0 flex-1 truncate",
   agentSessionTabGroupPanelEmpty:
