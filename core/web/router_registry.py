@@ -18,6 +18,7 @@ logger = logging.getLogger("uvicorn.error")
 # interdependent route/service packages deadlocks on module locks (CPython).
 _ROUTE_MODULE_NAMES: tuple[str, ...] = (
     "core.web.routes.runtime",
+    "core.web.routes.platform_version",
     "core.web.routes.launcher",
     "core.web.routes.agent_assets",
     "core.web.routes.workbench_ui",

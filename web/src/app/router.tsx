@@ -8,6 +8,7 @@ import { RouteLoadingShell, type RouteLoadingLayout } from "./RouteLoadingShell"
 import { WorkflowLoadingBoundary } from "../routes/teams/generic/WorkflowLoadingBoundary";
 import { RouteErrorBoundary, type RouteErrorSurface } from "./RouteErrorBoundary";
 import { HomeRedirect } from "../routes/HomeRedirect";
+import { PlatformVersionRoute } from "../routes/PlatformVersionRoute";
 import { WorkbenchDomainRoute } from "../routes/WorkbenchDomainRoute";
 import { WorkbenchModeRoute } from "../routes/WorkbenchModeRoute";
 import { postBrowserTelemetry } from "./browserTelemetry";
@@ -280,6 +281,10 @@ export const router = createBrowserRouter([
           "workbench",
           "review",
         ),
+      },
+      {
+        path: "platform-version",
+        ...guardedLazyElement(<PlatformVersionRoute />, "workbench"),
       },
       {
         path: "self-evolution",
