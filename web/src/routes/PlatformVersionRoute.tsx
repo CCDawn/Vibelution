@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import { detectUiLanguage } from "../api/client";
 import {
   fetchPlatformVersionSnapshot,
+  resolvePlatformVersionLanguage,
   subscribePlatformVersionEvents,
   type PlatformVersionSnapshot,
 } from "../api/platformVersion";
 import { VButton, VDenseRow, VDenseToolbar, VMetricChip, VPanel } from "../components/vui";
+import { platformVersionStyles as styles } from "./PlatformVersionRoute.styles";
 
 const COPY = {
   zh: {
@@ -75,7 +76,7 @@ function kindLabel(kind: string, lang: "zh" | "en"): string {
 }
 
 export function PlatformVersionRoute() {
-  const lang = detectUiLanguage();
+  const lang = resolvePlatformVersionLanguage();
   const copy = COPY[lang];
   const query = useQuery({
     queryKey: ["platform-version"],
@@ -112,23 +113,21 @@ export function PlatformVersionRoute() {
   const cadence = data?.cadence;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-4 text-vui-fg">
-      <header className="flex min-w-0 flex-wrap items-end justify-between gap-2">
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <h1 className="text-[length:var(--vui-font-xl)] font-semibold leading-tight">{copy.title}</h1>
-          <p className="text-[length:var(--vui-font-sm)] text-vui-fg-secondary">{copy.subtitle}</p>
+    <div className={styles.page}>
+      <header className={styles.header}>
+        <div className={styles.headerText}>
+          <h1 className={styles.title}>{copy.title}</h1>
+          <p className={styles.subtitle}>{copy.subtitle}</p>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-[length:var(--vui-font-xs)] text-vui-fg-secondary">
-            {connected ? copy.live : copy.loading}
-          </span>
+        <div className={styles.headerActions}>
+          <span className={styles.liveLabel}>{connected ? copy.live : copy.loading}</span>
           <VButton type="button" onClick={() => void query.refetch()}>
             {copy.refresh}
           </VButton>
         </div>
       </header>
 
-      <VPanel ariaLabel={copy.current} className="flex flex-col gap-2 p-3">
+      <VPanel ariaLabel={copy.current} className={styles.panel}>
         <VDenseToolbar ariaLabel={copy.current}>
           <VMetricChip label={copy.current} value={data?.currentVersion ?? "—"} />
           <VMetricChip label={copy.build} value={data ? `#${data.build}` : "—"} />
@@ -142,68 +141,63 @@ export function PlatformVersionRoute() {
           />
         </VDenseToolbar>
         <VDenseRow>
-          <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-            <span className="min-w-0">
-              {copy.anchor}: <strong className="font-medium">{data?.fileVersion || "—"}</strong>
-              <span className="ml-2">
-                {data?.fileBehind ? copy.anchorLag : copy.anchorAligned}
-              </span>
+          <div className={styles.rowBetween}>
+            <span className={styles.rowMuted}>
+              {copy.anchor}: {data?.fileVersion || "—"}
+              {" · "}
+              {data?.fileBehind ? copy.anchorLag : copy.anchorAligned}
             </span>
-            <span className="min-w-0 truncate text-[length:var(--vui-font-xs)] text-vui-fg-secondary">
+            <span className={styles.rowMuted}>
               {data?.unreleasedPending ? `${copy.pending}: ${data.unreleasedSummary}` : copy.idle}
             </span>
           </div>
         </VDenseRow>
         {data && cadence ? (
-          <p className="text-[length:var(--vui-font-xs)] text-vui-fg-secondary">
+          <p className={styles.cadenceNote}>
             {copy.cadence}: {cadence.patchPerMinor} × PATCH → MINOR · {cadence.minorPerMajor} × MINOR → MAJOR
           </p>
         ) : null}
         {data?.lastError ? (
-          <p className="text-[length:var(--vui-font-xs)] text-[var(--state-error)]">
+          <p className={styles.errorNote}>
             {copy.error}: {data.lastError}
           </p>
         ) : null}
       </VPanel>
 
-      <VPanel ariaLabel={copy.history} className="flex min-h-0 flex-1 flex-col gap-2 p-3">
-        <h2 className="text-[length:var(--vui-font-md)] font-medium">{copy.history}</h2>
+      <VPanel ariaLabel={copy.history} className={styles.historyPanel}>
+        <h2 className={styles.sectionTitle}>{copy.history}</h2>
         {data && data.entries.length > 0 ? (
-          <div className="min-h-0 overflow-auto">
-            <table className="w-full table-fixed border-collapse text-left text-[length:var(--vui-font-sm)]">
-              <thead className="text-vui-fg-secondary">
+          <div className={styles.tableWrap}>
+            <table className={styles.table}>
+              <thead className={styles.thead}>
                 <tr>
-                  <th className="w-14 px-2 py-1 font-medium">{copy.seq}</th>
-                  <th className="w-24 px-2 py-1 font-medium">{copy.version}</th>
-                  <th className="w-24 px-2 py-1 font-medium">{copy.kind}</th>
-                  <th className="px-2 py-1 font-medium">{copy.summary}</th>
-                  <th className="w-40 px-2 py-1 font-medium">{copy.time}</th>
+                  <th className={styles.thSeq}>{copy.seq}</th>
+                  <th className={styles.thVersion}>{copy.version}</th>
+                  <th className={styles.thKind}>{copy.kind}</th>
+                  <th className={styles.thSummary}>{copy.summary}</th>
+                  <th className={styles.thTime}>{copy.time}</th>
                 </tr>
               </thead>
               <tbody>
                 {data.entries.map((entry) => (
-                  <tr key={`${entry.seq}-${entry.version}`} className="border-t border-vui-border-subtle">
-                    <td className="px-2 py-1 text-vui-fg-secondary">{entry.seq}</td>
-                    <td className="px-2 py-1 font-medium">
+                  <tr key={`${entry.seq}-${entry.version}`} className={styles.tr}>
+                    <td className={styles.tdMuted}>{entry.seq}</td>
+                    <td className={styles.tdVersion}>
                       {entry.version}
-                      <span className="ml-1 text-[length:var(--vui-font-xs)] text-vui-fg-secondary">
-                        #{entry.build}
-                      </span>
+                      <span className={styles.buildBadge}>#{entry.build}</span>
                     </td>
-                    <td className="px-2 py-1 text-vui-fg-secondary">{kindLabel(entry.kind, lang)}</td>
-                    <td className="px-2 py-1">
-                      <span className="line-clamp-2">{entry.summary || entry.head_subject}</span>
+                    <td className={styles.tdMuted}>{kindLabel(entry.kind, lang)}</td>
+                    <td className={styles.tdMuted}>
+                      <span className={styles.summaryCell}>{entry.summary || entry.head_subject}</span>
                     </td>
-                    <td className="px-2 py-1 text-vui-fg-secondary">{entry.recorded_at}</td>
+                    <td className={styles.tdMuted}>{entry.recorded_at}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         ) : (
-          <p className="text-[length:var(--vui-font-sm)] text-vui-fg-secondary">
-            {query.isLoading ? copy.loading : copy.empty}
-          </p>
+          <p className={styles.empty}>{query.isLoading ? copy.loading : copy.empty}</p>
         )}
       </VPanel>
     </div>

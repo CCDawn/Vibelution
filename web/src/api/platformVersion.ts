@@ -1,4 +1,11 @@
-import { fetchJson } from "./client";
+import { detectUiLanguage, fetchJson } from "./client";
+
+export type PlatformVersionLanguage = "zh" | "en";
+
+/** Route files must not import api/client directly; resolve language here. */
+export function resolvePlatformVersionLanguage(): PlatformVersionLanguage {
+  return detectUiLanguage();
+}
 
 export type PlatformVersionEntry = {
   seq: number;
