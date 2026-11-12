@@ -16,6 +16,7 @@ import json
 import logging
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -49,9 +50,37 @@ _SESSION_SUMMARY_EVENT_SCAN_LIMIT = 64
 # ledger signature the events cache uses. Any append changes the signature and
 # the next read rebuilds exactly once — no invalidation hooks, no journal
 # semantics change. Bounded LRU keeps memory flat across sessions.
+#
+# Live (running) sessions append constantly, so "rebuild on the request thread"
+# turns every poll into a full-journal replay and — with several resumed
+# sessions polling at once — starves the single asyncio loop hard enough that
+# SSE heartbeats drop and clients reconnect-storm. Running sessions therefore
+# get stale-while-revalidate reads (see _ledger_projection_cache_entry): a
+# miss serves the previous snapshot for a short window and hands one rebuild
+# to a dedicated single-worker executor so at most one projection rebuild runs
+# process-wide at any time. Idle sessions keep the exact rebuild semantics.
 _LEDGER_PROJECTION_CACHE_MAX_ENTRIES = 32
 _LEDGER_PROJECTION_CACHE_LOCK = threading.Lock()
 _LEDGER_PROJECTION_CACHE: dict[str, dict[str, Any]] = {}
+# How long the previous snapshot may be served while a rebuild is pending.
+_LEDGER_PROJECTION_STALE_SERVE_SECONDS = 2.0
+# One serve-stale verdict per (session, captured signature): every detail
+# consumer of one request (messages / branch head / stat messages / timeline)
+# shares it instead of each field deciding on its own mid-request.
+_LEDGER_PROJECTION_SWR_DECISIONS: dict[str, tuple[tuple[Any, ...], bool, float]] = {}
+# Single-flight rebuild bookkeeping: cache keys queued or running on the
+# rebuild executor. One submission per session regardless of poll pressure.
+_SWR_REBUILD_LOCK = threading.Lock()
+_SWR_REBUILD_IN_FLIGHT: set[str] = set()
+# Only the rebuild thread itself may bypass stale-serve (its reads must
+# produce fresh snapshots, never re-serve or re-schedule).
+_SWR_REBUILD_STATE = threading.local()
+# All rebuilds serialize on one named worker: parallel full-journal replays
+# only interleave under the GIL and make every session slower together.
+_SWR_REBUILD_EXECUTOR = ThreadPoolExecutor(
+    max_workers=1,
+    thread_name_prefix="session-detail-projection-rebuild",
+)
 
 
 def _ledger_projection_cache_key(session_id: str) -> str:
@@ -60,20 +89,191 @@ def _ledger_projection_cache_key(session_id: str) -> str:
     return _ledger_events_shared_cache_key(Path(_service().PROJECT_ROOT), session_id)
 
 
+def _in_projection_rebuild_thread() -> bool:
+    return bool(getattr(_SWR_REBUILD_STATE, "rebuilding", False))
+
+
 def _ledger_projection_cache_entry(
     session_id: str,
     signature: tuple[Any, ...],
 ) -> dict[str, Any] | None:
-    """Return the signature-valid projection snapshot for one session read."""
+    """Return the projection snapshot for one session read.
+
+    Exact signature match returns the snapshot as-is. For a running session a
+    miss turns into a stale-while-revalidate read: the previous snapshot is
+    returned (never None mid-stale-window) and exactly one rebuild is queued
+    on the shared executor. The verdict is memoized per (session, signature)
+    so messages, branch head, stat messages and timeline within one request
+    all serve the same generation. Idle sessions and the rebuild thread
+    itself get ``None`` and rebuild synchronously — first-read semantics are
+    unchanged outside the live-session stale window.
+    """
 
     cache_key = _ledger_projection_cache_key(session_id)
     now = time.perf_counter()
     with _LEDGER_PROJECTION_CACHE_LOCK:
         entry = _LEDGER_PROJECTION_CACHE.get(cache_key)
-        if entry is None or tuple(entry.get("signature") or ()) != tuple(signature):
-            return None
-        entry["last_access"] = now
-        return entry
+        if entry is not None and tuple(entry.get("signature") or ()) == tuple(signature):
+            entry["last_access"] = now
+            return entry
+    return _ledger_projection_stale_serve_entry(session_id, signature, cache_key, now)
+
+
+def _ledger_projection_stale_serve_entry(
+    session_id: str,
+    signature: tuple[Any, ...],
+    cache_key: str,
+    now: float,
+) -> dict[str, Any] | None:
+    """Decide stale-serve vs synchronous rebuild for one signature miss."""
+
+    if _in_projection_rebuild_thread():
+        return None
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return None
+    try:
+        session_running = bool(_service()._is_session_running(normalized_session_id))
+    except Exception:  # noqa: BLE001 - the cache must never break a detail read
+        session_running = False
+    if not session_running:
+        return None
+    with _SWR_REBUILD_LOCK:
+        rebuild_in_flight = cache_key in _SWR_REBUILD_IN_FLIGHT
+    with _LEDGER_PROJECTION_CACHE_LOCK:
+        entry = _LEDGER_PROJECTION_CACHE.get(cache_key)
+        has_snapshot = entry is not None and entry.get("messages") is not None
+        recorded = _LEDGER_PROJECTION_SWR_DECISIONS.get(cache_key)
+        decision_fresh = (
+            recorded is not None
+            and tuple(recorded[0] or ()) == tuple(signature)
+            and now - float(recorded[2] or 0.0) <= _LEDGER_PROJECTION_STALE_SERVE_SECONDS
+        )
+        if decision_fresh:
+            serve_stale = bool(recorded[1]) and has_snapshot
+        else:
+            age_ok = has_snapshot and (
+                now - float((entry or {}).get("built_at") or 0.0)
+                <= _LEDGER_PROJECTION_STALE_SERVE_SECONDS
+            )
+            # While a rebuild is queued/running, keep serving stale even past
+            # the window: with several sessions serialized on one worker the
+            # queue wait alone can exceed the window, and falling back to a
+            # synchronous rebuild per poll would bring the storm back.
+            serve_stale = has_snapshot and (age_ok or rebuild_in_flight)
+            _LEDGER_PROJECTION_SWR_DECISIONS[cache_key] = (
+                tuple(signature),
+                serve_stale,
+                now,
+            )
+            expired = [
+                key
+                for key, verdict in _LEDGER_PROJECTION_SWR_DECISIONS.items()
+                if now - float(verdict[2] or 0.0) > _LEDGER_PROJECTION_STALE_SERVE_SECONDS * 4
+            ]
+            for key in expired:
+                _LEDGER_PROJECTION_SWR_DECISIONS.pop(key, None)
+        if serve_stale and entry is not None:
+            entry["last_access"] = now
+    if serve_stale and not rebuild_in_flight:
+        _schedule_ledger_projection_rebuild(normalized_session_id)
+    return entry if serve_stale else None
+
+
+def _schedule_ledger_projection_rebuild(session_id: str) -> None:
+    """Queue exactly one shared-executor rebuild per session (single flight)."""
+
+    cache_key = _ledger_projection_cache_key(session_id)
+    with _SWR_REBUILD_LOCK:
+        if cache_key in _SWR_REBUILD_IN_FLIGHT:
+            return
+        _SWR_REBUILD_IN_FLIGHT.add(cache_key)
+    try:
+        _SWR_REBUILD_EXECUTOR.submit(_run_ledger_projection_rebuild, session_id, cache_key)
+    except Exception as exc:  # noqa: BLE001 - polling continues without SWR
+        with _SWR_REBUILD_LOCK:
+            _SWR_REBUILD_IN_FLIGHT.discard(cache_key)
+        logger.warning(
+            "Session detail projection rebuild scheduling failed for %s: %s",
+            session_id,
+            type(exc).__name__,
+        )
+
+
+def _run_ledger_projection_rebuild(session_id: str, cache_key: str) -> None:
+    """Rebuild the full projection bundle for the session's current signature.
+
+    Runs on the single rebuild worker; its reads bypass stale-serve via the
+    thread-local flag so every field is rebuilt against the signature live at
+    execution time (an append between scheduling and execution simply
+    produces the newer snapshot).
+    """
+
+    _SWR_REBUILD_STATE.rebuilding = True
+    try:
+        s = _service()
+        # One signature for the whole bundle: all three stores must land on the
+        # same snapshot skeleton (fill semantics, no replace). Each step
+        # re-capturing its own signature would let an append mid-rebuild wipe
+        # the previous step's fields and leave a one-field entry that misses
+        # again on the next read. An append during execution just means the
+        # bundle lands one generation behind; the next read misses, SWR serves
+        # the fresh-enough snapshot and queues one more rebuild — self-healing.
+        signature = s._session_conversation_events_signature(session_id)
+        raw_messages = s._ledger_visible_messages_for_session(
+            session_id,
+            signature=signature,
+        )
+        try:
+            s._assistant_timeline_events_by_turn(session_id, signature=signature)
+        except Exception as exc:  # noqa: BLE001 - one field never blocks the others
+            logger.warning(
+                "Session detail timeline rebuild failed for %s: %s",
+                session_id,
+                type(exc).__name__,
+            )
+        _rebuild_stat_messages_snapshot(session_id, raw_messages, signature=signature)
+    except Exception as exc:  # noqa: BLE001 - background refresh never raises
+        logger.warning(
+            "Session detail projection rebuild failed for %s: %s",
+            session_id,
+            type(exc).__name__,
+        )
+    finally:
+        _SWR_REBUILD_STATE.rebuilding = False
+        with _SWR_REBUILD_LOCK:
+            _SWR_REBUILD_IN_FLIGHT.discard(cache_key)
+
+
+def _rebuild_stat_messages_snapshot(
+    session_id: str,
+    raw_messages: list[dict[str, Any]] | tuple[dict[str, Any], ...],
+    *,
+    signature: tuple[Any, ...] | None = None,
+) -> None:
+    """Rebuild the full-ledger stat projection (window builder parity)."""
+
+    s = _service()
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return
+    if signature is None:
+        signature = s._session_conversation_events_signature(normalized_session_id)
+    stat_messages = s._normalize_messages(
+        normalized_session_id,
+        list(raw_messages or []),
+        transcript_scope="none",
+        include_timeline=False,
+        # Metrics still need canonical turn items, filtering and coalescing,
+        # but never historical file checkpoints or per-turn work headers.
+        include_display_metadata=False,
+        journal_projection=_SessionJournalProjection(normalized_session_id),
+    )
+    _store_ledger_projection_cache_entry(
+        normalized_session_id,
+        signature,
+        stat_messages=tuple(stat_messages),
+    )
 
 
 def _store_ledger_projection_cache_entry(
@@ -86,8 +286,11 @@ def _store_ledger_projection_cache_entry(
     The (unlocked) rebuild can overlap a journal append; a stored entry whose
     signature no longer matches simply misses on the next read and rebuilds,
     so correctness never depends on the rebuilt result still being current.
-    A rebuild racing a fresher snapshot keeps the fresh one instead of
-    overwriting it with a stale-signature fill.
+    A fill for a different signature replaces the stored snapshot wholesale:
+    the freshly built projection becomes the session's latest snapshot (and
+    the stale-serve candidate for the next append). Dropping the fill instead
+    would pin the session to its first snapshot and turn every later read
+    into a permanent miss.
     """
 
     normalized_session_id = str(session_id or "").strip()
@@ -96,20 +299,24 @@ def _store_ledger_projection_cache_entry(
     cache_key = _ledger_projection_cache_key(normalized_session_id)
     with _LEDGER_PROJECTION_CACHE_LOCK:
         entry = _LEDGER_PROJECTION_CACHE.get(cache_key)
-        if entry is None:
+        if entry is None or tuple(entry.get("signature") or ()) != tuple(signature):
             entry = {
                 "signature": tuple(signature),
                 "messages": None,
                 "active_leaf_id": "",
                 "active_branch_id": "",
                 "stat_messages": None,
+                "built_at": time.perf_counter(),
                 "last_access": time.perf_counter(),
             }
             _LEDGER_PROJECTION_CACHE[cache_key] = entry
-        elif tuple(entry.get("signature") or ()) != tuple(signature):
-            return
         entry.update(fields)
-        entry["last_access"] = time.perf_counter()
+        now = time.perf_counter()
+        # ``built_at`` is the age anchor for the stale-serve window; every
+        # store refreshes it because a store always carries freshly rebuilt
+        # data for the entry's signature.
+        entry["built_at"] = now
+        entry["last_access"] = now
         while len(_LEDGER_PROJECTION_CACHE) > _LEDGER_PROJECTION_CACHE_MAX_ENTRIES:
             oldest_key = min(
                 _LEDGER_PROJECTION_CACHE,
@@ -5538,12 +5745,20 @@ def _session_agent_status_payload(
     }
 
 
-def _ledger_visible_messages_for_session(session_id: str) -> list[dict[str, Any]]:
+def _ledger_visible_messages_for_session(
+    session_id: str,
+    *,
+    signature: tuple[Any, ...] | None = None,
+) -> list[dict[str, Any]]:
     s = _service()
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
         return []
-    signature = s._session_conversation_events_signature(normalized_session_id)
+    # Callers inside the rebuild bundle pass the bundle-captured signature so
+    # their store lands on the shared snapshot skeleton; everything else keeps
+    # capturing the signature live at read time.
+    if signature is None:
+        signature = s._session_conversation_events_signature(normalized_session_id)
     entry = _ledger_projection_cache_entry(normalized_session_id, signature)
     if entry is not None and entry.get("messages") is not None:
         return list(entry["messages"])
