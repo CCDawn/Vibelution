@@ -1,6 +1,7 @@
 import {
   Bot,
   Check,
+  CornerUpLeft,
   ChevronDown,
   ChevronRight,
   FolderPlus,
@@ -791,7 +792,21 @@ export function AgentSessionTabStrip({
         {section.sessions.map((session) => {
           const sessionActive = activeSessionId === session.id;
           return (
-            <li key={session.id}>
+            <li
+              key={session.id}
+              className={styles.agentSessionTabGroupPanelRow}
+              draggable
+              onDragStart={(event) => {
+                // A panel member is the only drag source that can leave its group.
+                setDragOrderSessionId(session.id);
+                event.dataTransfer.setData(SESSION_TAB_ORDER_MIME, session.id);
+                event.dataTransfer.effectAllowed = "move";
+              }}
+              onDragEnd={() => {
+                setDragOrderSessionId(null);
+                setDropTarget(null);
+              }}
+            >
               <VButton
                 type="button"
                 contentLayout="plain"
@@ -813,6 +828,18 @@ export function AgentSessionTabStrip({
                 {renderAgentSessionStatusSlot(groupSessionTone(session))}
                 <span className={styles.agentSessionTabGroupPanelTitle}>{session.title}</span>
               </VButton>
+              <VIconButton
+                type="button"
+                variant="ghost"
+                className={styles.agentSessionTabGroupPanelRemove}
+                title={lang === "zh" ? "移出分组" : "Remove from group"}
+                label={lang === "zh" ? "移出分组" : "Remove from group"}
+                icon={<CornerUpLeft size={12} />}
+                onPress={() => {
+                  applyGroupMutation((state) => assignSessionToTabGroup(state, session.id, null));
+                  setGroupOpen(section.groupId, false);
+                }}
+              />
             </li>
           );
         })}
@@ -1138,6 +1165,7 @@ export function AgentSessionTabStrip({
           className={[
             styles.agentSessionTabGroupSection,
             section.collapsed ? styles.agentSessionTabGroupSectionCollapsed : "",
+            groupDropTarget === section.groupId ? styles.agentSessionTabGroupSectionDropTarget : "",
           ].filter(Boolean).join(" ")}
           data-session-tab-group={section.groupId}
           data-session-tab-group-ungrouped={section.ungrouped ? "true" : undefined}

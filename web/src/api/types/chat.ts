@@ -1333,6 +1333,14 @@ export type SessionDetail = SessionSummary & {
   stopRequested: boolean;
   stopRequestedAt: string;
   stopReason: string;
+  /** Stop-chain progress (requested / provider_aborted / tools_cancelled / ...). */
+  stopStages?: SessionStopStage[];
+};
+
+export type SessionStopStage = {
+  stage: string;
+  at: string;
+  [field: string]: unknown;
 };
 
 export type SessionLlmUsage = {

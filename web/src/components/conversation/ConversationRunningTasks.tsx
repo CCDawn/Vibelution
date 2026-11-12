@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, ChevronRight, LoaderCircle, StopCircle } from "lucide-react";
+import { LoaderCircle, StopCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import {
@@ -21,14 +21,13 @@ import { activeTurnElapsedSeconds } from "./conversationActiveTurnStatusPresenta
 /** Foreground poll beat; hidden conversation panes stop polling. */
 export const CONVERSATION_RUNNING_TASKS_POLL_MS = 4_000;
 
-/** Fallback jump target for tasks that do not own a child session. */
+/** Fallback jump target for running tasks that do not own a child session. */
 const AUX_CENTER_HREF = "/aux";
 
 const COPY = {
   zh: {
     section: "后台任务",
     open: "打开",
-    ended: "已结束",
     stop: "停止",
     stopPending: "停止中…",
     stopConfirmTitle: "停止该任务？",
@@ -39,7 +38,6 @@ const COPY = {
   en: {
     section: "Background tasks",
     open: "Open",
-    ended: "Ended",
     stop: "Stop",
     stopPending: "Stopping…",
     stopConfirmTitle: "Stop this task?",
@@ -52,12 +50,11 @@ const COPY = {
 /**
  * Tail-of-timeline strip for background runtime tasks parented to the current
  * session (ZCode ConversationStatusPanel shape): one compact row per live task
- * with a jump-seconds elapsed counter and a stop action, plus a footer
- * directory row ("已结束 · N ›") into the aux center when this session has
- * ended tasks. Stop only records the intent — the row flips to 停止中… and the
- * polled list decides the terminal state (the row leaves the running bucket
- * once `endedAt` exists). With neither running rows nor an ended count the
- * strip renders null: zero placeholder, no layout tax.
+ * with a jump-seconds elapsed counter and a stop action. Stop only records the
+ * intent — the row flips to 停止中… and the polled list decides the terminal
+ * state (the row leaves the running bucket once `endedAt` exists). With no
+ * running rows the strip renders null: finished tasks live in the right rail
+ * task panel, not at the conversation tail.
  */
 export function ConversationRunningTasks({ sessionId }: { sessionId: string }) {
   const { lang } = useShellI18n();
@@ -79,23 +76,6 @@ export function ConversationRunningTasks({ sessionId }: { sessionId: string }) {
     refetchIntervalInBackground: false,
   });
   const runningTasks = listQuery.data?.running ?? [];
-
-  // Ended directory count for the session (ZCode EndedDirectoryRow shape):
-  // one page-one probe is enough — `ended.total` is the full ended count.
-  const endedKey = queryKeys.runtimeTasks("ended", sessionId);
-  const endedQuery = useQuery({
-    queryKey: endedKey,
-    queryFn: ({ signal }) =>
-      listRuntimeTasksRevisionAware(
-        { status: "ended", parentSessionId: sessionId, limit: 1 },
-        queryClient.getQueryData<RuntimeTaskListPayload>(endedKey),
-        signal,
-      ),
-    enabled: Boolean(sessionId),
-    refetchInterval: resolvePollingInterval(pageVisible, CONVERSATION_RUNNING_TASKS_POLL_MS),
-    refetchIntervalInBackground: false,
-  });
-  const endedTotal = endedQuery.data?.ended?.total ?? 0;
 
   // Stop only records the intent: the id stays "requested" until the polled
   // list drops the task from the running bucket, so the row shows 停止中…
@@ -129,7 +109,7 @@ export function ConversationRunningTasks({ sessionId }: { sessionId: string }) {
     return () => window.clearInterval(timer);
   }, [hasRunningTasks]);
 
-  if (!hasRunningTasks && endedTotal <= 0) {
+  if (!hasRunningTasks) {
     return null;
   }
 
@@ -161,19 +141,6 @@ export function ConversationRunningTasks({ sessionId }: { sessionId: string }) {
               : copy.stopFailed}</span>
           ) : null}
         </div>
-      ) : null}
-      {endedTotal > 0 ? (
-        <VRouteLinkButton
-          to={AUX_CENTER_HREF}
-          variant="ghost"
-          density="compact"
-          className={styles.endedRow}
-          data-testid="conversation-running-tasks-ended-row"
-        >
-          <CheckCircle2 size={14} className={styles.endedIcon} aria-hidden="true" />
-          <span className={styles.endedLabel}>{copy.ended} · {endedTotal}</span>
-          <ChevronRight size={14} className={styles.endedChevron} aria-hidden="true" />
-        </VRouteLinkButton>
       ) : null}
       <VConfirmDialog
         open={Boolean(stopTargetTask)}

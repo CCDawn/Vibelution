@@ -372,6 +372,19 @@ debug = DebugLogger()
 # ConversationLogger - 实时对话记录器
 # ============================================================================
 
+def _resolve_file_logging_enabled() -> bool:
+    """log.file_enabled gates the conversation JSONL sink.
+
+    A broken config must never silently stop the file sink, so any failure
+    keeps the enabled default.
+    """
+    try:
+        from config import get_config
+        return bool(getattr(getattr(get_config(), "log", None), "file_enabled", True))
+    except Exception:
+        return True
+
+
 class ConversationLogger:
     """
     实时对话记录器 - 将 LLM 对话记录到文件
@@ -407,6 +420,7 @@ class ConversationLogger:
         self._delegation_depth = 0
         self._inherited_session = False
         self._log_dir = CONVERSATION_LOG_DIR
+        self._file_logging_enabled = _resolve_file_logging_enabled()
         self._apply_env_context()
         self._ensure_log_dir()
         self._current_session_file = None
@@ -442,6 +456,8 @@ class ConversationLogger:
 
     def _ensure_log_dir(self):
         """确保日志目录存在"""
+        if not getattr(self, "_file_logging_enabled", True):
+            return
         os.makedirs(self._log_dir, exist_ok=True)
 
     @staticmethod
@@ -654,6 +670,8 @@ class ConversationLogger:
 
     def _write(self, record: dict):
         """写入单条记录到文件（实时刷出）"""
+        if not self._file_logging_enabled:
+            return
         if not self._session_active:
             self._activate_default()
         try:

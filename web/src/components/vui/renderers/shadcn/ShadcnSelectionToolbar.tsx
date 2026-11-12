@@ -31,17 +31,22 @@ export function ShadcnSelectionToolbar({
     if (!toolbar) return;
     const place = () => {
       const measured = toolbar.getBoundingClientRect();
+      const height = measured.height || SELECTION_TOOLBAR_HEIGHT_PX;
       const position = resolveSelectionToolbarPosition(
         anchorRect,
         { width: window.innerWidth, height: window.innerHeight },
         {
           width: measured.width || SELECTION_TOOLBAR_WIDTH_PX,
-          height: measured.height || SELECTION_TOOLBAR_HEIGHT_PX,
+          height,
         },
       );
+      // Resolve the final visual top here instead of leaning on
+      // translateY(-100%): the measured height is already baked into
+      // `position.top`, so the transform would shift the menu a second time
+      // on the first frame after mount and it visibly jumps into place.
       toolbar.style.left = `${position.left}px`;
-      toolbar.style.top = `${position.top}px`;
-      toolbar.style.transform = position.above ? "translateY(-100%)" : "none";
+      toolbar.style.top = `${position.above ? position.top - height : position.top}px`;
+      toolbar.style.transform = "none";
     };
     place();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(place);
@@ -63,6 +68,10 @@ export function ShadcnSelectionToolbar({
       data-renderer="shadcn"
       // Keep the existing ConversationView outside-click boundary compatible.
       data-conversation-selection-menu="1"
+      // Pointer-down lands before mousedown on trackpads and touch screens;
+      // by then the browser has already folded the selection, so the action
+      // read empty text and copy wrote nothing. Both handlers are required.
+      onPointerDown={(event) => event.preventDefault()}
       onMouseDown={(event) => event.preventDefault()}
     >
       {children}

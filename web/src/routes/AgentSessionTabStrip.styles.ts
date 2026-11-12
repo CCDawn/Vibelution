@@ -105,6 +105,13 @@ const styles = {
     "vui-routes-chatcodingroute agentSessionTabGroupSection inline-flex min-w-0 shrink-0 items-center gap-1 rounded-[8px] border border-[color-mix(in_srgb,var(--fg-primary)_10%,transparent)] bg-[color-mix(in_srgb,var(--fg-primary)_3%,transparent)] px-1 py-0.5",
   agentSessionTabGroupSectionCollapsed:
     "vui-routes-chatcodingroute agentSessionTabGroupSectionCollapsed",
+  agentSessionTabGroupSectionDropTarget:
+    "vui-routes-chatcodingroute agentSessionTabGroupSectionDropTarget bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] ring-1 ring-[color-mix(in_srgb,var(--accent-cool)_50%,transparent)]",
+  // Panel member row: whole row drags, and the remove control only shows on hover.
+  agentSessionTabGroupPanelRow:
+    "vui-routes-chatcodingroute agentSessionTabGroupPanelRow flex min-w-0 items-center gap-1 rounded-[7px] [&>button]:min-w-0 [&>button]:flex-1 hover:bg-[color-mix(in_srgb,var(--fg-primary)_8%,transparent)] [&:hover_[data-group-remove]]:opacity-100",
+  agentSessionTabGroupPanelRemove:
+    "vui-routes-chatcodingroute agentSessionTabGroupPanelRemove shrink-0 opacity-0 transition-opacity",
   agentSessionTabGroupHeader:
     "vui-routes-chatcodingroute agentSessionTabGroupHeader group/tabgroup inline-flex h-7 min-w-0 shrink-0 cursor-pointer items-center gap-1 rounded-[6px] px-1.5 text-[11px] text-[var(--fg-secondary)] transition-colors",
   agentSessionTabGroupHeaderActive:

@@ -144,11 +144,11 @@ describe("ConversationRunningTasks", () => {
       expect.anything(),
       expect.anything(),
     );
-    // The ended directory probe is session-scoped too and only reads the count
-    // (its cache entry starts unseeded, so the previous-payload arg is undefined).
-    expect(runtimeApi.listRuntimeTasksRevisionAware).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "ended", parentSessionId: SESSION_ID, limit: 1 }),
-      undefined,
+    // Finished tasks live in the right rail task panel, so the tail strip
+    // never probes the ended bucket.
+    expect(runtimeApi.listRuntimeTasksRevisionAware).not.toHaveBeenCalledWith(
+      expect.objectContaining({ status: "ended" }),
+      expect.anything(),
       expect.anything(),
     );
     expect(host?.querySelector('[data-conversation-running-tasks="true"]')).toBeNull();
@@ -196,31 +196,25 @@ describe("ConversationRunningTasks", () => {
     expect(host?.querySelector('[data-testid="conversation-running-tasks-ended-row"]')).toBeNull();
   });
 
-  it("renders the ended directory footer linking to /aux when only ended tasks remain", async () => {
+  it("renders nothing when only ended tasks remain", async () => {
     await mountStrip(listPayload([]), listPayload([], 3));
-    await flushUntil(() => Boolean(host?.querySelector('[data-testid="conversation-running-tasks-ended-row"]')));
+    await flushUntil(() => !host?.querySelector('[data-conversation-running-tasks="true"]'));
 
-    const footer = host!.querySelector<HTMLAnchorElement>('[data-testid="conversation-running-tasks-ended-row"]');
-    expect(footer, "ended directory footer should exist").toBeTruthy();
-    expect(footer!.getAttribute("href")).toBe("/aux");
-    expect(footer!.textContent).toContain("已结束 · 3");
-    // Ended-only state: no running rows, no stop buttons, no timers needed.
-    expect(host!.querySelector('[data-testid^="conversation-running-task-"]')).toBeNull();
+    // Finished tasks belong to the right rail task panel, not the timeline tail.
+    expect(host?.querySelector('[data-conversation-running-tasks="true"]')).toBeNull();
+    expect(host?.querySelector('[data-testid="conversation-running-tasks-ended-row"]')).toBeNull();
+    expect(host?.textContent).toBe("");
   });
-
-  it("keeps the ended footer visible next to live running rows", async () => {
+  it("does not render an ended footer next to live running rows", async () => {
     await mountStrip(
       listPayload([task({ taskId: "task-1", title: "子任务：调研资料" })]),
       listPayload([task({ taskId: "task-1" })], 2),
     );
-    await flushUntil(() => Boolean(host?.querySelector('[data-testid="conversation-running-tasks-ended-row"]')));
+    await flushUntil(() => Boolean(host?.querySelector('[data-conversation-running-tasks="true"]')));
 
     expect(host!.querySelector('[data-testid="conversation-running-task-task-1"]')).toBeTruthy();
-    const footer = host!.querySelector<HTMLAnchorElement>('[data-testid="conversation-running-tasks-ended-row"]');
-    expect(footer!.getAttribute("href")).toBe("/aux");
-    expect(footer!.textContent).toContain("已结束 · 2");
+    expect(host!.querySelector('[data-testid="conversation-running-tasks-ended-row"]')).toBeNull();
   });
-
   it("stops a running task through the confirm dialog and keeps 停止中 until the row leaves the running bucket", async () => {
     await mountStrip(listPayload([task({ taskId: "task-1", title: "子任务：调研资料" })]));
     await flushUntil(() => Boolean(host?.querySelector('[data-conversation-running-tasks="true"]')));

@@ -978,7 +978,7 @@ class AgentConfig(BaseModel):
         max_runtime: 最大运行时间（秒），0 表示无限制
         auto_backup: 是否启用自动备份
         backup_interval: 自动备份间隔（秒）
-        auto_restart_threshold: 自动重启阈值（错误次数），0 表示禁用
+        auto_restart_threshold: 已退役（保留字段兼容；本版不按错误次数自动重启）
         exploration_mode: 是否启用探索模式
     """
     model_config = ConfigDict(extra="ignore")
@@ -1015,10 +1015,12 @@ class AgentConfig(BaseModel):
         gt=0,
         description="自动备份间隔（秒）"
     )
+    # 本版没有错误计数自动重启机制：重启只有 Agent 主动请求
+    # (tools/rebirth_tools.py) 和 Launcher 控制面两条入口。
     auto_restart_threshold: int = Field(
         default=0,
         ge=0,
-        description="自动重启阈值，0 表示禁用"
+        description="已退役兼容字段：本版不按错误次数自动重启；重启由 Agent 主动请求或 Launcher 控制面触发",
     )
     exploration_mode: bool = Field(
         default=False,
@@ -1242,8 +1244,8 @@ class ContextCompressionConfig(BaseModel):
         max_token_limit: Token 阈值，超过此值触发压缩
         keep_recent_steps: 保留最近的工具调用次数
         summary_max_chars: 压缩摘要的最大字符数
-        compression_model: 用于压缩的模型名称
-        compression_temperature: 压缩用模型温度
+        compression_model: 已退役；压缩模型由 Agent summary slot 决定
+        compression_temperature: 已退役；温度由 summary slot 模型配置决定
         max_compressions_per_session: 每会话最大压缩次数
         effectiveness_threshold: 压缩效率阈值
         llm_summary_failure_breaker_threshold: 压缩 LLM 摘要连败熔断阈值
@@ -1275,13 +1277,19 @@ class ContextCompressionConfig(BaseModel):
     )
     compression_model: str = Field(
         default="qwen-turbo",
-        description="用于压缩的轻量模型"
+        description=(
+            "已退役兼容字段：压缩模型由 Agent summary slot"
+            "（AGENT_LLM_SLOT_SUMMARY）决定，全局 compression profile 不是选择器"
+        )
     )
     compression_temperature: float = Field(
         default=0.3,
         ge=0.0,
         le=2.0,
-        description="压缩用模型温度"
+        description=(
+            "已退役兼容字段：压缩摘要温度由 summary slot 绑定模型的配置决定，"
+            "本字段不参与调用"
+        )
     )
     max_compressions_per_session: int = Field(
         default=20,
@@ -1978,22 +1986,26 @@ class MemoryConfig(BaseModel):
 
     storage_dir: str = Field(
         default="workspace/memory",
-        description="记忆存储目录"
+        description="已退役兼容字段：记忆路径由 WorkspaceManager 决定（<workspace>/memory），本字段不参与解析"
     )
     memory_file: str = Field(
         default="memory.json",
-        description="记忆文件名称"
+        description="已退役兼容字段：索引文件名固定为 memory.json；需要改整个索引路径请用 VIBELUTION_MEMORY_INDEX_PATH"
     )
     archive_dir: str = Field(
         default="workspace/memory/archives",
-        description="归档目录"
+        description="已退役兼容字段：归档目录由 WorkspaceManager.archives_dir 决定（<workspace>/memory/archives）"
     )
     max_entries: int = Field(
         default=1000,
         gt=0,
         description="最大记忆条目数"
     )
-    history_persistence: bool = Field(default=True, description="是否持久化会话历史")
+    # 会话历史持久化由 turn journal 决定，此开关从未参与该链路。
+    history_persistence: bool = Field(
+        default=True,
+        description="已退役兼容字段：会话历史持久化由 turn journal 决定，本开关不生效",
+    )
     semantic_memory_enabled: bool = Field(default=False, description="是否启用语义记忆")
     llm_extraction_enabled: bool = Field(default=False, description="是否启用 LLM 记忆提取")
     llm_summary_enabled: bool = Field(default=False, description="是否启用 LLM 记忆摘要")
@@ -2088,26 +2100,26 @@ class SupervisedEvolutionFeatureConfig(BaseModel):
 # ============================================================================
 
 class StrategyConfig(BaseModel):
-    """策略系统配置"""
+    """策略系统配置（已退役整组：策略学习/探索无业务消费者，仅保留兼容字段）"""
     model_config = ConfigDict(extra="ignore")
 
     data_dir: str = Field(
         default="workspace/strategy",
-        description="策略数据目录"
+        description="已退役兼容字段：本组功能无业务消费者，本字段不生效"
     )
     exploration_rate: float = Field(
         default=0.2,
         ge=0.0,
         le=1.0,
-        description="探索率"
+        description="已退役兼容字段：本组功能无业务消费者，本字段不生效"
     )
     learning_enabled: bool = Field(
         default=True,
-        description="是否启用策略学习"
+        description="已退役兼容字段：本组功能无业务消费者，本字段不生效"
     )
     learning_data_path: str = Field(
         default="workspace/strategy/learner_data.json",
-        description="学习数据存储路径"
+        description="已退役兼容字段：本组功能无业务消费者，本字段不生效"
     )
 
 
@@ -2168,24 +2180,24 @@ class PromptConfig(BaseModel):
 # ============================================================================
 
 class AnalysisConfig(BaseModel):
-    """代码分析配置"""
+    """代码分析配置（已退役整组：分析/反馈/知识图谱无业务消费者，仅保留兼容字段）"""
     model_config = ConfigDict(extra="ignore")
 
     data_dir: str = Field(
         default="workspace/analytics",
-        description="分析数据目录"
+        description="已退役兼容字段：本组功能无业务消费者，本字段不生效"
     )
     feedback_dir: str = Field(
         default="workspace/feedback",
-        description="反馈数据目录"
+        description="已退役兼容字段：本组功能无业务消费者，本字段不生效"
     )
     knowledge_graph_path: str = Field(
         default="workspace/knowledge_graph.json",
-        description="知识图谱存储路径"
+        description="已退役兼容字段：本组功能无业务消费者，本字段不生效"
     )
     pattern_library_path: str = Field(
         default="workspace/pattern_library.json",
-        description="模式库存储路径"
+        description="已退役兼容字段：本组功能无业务消费者，本字段不生效"
     )
 
 

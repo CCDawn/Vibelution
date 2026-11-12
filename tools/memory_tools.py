@@ -16,6 +16,7 @@
 """
 
 import ast
+import hashlib
 import json
 import os
 import re
@@ -668,3 +669,138 @@ def search_error_archive_tool(error_type: str = "") -> str:
     if not results:
         return json.dumps({"status": "ok", "count": 0, "results": []}, ensure_ascii=False)
     return json.dumps({"status": "ok", "count": len(results), "results": results}, ensure_ascii=False, default=str)
+
+
+# ============================================================================
+# Agent 级记忆整理（跨会话归并）
+# ============================================================================
+
+_MEMORY_ENTRY_MARKER = re.compile(r"<!--\s*memhash:([0-9a-f]{16})\s*-->")
+
+
+def _resolve_memory_agent_id(explicit_agent_id: str = "") -> str:
+    """优先使用显式 agentId，否则读取当前运行时 Agent。"""
+    normalized = str(explicit_agent_id or "").strip()
+    if normalized:
+        return normalized
+    try:
+        from core.web.services.agent_directory_service import current_agent_runtime
+
+        runtime = current_agent_runtime()
+    except Exception as exc:  # noqa: BLE001 - 运行时上下文缺失时降级为未解析
+        _debug_logger.warning(
+            f"[记忆整理] 获取当前 Agent runtime 失败: {type(exc).__name__}: {exc}"
+        )
+        runtime = {}
+    return str((runtime or {}).get("agentId") or "").strip()
+
+
+def _memory_entry_hash(category: str, title: str, content: str) -> str:
+    """条目稳定指纹：同一类别+标题+内容在任何实例上都得到同一个值。"""
+    raw = f"{category.strip()}\x1f{title.strip()}\x1f{content.strip()}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def consolidate_agent_memory_tool(agent_id: str = "", dry_run: bool = False) -> str:
+    """
+    【记忆整理】把本实例的长期记忆归并进 Agent 级文件记忆。
+
+    跨代 LongTermMemory 存在实例级 SQLite（agent_brain.db），每个实例一份；
+    workspace/agents/<agentId>/memory 才是同一个 Agent 跨会话共享的记忆根。
+    本工具按“类别+标题+内容”的哈希去重，把本实例新增条目追加进
+    long-term-memory.md，重复执行不会产生重复条目。
+
+    Args:
+        agent_id: 目标 Agent，留空则使用当前运行时 Agent
+        dry_run: 只统计，不写文件
+
+    Returns:
+        JSON 格式的整理结果（总数/新增/跳过/目标路径）
+    """
+    blocked = _perception_personal_read_block()
+    if blocked:
+        return blocked
+    wm = get_workspace()
+    resolved_agent_id = _resolve_memory_agent_id(agent_id)
+    if not resolved_agent_id:
+        return json.dumps({
+            "status": "error",
+            "error": "agent_id_unresolved",
+            "message": "无法确定当前 Agent，请显式传入 agent_id。",
+        }, ensure_ascii=False)
+
+    project_root_text = str(
+        getattr(wm, "project_root", "") or getattr(wm, "_project_root", "") or ""
+    ).strip()
+    project_root = Path(project_root_text) if project_root_text else Path(os.getcwd())
+    memory_root = project_root / "workspace" / "agents" / resolved_agent_id / "memory"
+    target = memory_root / "long-term-memory.md"
+
+    existing_hashes = set()
+    if target.is_file():
+        try:
+            existing_hashes = set(
+                _MEMORY_ENTRY_MARKER.findall(target.read_text(encoding="utf-8"))
+            )
+        except OSError as exc:
+            return json.dumps({
+                "status": "error",
+                "error": "memory_file_unreadable",
+                "message": f"{type(exc).__name__}: {exc}",
+                "file": str(target),
+            }, ensure_ascii=False)
+
+    entries = wm.search_long_term_memory(query="", category=None, limit=5000) or []
+    pending = []
+    skipped = 0
+    for entry in entries:
+        category = str(entry.get("category") or "UNKNOWN")
+        title = str(entry.get("title") or "(untitled)")
+        content = str(entry.get("content") or "")
+        digest = _memory_entry_hash(category, title, content)
+        if digest in existing_hashes:
+            skipped += 1
+            continue
+        existing_hashes.add(digest)
+        pending.append((entry, digest))
+
+    if pending and not dry_run:
+        header = (
+            "# Agent 长期记忆（跨会话归并）\n\n"
+            "> 由 consolidate_agent_memory_tool 生成；条目按内容哈希去重，"
+            "重复执行不会重复追加。\n"
+        )
+        try:
+            base = target.read_text(encoding="utf-8") if target.is_file() else header
+            chunks = []
+            for entry, digest in pending:
+                chunks.append(
+                    f"\n## [{entry.get('category')}] {entry.get('title')}\n"
+                    f"<!-- memhash:{digest} -->\n"
+                    f"- 重要度: {entry.get('importance')}\n"
+                    f"- 记录时间: {entry.get('created_at')}\n"
+                    f"- 来源世代: G{entry.get('generation')}\n\n"
+                    f"{entry.get('content')}\n"
+                )
+            memory_root.mkdir(parents=True, exist_ok=True)
+            tmp = target.with_name(target.name + ".tmp")
+            tmp.write_text(base + "".join(chunks), encoding="utf-8")
+            os.replace(tmp, target)
+        except OSError as exc:
+            return json.dumps({
+                "status": "error",
+                "error": "memory_file_unwritable",
+                "message": f"{type(exc).__name__}: {exc}",
+                "file": str(target),
+            }, ensure_ascii=False)
+
+    return json.dumps({
+        "status": "ok",
+        "agentId": resolved_agent_id,
+        "memoryRoot": str(memory_root),
+        "file": str(target),
+        "total": len(entries),
+        "added": len(pending),
+        "skipped": skipped,
+        "dryRun": bool(dry_run),
+    }, ensure_ascii=False)

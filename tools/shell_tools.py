@@ -1325,6 +1325,7 @@ def _load_config_defaults() -> dict:
             "DEFAULT_TIMEOUT": cfg.tools.shell.default_timeout,
             "MAX_OUTPUT_LENGTH": cfg.tools.shell.max_output_length,
             "MAX_FILE_SIZE": cfg.tools.shell.max_file_size,
+            "ALLOWED_SHELLS": cfg.tools.shell.allowed_shells,
             "SAFETY_CHECK": cfg.tools.shell.safety_check,
             "DANGEROUS_PATTERN_CHECK": cfg.tools.shell.dangerous_pattern_check,
             "DANGEROUS_PATTERNS": cfg.security.dangerous_commands,
@@ -1366,6 +1367,18 @@ SAFETY_CHECK_ENABLED = bool(_config_defaults.get("SAFETY_CHECK", True))
 DANGEROUS_PATTERN_CHECK_ENABLED = bool(
     _config_defaults.get("DANGEROUS_PATTERN_CHECK", True)
 )
+# tools.shell.allowed_shells: shell families the router may hand a command
+# to. git_bash is the Windows implementation of the bash family, and
+# no_console_git spawns no shell at all, so neither needs its own entry.
+ALLOWED_SHELLS = list(
+    _config_defaults.get("ALLOWED_SHELLS", ["powershell", "cmd", "bash"])
+)
+_ALLOWED_SHELL_FAMILIES = {
+    "powershell": "powershell",
+    "cmd": "cmd",
+    "bash": "bash",
+    "git_bash": "bash",
+}
 DEFAULT_TIMEOUT = _config_defaults.get("DEFAULT_TIMEOUT", 60)
 MAX_OUTPUT_LENGTH = _config_defaults.get("MAX_OUTPUT_LENGTH", 10000)
 MAX_FILE_SIZE = _config_defaults.get("MAX_FILE_SIZE", 10 * 1024 * 1024)
@@ -1405,6 +1418,28 @@ def _check_command_whitelist(command: str) -> tuple[bool, str]:
         from core.logging import debug as _debug_logger
         _debug_logger.warning(f"Security module load failed: {e}")
     return False, ""
+
+
+def _shell_route_blocked(route: str) -> str:
+    """Apply tools.shell.allowed_shells after the command was routed.
+
+    ``git_bash`` and ``bash`` share the bash family; routes that never
+    spawn a shell (``no_console_git``) and already-blocked routes are not
+    gated here.
+    """
+    family = _ALLOWED_SHELL_FAMILIES.get(str(route or "").strip().lower())
+    if not family:
+        return ""
+    allowed = {
+        str(item).strip().lower() for item in ALLOWED_SHELLS if str(item).strip()
+    }
+    if family in allowed:
+        return ""
+    listed = ", ".join(sorted(allowed)) or "(empty)"
+    return (
+        f"[Shell 拦截] 当前配置不允许使用 {family} shell"
+        f"（tools.shell.allowed_shells={listed}）"
+    )
 
 
 def _is_command_dangerous(
@@ -1556,6 +1591,9 @@ def execute_shell_command(
     route = classify_shell_command(command)
     if route.blocked:
         return route.error
+    shell_route_block = _shell_route_blocked(route.route)
+    if shell_route_block:
+        return shell_route_block
     final_command = route.final_command
 
     try:
