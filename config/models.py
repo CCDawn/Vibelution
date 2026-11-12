@@ -978,7 +978,7 @@ class AgentConfig(BaseModel):
         max_runtime: 最大运行时间（秒），0 表示无限制
         auto_backup: 是否启用自动备份
         backup_interval: 自动备份间隔（秒）
-        auto_restart_threshold: 自动重启阈值（错误次数），0 表示禁用
+        auto_restart_threshold: 已退役（保留字段兼容；本版不按错误次数自动重启）
         exploration_mode: 是否启用探索模式
     """
     model_config = ConfigDict(extra="ignore")
@@ -1015,10 +1015,12 @@ class AgentConfig(BaseModel):
         gt=0,
         description="自动备份间隔（秒）"
     )
+    # 本版没有错误计数自动重启机制：重启只有 Agent 主动请求
+    # (tools/rebirth_tools.py) 和 Launcher 控制面两条入口。
     auto_restart_threshold: int = Field(
         default=0,
         ge=0,
-        description="自动重启阈值，0 表示禁用"
+        description="已退役兼容字段：本版不按错误次数自动重启；重启由 Agent 主动请求或 Launcher 控制面触发",
     )
     exploration_mode: bool = Field(
         default=False,
