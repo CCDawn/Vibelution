@@ -7,6 +7,7 @@ import type {
   SessionReferenceAttachment,
 } from "../../api/types";
 import type { ComposerQueueItem } from "../../components/conversation/composerFollowupQueueModel";
+import { resolveStopStageLabel } from "./stopStageLabel";
 import type { TranslationKey } from "../../i18n/dictionary";
 import {
   latestUserMessageId as deriveLatestUserMessageId,
@@ -179,6 +180,11 @@ export function useChatComposerBridgeState({
     lang,
   });
   const composerStopPending = (stopTurnMutation.isPending && stopMutationMatchesActiveSession) || sessionStopping;
+  // While a stop is settling the composer names the hop it is waiting on, so a
+  // long tool teardown reads as progress instead of a frozen "stopping".
+  const stopStageGuidance = sessionStopping
+    ? resolveStopStageLabel(detail?.stopStages, lang)
+    : "";
   const composerSafeGuidancePending =
     sessionGuidanceMutation.isPending
     && guidanceMutationMatchesActiveSession
@@ -195,7 +201,7 @@ export function useChatComposerBridgeState({
       editTargetPreview: resolvedEditTarget?.original,
       error: activeComposerError,
       followupQueue: activeFollowupQueue,
-      guidance: activeImageInputGuidance,
+      guidance: stopStageGuidance || activeImageInputGuidance,
       imageAttachments: activeImageAttachments,
       imageInputUnsupported: activeAgentImageInputUnsupported,
       interruptGuidancePending: composerInterruptGuidancePending,
@@ -239,6 +245,7 @@ export function useChatComposerBridgeState({
       composerInterruptGuidancePending,
       composerSafeGuidancePending,
       composerStopPending,
+      stopStageGuidance,
       sessionBusy,
       sessionStopping,
       submitPending,
