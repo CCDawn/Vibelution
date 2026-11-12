@@ -13,6 +13,7 @@ import {
   planActiveTurnStageSwitch,
   resolveActiveTurnDisconnectSeconds,
   resolveActiveTurnProgressStage,
+  resolveActiveTurnQueueNote,
   resolveActiveTurnRetryProgress,
   resolveActiveTurnRouteFallback,
   resolveActiveTurnReasoningSummary,
@@ -137,9 +138,13 @@ export function ConversationActiveTurnStatusNote({
   // the duration belongs to the settled block, not to the wait. Other stages
   // (queued / requesting / generating / stopping) keep their counter.
   const visibleDuration = heartbeatActive ? "" : heartbeatDuration;
-  const displayHeartbeatText = visibleDuration
-    ? `${heartbeatHead} · ${visibleDuration}`
-    : heartbeatHead;
+  // 排队时补一句原因和位置：只有秒数的「排队中」无法区分限流和卡死。
+  const queueNote = displayStage === "queued" ? resolveActiveTurnQueueNote(message) : "";
+  const displayHeartbeatText = [
+    heartbeatHead,
+    visibleDuration,
+    queueNote,
+  ].filter(Boolean).join(" · ");
   const reasoningSummary = !advisoriesOnly && heartbeatActive
     ? resolveActiveTurnReasoningSummary(reasoningText)
     : "";

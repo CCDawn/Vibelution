@@ -179,6 +179,23 @@ export function resolveActiveTurnProgressStage(message: ActiveTurnStatusMessageL
   return "running";
 }
 
+/**
+ * 排队原因的人话提示。后端把原因写进 queued status 行的 metadata.queueNote，
+ * 这里取最新一条 queued 行，避免旧轮残留的提示继续显示。
+ */
+export function resolveActiveTurnQueueNote(message: ActiveTurnStatusMessageLike): string {
+  const items = message.turnItems;
+  if (!Array.isArray(items) || items.length === 0) return "";
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index] as { name?: unknown; metadata?: unknown } | null | undefined;
+    if (normalizeStage(String(item?.name ?? "")) !== "queued") continue;
+    const metadata = item?.metadata;
+    if (!metadata || typeof metadata !== "object") return "";
+    return String((metadata as Record<string, unknown>).queueNote ?? "").trim();
+  }
+  return "";
+}
+
 export function activeTurnStageBarPhase(stage: string): ActiveTurnStageBarPhase | "other" {
   switch (normalizeStage(stage)) {
     case "sending":
