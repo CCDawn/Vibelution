@@ -2094,26 +2094,26 @@ class SupervisedEvolutionFeatureConfig(BaseModel):
 # ============================================================================
 
 class StrategyConfig(BaseModel):
-    """策略系统配置"""
+    """策略系统配置（已退役整组：策略学习/探索无业务消费者，仅保留兼容字段）"""
     model_config = ConfigDict(extra="ignore")
 
     data_dir: str = Field(
         default="workspace/strategy",
-        description="策略数据目录"
+        description="已退役兼容字段：本组功能无业务消费者，本字段不生效"
     )
     exploration_rate: float = Field(
         default=0.2,
         ge=0.0,
         le=1.0,
-        description="探索率"
+        description="已退役兼容字段：本组功能无业务消费者，本字段不生效"
     )
     learning_enabled: bool = Field(
         default=True,
-        description="是否启用策略学习"
+        description="已退役兼容字段：本组功能无业务消费者，本字段不生效"
     )
     learning_data_path: str = Field(
         default="workspace/strategy/learner_data.json",
-        description="学习数据存储路径"
+        description="已退役兼容字段：本组功能无业务消费者，本字段不生效"
     )
 
 
@@ -2174,24 +2174,24 @@ class PromptConfig(BaseModel):
 # ============================================================================
 
 class AnalysisConfig(BaseModel):
-    """代码分析配置"""
+    """代码分析配置（已退役整组：分析/反馈/知识图谱无业务消费者，仅保留兼容字段）"""
     model_config = ConfigDict(extra="ignore")
 
     data_dir: str = Field(
         default="workspace/analytics",
-        description="分析数据目录"
+        description="已退役兼容字段：本组功能无业务消费者，本字段不生效"
     )
     feedback_dir: str = Field(
         default="workspace/feedback",
-        description="反馈数据目录"
+        description="已退役兼容字段：本组功能无业务消费者，本字段不生效"
     )
     knowledge_graph_path: str = Field(
         default="workspace/knowledge_graph.json",
-        description="知识图谱存储路径"
+        description="已退役兼容字段：本组功能无业务消费者，本字段不生效"
     )
     pattern_library_path: str = Field(
         default="workspace/pattern_library.json",
-        description="模式库存储路径"
+        description="已退役兼容字段：本组功能无业务消费者，本字段不生效"
     )
 
 
