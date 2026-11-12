@@ -64,9 +64,9 @@ const styles = {
     "vui-routes-chatcodingroute agentSessionTabDragging opacity-40 transition-opacity duration-150",
   // Inset shadows draw the insertion line, so no positioned parent is required.
   agentSessionTabDropBefore:
-    "vui-routes-chatcodingroute agentSessionTabDropBefore shadow-[-3px_0_0_0_var(--accent-cool)]",
+    "vui-routes-chatcodingroute agentSessionTabDropBefore shadow-[inset_2px_0_0_0_var(--accent-cool)]",
   agentSessionTabDropAfter:
-    "vui-routes-chatcodingroute agentSessionTabDropAfter shadow-[3px_0_0_0_var(--accent-cool)]",
+    "vui-routes-chatcodingroute agentSessionTabDropAfter shadow-[inset_-2px_0_0_0_var(--accent-cool)]",
   agentSessionTabStatusSlot:
     "vui-routes-chatcodingroute agentSessionTabStatusSlot inline-grid h-3.5 w-3.5 shrink-0 place-items-center self-center",
   agentSessionTabStatus:
@@ -113,6 +113,11 @@ const styles = {
     "vui-routes-chatcodingroute agentSessionTabGroupHeaderOpen [&_[data-group-chevron]]:opacity-100",
   agentSessionTabGroupChevron:
     "vui-routes-chatcodingroute agentSessionTabGroupChevron inline-flex shrink-0 items-center opacity-0 transition-opacity duration-150 group-hover/tabgroup:opacity-100",
+  // A collapsed chip must advertise that it opens: hiding the chevron there
+  // left an unexplained empty-looking chip. Only the open state stays quiet
+  // until hover.
+  agentSessionTabGroupChevronCollapsed:
+    "vui-routes-chatcodingroute agentSessionTabGroupChevronCollapsed !opacity-100",
   agentSessionTabGroupTintGray:
     "vui-routes-chatcodingroute bg-[hsl(220_10%_55%/0.16)] hover:bg-[hsl(220_10%_55%/0.24)]",
   agentSessionTabGroupTintBlue:

@@ -331,27 +331,32 @@ export function AgentSessionTabStrip({
     void manualOrderTick;
     return applyAgentSessionTabOrder(sessions, agentTabScopeId);
   })();
-  const [groupTick, setGroupTick] = useState(0);
+  // Read the stored bucket once per Agent scope; every mutation writes back
+  // through setGroupState, so renders no longer re-parse localStorage.
+  const [groupState, setGroupState] = useState<AgentSessionTabGroupState>(() =>
+    readAgentSessionTabGroupState(agentTabScopeId),
+  );
   const [groupDropTarget, setGroupDropTarget] = useState<string | null>(null);
   const [mergeTargetSessionId, setMergeTargetSessionId] = useState<string | null>(null);
   const [renamingGroupId, setRenamingGroupId] = useState<string | null>(null);
   const [groupNameDraft, setGroupNameDraft] = useState("");
-  const groupState = (() => {
-    void groupTick;
-    return readAgentSessionTabGroupState(agentTabScopeId);
-  })();
   const applyGroupMutation = useCallback(
     (mutate: (state: AgentSessionTabGroupState) => AgentSessionTabGroupState) => {
-      const current = readAgentSessionTabGroupState(agentTabScopeId);
-      const next = mutate(current);
-      if (next === current) {
-        return;
-      }
-      writeAgentSessionTabGroupState(agentTabScopeId, next);
-      setGroupTick((tick) => tick + 1);
+      setGroupState((current) => {
+        const next = mutate(current);
+        if (next === current) {
+          return current;
+        }
+        writeAgentSessionTabGroupState(agentTabScopeId, next);
+        return next;
+      });
     },
     [agentTabScopeId],
   );
+  // Switching Agent means a different stored bucket: re-read it.
+  useEffect(() => {
+    setGroupState(readAgentSessionTabGroupState(agentTabScopeId));
+  }, [agentTabScopeId]);
   const groupSections = (() => {
     const resolved = resolveSessionTabGroupSections(visibleSessions, groupState, {
       ungroupedName: lang === "zh" ? "未分组" : "Ungrouped",
@@ -451,7 +456,7 @@ export function AgentSessionTabStrip({
       return;
     }
     writeAgentSessionTabGroupState(agentTabScopeId, pruned);
-    setGroupTick((tick) => tick + 1);
+    setGroupState(pruned);
   }, [agentTabScopeId, visibleSessions]);
   const renderSessionTab = (session: SessionSummary, sectionGroupId: string) => {
     const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
@@ -827,8 +832,9 @@ export function AgentSessionTabStrip({
     const isOpen = groupIsOpen(section.groupId);
     const headerClassName = [
       styles.agentSessionTabGroupHeader,
-      groupTint,
-      containsActive ? styles.agentSessionTabGroupHeaderActive : "",
+      // The accent ring already says "the open session is in this group";
+      // stacking the colour tint on the same chip made two signals compete.
+      containsActive ? styles.agentSessionTabGroupHeaderActive : groupTint,
       dropActive ? styles.agentSessionTabGroupHeaderDropTarget : "",
       isOpen ? styles.agentSessionTabGroupHeaderOpen : "",
     ].filter(Boolean).join(" ");
@@ -925,7 +931,14 @@ export function AgentSessionTabStrip({
               <span className={styles.agentSessionTabGroupName}>{section.name}</span>
             )}
             <span className={styles.agentSessionTabGroupCount}>{section.sessions.length}</span>
-            <span className={styles.agentSessionTabGroupChevron} aria-hidden="true" data-group-chevron>
+            <span
+              className={[
+                styles.agentSessionTabGroupChevron,
+                section.collapsed ? styles.agentSessionTabGroupChevronCollapsed : "",
+              ].filter(Boolean).join(" ")}
+              aria-hidden="true"
+              data-group-chevron
+            >
               {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
             </span>
           </div>
