@@ -122,23 +122,42 @@ MAX_HUMAN_GATE_ITEMS = 20
 
 # The notification lane is polled every 5s by both the desktop notifier and the
 # assistant overview, and each uncached read replays stage files, state-v2
-# projections and the affair ledger. A short memo (single-flight, so concurrent
-# callers share one read) cuts that work in half while bounding how long a
-# newly arrived item can stay unseen.
+# projections and the affair ledger (a 1-2s multi-file read at the slow end).
 # The client polls every 5s; a 10s TTL turned roughly every second poll into a
-# full re-collection, and because collection runs under the cache lock every
-# concurrent poller queued behind that 2.4s read. 30s still surfaces reminders
-# promptly while cutting full collections to one per six polls.
+# full re-collection, and holding the cache lock across that read queued every
+# concurrent poller behind it. Two layers now protect the request path:
+# a 30s memo bounds how often full collections run, and an expired memo is
+# still served immediately (stale-while-revalidate) while one daemon thread
+# re-collects in the background — only a cold read (no memo at all) blocks
+# inline, single-flighted so concurrent first polls share one collection.
 HUMAN_ATTENTION_CACHE_TTL_SECONDS = 30.0
 
 _HUMAN_ATTENTION_CACHE_LOCK = threading.Lock()
 
 _HUMAN_ATTENTION_CACHE: dict[str, Any] = {"expires_at": 0.0, "items": None}
 
+# Single-flight re-collection slot: held for the whole duration of one
+# collection, so cold first reads share one collection and stale-while-
+# revalidate polls never spawn overlapping background refreshes.
+_HUMAN_ATTENTION_REFRESH_LOCK = threading.Lock()
+
+# Daemon thread currently running the background refresh (test join only).
+_HUMAN_ATTENTION_REFRESH_THREAD: threading.Thread | None = None
+
+
+def _join_human_attention_refresh_for_tests(timeout: float = 10.0) -> None:
+    """Wait for any in-flight background refresh (test isolation only)."""
+
+    with _HUMAN_ATTENTION_CACHE_LOCK:
+        worker = _HUMAN_ATTENTION_REFRESH_THREAD
+    if worker is not None and worker is not threading.current_thread():
+        worker.join(timeout=timeout)
+
 
 def _reset_human_attention_cache_for_tests() -> None:
     """Drop the memoized lane (test isolation only)."""
 
+    _join_human_attention_refresh_for_tests()
     with _HUMAN_ATTENTION_CACHE_LOCK:
         _HUMAN_ATTENTION_CACHE["expires_at"] = 0.0
         _HUMAN_ATTENTION_CACHE["items"] = None
@@ -982,25 +1001,94 @@ def _collect_human_attention_uncached() -> list[dict[str, Any]]:
     return extension
 
 
-def collect_human_attention() -> list[dict[str, Any]]:
-    """Read the notification lane without constructing the Session overview.
+def _store_human_attention_items(items: list[dict[str, Any]]) -> None:
+    """Publish collected rows and restart the TTL (cache-only critical section)."""
 
-    Memoized for ``HUMAN_ATTENTION_CACHE_TTL_SECONDS``; the collection runs
-    under the cache lock so overlapping polls wait for one read instead of
-    replaying every source. Callers receive their own copy of the rows.
-    """
     with _HUMAN_ATTENTION_CACHE_LOCK:
-        if (
-            _HUMAN_ATTENTION_CACHE["items"] is not None
-            and time.monotonic() < float(_HUMAN_ATTENTION_CACHE["expires_at"])
-        ):
-            return copy.deepcopy(_HUMAN_ATTENTION_CACHE["items"])
-        items = _collect_human_attention_uncached()
         _HUMAN_ATTENTION_CACHE["items"] = copy.deepcopy(items)
         _HUMAN_ATTENTION_CACHE["expires_at"] = (
             time.monotonic() + HUMAN_ATTENTION_CACHE_TTL_SECONDS
         )
-        return items
+
+
+def _refresh_human_attention_once() -> None:
+    """Single-flight re-collection shared by cold reads and background refresh.
+
+    The refresh lock serializes collectors; the freshness re-check after
+    acquiring it lets a caller that queued behind another collector return
+    without replaying every source a second time.
+    """
+
+    with _HUMAN_ATTENTION_REFRESH_LOCK:
+        with _HUMAN_ATTENTION_CACHE_LOCK:
+            cached = _HUMAN_ATTENTION_CACHE["items"]
+            fresh = cached is not None and time.monotonic() < float(
+                _HUMAN_ATTENTION_CACHE["expires_at"]
+            )
+        if fresh:
+            return
+        collected = _collect_human_attention_uncached()
+        _store_human_attention_items(collected)
+
+
+def _spawn_human_attention_refresh() -> None:
+    """Kick off one background refresh; no-op while another is in flight."""
+
+    if not _HUMAN_ATTENTION_REFRESH_LOCK.acquire(blocking=False):
+        # A refresh is already in flight; stale rows keep being served until
+        # it lands, so overlapping polls never fork duplicate collections.
+        return
+
+    global _HUMAN_ATTENTION_REFRESH_THREAD
+
+    def _run() -> None:
+        try:
+            collected = _collect_human_attention_uncached()
+            _store_human_attention_items(collected)
+        except Exception:  # noqa: BLE001 - background refresh must never surface
+            logger.exception("Human attention background refresh failed")
+        finally:
+            _HUMAN_ATTENTION_REFRESH_LOCK.release()
+
+    worker = threading.Thread(target=_run, name="human-attention-refresh", daemon=True)
+    with _HUMAN_ATTENTION_CACHE_LOCK:
+        _HUMAN_ATTENTION_REFRESH_THREAD = worker
+    try:
+        worker.start()
+    except Exception:  # noqa: BLE001 - thread exhaustion must not wedge the slot
+        with _HUMAN_ATTENTION_CACHE_LOCK:
+            _HUMAN_ATTENTION_REFRESH_THREAD = None
+        _HUMAN_ATTENTION_REFRESH_LOCK.release()
+        logger.exception("Human attention background refresh could not start")
+
+
+def collect_human_attention() -> list[dict[str, Any]]:
+    """Read the notification lane without constructing the Session overview.
+
+    Memoized for ``HUMAN_ATTENTION_CACHE_TTL_SECONDS`` with stale-while-
+    revalidate semantics: a fresh memo is served directly; an expired memo
+    still serves the previous rows immediately while one daemon thread
+    re-collects in the background, so polls never queue behind the multi-
+    source read. Only a cold read (no memo yet) collects inline,
+    single-flighted so concurrent first polls share one collection. Callers
+    receive their own copy of the rows.
+    """
+
+    with _HUMAN_ATTENTION_CACHE_LOCK:
+        items = _HUMAN_ATTENTION_CACHE["items"]
+        expired = items is None or time.monotonic() >= float(
+            _HUMAN_ATTENTION_CACHE["expires_at"]
+        )
+    if not expired:
+        return copy.deepcopy(items)
+    if items is not None:
+        # Expired memo: serve the previous rows now, refresh off the request
+        # path; the daemon thread dies with the process on shutdown.
+        _spawn_human_attention_refresh()
+        return copy.deepcopy(items)
+    _refresh_human_attention_once()
+    with _HUMAN_ATTENTION_CACHE_LOCK:
+        return copy.deepcopy(_HUMAN_ATTENTION_CACHE["items"])
 
 
 def attach_attention_to_overview(payload: dict[str, Any]) -> dict[str, Any]:

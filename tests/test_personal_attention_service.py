@@ -173,7 +173,9 @@ def test_human_attention_reads_shared_stage_files_once_per_request(monkeypatch):
     assert calls == ["stage-scan"]
 
 
-def test_human_attention_reads_are_memoized_until_the_poll_ttl_expires(monkeypatch):
+def test_human_attention_reads_are_memoized_and_expired_rows_serve_stale_then_refresh(
+    monkeypatch,
+):
     scans = []
 
     def stages():
@@ -190,8 +192,113 @@ def test_human_attention_reads_are_memoized_until_the_poll_ttl_expires(monkeypat
     assert second is not first
     with attention._HUMAN_ATTENTION_CACHE_LOCK:
         attention._HUMAN_ATTENTION_CACHE["expires_at"] = 0.0
-    attention.collect_human_attention()
+    stale = attention.collect_human_attention()
+    assert stale == first
+    attention._join_human_attention_refresh_for_tests()
+    assert scans == ["stage", "stage"]  # background refresh replayed sources once
+    third = attention.collect_human_attention()
+    assert third == first
+    assert scans == ["stage", "stage"]  # refreshed rows are memoized again
+
+
+def test_human_attention_stale_read_never_waits_for_a_blocked_background_refresh(
+    monkeypatch,
+):
+    import threading
+
+    entered = threading.Event()
+    release = threading.Event()
+    blocking = {"on": False}
+    scans = []
+    gate_rows = {"rows": [{"id": "gate-old", "kind": "human_gate"}]}
+
+    def stages():
+        scans.append("stage")
+        if blocking["on"]:
+            entered.set()
+            release.wait(timeout=10)
+        return [], []
+
+    monkeypatch.setattr(attention, "collect_stage_task_attention", stages)
+    monkeypatch.setattr(
+        attention, "_collect_human_gate_attention", lambda: gate_rows["rows"]
+    )
+    for name in _HUMAN_ATTENTION_COLLECTORS:
+        if name != "_collect_human_gate_attention":
+            monkeypatch.setattr(attention, name, lambda **_kwargs: [])
+    old = attention.collect_human_attention()
+    assert old == [{"id": "gate-old", "kind": "human_gate"}]
+
+    # Expire the memo, swap the source rows and block the next collection
+    # until this test says so: a synchronous miss would hang on the event,
+    # so returning at all proves the read never waited for the refresh.
+    gate_rows["rows"] = [{"id": "gate-new", "kind": "human_gate"}]
+    blocking["on"] = True
+    with attention._HUMAN_ATTENTION_CACHE_LOCK:
+        attention._HUMAN_ATTENTION_CACHE["expires_at"] = 0.0
+
+    stale = attention.collect_human_attention()
+    assert stale == old
+    assert release.is_set() is False  # returned before the refresh was allowed to finish
+    release.set()
+    assert entered.wait(timeout=10)
+    attention._join_human_attention_refresh_for_tests()
+    assert attention.collect_human_attention() == gate_rows["rows"]
     assert scans == ["stage", "stage"]
+
+
+def test_human_attention_concurrent_stale_polls_spawn_one_background_refresh(
+    monkeypatch,
+):
+    import threading
+
+    entered = threading.Event()
+    release = threading.Event()
+    blocking = {"on": False}
+    scans = []
+    gate_rows = {"rows": [{"id": "gate-old", "kind": "human_gate"}]}
+
+    def stages():
+        scans.append("stage")
+        if blocking["on"]:
+            entered.set()
+            release.wait(timeout=10)
+        return [], []
+
+    monkeypatch.setattr(attention, "collect_stage_task_attention", stages)
+    monkeypatch.setattr(
+        attention, "_collect_human_gate_attention", lambda: gate_rows["rows"]
+    )
+    for name in _HUMAN_ATTENTION_COLLECTORS:
+        if name != "_collect_human_gate_attention":
+            monkeypatch.setattr(attention, name, lambda **_kwargs: [])
+    old = attention.collect_human_attention()
+
+    gate_rows["rows"] = [{"id": "gate-new", "kind": "human_gate"}]
+    blocking["on"] = True
+    with attention._HUMAN_ATTENTION_CACHE_LOCK:
+        attention._HUMAN_ATTENTION_CACHE["expires_at"] = 0.0
+
+    results = []
+    pollers = [
+        threading.Thread(
+            target=lambda: results.append(attention.collect_human_attention())
+        )
+        for _ in range(4)
+    ]
+    for poller in pollers:
+        poller.start()
+    for poller in pollers:
+        poller.join(timeout=10)
+    assert len(results) == 4
+    assert all(rows == old for rows in results)  # every stale poll served old rows
+    # The refresh slot stays held while the (blocked) collection runs, so the
+    # four pollers can only ever hand the slot to one background collection.
+    release.set()
+    assert entered.wait(timeout=10)
+    attention._join_human_attention_refresh_for_tests()
+    assert attention.collect_human_attention() == gate_rows["rows"]
+    assert scans == ["stage", "stage"]  # cold read + exactly one background refresh
 
 
 def test_human_attention_concurrent_polls_share_one_read(monkeypatch):
