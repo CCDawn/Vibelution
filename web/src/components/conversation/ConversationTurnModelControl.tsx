@@ -1,5 +1,5 @@
 import { Layers, RotateCcw, Save, Zap } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import type { SessionLlmModelOption } from "../../api/types";
 import { useAppI18n } from "../../i18n/useAppI18n";
@@ -143,6 +143,17 @@ export function ConversationTurnModelControl({
     || !reasoningEffortValid
     || (parsedContextWindow === contextWindow && reasoningEffortDraft === effectiveEffort);
 
+  // Releasing the capsule commits the effort instead of asking the operator to
+  // travel to the save button: "drag means saved". The same applies to keyboard
+  // arrow/Home/End releases so the control behaves identically without a mouse.
+  // Validation stays in the shared writer, so an unsupported stop is still
+  // rejected there rather than silently persisted.
+  const commitEffort = useCallback((nextEffort: string) => {
+    if (!canConfigure || pending || !contextWindowValid) return;
+    if (nextEffort === effectiveEffort) return;
+    onSave({ contextWindow: parsedContextWindow, reasoningEffort: nextEffort });
+  }, [canConfigure, pending, contextWindowValid, effectiveEffort, onSave, parsedContextWindow]);
+
   useEffect(() => {
     setOpen(false);
     setContextWindowDraft(String(contextWindow || ""));
@@ -257,6 +268,14 @@ export function ConversationTurnModelControl({
                 onChange={(event) => {
                   setReasoningEffortDraft(supportedEfforts[Number(event.target.value)]);
                   setDirty(true);
+                }}
+                onPointerUp={(event) => {
+                  commitEffort(supportedEfforts[Number(event.currentTarget.value)]);
+                }}
+                onKeyUp={(event) => {
+                  const key = event.key;
+                  if (key !== "ArrowLeft" && key !== "ArrowRight" && key !== "Home" && key !== "End") return;
+                  commitEffort(supportedEfforts[Number(event.currentTarget.value)]);
                 }}
               />
             </div>

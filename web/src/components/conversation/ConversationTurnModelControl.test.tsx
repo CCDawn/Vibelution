@@ -116,6 +116,19 @@ describe("ConversationTurnModelControl", () => {
     });
   });
 
+  it("commits the released capsule effort without a second save click", async () => {
+    await withInteractiveControl(async (render, onSave) => {
+      await render({ currentReasoningEffort: "low" });
+      const slider = document.body.querySelector<HTMLInputElement>('input[aria-label="思考强度"]')!;
+      await editNativeValue(slider, "1");
+      expect(onSave).not.toHaveBeenCalled();
+      await act(async () => {
+        slider.dispatchEvent(new Event("pointerup", { bubbles: true }));
+      });
+      expect(onSave).toHaveBeenCalledWith({ contextWindow: 64_000, reasoningEffort: "high" });
+    });
+  });
+
   it("shows the Agent model and opens parameters without a model chooser", () => {
     const html = renderControl();
     expect(html).toContain(">gpt-5.6-luna<");
