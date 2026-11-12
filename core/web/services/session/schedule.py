@@ -335,7 +335,12 @@ def _mark_session_turn_queued(context: dict[str, Any], *, queue_position: int) -
     from . import directory_bridge
 
     directory_bridge.touch_directory_session_safe(session_id, status="queued", wait=False)
-    s._set_session_turn_progress_live_output(session_id, "queued", turn_id=turn_id)
+    s._set_session_turn_progress_live_output(
+        session_id,
+        "queued",
+        turn_id=turn_id,
+        queue_note=_session_queue_note(context, queue_position),
+    )
     s._persist_chat_turn_work_run(
         session_id=session_id,
         turn_id=turn_id,
@@ -354,6 +359,38 @@ def _mark_session_turn_queued(context: dict[str, Any], *, queue_position: int) -
         },
     )
     s._publish_session_detail_snapshot(session_id)
+
+def _session_queue_note(context: dict[str, Any], queue_position: int) -> str:
+    """排队提示要给原因：用户必须能分辨是在等槽位，还是模型卡住了。"""
+    s = _service()
+    language = s.get_web_language()
+    reason = str(context.get("_scheduler_queue_reason") or "").strip()
+    position = max(1, int(queue_position or 1))
+    active = int(context.get("_scheduler_agent_active_count") or 0)
+    max_active = int(context.get("_scheduler_agent_max_active") or 0)
+    if reason == "agent_concurrency_limit" and max_active > 0:
+        return s.text_for(
+            language,
+            zh=f"同一 Agent 已有 {active}/{max_active} 个会话在运行，你排第 {position}",
+            en=f"{active}/{max_active} sessions already running for this agent; you are #{position}",
+        )
+    if reason == "session_active":
+        return s.text_for(
+            language,
+            zh="上一轮还没结束，本轮排在其后",
+            en="The previous turn is still running; this turn waits behind it",
+        )
+    if reason in {"agent_external_active", "agent_external_waiting"}:
+        return s.text_for(
+            language,
+            zh="Agent 正在执行外部任务，本轮等待",
+            en="The agent is running external work; this turn waits",
+        )
+    return s.text_for(
+        language,
+        zh=f"等待空闲槽位，你排第 {position}",
+        en=f"Waiting for a free slot; you are #{position}",
+    )
 
 def _mark_session_turn_dequeued(context: dict[str, Any]) -> None:
     s = _service()

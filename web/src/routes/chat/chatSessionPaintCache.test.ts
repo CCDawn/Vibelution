@@ -16,6 +16,7 @@ import {
   resolveStickySessionDetailPaint,
   shouldShowStickyTranscriptPending,
   touchSessionKeepAlive,
+  SESSION_PAINT_KEEP_ALIVE_LIMIT,
 } from "./chatSessionPaintCache";
 import { appendOptimisticUserMessage, applyOptimisticEditResubmit, removeOptimisticUserMessage } from "../chatSessionState";
 
@@ -258,5 +259,20 @@ describe("chatSessionPaintCache", () => {
     expect(listSessionKeepAliveIds()).toEqual(["d", "c", "b"]);
     forgetSessionDetailPaint("c");
     expect(listSessionKeepAliveIds()).toEqual(["d", "b"]);
+  });
+});
+
+describe("sticky paint keep-alive", () => {
+  it("keeps the recent switch ring warm past the sticky ceiling", () => {
+    clearSessionDetailPaintCacheForTests();
+    for (let index = 0; index < 12; index += 1) {
+      rememberSessionDetailPaint(detail(`s${index}`, 2));
+    }
+    touchSessionKeepAlive("s0", SESSION_PAINT_KEEP_ALIVE_LIMIT);
+    for (let index = 12; index < 40; index += 1) {
+      rememberSessionDetailPaint(detail(`s${index}`, 2));
+    }
+    expect(resolveStickySessionDetailPaint({ activeSessionId: "s0", detail: undefined })).toBeTruthy();
+    expect(resolveStickySessionDetailPaint({ activeSessionId: "s39", detail: undefined })).toBeTruthy();
   });
 });

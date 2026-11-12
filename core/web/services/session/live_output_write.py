@@ -509,13 +509,15 @@ def _set_session_turn_progress_live_output(
     *,
     turn_id: str = "",
     set_stage: bool = True,
+    queue_note: str = "",
 ) -> None:
     s = _service()
     language = s.get_web_language()
     stage_key = str(stage or "").strip().lower()
     visible_stage = _SESSION_USER_VISIBLE_PROGRESS_STAGES.get(stage_key, "working")
     content = {
-        "queued": s.text_for(
+        "queued": queue_note
+        or s.text_for(
             language,
             zh="排队中，等待空闲槽位...",
             en="Queued; waiting for a free slot...",
@@ -546,6 +548,7 @@ def _set_session_turn_progress_live_output(
             "name": visible_stage,
             "summary": s.trim_lines(content, max_lines=2),
             "resultPreview": content,
+            "metadata": {"queueNote": queue_note} if queue_note else {},
         },
         turn_id=turn_id,
     )
