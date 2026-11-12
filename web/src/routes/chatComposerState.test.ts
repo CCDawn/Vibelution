@@ -51,15 +51,17 @@ describe("chat composer state", () => {
     expect(resolveComposerDraftValue("edited first prompt", target, resolved)).toBe("edited first prompt");
   });
 
-  it("hides draft text for an edit target that left the active path", () => {
+  it("keeps the seeded draft when a re-projection re-keys the edited row", () => {
     const target: ChatEditTarget = { messageId: "message-user-1", original: "first prompt" };
     const resolved = resolveActiveEditTarget(target, [
       { id: "message-user-2", role: "user" },
       { id: "message-assistant-2", role: "assistant" },
     ]);
 
-    expect(resolved).toBeNull();
-    expect(resolveComposerDraftValue("stale edit draft", target, resolved)).toBe("");
+    // A stop or a branch re-key can re-identify the row. Blanking the draft here
+    // is what left users staring at an empty editor with a disabled submit.
+    expect(resolved).toEqual(target);
+    expect(resolveComposerDraftValue("stale edit draft", target, resolved)).toBe("stale edit draft");
   });
 
   it("finds only the latest user message id", () => {

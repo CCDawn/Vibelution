@@ -1018,7 +1018,9 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     // The row editor owns the edit surface now: accent-tinted shell, capped
     // self-sizing input, and a labeled rerun submit that stays a pill.
     expect(styles.turnInlineEditor).toContain("accent-cool");
-    expect(styles.turnInlineEditor).toContain("rounded-[var(--radius-control)]");
+    // The editor is the user bubble, so it carries the bubble radius rather
+    // than a control radius that read as a detached form.
+    expect(styles.turnInlineEditor).toContain("rounded-[12px]");
     expect(styles.turnInlineEditorInput).toContain("max-h-64");
     expect(styles.turnInlineEditorInput).toContain("resize-none");
     expect(styles.turnInlineEditorInput).toContain("overflow-y-auto");
