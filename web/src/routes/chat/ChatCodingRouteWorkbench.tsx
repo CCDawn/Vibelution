@@ -3483,7 +3483,7 @@ export function ChatCodingRouteWorkbench() {
       <ChatWorkbenchCenterColumn
         className={centerPaneClassName}
         surfaceClassName={styles.centerSurface}
-        tabStrip={sessionTabStrip}
+        tabStrip={sessionRowSpansRail ? null : sessionTabStrip}
         surface={(
           <>
           <ChatCenterSessionSurface
