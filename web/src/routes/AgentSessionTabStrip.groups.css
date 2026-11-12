@@ -9,4 +9,5 @@
 [data-session-tab-container][data-session-tab-merge-target="true"] {
   outline: 2px dashed hsl(212 72% 55%);
   outline-offset: -2px;
+  background-color: color-mix(in srgb, hsl(212 72% 55%) 12%, transparent);
 }
