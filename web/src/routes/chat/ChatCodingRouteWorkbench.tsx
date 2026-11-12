@@ -4,6 +4,7 @@ import {
   moveLiveComposerDraft,
   writeLiveComposerDraft,
 } from "./composerLiveDraft";
+import { rememberComposerViewRebase } from "./composerViewIdentity";
 import { isChatRoomMutationPending } from "./useChatScopedMutationPending";
 import { collapseProjectUtilityRail, selectSessionUtilityRail, setProjectUtilityHost } from "../../app/projectUtilityRail";
 import { useProjectAwareRightRail } from "./useProjectAwareRightRail";
@@ -506,6 +507,10 @@ export function ChatCodingRouteWorkbench() {
     setTurnModelSelections((current) => ({ ...current, [sessionId]: selection }));
   }, []);
   const rebaseSessionComposerState = useCallback((fromId: string, toId: string) => {
+    // Remember the swap before touching the caches: the conversation view
+    // resolves its key from this record, so the temp instance survives the
+    // id change instead of flashing a fresh pane for the same conversation.
+    rememberComposerViewRebase(fromId, toId);
     // A create -> real-id rebase can land inside the 400ms mirror debounce, so
     // the state entry for the temp id is still empty. Flush the live text into
     // the old key first; the rekey below then carries the operator's newest

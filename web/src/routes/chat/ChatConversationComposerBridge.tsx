@@ -7,6 +7,7 @@ import type { SessionReferenceAttachment } from "../../api/types";
 import { postBrowserTelemetry } from "../../app/browserTelemetry";
 import { useChatStartupPresentation } from "./useChatStartupPresentation";
 import { LazyConversationView } from "../../components/conversation/LazyConversationView";
+import { resolveComposerViewKey } from "./composerViewIdentity";
 import {
   createComposerDraftStore,
   registerComposerDraftStore,
@@ -315,10 +316,13 @@ export const ChatConversationComposerBridge = memo(function ChatConversationComp
   // inside that window leaves both values empty and this sync never runs.
   // Registration lets the submit path clear the mounted store directly.
   useEffect(() => registerComposerDraftStore(sessionId, draftStore), [draftStore, sessionId]);
+  // Ordinary switches resolve to their own id and remount; only the create
+  // rebase keeps the temp id, so that one swap stops remounting the pane.
+  const conversationViewKey = resolveComposerViewKey(sessionId);
 
   return (
     <LazyConversationView
-      key={sessionId}
+      key={conversationViewKey}
       {...props}
       turnModelControl={composer.readOnly ? undefined : props.turnModelControl}
       sessionId={sessionId}
