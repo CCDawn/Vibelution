@@ -17,7 +17,7 @@ from fastapi.responses import StreamingResponse
 
 from core.platform_version.settler import get_watcher
 
-router = APIRouter(prefix="/api/platform-version", tags=["platform-version"])
+router = APIRouter(prefix="/platform-version", tags=["platform-version"])
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 

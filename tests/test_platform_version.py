@@ -124,3 +124,10 @@ def test_resolve_ledger_path_stays_outside_checkout(tmp_path: Path, monkeypatch)
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
     resolved = resolve_ledger_path(tmp_path / "checkout")
     assert (tmp_path / "checkout") not in resolved.parents
+
+def test_router_prefix_survives_web_registration() -> None:
+    """The registry adds /api itself, so the route prefix must not repeat it."""
+
+    from core.web.routes import platform_version
+
+    assert platform_version.router.prefix == "/platform-version"
