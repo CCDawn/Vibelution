@@ -20,6 +20,13 @@ export function combineAssistantActiveWork(workspace: ActiveWorkStatus, assistan
 export type AssistantLifecycleLease = { release(): Promise<void>; commit(): void };
 type Host = Pick<AssistantHost, "snapshot" | "beginLifecycleAdmission" | "migrationBarrier">;
 
+/** Upper bound on waiting for one host's own convergence during release. A
+ * dead host with an exhausted respawn budget never reaches "stopped", so an
+ * unbounded wait would keep the lease owner and every producer fence (and in
+ * main, the migrationRunning latch) captured forever. After the budget the
+ * fences are handed back with a warning instead of deadlocking the shell. */
+export const ASSISTANT_LIFECYCLE_RELEASE_WAIT_BUDGET_MS = 30_000;
+
 /** Reuse the joint native barrier only after fencing its external producers.
  * The returned lease stays held through native shutdown, never just an idle poll.
  */
@@ -32,6 +39,8 @@ export async function acquireAssistantLifecycleLease(input: {
   reopen(): boolean;
   releaseOwner(): void;
   signal?: AbortSignal;
+  /** Test seam; production uses ASSISTANT_LIFECYCLE_RELEASE_WAIT_BUDGET_MS. */
+  releaseWaitBudgetMs?: number;
 }): Promise<AssistantLifecycleLease> {
   let admission: ReturnType<Host["beginLifecycleAdmission"]> | undefined;
   let registry: ReturnType<typeof input.projects.beginMigrationTransition> | undefined;
@@ -39,19 +48,33 @@ export async function acquireAssistantLifecycleLease(input: {
   let releasing: Promise<void> | undefined;
   const pause = () => new Promise<void>(resolve => { const timer = setTimeout(resolve, 100); timer.unref?.(); });
   const release = (): Promise<void> => releasing ??= (async () => {
-    // A lost reply does not prove native admission reopened. Retain the same
-    // owner and all producer fences until release or that exact host's stop.
-    if (barrierAttempted) {
-      while (input.host.snapshot().state !== "stopped") {
-        try { if (await input.host.migrationBarrier("release") === "idle") break; }
-        catch { /* Reconcile the same barrier; never replay a business action. */ }
-        await pause();
+    try {
+      // A lost reply does not prove native admission reopened. Retain the same
+      // owner and all producer fences until release, that exact host's stop,
+      // or the bounded convergence budget below.
+      if (barrierAttempted) {
+        const budget = input.releaseWaitBudgetMs ?? ASSISTANT_LIFECYCLE_RELEASE_WAIT_BUDGET_MS;
+        const deadline = Date.now() + budget;
+        while (input.host.snapshot().state !== "stopped") {
+          try { if (await input.host.migrationBarrier("release") === "idle") break; }
+          catch { /* Reconcile the same barrier; never replay a business action. */ }
+          if (Date.now() >= deadline) {
+            console.warn(`ASSISTANT_LIFECYCLE_RELEASE_WAIT_TIMEOUT `
+              + `state=${input.host.snapshot().state} budgetMs=${budget}`);
+            break;
+          }
+          await pause();
+        }
       }
+      if (!input.reopen()) return; // Shutdown owns the retained gates until exit.
+      registry?.release(); admission?.release();
+      if (remindersDrained) input.reminders.resumeAfterMigration();
+    } finally {
+      // The owner latch must reset on every releasable path, including a
+      // fencing failure inside the handoff above; otherwise the shell refuses
+      // every later lifecycle command forever.
+      if (input.reopen()) input.releaseOwner();
     }
-    if (!input.reopen()) return; // Shutdown owns the retained gates until exit.
-    registry?.release(); admission?.release();
-    if (remindersDrained) input.reminders.resumeAfterMigration();
-    input.releaseOwner();
   })();
   try {
     input.signal?.throwIfAborted();

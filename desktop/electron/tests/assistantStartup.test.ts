@@ -370,12 +370,14 @@ describe("resident assistant startup", () => {
     await context.start(paths);
     host.snapshot = vi.fn(() => ({ state: "ready" as const, errorCode: null }));
     host.resumeAfterCancelledExit = vi.fn();
-    await context.stop();
+    // The surviving shell's orphan guard surfaces an incompletely stopped
+    // host instead of reporting a settled stop (main.ts stopLauncherAssistant).
+    await expect(context.stop()).rejects.toThrow("ASSISTANT_HOST_STOP_INCOMPLETE");
     await context.resume();
     expect(host.resumeAfterCancelledExit).not.toHaveBeenCalled();
     expect(projects.start).toHaveBeenCalledOnce();
     expect(context.launcherAssistantResume).toBeNull();
-    await context.stop();
+    await expect(context.stop()).rejects.toThrow("ASSISTANT_HOST_STOP_INCOMPLETE");
   });
 
   it("forwards a source admission revoke to the registry before releasing the original verifier", async () => {

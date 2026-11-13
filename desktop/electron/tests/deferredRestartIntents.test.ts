@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -7,6 +7,7 @@ import {
   DEFERRED_RESTART_INTENT_MAX_AGE_MS,
   fulfillDeferredRestartIntentOnce,
   listDeferredRestartIntents,
+  pruneTerminalDeferredRestartIntents,
   supersedePendingDeferredRestartIntents,
   type DeferredRestartIntent
 } from "../src/lifecycle/deferredRestartIntents.js";
@@ -270,6 +271,45 @@ describe("supersedePendingDeferredRestartIntents", () => {
       expect(readIntent(intentsDir, "intent_done").status).toBe("completed");
       expect(readIntent(intentsDir, "intent_foreign").status).toBe("pending");
       expect(readdirSync(intentsDir).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("pruneTerminalDeferredRestartIntents", () => {
+  it("deletes settled restart intents and keeps live or foreign-target ones", () => {
+    const { root, runtimeManagerDir, intentsDir } = makeWorkspace();
+    try {
+      // Distinct creation times fix the list order the prune reports.
+      writeIntent(intentsDir, intentPayload({ intentId: "intent_done", status: "completed", createdAt: "2026-09-16T01:56:00.000Z" }));
+      writeIntent(intentsDir, intentPayload({ intentId: "intent_failed", status: "failed", createdAt: "2026-09-16T01:57:00.000Z" }));
+      writeIntent(intentsDir, intentPayload({ intentId: "intent_expired", status: "expired", createdAt: "2026-09-16T01:58:00.000Z" }));
+      writeIntent(intentsDir, intentPayload({ intentId: "intent_superseded", status: "superseded", createdAt: "2026-09-16T01:55:00.000Z" }));
+      writeIntent(intentsDir, intentPayload({ intentId: "intent_pending", status: "pending" }));
+      writeIntent(intentsDir, intentPayload({ intentId: "intent_claimed", status: "claimed" }));
+      writeIntent(intentsDir, intentPayload({ intentId: "intent_foreign", target: "other_target", status: "failed" }));
+      const pruned = pruneTerminalDeferredRestartIntents({ runtimeManagerDir });
+      expect(pruned).toEqual([
+        "intent_superseded", "intent_done", "intent_failed", "intent_expired"
+      ]);
+      expect(existsSync(join(intentsDir, "intent_done.json"))).toBe(false);
+      expect(existsSync(join(intentsDir, "intent_failed.json"))).toBe(false);
+      expect(existsSync(join(intentsDir, "intent_expired.json"))).toBe(false);
+      expect(existsSync(join(intentsDir, "intent_superseded.json"))).toBe(false);
+      expect(readIntent(intentsDir, "intent_pending").status).toBe("pending");
+      expect(readIntent(intentsDir, "intent_claimed").status).toBe("claimed");
+      // Another supervisor's terminal intents are not ours to collect.
+      expect(existsSync(join(intentsDir, "intent_foreign.json"))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("is empty and silent when the intents directory is absent", () => {
+    const { root, runtimeManagerDir } = makeWorkspace();
+    try {
+      expect(pruneTerminalDeferredRestartIntents({ runtimeManagerDir: join(runtimeManagerDir, "missing") })).toEqual([]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

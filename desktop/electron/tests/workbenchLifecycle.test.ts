@@ -154,7 +154,7 @@ describe("runWorkbenchLifecycle command settlement evidence", () => {
     }
   });
 
-  it("supersedes pending deferred restart intents after an accepted lifecycle command", async () => {
+  it("supersedes pending deferred restart intents and prunes the settled file after an accepted lifecycle command", async () => {
     const { root, runtimeManagerDir } = makeWorkspace();
     const intentsDir = join(runtimeManagerDir, "restart-intents");
     mkdirSync(intentsDir, { recursive: true });
@@ -180,9 +180,11 @@ describe("runWorkbenchLifecycle command settlement evidence", () => {
         queue: createMainLineCommandQueue()
       });
       expect(result).toMatchObject({ accepted: true, operation: "stop" });
-      const settled = JSON.parse(readFileSync(intentPath, "utf8"));
-      expect(settled.status).toBe("superseded");
-      expect(String(settled.message || "")).toContain("stop");
+      // The accepted command superseded the pending intent and the same
+      // boundary garbage-collects the settled file: repeated rejections must
+      // not accumulate settled intents forever (their settle event stays in
+      // the supervisor event fallback).
+      expect(existsSync(intentPath)).toBe(false);
       // The settlement evidence write is fire-and-forget; let it land before
       // the temp workspace is removed or Windows fails the recursive delete.
       const resultPath = mainLineCommandResultPath(runtimeManagerDir, result.commandId || "");

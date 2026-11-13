@@ -1832,6 +1832,32 @@ async function stopLauncherAssistant(): Promise<void> {
         await stopLauncherAssistantReminders?.();
         await launcherAssistantProjects?.stop();
       }
+      // Orphan-shell guard: the registry stop above can miss this exact host
+      // (its retirement raced an in-flight startup, or the connection's own
+      // owner pointer was never bound). A shell that SURVIVES its stop with a
+      // live/dead hybrid host refuses every later lifecycle command forever,
+      // so the resident owner is stopped directly here. An approved shutdown
+      // exits the process right after this — the Job-bound host dies with it —
+      // so only a still-surviving shell owes itself this cleanup.
+      if (!shutdownApproved) {
+        try {
+          const resident = launcherAssistantHost;
+          if (resident && typeof resident.snapshot === "function" && resident.snapshot().state !== "stopped") {
+            console.warn(`ASSISTANT_HOST_STOP_ORPHAN_FALLBACK state=${String(resident.snapshot().state)}`);
+            await resident.stop();
+          }
+        } catch (error) {
+          console.warn(`ASSISTANT_HOST_STOP_ORPHAN_FAILED ${error instanceof Error ? error.message : String(error)}`);
+        }
+        const residentAfterStop = launcherAssistantHost;
+        if (residentAfterStop && typeof residentAfterStop.snapshot === "function"
+          && residentAfterStop.snapshot().state !== "stopped") {
+          // Surface the incompleteness instead of reporting a settled stop:
+          // the failing caller keeps the exit honest, and the retained stop
+          // promise resets so the cancelled-exit recovery can re-run this stop.
+          throw new Error(`ASSISTANT_HOST_STOP_INCOMPLETE state=${String(residentAfterStop.snapshot().state)}`);
+        }
+      }
       stopLauncherAssistantReminders = null;
       launcherAssistantBrowser?.dispose();
       launcherAssistantBrowser = null;
@@ -1869,7 +1895,15 @@ function resumeLauncherAssistantAfterCancelledExit(): Promise<void> {
     // judged (and recovered) as stopped.
     await launcherAssistantStopping?.catch(() => undefined);
     const host = launcherAssistantHost;
-    if (!host || host.snapshot().state !== "stopped") {
+    if (!host) return;
+    // A stop that failed mid-retirement leaves the host "failed": the shell
+    // survives with a dead host whose sealed admission refuses every later
+    // start. The retained owner cleanup resets its stop promise on failure,
+    // so exactly one retry can still converge the host to "stopped" here.
+    if (host.snapshot().state === "failed") {
+      await stopLauncherAssistant().catch(() => undefined);
+    }
+    if (host.snapshot().state !== "stopped") {
       console.warn("ASSISTANT_CANCELLED_EXIT_RECOVERY skipped: resident host is not stopped");
       return;
     }
