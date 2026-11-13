@@ -35,7 +35,6 @@ import {
   createAgentSessionTabGroup,
   defaultAgentSessionTabGroupName,
   deleteAgentSessionTabGroup,
-  pruneSessionTabGroupMembership,
   readAgentSessionTabGroupState,
   renameAgentSessionTabGroup,
   resolveSessionTabGroupSections,
@@ -447,21 +446,6 @@ export function AgentSessionTabStrip({
     },
     [applyGroupMutation, groupNameDraft],
   );
-  useEffect(() => {
-    if (!agentTabScopeId) {
-      return;
-    }
-    const current = readAgentSessionTabGroupState(agentTabScopeId);
-    const pruned = pruneSessionTabGroupMembership(
-      current,
-      visibleSessions.map((session) => session.id),
-    );
-    if (pruned === current) {
-      return;
-    }
-    writeAgentSessionTabGroupState(agentTabScopeId, pruned);
-    setGroupState(pruned);
-  }, [agentTabScopeId, visibleSessions]);
   const renderSessionTab = (session: SessionSummary, sectionGroupId: string) => {
     const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
     const sessionDisplay = sessionAgentDisplayInfo(session, sessionAgent, lang, resolveModelLabel);

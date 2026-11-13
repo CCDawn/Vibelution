@@ -380,9 +380,6 @@ export function resolveSessionTabGroupSections(
   const sections: AgentSessionTabGroupSection[] = [];
   for (const group of state.groups) {
     const members = buckets.get(group.id) ?? [];
-    if (!members.length) {
-      continue;
-    }
     sections.push({
       groupId: group.id,
       name: group.name,
