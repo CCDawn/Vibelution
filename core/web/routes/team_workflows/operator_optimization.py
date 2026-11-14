@@ -1,9 +1,10 @@
 """Independent operator campaign API, scoped by explicit project identity."""
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import HTTPException, Request
 from pydantic import Field
-from typing import Literal
 
 from core.research.operator_optimization.contracts import (
     CampaignBudget,
@@ -12,13 +13,18 @@ from core.research.operator_optimization.contracts import (
     OptimizationCampaign,
     Text,
 )
+from core.research.operator_optimization.cuda_runner import CudaEnvironmentUnavailable
+from core.research.operator_optimization.measurement import MeasurementProtocol
 from core.web.services.team_service import TeamNotFoundError
 from core.web.services.team_workflow.operator_optimization import store
+from core.web.services.team_workflow.operator_optimization.baseline import prepare_baseline
 from core.web.services.team_workflow.operator_optimization.commands import (
     authorize_campaign,
 )
+from core.web.services.team_workflow.operator_optimization.rounds import prepare_round
 from core.web.services.team_workflow.research_projects import ResearchProjectError
 from core.web.services.team_workflow.research_runtime.operator_authorization import (
+    require_privileged_server_operator,
     server_operator_scope_from_http,
 )
 
@@ -42,9 +48,14 @@ class CampaignListResponse(Contract):
     campaigns: tuple[OptimizationCampaign, ...]
 
 
+class BaselinePrepareRequest(CampaignCommandRequest):
+    protocol: MeasurementProtocol
+
+
 class BaselineStartRequest(Contract):
     idempotencyKey: str = Field(min_length=1, max_length=200)
     expectedRunVersion: int = Field(ge=1, strict=True)
+    baselineRunId: str = Field(default="", max_length=160)
 
 
 class Stage2MigrationRequest(CampaignCommandRequest):
@@ -62,6 +73,8 @@ def _invoke(fn, *args, **kwargs):
         raise HTTPException(403, detail={"code": "command_forbidden", "message": str(exc)}) from exc
     except store.CampaignConflict as exc:
         raise HTTPException(409, detail={"code": "campaign_conflict", "message": str(exc)}) from exc
+    except CudaEnvironmentUnavailable as exc:
+        raise HTTPException(409, detail={"code": "cuda_environment_unavailable", "message": str(exc)}) from exc
     except (FileNotFoundError, TeamNotFoundError) as exc:
         raise HTTPException(404, detail={"code": "campaign_scope_not_found", "message": str(exc)}) from exc
     except (ValueError, ResearchProjectError) as exc:
@@ -93,6 +106,17 @@ def operator_campaign_authorize(team_id: str, project_id: str, campaign_id: str,
         raise HTTPException(403, detail={"code": "command_forbidden"}) from exc
 
 
+@router.post(_PATH + "/{campaign_id}/baseline", response_model=OptimizationCampaign)
+def operator_baseline_prepare(team_id: str, project_id: str, campaign_id: str,
+                              payload: BaselinePrepareRequest, request: Request):
+    try:
+        with server_operator_scope_from_http(request):
+            return _invoke(prepare_baseline, team_id, project_id, campaign_id, protocol=payload.protocol,
+                expected_version=payload.expectedCampaignVersion, command_key=payload.idempotencyKey)
+    except PermissionError as exc:
+        raise HTTPException(403, detail={"code": "command_forbidden"}) from exc
+
+
 @router.post(_PATH + "/{campaign_id}/baseline/start",
     response_model=ResearchWorkflowCommandReceiptResponse, response_model_exclude_unset=True)
 def operator_baseline_start(team_id: str, project_id: str, campaign_id: str, payload: BaselineStartRequest, request: Request):
@@ -100,10 +124,17 @@ def operator_baseline_start(team_id: str, project_id: str, campaign_id: str, pay
 
     from .research_runtime import _submit_workflow_command
     campaign = _invoke(store.read_campaign, team_id, project_id, campaign_id)
-    pending = [item for item in campaign.baselineVersions if item.status == "prepared"]
-    baseline_run_id = pending[-1].runId if pending else (
-        campaign.baselineRunId if not campaign.baselineVersions else ""
-    )
+    baseline_run_id = payload.baselineRunId
+    if baseline_run_id:
+        known_runs = {item.runId for item in campaign.baselineVersions} | {campaign.baselineRunId}
+        if baseline_run_id not in known_runs:
+            raise HTTPException(404, detail={"code": "campaign_baseline_not_found"})
+    elif len(campaign.baselineVersions) > 1:
+        raise HTTPException(409, detail={"code": "baseline_run_id_required"})
+    elif campaign.baselineVersions:
+        baseline_run_id = campaign.baselineVersions[0].runId
+    else:
+        baseline_run_id = campaign.baselineRunId
     if not baseline_run_id:
         raise HTTPException(409, detail={"code": "baseline_not_prepared"})
     # Run version/idempotency and fresh readiness are owned by the canonical
@@ -112,6 +143,19 @@ def operator_baseline_start(team_id: str, project_id: str, campaign_id: str, pay
         kind=WorkflowCommandKind.START_NODE, node_id="operator_baseline",
         expected_run_version=payload.expectedRunVersion, idempotency_key=payload.idempotencyKey,
         payload={}, request=request)
+
+
+@router.post(_PATH + "/{campaign_id}/rounds", response_model=OptimizationCampaign)
+def operator_round_prepare(team_id: str, project_id: str, campaign_id: str,
+                           payload: CampaignCommandRequest, request: Request):
+    try:
+        with server_operator_scope_from_http(request):
+            require_privileged_server_operator(command="extend_budget")
+            return _invoke(prepare_round, team_id, project_id, campaign_id,
+                expected_version=payload.expectedCampaignVersion, command_key=payload.idempotencyKey,
+                first_only=True)
+    except PermissionError as exc:
+        raise HTTPException(403, detail={"code": "command_forbidden"}) from exc
 
 
 @router.post(_PATH + "/{campaign_id}/stage2-migrations", response_model=OptimizationCampaign)

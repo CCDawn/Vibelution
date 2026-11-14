@@ -43,8 +43,11 @@ def prepare_round(
     command_key: str,
     iteration_action: str | None = None,
     stage2_source_run_id: str = "",
+    first_only: bool = False,
 ):
     def prepare(campaign):
+        if first_only and campaign.rounds:
+            raise CampaignConflict("The initial optimization round has already been prepared")
         if campaign.status != "running" or not campaign.budget.authorized or not campaign.authorizedBy:
             raise CampaignConflict("Campaign is not admitting optimization rounds")
         if not campaign.baselineRef:
@@ -265,9 +268,9 @@ def prepare_round(
             workload_ref=frozen["datasetRefs"][0], observation_refs=tuple(observations))
         run_creation.create_run(OPERATOR_WORKFLOW_ID, run_input=run_input, idempotency_key=round_id)
         return campaign.model_copy(update={"rounds": (*campaign.rounds, record), "activeRunId": run_id})
+    command = {"action": "prepare_round", "iterationAction": iteration_action,
+               "stage2SourceRunId": stage2_source_run_id}
+    if first_only:
+        command["firstOnly"] = True
     return update_campaign(team_id, project_id, campaign_id, expected_version=expected_version,
-        command_key=command_key,
-        command={"action": "prepare_round", "iterationAction": iteration_action,
-            "stage2SourceRunId": stage2_source_run_id},
-        transform=prepare,
-    )
+        command_key=command_key, command=command, transform=prepare)
