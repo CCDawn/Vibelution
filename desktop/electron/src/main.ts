@@ -49,6 +49,7 @@ import { readNativeBranchInstanceInventory } from "./process/branchInstanceInven
 import { sameProjectRoot } from "./process/workbenchBackend.js";
 import { AssistantWindow } from "./assistant/assistantWindow.js";
 import { invokeAssistant } from "./assistant/assistantBridge.js";
+import { openAssistantRemoteAccess } from "./assistant/assistantRemoteAccess.js";
 import { publishAssistantTheme, ThemeProjectionTracker, workbenchThemeScope } from "./assistant/workbenchThemeSync.js";
 import { ThemeAuthority } from "./assistant/themeAuthority.js";
 import { resolveAssistantResources } from "./assistant/assistantResources.js";
@@ -8191,6 +8192,16 @@ app.whenReady()
         workspaceRoot: String(desktopEnvironment().VIBELUTION_WORKSPACE_ROOT || ""), env: desktopEnvironment() })
     });
     if (!desktopCliArgs.smoke) {
+      if (!desktopCliArgs.workbenchCloseCanary) {
+        const reportRemoteAccessError = () => console.warn("ASSISTANT_REMOTE_ACCESS_UNAVAILABLE");
+        void openAssistantRemoteAccess(paths.userDataRoot,
+          () => shutdownApproved || launcherAssistantStopping || launcherAssistantStartupAbort.signal.aborted
+            ? null : launcherAssistantHost, reportRemoteAccessError).then(remote => {
+          if (!remote) return;
+          if (shutdownApproved) remote.close();
+          else app.once("will-quit", remote.close);
+        }).catch(reportRemoteAccessError);
+      }
       const assistantStartup = startLauncherAssistant(paths);
       if (assistantOnly) {
         await completeAssistantOnlyStartup(assistantStartup, process.argv.slice(1));
