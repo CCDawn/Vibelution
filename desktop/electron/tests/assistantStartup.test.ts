@@ -503,6 +503,7 @@ describe("resident assistant startup", () => {
       createDesktopPathsForApp: vi.fn(() => { throw new Error("project paths must not be created"); }),
       claimElectronDesktopShellOwner: vi.fn(), localDebuggingEnabled: false,
       registerLauncherAppProtocolHandle: vi.fn(), resolveLauncherDistRoot: vi.fn(),
+      openAssistantRemoteAccess: vi.fn(async () => null),
       resolveLauncherControlPlaneReady: vi.fn(), completeAssistantOnlyStartup: vi.fn(async (startup: Promise<void>) => await startup),
     });
     const begin = source.indexOf("const workspaceRoot = String(desktopEnvironment()", source.indexOf("if (runPrimaryWhenReady)"));
@@ -517,6 +518,7 @@ describe("resident assistant startup", () => {
     expect(context.claimElectronDesktopShellOwner).not.toHaveBeenCalled();
     expect(context.desktopPythonPath).not.toHaveBeenCalled();
     expect(host.start).toHaveBeenCalledTimes(1);
+    expect(context.openAssistantRemoteAccess).toHaveBeenCalledOnce();
     expect(context.completeAssistantOnlyStartup).toHaveBeenCalledOnce();
   });
 
