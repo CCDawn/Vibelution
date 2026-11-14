@@ -3404,6 +3404,12 @@ def _run_session_continuation_loop(
         )
         if not required_tool_progress_missing:
             last_visible_result = s._remember_continuation_visible_result(result, last_visible_result)
+        invocation_binding = (receipt_context or {}).get("operatorInvocationBinding") or {}
+        if invocation_binding.get("accountingKind") == "operator_knowledge" and result_status == "failed":
+            failure = result.get("llm_failure")
+            if isinstance(failure, dict) and failure.get("category") == "budget_exhausted":
+                failure["reason_code"] = "operator_knowledge_budget_exhausted"
+                return s._annotate_continuation_result(result, turn_index, reached_limit=False)
         if s._is_provider_failed_result(result):
             s._record_session_turn_circuit_breaker_event(
                 session_id,

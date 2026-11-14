@@ -439,6 +439,29 @@ def test_persist_turn_result_provider_failure_allows_next_turn_reconcile(
     assert stamped
 
 
+def test_operator_knowledge_budget_failure_is_recorded_in_terminal_snapshot(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_running_session(tmp_path, "session-a", "turn-a")
+    problem_code = "operator_knowledge_budget_exhausted"
+
+    persist._persist_session_turn_result(
+        "session-a",
+        {
+            "status": "failed",
+            "summary": "Challenge invocation token budget is exhausted.",
+            "llm_failure": {"category": "budget_exhausted", "reason_code": problem_code},
+        },
+        turn_id="turn-a",
+    )
+
+    events = session_service._load_session_conversation_events_cached("session-a")
+    terminal = next(e for e in events if e.event_type == session_service.EVENT_TURN_FAILED)
+    assert terminal.payload["terminalProblemCode"] == problem_code
+    snapshot = session_service.get_session_turn_completion_snapshot("session-a", "turn-a")
+    assert snapshot["terminalStatus"] == "failed_runtime"
+    assert snapshot["terminalProblemCode"] == problem_code
+
+
 def test_journal_poisoning_assistant_message_breaks_next_turn_reconcile(
     tmp_path,
     monkeypatch,

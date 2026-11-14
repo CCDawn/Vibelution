@@ -7,7 +7,7 @@ from decimal import Decimal
 from core.research.operator_optimization.knowledge import OperatorKnowledgeRequest
 from core.research.workflow.contracts._canonical import sha256_hex
 
-from .model_budget import admit_model_invocation, reserve_model_budget
+from .model_budget import ModelBudgetError, admit_model_invocation, reserve_model_budget
 from .store import CampaignConflict, read_campaign
 
 SOURCE_NODES = {"source_finding", "source_extraction", "evidence_relations", "knowledge_ingestion"}
@@ -161,11 +161,16 @@ def knowledge_receipt_context(store, binding, *, expected_model_route):
             return current
         current = store.read(validate)
         output = min(max_output_tokens, current["maxOutputTokensPerCall"])
-        result = admit_model_invocation(store,
-            reservation={"reservationId": "reservation-" + binding.formalNodeRunId,
-                "runId": binding.workflowRunId, "nodeRunId": binding.formalNodeRunId},
-            invocation_id=invocation_id, model_ref=expected_model_route["modelRef"],
-            input_tokens=estimated_input_tokens, output_tokens=output)
+        try:
+            result = admit_model_invocation(store,
+                reservation={"reservationId": "reservation-" + binding.formalNodeRunId,
+                    "runId": binding.workflowRunId, "nodeRunId": binding.formalNodeRunId},
+                invocation_id=invocation_id, model_ref=expected_model_route["modelRef"],
+                input_tokens=estimated_input_tokens, output_tokens=output)
+        except ModelBudgetError as exc:
+            if exc.code not in {"operator_model_token_limit_reached", "operator_model_call_limit_reached"}:
+                raise
+            return {"maxOutputTokens": 0, "remainingTokens": 0, "reason": exc.code}
         return {"maxOutputTokens": output, "remainingTokens": max(0, current["tokenLimit"] - result["tokensUsed"])}
 
     def persist(receipt):

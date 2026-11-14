@@ -68,6 +68,23 @@ def context_for(store, binding):
         "modelRef": "default/qwen-alias", "providerId": "default", "modelId": "qwen-plus"})
 
 
+def test_knowledge_token_limit_blocks_before_provider(child_case):
+    store, binding, _ = child_case
+    context = context_for(store, binding)
+
+    def provider(_payload):
+        pytest.fail("A rejected invocation must not reach the provider")
+
+    client = LLMClient(config=make_config(), backend=provider)
+    with model_invocation_receipt_context_scope(context), pytest.raises(LLMError) as error:
+        client.invoke_outcome(
+            [{"role": "user", "content": "long evidence request " * 1000}],
+            metadata={"sessionId": "session1", "turnId": "turn1", "invocationId": "over-limit"},
+        )
+    assert error.value.category == "budget_exhausted"
+    assert error.value.details["reason"] == "operator_model_token_limit_reached"
+
+
 def invoke(context, *, fail_first=False, stream=False):
     calls = []
     def backend(payload):

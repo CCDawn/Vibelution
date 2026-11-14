@@ -70,7 +70,7 @@ def plan_stream_recovery(
     uncommitted text or reasoning was produced. A user stop never recovers.
     """
 
-    if user_stopped:
+    if user_stopped or category == "budget_exhausted":
         return None
     used = _nonnegative(retry_count)
     if used >= STREAM_RECOVERY_MAX_RETRIES:
