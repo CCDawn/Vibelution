@@ -263,6 +263,62 @@ def test_codex_own_marker_completes_once_across_chunks_and_preserves_answer(code
     assert marker not in completed["stdoutPreview"]
 
 
+@pytest.mark.parametrize("redraw_marker", [False, True])
+def test_codex_conpty_returns_rendered_answer_and_completes_once(codex_task, redraw_marker):
+    from core.web.services.terminal_screen_buffer import TerminalScreenBuffer
+
+    terminal, result, _, delivered = codex_task("Return the receipt")
+    terminal["transport"] = "conpty"
+    marker = task_kernel._read_task_state(result["taskId"])["completionMarker"]
+    screen = TerminalScreenBuffer(rows=20, cols=100)
+
+    def feed(chunk):
+        snapshot = screen.feed(chunk)
+        task_kernel.ingest_terminal_output({
+            **terminal, "screenText": snapshot.text, "screenQuality": snapshot.quality,
+        }, chunk)
+
+    feed(f"\x1b[1;1H› Return the receipt\x1b[2;1HPrint left bracket + {marker[1:-1]} + right bracket")
+    feed("\x1b[5;1H• VIBE-RETURN-612679\x1b[18;1HWorking\x1b[5;21H1009:467")
+    feed("\x1b[6;3HSecond  line")
+    feed("\x1b[8;1H[VIBELUTION_CLI_DONE:other]")
+    assert not delivered
+    if redraw_marker:
+        feed(f"\x1b[7;3H{marker[:20]}\x1b[19;1H2\u2022")
+        assert not delivered
+        feed(f"\x1b[7;23H{marker[20:]}")
+    else:
+        feed(f"\x1b[7;3H{marker}")
+    feed("\x1b[19;1HAsk Codex to do anything")
+
+    assert task_kernel._read_task_state(result["taskId"])["status"] == "completed"
+    assert len(delivered) == 1
+    completed = delivered[0][1]["task_result"]
+    assert completed["resultSource"] == "codex_screen_answer"
+    assert completed["resultSegments"] == [
+        {"index": 0, "kind": "answer", "text": "VIBE-RETURN-6126791009:467\nSecond  line"}
+    ]
+    assert "Working" not in completed["stdoutPreview"]
+    assert marker not in completed["stdoutPreview"]
+
+
+@pytest.mark.parametrize(("screen_body", "answer"), [
+    ("• Answer\n  {first}\n  {rest}", "Answer"),
+    ("  Last visible answer line\n  {first}\n  {rest}", "Last visible answer line"),
+    ("• [\n  {marker}", "["),
+    ("• {marker}", ""),
+])
+def test_codex_screen_marker_survives_wrapping_and_scrolling(screen_body, answer):
+    from core.web.services import cli_agent_protocols
+
+    marker = "[VIBELUTION_CLI_DONE:cli-task-0123456789abcdef]"
+    assert cli_agent_protocols.codex_screen_answer(
+        screen_body.format(marker=marker, first=marker[:18], rest=marker[18:]), marker,
+    ) == answer
+    assert cli_agent_protocols.codex_screen_answer(f"› {marker}", marker) is None
+    assert cli_agent_protocols.codex_screen_answer(f"• Answer\n  {marker[:18]}\n\n  {marker[18:]}", marker) is None
+
+
 @pytest.mark.parametrize("marker", ["", "[VIBELUTION_CLI_DONE:task-own]"])
 @pytest.mark.parametrize("output", ["OpenAI Codex\n› Inspect the source", "Working", "completed", "failed"])
 def test_codex_current_and_legacy_tasks_never_idle_complete(marker, output):

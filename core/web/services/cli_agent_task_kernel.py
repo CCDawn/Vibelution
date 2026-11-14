@@ -159,13 +159,17 @@ def ingest_terminal_output(terminal_session: dict[str, Any], chunk: str) -> None
         task_state["lastOutputAt"] = task_state["updatedAt"]
         task_state["output"] = _bounded_output(str(task_state.get("output") or "") + str(chunk or ""))
         _capture_terminal_screen(task_state, terminal_session)
-        segments = protocols.split_semantic_segments(adapter_id, _task_parse_text(task_state))
-        task_state["segments"] = segments[-50:]
-        detected = protocols.detect_task_status(
-            adapter_id,
-            task_state["output"],
-            completion_marker=str(task_state.get("completionMarker") or ""),
-        )
+        marker = str(task_state.get("completionMarker") or "")
+        if adapter_id == "codex_code" and terminal_session.get("transport") == "conpty":
+            # ConPTY emits cursor moves and redraws, not a linear transcript.
+            answer = protocols.codex_screen_answer(str(task_state.get("screenTextDelta") or ""), marker)
+            detected = "completed" if answer is not None else ""
+            if answer is not None:
+                task_state["screenAnswer"] = cli_agent_service._clip(
+                    answer, int(task_state.get("outputLimit") or cli_agent_service.DEFAULT_OUTPUT_LIMIT),
+                )
+        else:
+            detected = protocols.detect_task_status(adapter_id, task_state["output"], completion_marker=marker)
         if detected:
             _complete_task_state(
                 task_state,
@@ -177,6 +181,8 @@ def ingest_terminal_output(terminal_session: dict[str, Any], chunk: str) -> None
         if finalized:
             _persist_task_for_finalization(task_state)
         else:
+            segments = protocols.split_semantic_segments(adapter_id, _task_parse_text(task_state))
+            task_state["segments"] = segments[-50:]
             _write_task_state(task_state)
     if finalized:
         _finalize_task_result(finalized, reason="protocol_pattern")
@@ -395,7 +401,11 @@ def _complete_task_state(task_state: dict[str, Any], *, status: str, code: str, 
     task_state["completedAt"] = now
     task_state["updatedAt"] = now
     adapter_id = str(task_state.get("adapterId") or "").strip()
-    segments = protocols.tail_semantic_segments(adapter_id, _task_parse_text(task_state))
+    answer = task_state.get("screenAnswer")
+    if answer is None:
+        segments = protocols.tail_semantic_segments(adapter_id, _task_parse_text(task_state))
+    else:
+        segments = [{"index": 0, "kind": "answer", "text": answer}] if answer else []
     task_state["resultSegments"] = segments
     task_state["resultSummary"] = protocols.summarize_segments(segments)
 
@@ -604,11 +614,14 @@ def _public_task_result(
     terminal = dict(terminal_session or {}) if isinstance(terminal_session, dict) else {}
     limit = int(output_limit or task_state.get("outputLimit") or cli_agent_service.DEFAULT_OUTPUT_LIMIT)
     adapter_id = str(task_state.get("adapterId") or terminal.get("adapterId") or "").strip()
-    segments = list(task_state.get("resultSegments") or task_state.get("segments") or [])
-    parse_text = _task_parse_text(task_state)
-    if not task_state.get("resultSegments"):
-        segments = protocols.tail_semantic_segments(adapter_id, parse_text, limit=protocols.protocol_for_adapter(adapter_id).max_tail_segments)
-    stdout_preview = protocols.summarize_segments(segments) or protocols.remove_protocol_markers(protocols.strip_terminal_controls(parse_text))
+    screen_answer = task_state.get("screenAnswer")
+    if screen_answer is not None:
+        segments = list(task_state.get("resultSegments") or [])
+        stdout_preview = screen_answer
+    else:
+        parse_text = _task_parse_text(task_state)
+        segments = list(task_state.get("resultSegments") or protocols.tail_semantic_segments(adapter_id, parse_text))
+        stdout_preview = protocols.summarize_segments(segments) or protocols.remove_protocol_markers(protocols.strip_terminal_controls(parse_text))
     result_source = _task_result_source(task_state)
     public_status = _semantic_task_status(str(task_state.get("status") or "").strip(), code or str(task_state.get("code") or "").strip())
     result = {
@@ -652,7 +665,7 @@ def _public_task_result(
         "resultSegments": segments,
         "resultSource": result_source,
         "parserConfidence": _parser_confidence(task_state, result_source),
-        "stdoutPreview": cli_agent_service._clip(stdout_preview, limit),
+        "stdoutPreview": stdout_preview if screen_answer is not None else cli_agent_service._clip(stdout_preview, limit),
         "stderrPreview": "",
         "exitCode": None,
         "timedOut": str(task_state.get("status") or "").strip().lower() == "timeout",
@@ -682,6 +695,8 @@ def _task_parse_text(task_state: dict[str, Any]) -> str:
 
 
 def _task_result_source(task_state: dict[str, Any]) -> str:
+    if "screenAnswer" in task_state:
+        return "codex_screen_answer"
     if protocols.remove_protocol_markers(protocols.strip_terminal_controls(str(task_state.get("output") or ""))).strip():
         return "terminal_output"
     if str(task_state.get("screenTextDelta") or "").strip():

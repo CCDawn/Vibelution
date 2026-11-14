@@ -5063,6 +5063,13 @@ def _format_cli_agent_task_result_content(task_result: dict[str, Any]) -> str:
         f"CLI Agent 任务结果回流：{label}",
         f"状态：{status_label}",
     ]
+    if (
+        status == "completed"
+        and task_result.get("adapterId") == "codex_code"
+        and task_result.get("resultSource") == "codex_screen_answer"
+    ):
+        answer = str(task_result.get("stdoutPreview") or "").strip()
+        return "\n".join([*lines, answer]).strip()
     code = str(task_result.get("code") or "").strip()
     if code:
         lines.append(f"代码：{code}")
