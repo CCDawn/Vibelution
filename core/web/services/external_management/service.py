@@ -37,6 +37,10 @@ class ManagementError(Exception):
 class TargetIdentity:
     binding: dict
     signature: str
+    migrated_authority: Callable[[str, str], bool] | None = None
+
+    def accepts(self, authority: str, subject: str) -> bool:
+        return authority == self.signature or bool(self.migrated_authority and self.migrated_authority(authority, subject))
 
 
 def _subset(expected, actual):
@@ -96,7 +100,8 @@ class ManagementService:
                 grant = self.store.read(self.store.path("subjects", index["subject_id"]))
                 if grant and grant.get("revoked") is True:
                     raise ManagementError("SUBJECT_REVOKED")
-                if (not grant or grant.get("binding") != current.binding or grant.get("authority") != current.signature
+                if (not grant or grant.get("binding") != current.binding
+                    or not current.accepts(grant.get("authority"), index["subject_id"])
                     or grant.get("scopes") != scopes):
                     raise ManagementError("SUBJECT_GRANT_CONFLICT", 409)
             else:
@@ -119,7 +124,7 @@ class ManagementService:
         if grant.get("revoked") is True:
             raise ManagementError("SUBJECT_REVOKED")
         current = self.identity()
-        if grant.get("binding") != current.binding or grant.get("authority") != current.signature:
+        if grant.get("binding") != current.binding or not current.accepts(grant.get("authority"), subject):
             raise ManagementError("TARGET_BINDING_CHANGED", 409)
         if expected is not None and expected != current.binding:
             raise ManagementError("TARGET_BINDING_CHANGED", 409)
@@ -845,16 +850,34 @@ def build_default_service(project_root: Path) -> ManagementService:
         instance_id_for_project,
         load_project_identity,
         resolve_project_data_home,
-        resolve_project_runtime_home,
+        resolve_project_storage_paths,
+        storage_migration_complete,
     )
 
     from .native import NativeAgentGateway
+    from .storage import management_home, migrated_management_subject_exists
     root = Path(project_root).resolve()
+    store = management_home(root)
 
     def identity():
+        if management_home(root) != store:
+            raise ManagementError("TARGET_BINDING_CHANGED", 409)
         binding = {"projectId": load_project_identity(root).project_id, "instanceId": instance_id_for_project(root)}
-        signature = digest([str(root).casefold(), str(resolve_project_data_home(root)).casefold(), str(resolve_project_runtime_home(root)).casefold(), binding])
-        return TargetIdentity(binding, signature)
+        source = str(root).casefold()
+        data = str(resolve_project_data_home(root)).casefold()
+        store_runtime = store.parent
+        signature = digest([source, data, str(store_runtime).casefold(), binding])
+        # Preserve the authority on server-owned legacy records and their
+        # receipts. A different project root or data directory still fails.
+        canonical = resolve_project_storage_paths(root)
+        legacy_signature = digest([source, data, str(root / ".runtime").casefold(), binding])
+
+        def migrated_authority(authority, subject):
+            return (authority == legacy_signature and store_runtime == canonical.runtime
+                    and storage_migration_complete(canonical)
+                    and migrated_management_subject_exists(canonical, Store(store).path("subjects", subject)))
+
+        return TargetIdentity(binding, signature, migrated_authority)
 
     identity()  # A missing canonical project identity cannot mint a grant.
-    return ManagementService(resolve_project_runtime_home(root) / "external_management", identity=identity, native=NativeAgentGateway(root))
+    return ManagementService(store, identity=identity, native=NativeAgentGateway(root))

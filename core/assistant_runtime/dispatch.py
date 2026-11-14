@@ -51,6 +51,8 @@ _BACKEND_CODE_MESSAGES = {
     "BACKEND_TIMEOUT": "项目后端未在时限内回应，操作可能已执行：请用原 request_id 查询回执确认，不要更换 ID 重发或重新发起审批。",
     "BACKEND_UNAVAILABLE": "无法连接该项目后端。请检查 Launcher 中该项目的运行状态；已有任务引用已保留。",
     "RUNTIME_IDENTITY_MISMATCH": "项目后端的版本或项目身份校验失败。" + _IDENTITY_RECOVERY_HINT + "已有任务引用已保留。",
+    "SUBJECT_DENIED": "项目端无法验证原管理身份。若项目端的正式授权已经丢失，需要操作者重新授权。保留原任务和请求编号，避免重复执行。",
+    "SUBJECT_REVOKED": "项目操作者已撤销该管理身份。需由操作者重新授权才能继续管理。",
 }
 
 

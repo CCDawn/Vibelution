@@ -37,6 +37,30 @@ class Dispatch:
         return await self.dispatch(project_id, **kwargs)
 
 
+@pytest.mark.asyncio
+async def test_authorization_status_plans_all_missing_scopes_in_one_read():
+    calls = []
+
+    async def status(project_id):
+        calls.append(project_id)
+        return {"scopes": ["teams:directory:read"], "grantRevision": 2}
+
+    service = Dispatch()
+    service.management = SimpleNamespace(authorization_status=status)
+    bind_actions(service, asyncio.get_running_loop())
+    try:
+        result = await asyncio.to_thread(execute_action, "authorization_status", {
+            "project_id": "test-project", "actions": ["team_list", "agent_list", "source_read", "source_search", "dispatch"],
+        })
+        assert calls == ["test-project"]
+        assert result["missingScopes"] == ["agents:directory:read", "source:read"]
+        assert result["blockedActions"] == {
+            "agent_list": ["agents:directory:read"], "source_read": ["source:read"], "source_search": ["source:read"],
+        }
+    finally:
+        unbind_actions(service)
+
+
 @pytest.mark.parametrize(("action", "scope"), [("task_list", "tasks:read"), ("source_read", "source:read"), ("source_search", "source:read")])
 def test_denied_requested_query_explains_native_approval_without_granting_it(monkeypatch, action, scope):
     from core.infrastructure import native_runtime

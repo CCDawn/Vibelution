@@ -151,28 +151,8 @@ def personal_assistant_action_tool(action: str = "index", parameters: dict | Non
         if is_launcher_assistant_process():
             from core.assistant_runtime.actions import execute_action
             result = execute_action(action, parameters or {}, runtime=runtime)
-            required_scopes = {
-                "task_list": ["tasks:read"], "source_read": ["source:read"], "source_search": ["source:read"],
-                "agent_get": ["agents:read"], "agent_purge_preview": ["agents:read"], "avatar_options": ["agents:read"],
-                "agent_list": ["agents:directory:read"],
-                "session_list": ["sessions:read"], "session_get": ["sessions:read"],
-                "session_config_get": ["sessions:read"], "session_config_compare": ["sessions:read"],
-                "session_parameters_get": ["sessions:parameters:read", "sessions:read"],
-                "team_list": ["teams:directory:read"], "team_get": ["teams:directory:read"],
-                "team_result": ["teams:results:read"], "flow_result": ["teams:results:read"],
-                "runtime_list": ["operations:read"], "runtime_get": ["operations:read"],
-                "research_get": ["operations:read"], "team_recovery_get": ["operations:read"], "knowledge_list": ["knowledge:catalog:read"],
-                "team_asset_get": ["teams:manage:read"],
-                "agent_tool_policy_get": ["agents:tool-policy:read"],
-                "agent_tool_policy_inspect": ["agents:tool-policy:read"],
-                "agent_config_get": ["agents:configuration:read"], "agent_prompt_get": ["agents:configuration:read"],
-                "agent_dispatch_access_get": ["agents:dispatch-access:read"],
-                "knowledge_acl_get": ["knowledge:acl:read"],
-                "flow_list": ["teams:flows:read"], "flow_get": ["teams:flows:read"],
-                "team_knowledge_list": ["knowledge:catalog:read", "teams:directory:read"],
-                "room_list": ["rooms:read"], "room_get": ["rooms:read"],
-                "legacy_observers": ["legacy:receipts:read"], "legacy_receipts": ["legacy:receipts:read"],
-            }.get(action)
+            from core.assistant_runtime.management_scopes import read_scopes
+            required_scopes = read_scopes(action)
             if result.get("code") == "SCOPE_DENIED" and required_scopes:
                 result = {**result, "requiredScopes": required_scopes,
                     **({"requiredScope": required_scopes[0]} if len(required_scopes) == 1 else {}), "nextStep": (

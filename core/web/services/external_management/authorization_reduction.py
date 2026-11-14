@@ -139,7 +139,7 @@ class ReductionOwner:
                 or not secrets.compare_digest(digest(grant["subject_capability"]), digest(capability))):
             _error("SUBJECT_DENIED", 403)
         current = self.identity()
-        if (grant.get("binding") != _binding(current.binding) or grant.get("authority") != current.signature):
+        if (grant.get("binding") != _binding(current.binding) or not current.accepts(grant.get("authority"), subject)):
             _error("TARGET_BINDING_CHANGED", 409)
         try:
             # Validate legacy upgrade proofs against a view that cannot treat

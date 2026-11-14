@@ -85,6 +85,8 @@ Research 续页必须同时传原 `operation.revision` 为 `expected_revision`�
 
 ## 生命周期与验收限制
 
+项目的旧运行目录迁移到实例目录时，沿用存储迁移对正式管理记录的复制和核验。项目和数据身份匹配时，助理继续使用原主体，撤销和回执仍按同一主体核对。若项目端已无可验证的原授权，助理报告需要操作者恢复授权。用 `authorization_status` 的 `actions` 一次列出当前任务要用的动作，按 `missingScopes` 和 `blockedActions` 汇总各动作的基础权限缺项，再按现有原生审批补齐。
+
 `project_status` / `project_lifecycle` / `project_lifecycle_receipt` 定位已登记 physical root；主项目复用 canonical queue，分支 start/stop/restart 复用 branch instance supervisor 和原生 command owner，不再一律拒绝分支，也不开放任意 worktree/Git 命令。生命周期占用、active work、缺失身份、登记变化和退休未确认仍保留原生拒绝/未知语义。回执绑定 root、instance、command ID/source；恢复只读原结果，无 force、路径、URL、任意命令或进程树强杀入口。状态查询不能证明全项目空闲。
 
 源码接通与局部回归不能替代最新安装包、真实模型、真实 main/branch 项目及退出恢复的联合现场验收。旧平台助理退休、数据交接与发布仍有各自验收条件。上述能力不放宽普通 Session 的权限、提交、Journal、worker、持久化或 SSE，也不创建第二套 transcript。
