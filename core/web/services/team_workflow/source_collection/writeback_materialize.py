@@ -3699,12 +3699,18 @@ def _source_collection_stage_writeback_record_payload(
     elif doi:
         source_ref = source_ref or f"https://doi.org/{doi}"
     title = s._trim_text(lead.get("title"), max_length=260)
-    if not doi and title:
+    has_arxiv_locator = any(
+        s._source_collection_qwen_url_arxiv_id(value)
+        for value in (source_ref, source_url, locator)
+    )
+    if not doi and title and not has_arxiv_locator:
         # SCI-021: leads from providers without DOI metadata (bare mdpi.com
         # URLs) leave nothing to reroute a publisher 403 through the
         # doi.org/EuropePMC mirror fallback.  Fill the gap from the exact
         # title before the record/candidate metadata freezes; fail-open (a
-        # miss keeps the historical DOI-less shape).
+        # miss keeps the historical DOI-less shape). A versioned arXiv
+        # locator already binds to its search receipt; a DOI found by title
+        # would add a separate identity the receipt did not attest.
         doi = enrich_missing_doi(title) or ""
     year = s._trim_text(lead.get("year") or lead.get("published"), max_length=80)
     container = s._trim_text(lead.get("container") or lead.get("venue") or lead.get("journal"), max_length=240)

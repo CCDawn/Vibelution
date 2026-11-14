@@ -96,6 +96,8 @@ def materialize_optimization_plan(team_id: str, run_id: str, output):
                 raise CampaignConflict("Planning output differs from the frozen plan")
             return planning.freeze_optimization_plan(team_id, run_id, existing)
 
+        if proposal.candidate.implementation == "torch_softmax" and proposal.candidate.numWarps != 4:
+            raise CampaignConflict("numWarps is only configurable for triton_row_softmax")
         candidate_ref = next((ref for ref in (record.parentCandidateRef, record.baselineCandidateRef)
             if ref.candidate == proposal.candidate), None)
         if candidate_ref is None:
