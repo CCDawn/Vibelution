@@ -249,7 +249,8 @@ def test_native_batch_uses_one_approval_for_mixed_results(native_provider_gate, 
         calls.append(provider.provider_id)
         if provider.provider_id == "pixel_relay":
             return {"ok": True, "completed_text": True}
-        return {"ok": False, "error_category": "quota_error", "http_status": 429, "message": "SECRET"}
+        return {"ok": False, "error_category": "provider_protocol_error", "message":
+                'gateway error: {"error":{"message":"Insufficient Balance","type":"insufficient_balance"}} SECRET'}
 
     monkeypatch.setenv("VIBELUTION_LLM_PROVIDER_PIXEL_RELAY_API_KEY", "fixture-key")
     monkeypatch.setattr(config_service, "_run_bounded_llm_runtime_probe", probe)

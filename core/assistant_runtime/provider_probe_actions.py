@@ -222,9 +222,16 @@ def _probe(config: dict, target: dict, cancel_checker: Callable[[], str] | None)
             reason = "failed"
         else:
             verification = config_service._model_verification_summary(result)
-            reason = verification["error_type"] if not result.get("ok") else (
-                "" if result.get("completed_text") is True else "incomplete_response"
-            )
+            if not result.get("ok"):
+                reason = verification["error_type"]
+                if reason in {"failed", "bad_request", "provider_protocol_error"}:
+                    from core.web.services.session.turn_diagnostics import _provider_error_user_reason
+
+                    detail = _provider_error_user_reason(result.get("message", ""), lang="zh")
+                    if detail.get("code") == "quota_exhausted":
+                        reason = "quota_exhausted"
+            else:
+                reason = "" if result.get("completed_text") is True else "incomplete_response"
             if verification["http_status"] is not None:
                 target = {**target, "httpStatus": verification["http_status"]}
     if not reason:
