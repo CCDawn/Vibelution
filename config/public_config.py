@@ -2717,6 +2717,17 @@ def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
 
     captured_payload: dict[str, Any] = {}
 
+    def call_responses(payload: dict[str, Any]) -> Any:
+        try:
+            return _default_responses_backend(payload)
+        except ChatGPTSubscriptionError as exc:
+            category = {
+                "signed_out": "missing_credential", "reauth_required": "auth_error", "permission_missing": "auth_error",
+                "network": "network_error", "timeout": "timeout", "rate_limited": "rate_limit",
+                "upstream_unavailable": "server_error", "busy": "probe_busy",
+            }.get(exc.code, "configuration_error")
+            raise LLMError(category, exc.message, retryable=False) from None
+
     def real_backend(payload: dict[str, Any]) -> dict[str, Any]:
         max_output_tokens = payload.get("max_output_tokens")
         max_tokens = payload.get("max_tokens") if "max_tokens" in payload else max_output_tokens
@@ -2731,7 +2742,7 @@ def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
             }
         )
         if "input" in payload and "messages" not in payload:
-            return _default_responses_backend(payload)
+            return call_responses(payload)
         return _default_completion_backend({**payload, "num_retries": 0})
 
     def native_anthropic_backend(payload: dict[str, Any]) -> dict[str, Any]:
@@ -2798,13 +2809,6 @@ def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
         completed_text = bool(outcome is not None and outcome.kind == "final_answer" and outcome.final_text.strip())
         if subscription and not completed_text:
             return {"ok": False, "message": "probe did not receive a completed text answer", "error_category": "incomplete_response"}
-    except ChatGPTSubscriptionError as exc:
-        category = {
-            "signed_out": "missing_credential", "reauth_required": "auth_error", "permission_missing": "auth_error",
-            "network": "network_error", "timeout": "timeout", "rate_limited": "rate_limit",
-            "upstream_unavailable": "server_error", "busy": "probe_busy",
-        }.get(exc.code, "configuration_error")
-        return {"ok": False, "message": exc.message, "error_category": category}
     except LLMError as exc:
         return {
             "ok": False,

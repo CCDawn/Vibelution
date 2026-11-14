@@ -4,14 +4,17 @@ import json
 from types import SimpleNamespace
 
 import httpx
+import pytest
 
 from config.chatgpt_subscription import build_subscription_provider
 from config.models import LLMProfile, ProviderConfig
 from config import public_config
 from core.llm import chatgpt_subscription, client as llm_client
+from core.llm.chatgpt_subscription.errors import ChatGPTSubscriptionError
 
 
-def test_real_configuration_probe_uses_oauth_and_native_terminal_validation(monkeypatch):
+@pytest.mark.parametrize("auth_error, expected", [(None, ""), ("signed_out", "missing_credential"), ("reauth_required", "auth_error")])
+def test_real_configuration_probe_uses_oauth_and_native_terminal_validation(monkeypatch, auth_error, expected):
     requests = []
     provider = ProviderConfig(**{**build_subscription_provider(), "provider_id": "subscription", "legacy_inference_allowed": False})
     profile = LLMProfile(profile_id="primary", provider_id="subscription", model="example-model",
@@ -24,11 +27,20 @@ def test_real_configuration_probe_uses_oauth_and_native_terminal_validation(monk
         requests.append(request)
         return httpx.Response(200, text="data: " + json.dumps({"type": "response.completed", "response": final}) + "\n\n")
 
-    manager = SimpleNamespace(get_access_token=lambda: "synthetic-oauth", mark_auth_rejected=lambda _: None)
+    def access_token():
+        if auth_error:
+            raise ChatGPTSubscriptionError(auth_error)
+        return "synthetic-oauth"
+
+    manager = SimpleNamespace(get_access_token=access_token, mark_auth_rejected=lambda _: None)
     monkeypatch.setattr(chatgpt_subscription, "get_chatgpt_subscription_auth", lambda: manager)
     monkeypatch.setattr(llm_client, "_llm_new_httpx_client", lambda **_: httpx.Client(transport=httpx.MockTransport(respond)))
     monkeypatch.setattr(public_config, "validate_llm_provider_target", lambda *args, **kwargs: None)
     result = public_config._probe_llm_runtime(provider, profile)
+    if auth_error:
+        assert result["ok"] is False and result["error_category"] == expected
+        assert requests == []
+        return
     assert result["ok"] is True, result
     assert len(requests) == 1
     assert requests[0].headers["authorization"] == "Bearer synthetic-oauth"
