@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import copy
 import json
+from types import SimpleNamespace
+
+import pytest
 
 from config.llm_identity import provider_discovery_fingerprint
 from core.web.services import agent_model_candidate_service
@@ -340,6 +343,28 @@ def test_provider_channel_health_requires_configured_credential(monkeypatch):
     candidate_item = by_ref["ai-pixel/gpt-5.6-luna"]
     assert candidate_item["missingApiKey"] is True
     assert candidate_item["providerHealthy"] is False
+
+
+@pytest.mark.parametrize("connected", [True, False])
+def test_chatgpt_subscription_picker_uses_login_state_without_a_token(monkeypatch, connected):
+    from config.chatgpt_subscription import build_subscription_provider
+    from core.llm import chatgpt_subscription
+
+    monkeypatch.setattr(
+        chatgpt_subscription, "get_chatgpt_subscription_auth",
+        lambda: SimpleNamespace(status=lambda: {"connected": connected}),
+    )
+    provider = build_subscription_provider()
+    provider["models"]["gpt-6.1-sol-high"] = {
+        "upstream_id": "gpt-6.1-sol", "label": "GPT-6.1-Sol (High)", "enabled": True,
+    }
+    config = {"llm": {"schema_version": 2, "providers": {"chatgpt": provider}, "profiles": {}}}
+    [model] = agent_model_candidate_service.project_agent_model_candidates(config, {})
+
+    assert model["modelRef"] == "chatgpt/gpt-6.1-sol-high"
+    assert model["runtimeSelectable"] is True
+    assert model["missingApiKey"] is not connected
+    assert model["providerHealthy"] is connected
 
 
 def test_disabled_provider_projects_unhealthy_channel_even_when_reachable(monkeypatch):
