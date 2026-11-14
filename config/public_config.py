@@ -2783,6 +2783,7 @@ def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
                 [{"role": "user", "content": "ping"}],
                 tools=[],
                 context=probe_context,
+                metadata={"disableAutomaticRetries": True},
             ):
                 outcome = chunk.additional_kwargs.get("turn_outcome", outcome)
         else:
@@ -2791,6 +2792,7 @@ def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
                 [{"role": "user", "content": "ping"}],
                 tools=[],
                 context=probe_context,
+                metadata={"disableAutomaticRetries": True},
             )
             outcome = response.additional_kwargs.get("turn_outcome")
         completed_text = bool(outcome is not None and outcome.kind == "final_answer" and outcome.final_text.strip())

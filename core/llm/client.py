@@ -6240,7 +6240,8 @@ class LLMClient:
         }
         payload_summary_ms = max(0, int((time.perf_counter() - payload_summary_started) * 1000))
         payload_prepare_ms = max(0, int((time.perf_counter() - payload_prepare_started) * 1000))
-        max_attempts = _retry_policy_max_attempts(self.profile, role=self.role)
+        disable_automatic_retries = bool((metadata or {}).get("disableAutomaticRetries"))
+        max_attempts = 1 if disable_automatic_retries else _retry_policy_max_attempts(self.profile, role=self.role)
         last_error: LLMError | None = None
         previous_attempt_emitted = False
         stream_usage_options_downgraded = False
@@ -6735,6 +6736,13 @@ class LLMClient:
                         attempt=attempt,
                         retry_count=max(0, attempt - 1),
                     )
+                if disable_automatic_retries:
+                    self._record_llm_retry_or_failure(
+                        phase="stream", event_code="llm.stream.failed", message="LLM stream failed",
+                        message_count=message_count, tool_count=tool_count, metadata=event_metadata,
+                        attempt=attempt, max_attempts=max_attempts, llm_error=llm_error,
+                    )
+                    raise llm_error from exc
                 if emitted:
                     if content_emitted and str(
                         (getattr(llm_error, "details", {}) or {}).get("terminal_reason") or ""
