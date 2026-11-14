@@ -431,6 +431,7 @@ def test_native_model_worker_keeps_default_stores_in_profile(tmp_path, developer
         config_path.write_text(config_path.read_text().replace('127.0.0.1:9', '127.0.0.1:' + str(provider.server_port)))
 
         from core.assistant_runtime import native
+        from core.chat.conversation_ledger import conversation_ledger_path
         from core.web.services import session_service as sessions
         from core.runtime_manager import constants, evolution_store, work_run_store
         from core.logging.unified_logger import logger
@@ -471,7 +472,8 @@ def test_native_model_worker_keeps_default_stores_in_profile(tmp_path, developer
             logger.transcript.shutdown(timeout=2)
             other_files = [str(path.relative_to(root.parent)) for path in (root.parent / 'projects').rglob('*') if path.is_file()]
             assert not other_files, other_files[:15]
-            assert list((root / 'logs' / 'conversations').glob('conversation_*.jsonl'))
+            ledger = conversation_ledger_path(root, sid)
+            assert ledger.is_relative_to(root) and ledger.is_file(), ledger
             assert not (root / '.vibelution' / 'project.json').exists()
         finally:
             native.shutdown()

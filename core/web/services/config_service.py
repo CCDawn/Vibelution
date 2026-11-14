@@ -896,6 +896,8 @@ def _profile_test_target(
     public_config: dict[str, Any],
     profile_id: str,
     draft_meta: dict | None = None,
+    *,
+    saved_credential_only: bool = False,
 ) -> dict[str, Any]:
     normalized_profile_id = str(profile_id or "").strip() or "primary"
     public_profile = _public_profile(public_config, normalized_profile_id)
@@ -905,6 +907,10 @@ def _profile_test_target(
     if is_subscription_provider(provider):
         api_key = None
         api_key_source = "oauth:chatgpt"
+    elif saved_credential_only and provider.requires_api_key:
+        credential = resolve_credential_ref(provider.credential_ref, resolve_secret=True)
+        api_key = credential.secret or None
+        api_key_source = credential.source
     elif provider.requires_api_key:
         api_key, api_key_source = _resolve_model_option_api_key(provider, profile, draft_meta)
     else:
@@ -928,6 +934,8 @@ def _v2_model_ref_test_target(
     public_config: dict[str, Any],
     model_ref: str,
     draft_meta: dict | None = None,
+    *,
+    saved_credential_only: bool = False,
 ) -> dict[str, Any]:
     normalized_ref = make_model_ref(*split_model_ref(model_ref))
     route_id = _model_probe_route_id(normalized_ref)
@@ -983,7 +991,7 @@ def _v2_model_ref_test_target(
         "model_ref": normalized_ref,
         "overrides": {},
     }
-    target = _profile_test_target(probe_config, route_id, draft_meta)
+    target = _profile_test_target(probe_config, route_id, draft_meta, saved_credential_only=saved_credential_only)
     target["model_id"] = normalized_ref
     return target
 

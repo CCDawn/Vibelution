@@ -15,7 +15,7 @@ from urllib.parse import urlsplit
 
 from pydantic import Field, ValidationError
 
-from config.llm_identity import make_model_ref, normalize_provider_endpoint
+from config.llm_identity import make_model_ref, normalize_provider_endpoint, split_model_ref
 from tools.pa_config_actions import Arguments
 
 
@@ -203,12 +203,18 @@ def _probe(config: dict, target: dict, cancel_checker: Callable[[], str] | None)
         reason = "cancelled"
     else:
         try:
-            prepared = config_service._v2_model_ref_test_target(config, model_id)
+            prepared = config_service._v2_model_ref_test_target(config, model_id, saved_credential_only=True)
             profile = prepared["profile"]
+            provider_id, model_key = split_model_ref(model_id)
+            provider = prepared["provider"]
+            model = config["llm"]["providers"][provider_id]["models"][model_key]
+            if (provider.provider_id != provider_id or profile.model_ref != model_id
+                    or profile.model != str(model["upstream_id"]).strip()):
+                raise ValueError("Effective route differs from the approved model")
             profile = profile.model_copy(update={"timeout": min(profile.timeout, _PROBE_TIMEOUT_SECONDS),
                                                  "connect_timeout": min(profile.connect_timeout, _PROBE_TIMEOUT_SECONDS)})
             result = config_service._run_bounded_llm_runtime_probe(
-                prepared["provider"], profile, prepared["api_key"], cancel_checker=cancel_checker,
+                provider, profile, prepared["api_key"], cancel_checker=cancel_checker,
             )
         except (KeyError, TypeError, ValueError):
             reason = "invalid_config"

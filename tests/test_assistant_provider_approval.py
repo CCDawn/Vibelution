@@ -295,6 +295,32 @@ def test_native_batch_refuses_changed_config_before_sending(native_provider_gate
     assert json.loads(output)["reason"] == "configuration_changed"
 
 
+def test_batch_probe_does_not_fall_back_to_another_providers_key(native_provider_gate, monkeypatch):
+    from core.assistant_runtime import provider_probe_actions
+    from core.web.services import config_service
+
+    path, _ = native_provider_gate
+    monkeypatch.setenv("OPENAI_API_KEY", "unrelated-key")
+    monkeypatch.setenv("VIBELUTION_LLM_PROVIDER_PIXEL_RELAY_API_KEY", "")
+    monkeypatch.setattr(config_service, "_read_env_var", lambda *_: pytest.fail("looked up a fallback credential"))
+    config = tomllib.loads(path.read_text(encoding="utf-8"))
+    result = provider_probe_actions._probe(config, {"providerId": "pixel_relay", "modelId": "pixel_relay/gpt-5.6-luna"}, None)
+    assert result["status"] == "not_tested" and result["reason"] == "missing_credential"
+
+
+def test_batch_probe_rejects_alias_shadowing_an_approved_model(native_provider_gate, monkeypatch):
+    from core.assistant_runtime import provider_probe_actions
+    from core.web.services import config_service
+
+    path, _ = native_provider_gate
+    config = tomllib.loads(path.read_text(encoding="utf-8"))
+    model_id = "pixel_relay/gpt-5.6-luna"
+    config["llm"]["model_aliases"] = {model_id: "lab_llamacpp_a/qwen3.6-35b-a3b"}
+    monkeypatch.setattr(config_service, "_run_bounded_llm_runtime_probe", lambda *a, **kw: pytest.fail("sent to an unapproved route"))
+    result = provider_probe_actions._probe(config, {"providerId": "pixel_relay", "modelId": model_id}, None)
+    assert result["status"] == "not_tested" and result["reason"] == "invalid_config"
+
+
 @pytest.mark.parametrize("raw", [
     '{"provider_id":"pixel_relay","verify":"false"}',
     '{"provider_id":"pixel_relay","upstream_id":"x","key":"SECRET"}',

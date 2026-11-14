@@ -2732,7 +2732,7 @@ def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
         )
         if "input" in payload and "messages" not in payload:
             return _default_responses_backend(payload)
-        return _default_completion_backend(payload)
+        return _default_completion_backend({**payload, "num_retries": 0})
 
     def native_anthropic_backend(payload: dict[str, Any]) -> dict[str, Any]:
         # anthropic_messages_native provider 必须保留 client 的 native 分派路径
