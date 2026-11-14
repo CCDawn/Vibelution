@@ -7,15 +7,21 @@ from copy import deepcopy
 from core.research.operator_optimization.discussion_contracts import OperatorInvocationBinding
 from core.research.workflow.contracts._canonical import sha256_hex
 from core.web.services import agent_directory_service, chat_room_service, team_service
+from core.web.services.team.team_constants import CHALLENGE_CUP_RESEARCH_TEAM_LEGACY_ROLE_OWNERS
 
 from ..research_runtime import workflow_artifact_store as artifacts
 from ..research_runtime.artifact_readback_registry import load_scoped_artifact_payload
 from ..research_runtime.formal_write_runtime import get_write_store
+from ..research_runtime.team_role_source import normalize_role_key
 from ..storage_durability import inter_process_lock
 from .discussion import discussion_input
 from .store import CampaignConflict, read_campaign
 
 AUTHORITY_KIND = "operator_discussion"
+_EXECUTION_ANOMALIES = frozenset({
+    "environmentHash_mismatch", "protocolHash_mismatch", "workloadHash_mismatch",
+    "timed_out",
+})
 
 
 def _setup_identity(round_id: str, node_run_id: str) -> str:
@@ -34,6 +40,41 @@ def _active_run(team_id, run_id, node_run_id):
             or run.status in {"failed", "cancelled", "archived", "succeeded"}):
         raise CampaignConflict("Operator discussion requires its active node attempt")
     return run, attempt
+
+
+def _members_with_role(members: dict[str, dict], role: str, *, exclude: str) -> list[dict]:
+    matches = []
+    for agent_id, member in members.items():
+        key = normalize_role_key(member.get("role"))
+        owner = CHALLENGE_CUP_RESEARCH_TEAM_LEGACY_ROLE_OWNERS.get(key, {}).get("ownerId", key)
+        if owner == role and agent_id != exclude:
+            matches.append(member)
+    return matches
+
+
+def _priced_seat(member: dict, budget) -> dict:
+    agent = agent_directory_service.get_agent(member["agentId"], include_archived=False)
+    resolved = chat_room_service._resolve_chat_room_agent_llm(agent)
+    prices = [price for price in budget.discussion.prices
+              if price.modelRef == resolved.model_ref and price.currency == budget.currency]
+    if len(prices) != 1:
+        raise CampaignConflict("Discussion model requires one price in the authorized currency")
+    return {"agentId": member["agentId"], "role": member.get("role") or "researcher",
+        "modelRef": resolved.model_ref, "providerId": resolved.provider_id, "modelId": resolved.model}
+
+
+def _has_execution_anomaly(inputs: dict) -> bool:
+    for evidence in inputs["evidence"]:
+        if evidence["ref"]["kind"] != "operator_evaluation":
+            continue
+        for trial in evidence["summary"]["trials"]:
+            reasons = trial["reasons"]
+            if _EXECUTION_ANOMALIES.intersection(reasons):
+                return True
+            # The CUDA runner also marks a numerical correctness rejection as failed.
+            if "failed" in reasons and not any(reason.startswith("correctness_failed:") for reason in reasons):
+                return True
+    return False
 
 
 def build_operator_meeting_authority(team_id: str, run_id: str, *, node_run_id: str) -> dict:
@@ -59,23 +100,24 @@ def build_operator_meeting_authority(team_id: str, run_id: str, *, node_run_id: 
         if len(planners) != 1:
             raise CampaignConflict("Discussion requires one bound experiment_planner")
         planner = next(iter(planners))
-        members = list({m["agentId"]: m for m in (team_service.get_team(team_id).get("members") or [])
-            if m.get("agentId")}.values())
-        if len(members) < 2 or planner not in {m["agentId"] for m in members}:
-            raise CampaignConflict("Discussion requires at least two team participants including its planner")
-        if len(members) > campaign.budget.discussion.maxCalls:
-            raise CampaignConflict("Discussion participants exceed the authorized call limit")
-        members.sort(key=lambda m: m["agentId"] == planner)
-        seats = []
-        for member in members:
-            agent = agent_directory_service.get_agent(member["agentId"], include_archived=False)
-            resolved = chat_room_service._resolve_chat_room_agent_llm(agent)
-            prices = [p for p in campaign.budget.discussion.prices if p.modelRef == resolved.model_ref
-                and p.currency == campaign.budget.currency]
-            if len(prices) != 1:
-                raise CampaignConflict("Discussion model requires one price in the authorized currency")
-            seats.append({"agentId": member["agentId"], "role": member.get("role") or "researcher",
-                "modelRef": resolved.model_ref, "providerId": resolved.provider_id, "modelId": resolved.model})
+        members = {m["agentId"]: m for m in (team_service.get_team(team_id).get("members") or [])
+            if m.get("agentId")}
+        if planner not in members:
+            raise CampaignConflict("Discussion requires its bound planner to be on the team")
+        evaluators = _members_with_role(members, "challenge_cup_evaluator", exclude=planner)
+        if len(evaluators) != 1:
+            raise CampaignConflict("Discussion requires one independent evaluator")
+        max_calls = campaign.budget.discussion.maxCalls
+        seats = [_priced_seat(evaluators[0], campaign.budget)]
+        if max_calls > 2 and _has_execution_anomaly(inputs):
+            stewards = _members_with_role(members, "challenge_cup_execution_steward", exclude=planner)
+            if len(stewards) == 1:
+                try:
+                    seats.append(_priced_seat(stewards[0], campaign.budget))
+                except (CampaignConflict, chat_room_service.ChatRoomValidationError):
+                    # The required seats can still review the recorded anomaly.
+                    pass
+        seats.append(_priced_seat(members[planner], campaign.budget))
         result = {"schemaVersion": 1, "authorityKind": AUTHORITY_KIND,
             "teamId": team_id, "researchProjectId": run.project_id,
             "optimizationCampaignId": context["optimizationCampaignId"], "roundId": context["roundId"],

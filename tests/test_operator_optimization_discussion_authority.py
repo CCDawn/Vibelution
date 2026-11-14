@@ -26,7 +26,8 @@ def setup(activity, discussion_case, monkeypatch):
     campaign = campaign.model_copy(update={"budget": campaign.budget.model_copy(update={"discussion": budget})})
     monkeypatch.setattr(authority, "read_campaign", lambda *_: campaign)
     monkeypatch.setattr(authority.team_service, "get_team", lambda _: {"members": [
-        {"agentId": "planner", "role": "experiment_planner"}, {"agentId": "reviewer", "role": "reviewer"}]})
+        {"agentId": "planner", "role": "experiment_planner"},
+        {"agentId": "reviewer", "role": "challenge_cup_evaluator"}]})
     monkeypatch.setattr(authority.agent_directory_service, "get_agent", lambda agent_id, **_: {"agentId": agent_id})
     monkeypatch.setattr(authority.chat_room_service, "_resolve_chat_room_agent_llm", lambda _: SimpleNamespace(
         model_ref="provider/model", provider_id="provider", model="model"))
@@ -42,6 +43,80 @@ def test_server_setup_freezes_routes_planner_and_actual_attempt(activity, setup)
     for key in ("researchProjectId", "roundId", "nodeRunId"):
         with pytest.raises(CampaignConflict):
             authority.validate_operator_authority({**result, key: "other"})
+
+
+@pytest.mark.parametrize("evaluator_role", ["challenge_cup_evaluator", "experiment_ledger"])
+def test_discussion_only_resolves_the_evaluator_and_planner(activity, setup, monkeypatch, evaluator_role):
+    run, _ = setup
+    members = [
+        {"agentId": "planner", "role": "challenge_cup_experiment_revision"},
+        {"agentId": "search", "role": "challenge_cup_search"},
+        {"agentId": "extractor", "role": "challenge_cup_extractor"},
+        {"agentId": "knowledge", "role": "challenge_cup_knowledge_manager"},
+        {"agentId": "reviewer", "role": evaluator_role},
+        {"agentId": "execution", "role": "challenge_cup_execution_steward"},
+    ]
+    monkeypatch.setattr(authority.team_service, "get_team", lambda _: {"members": members})
+    resolved_agent_ids = []
+
+    def get_agent(agent_id, **_):
+        resolved_agent_ids.append(agent_id)
+        return {"agentId": agent_id}
+
+    monkeypatch.setattr(authority.agent_directory_service, "get_agent", get_agent)
+    result = authority.build_operator_meeting_authority(activity[0], run.run_id, node_run_id="node1")
+    assert [seat["agentId"] for seat in result["participants"]] == ["reviewer", "planner"]
+    assert resolved_agent_ids == ["reviewer", "planner"]
+
+    members.clear()
+    assert authority.build_operator_meeting_authority(activity[0], run.run_id, node_run_id="node1") == result
+    assert resolved_agent_ids == ["reviewer", "planner"]
+
+
+def test_discussion_rejects_ambiguous_evaluator_binding(activity, setup, monkeypatch):
+    run, _ = setup
+    monkeypatch.setattr(authority.team_service, "get_team", lambda _: {"members": [
+        {"agentId": "planner", "role": "experiment_planner"},
+        {"agentId": "reviewer", "role": "challenge_cup_evaluator"},
+        {"agentId": "reviewer2", "role": "experiment_ledger"},
+    ]})
+    with pytest.raises(CampaignConflict, match="one independent evaluator"):
+        authority.build_operator_meeting_authority(activity[0], run.run_id, node_run_id="node1")
+
+
+@pytest.mark.parametrize(("reasons", "max_calls", "steward_model", "attendees"), [
+    (["shape_regression"], 3, "provider/model", ["reviewer", "planner"]),
+    (["failed", "correctness_failed:wide"], 3, "provider/model", ["reviewer", "planner"]),
+    (["environmentHash_mismatch"], 3, "provider/model", ["reviewer", "execution", "planner"]),
+    (["environmentHash_mismatch"], 2, "provider/model", ["reviewer", "planner"]),
+    (["environmentHash_mismatch"], 3, "provider/unpriced", ["reviewer", "planner"]),
+])
+def test_discussion_invites_execution_steward_for_measurement_anomaly(
+    activity, setup, monkeypatch, reasons, max_calls, steward_model, attendees,
+):
+    run, _ = setup
+    inputs = authority.discussion_input(activity[0], run.run_id)
+    inputs["evidence"].append({
+        "ref": {"kind": "operator_evaluation"},
+        "summary": {"trials": [{"reasons": reasons}]},
+    })
+    monkeypatch.setattr(authority, "discussion_input", lambda *_: inputs)
+    campaign = authority.read_campaign()
+    budget = campaign.budget.model_copy(update={
+        "discussion": campaign.budget.discussion.model_copy(update={"maxCalls": max_calls}),
+    })
+    monkeypatch.setattr(authority, "read_campaign", lambda *_: campaign.model_copy(update={"budget": budget}))
+    monkeypatch.setattr(authority.team_service, "get_team", lambda _: {"members": [
+        {"agentId": "planner", "role": "experiment_planner"},
+        {"agentId": "reviewer", "role": "challenge_cup_evaluator"},
+        {"agentId": "execution", "role": "execution_steward"},
+    ]})
+    monkeypatch.setattr(authority.chat_room_service, "_resolve_chat_room_agent_llm", lambda agent: SimpleNamespace(
+        model_ref=steward_model if agent["agentId"] == "execution" else "provider/model",
+        provider_id="provider", model="model",
+    ))
+    result = authority.build_operator_meeting_authority(activity[0], run.run_id, node_run_id="node1")
+    assert [seat["agentId"] for seat in result["participants"]] == attendees
 
 
 def test_retry_freezes_new_authority_and_rejects_previous_attempt(activity, setup):
