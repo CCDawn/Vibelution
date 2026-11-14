@@ -48,10 +48,10 @@ def parse_arguments(raw: str) -> dict:
 
 def _risk(action: str, parameters: dict) -> str:
     from core.assistant_runtime import actions
-    from core.assistant_runtime.provider_approval import PROVIDER_APPROVAL_ACTIONS, validate_provider_model_resolve
+    from core.assistant_runtime.provider_approval import PROVIDER_APPROVAL_ACTIONS, provider_approval_summary
 
     if action in PROVIDER_APPROVAL_ACTIONS:
-        validate_provider_model_resolve(parameters)
+        provider_approval_summary(action, parameters)
         return "write"
 
     managed = actions._management_contracts()

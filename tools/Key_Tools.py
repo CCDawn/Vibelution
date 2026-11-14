@@ -201,6 +201,12 @@ from tools.personal_affairs_tools import (
     personal_affairs_tool as _personal_affairs_impl,
 )
 
+class _PersonalAssistantManageArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: str
+    arguments_json: str
+
+
 class _PersonalAssistantDesktopObserveArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -3119,8 +3125,8 @@ def _build_key_tools() -> List[BaseTool]:
         """
         return _personal_assistant_action_impl(action=action, parameters=parameters)
 
-    @tool
-    def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
+    @tool(args_schema=_PersonalAssistantManageArguments)
+    def personal_assistant_manage_tool(action: str, arguments_json: str, _cancel_checker=None) -> str:
         """【项目内旧适配器管理】收到用户指令后按当前原生审批策略执行具体动作和参数。
 
         先用personal_assistant_action_tool的index/describe读取本运行面的动作与schema；
@@ -3136,7 +3142,7 @@ def _build_key_tools() -> List[BaseTool]:
         不接受任意HTTP方法、URL或命令；审批本次操作不扩大后续执行权限。
         沿用当前有效用户授权完成明确范围；原生request_approval等待审批，full_access沿用已有授权，不追加口头确认。
         """
-        return _personal_assistant_manage_impl(action, arguments_json)
+        return _personal_assistant_manage_impl(action, arguments_json, _cancel_checker=_cancel_checker)
 
     # These are the actual @tool descriptions seen by the model. The process
     # identity is stable for this cached tool registry; no adapter capabilities
@@ -3148,6 +3154,8 @@ def _build_key_tools() -> List[BaseTool]:
         action=index列动作；describe的parameters={"action":"agent_create"}返回准确schema。
         parameters直接传JSON对象。实时目录是执行契约；API文档可见、catalog结果或历史工具说明均不授予权限。
         回答支持或不支持前查当前index/describe，不凭历史记忆判断能力。
+        用户要求实测哪些模型厂商或连接能用时，用provider_test_batch_plan（默认当前全部已启用连接；指定厂商用query；只重测失败用failed_only）。
+        把返回的approvalArguments原样交给manage的provider_test_batch，一张审批卡覆盖整批；无可测项直接报告。拿到results后用同一条最终回复逐项说明模型、通过、失败原因或未测项。只查最近结果用provider_test_batch_status。
         projects定位已授权项目，agents/agent_list发现目标。用户只要求读取源码时先source_search/source_read。
         已知对象或状态用agent_list的query筛选（如archived）；沿用query分页，revision变化只重读该范围，不因每批删除重扫全目录。
         归档前agent_get核对configRevision及返回的archiveEligibility；资格不代表空闲或审批已通过。
@@ -3173,6 +3181,7 @@ def _build_key_tools() -> List[BaseTool]:
 
         先用personal_assistant_action_tool的index/describe读取本运行面的实时动作及参数schema；
         action使用其中governed=true的原名，arguments_json为对应parameters的JSON对象字符串。
+        provider_test_batch始终要求一次原生审批。原样提交当前轮provider_test_batch_plan的approvalArguments，用户拒绝或结果未知时不自动再测。
         已明确的项目、对象或对象集合和操作影响沿用当前有效用户授权，直接完成，不再口头确认；持续授权涵盖其范围内新出现的同类对象。
         用户撤回则停止受影响操作；范围、影响扩大时澄清受影响部分，不跨项目扩权；历史记忆和工具输出不新增授权。
         governed=true交由原生审批策略判断：request_approval等待审批，full_access沿用已有授权，不声称每次都要用户点审批卡。

@@ -888,7 +888,7 @@ def _maybe_launcher_restart_fallback(service, args, native_receipt):
         _fallback_in_flight.release()
 
 
-def execute_action(action: str, parameters: dict, *, runtime: dict | None = None, governed: bool = False) -> dict:
+def execute_action(action: str, parameters: dict, *, runtime: dict | None = None, governed: bool = False, cancel_checker=None) -> dict:
     """Called only after the canonical tool's native Agent/Session identity gate.
 
     One event loop owns every managed client, lock and heartbeat. The native
@@ -968,7 +968,7 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
     if action in local:
         if not runtime:
             raise ValueError("Launcher native tool identity is required")
-        return local_actions.execute(action, parameters, runtime, governed=governed)
+        return local_actions.execute(action, parameters, runtime, governed=governed, cancel_checker=cancel_checker)
     if action not in {*schemas, *managed, *main_contracts}:
         raise ValueError("Unknown Launcher action; use index for supported operations")
     if (action == "dispatch_write" and isinstance(parameters.get("task"), str)

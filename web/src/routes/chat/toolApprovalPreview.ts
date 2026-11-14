@@ -345,7 +345,7 @@ export function toolApprovalActionPreview(
     if (summary.assistantArgumentsInvalid || !managementApprovalActionIsKnown(action)) {
       return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新发起。" : "Arguments cannot be verified. Decline and request again."}`;
     }
-    if (action === "provider_model_resolve" || Object.hasOwn(summary, "assistantProviderPreviewVersion")) {
+    if (["provider_model_resolve", "provider_test_batch"].includes(action) || Object.hasOwn(summary, "assistantProviderPreviewVersion")) {
       return providerModelApprovalText(summary, lang);
     }
     if (agentConfigurationApprovalActionIsKnown(action)) return agentConfigurationApprovalText(summary, lang);

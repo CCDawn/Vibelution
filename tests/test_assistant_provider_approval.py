@@ -236,6 +236,65 @@ def test_native_decline_keeps_operator_configuration_unchanged(native_provider_g
     assert path.read_bytes() == original
 
 
+def test_native_batch_uses_one_approval_for_mixed_results(native_provider_gate, monkeypatch):
+    from core.assistant_runtime import local_actions
+    from core.web.services import config_service
+
+    path, pending = native_provider_gate
+    original = path.read_bytes()
+    runtime = {"agentId": "agent-a", "sessionId": "session-a", "turnId": "turn-a"}
+    calls = []
+
+    def probe(provider, profile, api_key, **kwargs):
+        calls.append(provider.provider_id)
+        if provider.provider_id == "pixel_relay":
+            return {"ok": True, "completed_text": True}
+        return {"ok": False, "error_category": "quota_error", "http_status": 429, "message": "SECRET"}
+
+    monkeypatch.setenv("VIBELUTION_LLM_PROVIDER_PIXEL_RELAY_API_KEY", "fixture-key")
+    monkeypatch.setattr(config_service, "_run_bounded_llm_runtime_probe", probe)
+    plan = local_actions.execute("provider_test_batch_plan", {}, runtime)
+    parameters = plan["approvalArguments"]
+    assert plan["maxCalls"] == 2 and calls == []
+    assert not local_actions.execute("provider_test_batch", parameters, runtime)["ok"]
+    args = {"action": "provider_test_batch", "arguments_json": json.dumps(parameters)}
+    assert management_approval.approval_requirement(runtime, args) == ("always", "write")
+    with pending(args) as (request, future):
+        assert request["argumentSummary"]["assistantProbeTargets"] == plan["targets"]
+        assert not future.done() and calls == []
+        tool_approvals.resolve_tool_approval_request("session-a", request["requestId"], decision="accept")
+        output, side_effect = future.result(timeout=5)
+    result = json.loads(output)
+    rows = {row["providerId"]: row for row in result["results"]}
+    assert rows["pixel_relay"]["status"] == "verified"
+    assert rows["lab_llamacpp_a"]["reason"] == "quota_exhausted"
+    assert "SECRET" not in output and side_effect is None
+    assert not local_actions.execute("provider_test_batch", parameters, runtime, governed=True)["ok"]
+    assert sorted(calls) == ["lab_llamacpp_a", "pixel_relay"]
+    assert path.read_bytes() == original
+    history = local_actions.execute("provider_test_batch_status", {}, runtime)
+    assert history["stale"] is False and history["results"] == result["results"]
+    retry = local_actions.execute("provider_test_batch_plan", {"failed_only": True}, {**runtime, "turnId": "next-turn"})
+    assert [row["providerId"] for row in retry["targets"]] == ["lab_llamacpp_a"]
+
+
+def test_native_batch_refuses_changed_config_before_sending(native_provider_gate, monkeypatch):
+    from core.assistant_runtime import local_actions
+    from core.web.services import config_service
+
+    path, pending = native_provider_gate
+    runtime = {"agentId": "agent-a", "sessionId": "session-a", "turnId": "turn-a"}
+    monkeypatch.setattr(config_service, "_run_bounded_llm_runtime_probe", lambda *a, **kw: pytest.fail("sent after config drift"))
+    plan = local_actions.execute("provider_test_batch_plan", {"query": "Lab"}, runtime)
+    args = {"action": "provider_test_batch", "arguments_json": json.dumps(plan["approvalArguments"])}
+    with pending(args) as (request, future):
+        with path.open("a", encoding="utf-8") as file:
+            file.write("\n# changed while approval was pending\n")
+        tool_approvals.resolve_tool_approval_request("session-a", request["requestId"], decision="accept")
+        output, _ = future.result(timeout=5)
+    assert json.loads(output)["reason"] == "configuration_changed"
+
+
 @pytest.mark.parametrize("raw", [
     '{"provider_id":"pixel_relay","verify":"false"}',
     '{"provider_id":"pixel_relay","upstream_id":"x","key":"SECRET"}',

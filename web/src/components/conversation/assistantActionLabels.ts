@@ -155,6 +155,7 @@ const ASSISTANT_ACTION_DETAILS: Record<string, readonly [string, string, Assista
   provider_discover: ["发现连接模型", "Discover provider models", "change"],
   provider_prepare: ["解析模型接入信息", "Parse provider connection details", "inspect"],
   provider_model_resolve: ["发现并配置连接模型", "Discover and configure provider model", "change"],
+  provider_test_batch: ["批量测试模型连接", "Test model connections", "change"],
   provider_catalog: ["查询模型连接目录", "List model providers", "inspect"],
   provider_models: ["列出模型", "List provider models", "inspect"],
   model_update: ["修改模型", "Update model", "change"], model_remove: ["移除模型", "Remove model", "change"],

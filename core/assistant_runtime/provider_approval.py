@@ -7,7 +7,22 @@ import unicodedata
 
 from pydantic import ValidationError
 
-PROVIDER_APPROVAL_ACTIONS = frozenset({"provider_model_resolve"})
+PROVIDER_APPROVAL_ACTIONS = frozenset({"provider_model_resolve", "provider_test_batch"})
+
+
+def provider_approval_summary(action: str, parameters: dict) -> dict:
+    if action == "provider_model_resolve":
+        return provider_model_resolve_approval_summary(parameters)
+    from .provider_probe_actions import approval_targets
+
+    plan_id, targets = approval_targets(parameters)
+    return {
+        "assistantAction": action,
+        "assistantProviderPreviewVersion": 1,
+        "assistantParametersDigest": hashlib.sha256(plan_id.encode("ascii")).hexdigest(),
+        "assistantProbeTargets": targets,
+        "assistantDetailsOmitted": False,
+    }
 
 
 def validate_provider_model_resolve(parameters: dict) -> dict:

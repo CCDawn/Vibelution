@@ -256,7 +256,7 @@ def personal_assistant_overview_tool(offset: int = 0, limit: int = 100, team_id:
         return _error(str(exc))
 
 
-def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
+def personal_assistant_manage_tool(action: str, arguments_json: str, _cancel_checker=None) -> str:
     """Bounded governed operations; native descriptor requires approval every call.
 
     Actions: agent_create, agent_update, agent_archive, session_create,
@@ -288,7 +288,7 @@ def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
         from core.infrastructure.native_runtime import is_launcher_assistant_process
         if is_launcher_assistant_process():
             from core.assistant_runtime.actions import execute_action
-            result = execute_action(action, args, runtime=runtime, governed=True)
+            result = execute_action(action, args, runtime=runtime, governed=True, cancel_checker=_cancel_checker)
             from core.web.services.external_management.contracts import ACTION_SCOPES
             required_scope = ACTION_SCOPES.get(action)
             required_scopes = [required_scope] if required_scope else []

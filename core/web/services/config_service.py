@@ -902,7 +902,10 @@ def _profile_test_target(
     effective = build_effective_config(public_config)
     profile = effective.llm.get_profile(profile_id=normalized_profile_id)
     provider = effective.llm.get_provider(profile.provider_id)
-    if provider.requires_api_key:
+    if is_subscription_provider(provider):
+        api_key = None
+        api_key_source = "oauth:chatgpt"
+    elif provider.requires_api_key:
         api_key, api_key_source = _resolve_model_option_api_key(provider, profile, draft_meta)
     else:
         api_key = None
@@ -1031,24 +1034,39 @@ def _model_verification_summary(result: dict[str, Any]) -> dict[str, Any]:
 
     error_type = ""
     if not ok:
-        if "missing api key" in lowered or "missing credential" in lowered:
+        category = result.get("error_category")
+        if result.get("busy") or category == "probe_busy":
+            error_type = "busy"
+        elif category == "quota_error":
+            error_type = "quota_exhausted"
+        elif category == "incomplete_response":
+            error_type = "incomplete_response"
+        elif category == "missing_credential" or "missing api key" in lowered or "missing credential" in lowered:
             error_type = "missing_credential"
-        elif http_status in {401, 403} or "unauthor" in lowered or "forbidden" in lowered:
+        elif http_status == 403:
+            error_type = "permission_denied"
+        elif http_status == 401 or "unauthor" in lowered or "forbidden" in lowered:
             error_type = "auth_failed"
-        elif http_status == 429 or "rate limit" in lowered:
+        elif http_status == 429 or category == "rate_limit" or "rate limit" in lowered:
             error_type = "rate_limited"
         elif http_status == 503 or "service temporarily unavailable" in lowered:
             error_type = "service_unavailable"
         elif http_status == 502 or "upstream" in lowered:
             error_type = "upstream_unavailable"
-        elif "timeout" in lowered or "timed out" in lowered or "probe timed out" in lowered:
+        elif category == "timeout" or "timeout" in lowered or "timed out" in lowered:
             error_type = "timeout"
-        elif "connection" in lowered or "network" in lowered:
+        elif category == "network_error" or "connection" in lowered or "network" in lowered:
             error_type = "network"
-        elif "notfound" in lowered or "not found" in lowered or "does not exist" in lowered:
+        elif http_status == 404 or "notfound" in lowered or "not found" in lowered or "does not exist" in lowered:
             error_type = "not_found"
         elif http_status == 400:
             error_type = "bad_request"
+        elif category == "auth_error":
+            error_type = "auth_failed"
+        elif category == "server_error" or http_status is not None and http_status >= 500:
+            error_type = "service_unavailable"
+        elif category in {"configuration_error", "provider_protocol_error", "capability_error"}:
+            error_type = str(category)
         else:
             error_type = "failed"
     return {
@@ -1179,7 +1197,9 @@ def _invoke_llm_runtime_probe(provider: ProviderConfig, profile: LLMProfile, api
     return public_config_module._probe_llm_runtime(provider, profile, api_key)
 
 
-def _run_bounded_llm_runtime_probe(provider: ProviderConfig, profile: LLMProfile, api_key: str | None) -> dict[str, Any]:
+def _run_bounded_llm_runtime_probe(
+    provider: ProviderConfig, profile: LLMProfile, api_key: str | None, *, cancel_checker=None,
+) -> dict[str, Any]:
     probe_timeout = _llm_test_probe_timeout_seconds(provider, profile)
     if not _LLM_TEST_PROBE_WORKER_SLOTS.acquire(blocking=False):
         return {
@@ -1193,7 +1213,10 @@ def _run_bounded_llm_runtime_probe(provider: ProviderConfig, profile: LLMProfile
 
     def run_probe() -> None:
         try:
-            result_queue.put(("result", _invoke_llm_runtime_probe(provider, profile, api_key)))
+            from core.llm.client import llm_cancel_context
+
+            with llm_cancel_context(cancel_checker, enable_chat_provider_abort=cancel_checker is not None):
+                result_queue.put(("result", _invoke_llm_runtime_probe(provider, profile, api_key)))
         except Exception as exc:
             result_queue.put(("error", exc))
         finally:

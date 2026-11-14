@@ -17,6 +17,7 @@ from typing import Any
 
 import tomllib
 from core.llm import LLMInvocationContext, assert_llm_compatibility, invoke_llm
+from .chatgpt_subscription import is_subscription_provider
 from .llm_credentials import resolve_credential_ref
 from .llm_identity import make_model_ref
 from .lock_errors import ConfigEditLockBusy
@@ -2630,9 +2631,10 @@ def _probe_llm_http(provider, profile, api_key: str | None = None) -> dict:
 
 
 def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
-    if provider.requires_api_key and not api_key:
+    subscription = is_subscription_provider(provider)
+    if provider.requires_api_key and not api_key and not subscription:
         return {"ok": False, "message": f"missing API key for provider `{provider.provider_id}`"}
-    if not provider.requires_api_key:
+    if subscription or not provider.requires_api_key:
         api_key = None
     if not provider.base_url:
         return {"ok": False, "message": f"missing base_url for provider `{provider.provider_id}`"}
@@ -2648,7 +2650,11 @@ def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
             _default_completion_backend,
             _default_responses_backend,
         )
+        from core.llm.errors import LLMError
+        from core.llm.chatgpt_subscription.errors import ChatGPTSubscriptionError
     except Exception:
+        if subscription:
+            return {"ok": False, "message": "ChatGPT OAuth transport is unavailable", "error_category": "configuration_error"}
         return _probe_llm_http(provider, profile, api_key)
 
     probe_timeout = coerce_llm_runtime_probe_timeout(provider, profile.connect_timeout, profile.timeout)
@@ -2771,20 +2777,39 @@ def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
             # 很小，排空整个流即可。
             from core.llm.invocation import stream_llm
 
-            for _chunk in stream_llm(
+            outcome = None
+            for chunk in stream_llm(
                 client,
                 [{"role": "user", "content": "ping"}],
                 tools=[],
                 context=probe_context,
             ):
-                pass
+                outcome = chunk.additional_kwargs.get("turn_outcome", outcome)
         else:
-            invoke_llm(
+            response = invoke_llm(
                 client,
                 [{"role": "user", "content": "ping"}],
                 tools=[],
                 context=probe_context,
             )
+            outcome = response.additional_kwargs.get("turn_outcome")
+        completed_text = bool(outcome is not None and outcome.kind == "final_answer" and outcome.final_text.strip())
+        if subscription and not completed_text:
+            return {"ok": False, "message": "probe did not receive a completed text answer", "error_category": "incomplete_response"}
+    except ChatGPTSubscriptionError as exc:
+        category = {
+            "signed_out": "missing_credential", "reauth_required": "auth_error", "permission_missing": "auth_error",
+            "network": "network_error", "timeout": "timeout", "rate_limited": "rate_limit",
+            "upstream_unavailable": "server_error", "busy": "probe_busy",
+        }.get(exc.code, "configuration_error")
+        return {"ok": False, "message": exc.message, "error_category": category}
+    except LLMError as exc:
+        return {
+            "ok": False,
+            "message": redact_llm_probe_error(str(exc), api_key=api_key),
+            "error_category": exc.category,
+            "http_status": exc.details.get("httpStatus"),
+        }
     except Exception as exc:
         return {"ok": False, "message": redact_llm_probe_error(str(exc), api_key=api_key)}
 
@@ -2793,6 +2818,7 @@ def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
         "message": f"provider responded from {profile.model}",
         "runtime_route": captured_payload.get("model", ""),
         "probe": "runtime_provider",
+        "completed_text": completed_text,
         "stream": bool(captured_payload.get("stream")),
         "max_tokens": captured_payload.get("max_tokens"),
         "max_output_tokens": captured_payload.get("max_output_tokens"),
@@ -2805,7 +2831,7 @@ def test_llm_connection(public_config: dict, profile_id: str | None = None) -> d
     effective = build_effective_from_public_payload(public_config)
     profile = effective.llm.get_profile(profile_id=profile_id) if profile_id else effective.llm.get_profile(role="primary")
     provider = effective.llm.get_provider(profile.provider_id)
-    api_key = effective.get_api_key_for_profile(profile_id=profile.profile_id)
+    api_key = None if is_subscription_provider(provider) else effective.get_api_key_for_profile(profile_id=profile.profile_id)
     api_key_source = effective.llm.get_api_key_source_label_for_profile(profile_id=profile.profile_id)
     if not provider.requires_api_key:
         api_key = None

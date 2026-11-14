@@ -355,12 +355,15 @@ def test_restart_uses_native_rebirth_and_current_session_only(
 
 
 def test_manage_registered_descriptor_always_requires_native_approval():
+    from tools.Key_Tools import _PersonalAssistantManageArguments
+
     wrapper = definition(
         "tools/Key_Tools.py",
         MANAGE,
         {
             "tool": tool,
             "_personal_assistant_manage_impl": tools.personal_assistant_manage_tool,
+            "_PersonalAssistantManageArguments": _PersonalAssistantManageArguments,
         },
     )
     schema = wrapper.args_schema.model_json_schema()

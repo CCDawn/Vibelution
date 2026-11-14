@@ -174,6 +174,8 @@ def resolve_tool_approval_request(
     *,
     decision: str,
 ) -> dict[str, Any]:
+    from core.assistant_runtime.provider_approval import PROVIDER_APPROVAL_ACTIONS
+
     normalized_decision = str(decision or "").strip()
     if normalized_decision not in _VALID_DECISIONS:
         raise ToolApprovalError(f"unsupported tool approval decision: {normalized_decision or '<empty>'}")
@@ -186,7 +188,7 @@ def resolve_tool_approval_request(
         if request.external_task_id and normalized_decision not in {"decline", "cancel"}:
             raise ToolApprovalConflictError("external task approvals require a bound preview")
         if (request.tool_name == "personal_assistant_manage_tool"
-                and request.argument_summary.get("assistantAction") == "provider_model_resolve"
+                and request.argument_summary.get("assistantAction") in PROVIDER_APPROVAL_ACTIONS
                 and request.argument_summary.get("assistantArgumentsInvalid") is True
                 and normalized_decision not in {"decline", "cancel"}):
             raise ToolApprovalConflictError("provider model approval arguments cannot be verified")
@@ -1548,8 +1550,8 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
             if set(args) - {"action", "arguments_json", "_cancel_checker"}:
                 raise ValueError("Invalid provider management call")
             from core.web.services.local_assistant.management_approval import parse_arguments
-            from core.assistant_runtime.provider_approval import provider_model_resolve_approval_summary
-            return provider_model_resolve_approval_summary(parse_arguments(args.get("arguments_json")))
+            from core.assistant_runtime.provider_approval import provider_approval_summary
+            return provider_approval_summary(action, parse_arguments(args.get("arguments_json")))
         except (ValueError, TypeError, KeyError, RuntimeError, RecursionError):
             return {"assistantAction": action, "assistantArgumentsInvalid": True}
     from core.assistant_runtime.autonomy_approval import AUTONOMY_ACTIONS
