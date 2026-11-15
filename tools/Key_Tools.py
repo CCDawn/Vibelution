@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Annotated, Callable, Dict, List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 from langchain_core.tools import BaseTool, tool, StructuredTool
+from core.web.services.local_assistant.reuse_evidence import LocalReuseEvidenceArguments
 from tools.rebirth_tools import trigger_self_restart_tool as _restart_impl
 from tools.personal_assistant_tools import (
     personal_assistant_overview_tool as _personal_assistant_overview_impl,
@@ -610,6 +611,14 @@ def _build_key_tools() -> List[BaseTool]:
         except PermissionError as exc:
             return f"[patch] [SECURITY] {exc}"
         return apply_patch_edit(patch_text=patch_text, cwd=str(cwd_path))
+
+    @tool(args_schema=LocalReuseEvidenceArguments)
+    def record_local_reuse_evidence_tool(**arguments) -> str:
+        """为当前 Launcher 派遣的小修记录 LOCAL_ONLY 复用证据。先定位本地 owner，记录实际裁决、改动边界和验证计划，再改实现。工作区和分支由派遣绑定。"""
+        from core.web.services.local_assistant.reuse_evidence import record_local_reuse_evidence
+
+        return json.dumps(record_local_reuse_evidence(LocalReuseEvidenceArguments.model_validate(arguments)),
+                          ensure_ascii=False)
 
     @tool
     def code_symbol_tool(
@@ -4021,6 +4030,7 @@ def _build_key_tools() -> List[BaseTool]:
         cli_agent_run_tool,
         read_file_tool,
         write_file_tool,
+        record_local_reuse_evidence_tool,
         glob_tool,
         read_memory_tool,
         get_memory_summary_tool,

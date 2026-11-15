@@ -300,6 +300,7 @@ def test_local_worker_preparation_preserves_launcher_boundary(monkeypatch, tmp_p
     expected = f"launcher_assistant_task:{profile or 'inactive'}" if launcher_local else "external_agent_task:workspace_write"
     assert bindings[-1]["runtime_tool_source"] == expected
     assert bool(bindings[-1]["runtime_tool_grants"]) is bool(profile or not launcher_local)
+    assert ("record_local_reuse_evidence_tool" in bindings[-1]["runtime_tool_grants"]) is (profile == "workspace_write")
     assignment = next((block for block in seeds if "Launcher Task Assignment" in block), "")
     if not profile:
         assert assignment == ""
@@ -309,6 +310,7 @@ def test_local_worker_preparation_preserves_launcher_boundary(monkeypatch, tmp_p
         assert "Return your actual findings" in assignment
         assert original not in assignment
         assert ("Run real tests" in assignment) is (profile == "workspace_write")
+        assert ("record_local_reuse_evidence_tool" in assignment) is (profile == "workspace_write")
         assert ("read-only assignment" in assignment) is (profile == "read_only")
 
 

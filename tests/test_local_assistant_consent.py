@@ -73,6 +73,22 @@ def test_third_party_and_ordinary_session_policy_remain_unchanged(monkeypatch):
                 ("always", "execute"), "request_approval")
 
 
+def test_local_reuse_evidence_is_only_preapproved_for_an_active_workspace_writer(tmp_path, monkeypatch):
+    monkeypatch.setattr(consent, "_native_launcher", lambda runtime: False)
+    task = {"workspace": tmp_path, "profile": "workspace_write"}
+    monkeypatch.setattr(consent, "_task_runtime", lambda runtime: task)
+    tool = "record_local_reuse_evidence_tool"
+    runtime = {"runtimeToolSource": "launcher_assistant_task:workspace_write"}
+    assert consent.local_approval_policy(runtime, tool, {}, ("on_request", "write"), "auto_review") == (
+        None, "auto_review")
+    for source in ("", "external_agent_task:workspace_write", "launcher_assistant_task:read_only"):
+        with pytest.raises(consent.LocalTaskScopeError):
+            consent.local_approval_policy({"runtimeToolSource": source}, tool, {}, None, "full_access")
+    task["profile"] = "read_only"
+    with pytest.raises(consent.LocalTaskScopeError):
+        consent.local_approval_policy(runtime, tool, {}, None, "full_access")
+
+
 @pytest.mark.parametrize("command", [
     "python -m pytest --basetemp=C:/outside",
     "npm run test --prefix=C:/outside",

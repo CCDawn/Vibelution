@@ -7,10 +7,13 @@ import json
 import os
 import re
 import subprocess
+import tempfile
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Sequence
 
+from core.infrastructure.git_process import run_git
 from core.web.services import github_project_library_service as github_library
 
 
@@ -62,6 +65,12 @@ class ReuseResearchEvidenceError(ValueError):
     """Raised when reuse-research evidence is missing, unsafe, or unverifiable."""
 
 
+@dataclass(frozen=True, slots=True)
+class ReuseEvidenceWorkspace:
+    branch: str
+    git_common_dir: Path
+
+
 def normalize_path(value: str) -> str:
     return str(value or "").replace("\\", "/").removeprefix("./")
 
@@ -79,8 +88,8 @@ def reuse_research_required(files: Sequence[str]) -> bool:
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-c", "core.longpaths=true", *args],
+    return run_git(
+        ["-c", "core.longpaths=true", *args],
         cwd=root,
         capture_output=True,
         text=True,
@@ -120,11 +129,14 @@ def _git_common_dir(root: Path) -> Path:
 
 
 def evidence_path(root: Path | str, task_id: str) -> Path:
-    repository = _repository_root(root)
+    return _evidence_path(_git_common_dir(_repository_root(root)), task_id)
+
+
+def _evidence_path(common_dir: Path, task_id: str) -> Path:
     safe_task_id = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(task_id or "")).strip("-")
     if not safe_task_id:
         raise ReuseResearchEvidenceError("taskId is required.")
-    directory = _git_common_dir(repository) / "vibelution-cache" / "reuse_research"
+    directory = common_dir / "vibelution-cache" / "reuse_research"
     return directory / f"{safe_task_id}.json"
 
 
@@ -349,9 +361,24 @@ def record_evidence(
     source_refs: Sequence[str],
     research_mode: str = "EXTERNAL",
     project_root: Path | str | None = None,
+    workspace_binding: ReuseEvidenceWorkspace | None = None,
 ) -> dict[str, object]:
-    repository = _repository_root(root)
-    branch = _branch(repository)
+    if workspace_binding is None:
+        repository = _repository_root(root)
+        branch = _branch(repository)
+        common_dir = _git_common_dir(repository)
+    else:
+        from core.infrastructure.git_fileread import read_git_identity, read_git_layout
+
+        repository = Path(root).resolve(strict=True)
+        layout = read_git_layout(repository)
+        git_identity = read_git_identity(repository)
+        branch = workspace_binding.branch
+        common_dir = workspace_binding.git_common_dir
+        if (layout is None or layout.worktree_root != repository or layout.git_common_dir != common_dir
+                or layout.git_dir.parent != common_dir / "worktrees"
+                or (git_identity["branchName"] if git_identity else _branch(repository)) != branch):
+            raise ReuseResearchEvidenceError("The assigned worktree or branch no longer matches the task.")
     task_id = _task_id(branch)
     normalized_decision = str(decision or "").strip().upper()
     if normalized_decision not in DECISIONS:
@@ -422,11 +449,19 @@ def record_evidence(
         "recordedAt": _utc_now(),
     }
     validate_evidence_payload(payload, repository, task_id=task_id, branch=branch)
-    path = evidence_path(repository, task_id)
+    path = _evidence_path(common_dir, task_id)
+    if workspace_binding is not None and path.parent.resolve() != path.parent:
+        raise ReuseResearchEvidenceError("The reuse evidence directory has been redirected.")
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + f".{os.getpid()}.tmp")
-    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    os.replace(temporary, path)
+    descriptor, filename = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temporary = Path(filename)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            json.dump(payload, output, ensure_ascii=False, indent=2)
+            output.write("\n")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
     return payload
 
 

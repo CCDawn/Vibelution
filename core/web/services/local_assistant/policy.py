@@ -19,6 +19,7 @@ from core.web.services.external_agent.policy import external_runtime_tool_grants
 from core.web.services.tool_catalog import TOOL_CATALOG
 
 LOCAL_RUNTIME_SOURCE_PREFIX = "launcher_assistant_task:"
+LOCAL_REUSE_EVIDENCE_TOOL = "record_local_reuse_evidence_tool"
 
 _CLI_TOOLS = frozenset({"cli_tool", "exec_command", "write_stdin"})
 _FILE_TOOLS = frozenset({"read_file_tool", "write_file_tool", "apply_diff_edit_tool"})
@@ -123,6 +124,7 @@ def local_runtime_tool_grants(permission_profile: str) -> tuple[str, ...]:
     desired = _READ_GRANTS + (_WRITE_GRANTS if permission_profile == "workspace_write" else ())
     names = [name for name in desired if name in external and _ordinary_metadata(name)]
     if permission_profile == "workspace_write":
+        names.append(LOCAL_REUSE_EVIDENCE_TOOL)
         names.extend(name for name in sorted(_CLI_TOOLS) if _ordinary_metadata(name))
     return tuple(dict.fromkeys(names))
 

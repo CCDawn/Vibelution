@@ -1,5 +1,5 @@
 """Apply task-level local consent at the existing final execution gate."""
-from .policy import (LOCAL_RUNTIME_SOURCE_PREFIX, normal_development_call,
+from .policy import (LOCAL_REUSE_EVIDENCE_TOOL, LOCAL_RUNTIME_SOURCE_PREFIX, normal_development_call,
                      workspace_paths_allowed)
 
 
@@ -49,7 +49,19 @@ def _active_task(runtime):
     return task
 
 
+def require_local_workspace_write(runtime):
+    """Require a current server-bound worktree write grant, even after tool selection."""
+    if runtime.get("runtimeToolSource") == LOCAL_RUNTIME_SOURCE_PREFIX + "workspace_write":
+        task = _active_task(runtime)
+        if task["profile"] == "workspace_write":
+            return task
+    raise LocalTaskScopeError("本地复用记录工具仅供持有工作区写权限的当前 Launcher 派遣任务使用。")
+
+
 def local_approval_policy(runtime, tool_name, args, requirement, permission_preset):
+    if tool_name == LOCAL_REUSE_EVIDENCE_TOOL:
+        require_local_workspace_write(runtime)
+        return None, permission_preset
     if _native_launcher(runtime) and tool_name == "personal_assistant_manage_tool":
         from .management_approval import approval_requirement
         return approval_requirement(runtime, args), "request_approval"

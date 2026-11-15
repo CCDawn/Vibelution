@@ -19,6 +19,7 @@ def task_assignment_context(task: dict) -> str:
     if task["profile"] == "workspace_write":
         lines.extend([
             "Normal edits and local tests/builds in this worktree can proceed under the task grant.",
+            "For a confirmed small fix that requires LOCAL_ONLY reuse evidence, use record_local_reuse_evidence_tool before editing implementation files. Supply the actual owner, decision, reason, change boundary, and verification; this is the task-scoped way to record the evidence described in the project rules.",
             "Keep changes in the task worktree. Do not publish, delete unrelated data, change permissions, or write to the integration checkout.",
             "Run real tests and include the command, exit code, changed files, and worktree path in your final answer.",
         ])
