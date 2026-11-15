@@ -8,6 +8,7 @@ from core.assistant_runtime.local_project_client import LocalAssistantBackendCli
 from core.assistant_runtime.management import ManagementAdapter
 from core.assistant_runtime.migration_io import MigrationIOError
 from core.external_agent.backend_client import BackendClientError
+from core.infrastructure.file_lock import lock_path_for
 from core.web.services.external_management.recovery import RecoverSubject, RecoveryIdentity, recover
 from core.web.services.external_management.service import ManagementError, ManagementService, TargetIdentity
 
@@ -70,17 +71,20 @@ def test_recovery_retries_exact_approved_subject_after_missing_ack(grants, monke
             recover(grants.service, changed, launcher_capability=token)
 
 
-def test_recovery_refuses_an_unsafe_namespace_before_taking_locks(grants, monkeypatch):
+@pytest.mark.parametrize("location", ["directory", "lock"])
+def test_recovery_refuses_an_unsafe_namespace_before_taking_locks(grants, monkeypatch, location):
     original = type(grants.subject).lstat
-    directory = grants.subject.parent
+    unsafe = grants.subject.parent if location == "directory" else lock_path_for(grants.subject.with_suffix(".lock"))
+    if location == "lock":
+        unsafe.touch()
 
     def lstat(path, *args, **kwargs):
         value = original(path, *args, **kwargs)
-        if path == directory:
+        if path == unsafe:
             return SimpleNamespace(st_mode=value.st_mode, st_file_attributes=0x400)
         return value
 
-    monkeypatch.setattr(type(directory), "lstat", lstat)
+    monkeypatch.setattr(type(unsafe), "lstat", lstat)
     monkeypatch.setattr(grants.service.store, "lock", lambda *_: pytest.fail("unsafe namespace must not be locked"))
     with pytest.raises(MigrationIOError, match="linked_source"):
         recover(grants.service, grants.identity, launcher_capability="trusted-launcher")
@@ -112,7 +116,7 @@ def test_recovery_transport_requires_launcher_and_privileged_operator(grants, mo
         assert http.post(url, json=grants.identity.model_dump(), headers=headers).json()["detail"]["code"] == "OPERATOR_CONTROL_REQUIRED"
         monkeypatch.setenv(CONTROL_OPERATOR_ROLES_ENV, "operator")
         assert http.post(url, json=grants.identity.model_dump(), headers=headers).json() == {"available": True}
-    assert url not in app.openapi()["paths"]
+    assert not any("/subjects/recovery/" in path for path in app.openapi()["paths"])
 
 
 @pytest.mark.asyncio

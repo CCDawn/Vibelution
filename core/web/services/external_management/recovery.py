@@ -5,6 +5,7 @@ import stat
 from pydantic import Field, field_validator
 
 from core.assistant_runtime.migration_io import check_path
+from core.infrastructure.file_lock import lock_path_for
 
 from .contracts import Binding, Closed, SCOPES, Scope
 from .store import digest
@@ -57,7 +58,7 @@ def recover(service, request: RecoveryIdentity, *, launcher_capability: str):
     old_subject_path = store.path("subjects", request.subject_id)
     old_index_path = store.path("clients", request.client_id)
     for record in (old_subject_path, old_index_path):
-        check_path(record.with_suffix(".lock"), missing_ok=True)
+        check_path(lock_path_for(record.with_suffix(".lock")), missing_ok=True)
     with store.lock("clients", request.client_id), store.lock("subjects", request.subject_id):
         service._expected(binding)
         old_subject = _read_record(store, old_subject_path)
@@ -70,7 +71,8 @@ def recover(service, request: RecoveryIdentity, *, launcher_capability: str):
         if not isinstance(request, RecoverSubject):
             return {"available": _read_record(store, path) is None and _read_record(store, index_path) is None}
         for record in (path, index_path):
-            check_path(record.with_suffix(".lock"), missing_ok=True)
+            check_path(lock_path_for(record.with_suffix(".lock")), missing_ok=True)
+            check_path(lock_path_for(record), missing_ok=True)
         with store.lock("clients", new_client), store.lock("subjects", new_subject):
             current = service._expected(binding)
             fingerprint = digest([current.signature, request.model_dump(), launcher_capability])
