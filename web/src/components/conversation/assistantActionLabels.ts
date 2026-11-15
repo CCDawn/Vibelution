@@ -137,6 +137,7 @@ const ASSISTANT_ACTION_DETAILS: Record<string, readonly [string, string, Assista
   project_lifecycle: ["管理项目", "Manage project", "execute"],
   dispatch_write: ["派遣 Agent 修改项目", "Dispatch agent to modify project", "dispatch"],
   authorization_upgrade: ["新增项目权限", "Add project permissions", "change"],
+  authorization_recover: ["恢复项目授权", "Recover project authorization", "change"],
   agent_create: ["创建 Agent", "Create agent", "change"], agent_update: ["修改 Agent", "Update agent", "change"],
   agent_parameters_update: ["修改 Agent 参数", "Update agent parameters", "change"],
   agent_prompt_update: ["修改 Agent 提示词", "Update agent prompt", "change"],

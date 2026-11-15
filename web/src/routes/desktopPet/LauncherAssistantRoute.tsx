@@ -47,7 +47,7 @@ import { DEFAULT_PET_PREFERENCES } from "./desktopPetPreferences";
 import { usePetCompletion } from "./usePetCompletion";
 import { ChatToolApprovalDialog } from "../chat/ChatToolApprovalDialog";
 import { toolApprovalRiskLabel } from "../chat/toolApprovalLabels";
-import { agentArchivePreviewIsValid, agentPurgePreviewIsValid, autonomyActionIsKnown, autonomyApprovalPreviewIsValid, authorizationUpgradePreviewIsValid, browserInteractPreviewIsValid, dispatchWritePreviewIsValid, launcherAgentCreatePreviewIsValid, operatorImageUploadPreviewIsValid, preferenceProposalPreviewIsValid, projectLifecyclePreviewIsValid, recoveryPreviewIsValid, managementApprovalActionIsKnown, platformManagementActionIsKnown, platformManagementPreviewIsValid, toolApprovalActionPreview, toolApprovalDisplayName } from "../chat/toolApprovalPreview";
+import { agentArchivePreviewIsValid, agentPurgePreviewIsValid, autonomyActionIsKnown, autonomyApprovalPreviewIsValid, authorizationRecoverPreviewIsValid, authorizationUpgradePreviewIsValid, browserInteractPreviewIsValid, dispatchWritePreviewIsValid, launcherAgentCreatePreviewIsValid, operatorImageUploadPreviewIsValid, preferenceProposalPreviewIsValid, projectLifecyclePreviewIsValid, recoveryPreviewIsValid, managementApprovalActionIsKnown, platformManagementActionIsKnown, platformManagementPreviewIsValid, toolApprovalActionPreview, toolApprovalDisplayName } from "../chat/toolApprovalPreview";
 import { providerModelApprovalPreviewIsValid } from "../chat/providerApprovalPreview";
 import { agentConfigurationApprovalActionIsKnown, agentConfigurationApprovalPreviewIsValid } from "../chat/agentConfigurationApprovalPreview";
 import { launcherTeamActionIsKnown, launcherTeamPreviewIsValid, launcherTeamActionPreview, launcherTeamActionTitle } from "./teamManagementApprovalPreview";
@@ -140,6 +140,7 @@ function approvalAcceptDisabled(request: SessionToolApprovalRequest): boolean {
     || summary?.assistantAction === "agent_purge_batch" && !agentPurgeBatchPreviewIsValid(summary)
     || summary?.assistantAction === "agent_archive" && !agentArchivePreviewIsValid(summary)
     || summary?.assistantAction === "authorization_upgrade" && !authorizationUpgradePreviewIsValid(summary)
+    || summary?.assistantAction === "authorization_recover" && !authorizationRecoverPreviewIsValid(summary)
     || summary?.assistantAction === "dispatch_write" && !dispatchWritePreviewIsValid(summary)
     || summary?.assistantAction === "project_lifecycle" && !projectLifecyclePreviewIsValid(summary)
     || summary?.assistantAction === "operator_image_upload" && !operatorImageUploadPreviewIsValid(summary)
@@ -1601,7 +1602,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       toolName={approval.toolName} actionPreview={approval.toolName === "personal_assistant_manage_tool" && launcherTeamActionIsKnown(approval.argumentSummary?.assistantAction)
         ? launcherTeamActionPreview(approval.argumentSummary, lang) : approval.toolName === "personal_assistant_manage_tool" && approval.argumentSummary?.assistantAction === "agent_purge_batch"
           ? launcherAgentPurgeBatchActionPreview(approval.argumentSummary, lang) : toolApprovalActionPreview(approval.argumentSummary, approval.toolName, lang)}
-      fullActionPreview={approval.toolName === "personal_assistant_manage_tool" && (autonomyActionIsKnown(approval.argumentSummary?.assistantAction) || launcherTeamActionIsKnown(approval.argumentSummary?.assistantAction) || platformManagementActionIsKnown(approval.argumentSummary?.assistantAction) || ["agent_create", "agent_archive", "agent_purge", "agent_purge_batch", "authorization_upgrade", "dispatch_write", "project_lifecycle", "operator_image_upload", "reminder_handoff_recover", "browser_interact", "provider_test_batch"].includes(String(approval.argumentSummary?.assistantAction)))}
+      fullActionPreview={approval.toolName === "personal_assistant_manage_tool" && (autonomyActionIsKnown(approval.argumentSummary?.assistantAction) || launcherTeamActionIsKnown(approval.argumentSummary?.assistantAction) || platformManagementActionIsKnown(approval.argumentSummary?.assistantAction) || ["agent_create", "agent_archive", "agent_purge", "agent_purge_batch", "authorization_upgrade", "authorization_recover", "dispatch_write", "project_lifecycle", "operator_image_upload", "reminder_handoff_recover", "browser_interact", "provider_test_batch"].includes(String(approval.argumentSummary?.assistantAction)))}
       approveDisabled={approvalAcceptDisabled(approval)}
       onApprove={() => void decide(approval, "accept")} onReject={() => void decide(approval, "decline")} /> : null}
     {dispatchApproval ? <ChatToolApprovalDialog lang={lang} variant="composer"

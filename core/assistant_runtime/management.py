@@ -241,6 +241,24 @@ class ManagementAdapter:
         raise DispatchError("This request was permanently cleaned; use a new request identity for new work.",
                             code="MANAGEMENT_ALREADY_CLEANED")
 
+    @staticmethod
+    def _check_epoch(client, record):
+        if record.get("authorizationEpoch", "") != getattr(client, "management_epoch", ""):
+            raise DispatchError("原请求属于已失效的管理身份，执行结果待确认。保留原编号，不重新提交。",
+                                code="ORIGINAL_MANAGEMENT_IDENTITY_UNAVAILABLE")
+
+    async def _call_original(self, project_id, record, action):
+        async def run(client):
+            self._check_epoch(client, record)
+            return await action(client)
+        return await self._call(project_id, run)
+
+    async def recover(self, project_id: str, **parameters):
+        if project_id not in self._projects:
+            raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")
+        result = await self._call(project_id, lambda client: client.management_recover(**parameters))
+        return {**result, "projectId": project_id}
+
     async def invoke(self, project_id: str, *, action: str, request_id: str, parameters: dict):
         from core.web.services.external_management.platform_actions import PLATFORM_ACTIONS
         never_replay = action in PLATFORM_ACTIONS or action in {"agent_archive", "agent_purge", "agent_purge_batch"}
@@ -258,7 +276,8 @@ class ManagementAdapter:
                 if record["fingerprint"] != fingerprint:
                     raise DispatchError("Request ID belongs to different parameters.", code="MANAGEMENT_CONFLICT")
                 try:
-                    result = await self._call(project_id, lambda client: client.management_receipt(action=action, request_id=request_id))
+                    result = await self._call_original(project_id, record,
+                        lambda client: client.management_receipt(action=action, request_id=request_id))
                     team = result.get("teamRun")
                     resumable = (action == "team_run" and result.get("status") == "unknown"
                         and result.get("resumeAllowed") is True
@@ -279,18 +298,23 @@ class ManagementAdapter:
                     # Only an authenticated not-admitted result permits the
                     # original envelope to reach the target's durable gate.
             else:
-                atomic_write_json(path, {"schemaVersion": 1, "fingerprint": fingerprint,
-                    "reference": {"projectId": project_id, "action": action, "requestId": request_id}})
+                record = {"schemaVersion": 1, "fingerprint": fingerprint,
+                          "reference": {"projectId": project_id, "action": action, "requestId": request_id}}
             # A missing target receipt cannot prove that an earlier control did
             # not run. Only this attempt's authenticated, pre-admission scope
             # denial permits the same key after its explicit scope upgrade.
-            if never_replay:
-                record = self._read(path)
+            async def execute(client):
+                if retrying:
+                    self._check_epoch(client, record)
+                else:
+                    record["authorizationEpoch"] = getattr(client, "management_epoch", "")
                 record.pop("admissionDenied", None)
-                atomic_write_json(path, record)
+                if never_replay or not retrying:
+                    atomic_write_json(path, record)
+                return await client.management_action(action=action, request_id=request_id,
+                    parameters=parameters, require_existing_subject=retrying)
             try:
-                result = await self._call(project_id, lambda client: client.management_action(action=action,
-                    request_id=request_id, parameters=parameters, require_existing_subject=retrying))
+                result = await self._call(project_id, execute)
             except DispatchError as exc:
                 if never_replay and exc.code == "SCOPE_DENIED":
                     record["admissionDenied"] = "SCOPE_DENIED"
@@ -300,8 +324,9 @@ class ManagementAdapter:
 
     async def receipt(self, project_id: str, *, action: str, request_id: str):
         key = self._key(project_id, action, request_id)
-        self._read(self._root / (key + ".json"))
-        result = await self._call(project_id, lambda client: client.management_receipt(action=action, request_id=request_id))
+        record = self._read(self._root / (key + ".json"))
+        result = await self._call_original(project_id, record,
+            lambda client: client.management_receipt(action=action, request_id=request_id))
         return {**result, "projectId": project_id}
 
     async def flow_result(self, project_id: str, *, request_id: str, team_id: str, flow_id: str,
@@ -316,7 +341,7 @@ class ManagementAdapter:
         record = self._read(path)
         if record.get("reference") != {"projectId": project_id, "action": "flow_start", "requestId": request_id}:
             raise DispatchError("Original flow association is unavailable.", code="MANAGEMENT_STATE_INVALID")
-        result = await self._call(project_id, lambda client: client.management_flow_result(
+        result = await self._call_original(project_id, record, lambda client: client.management_flow_result(
             request_id=request_id, team_id=team_id, flow_id=flow_id, run_id=run_id))
         if any(result.get(field) != expected for field, expected in (
                 ("requestId", request_id), ("teamId", team_id), ("flowId", flow_id), ("runId", run_id))):
@@ -335,8 +360,9 @@ class ManagementAdapter:
         if self._read_binding is None:
             raise DispatchError("Project authorization cannot be checked.", code="TEAM_RESULT_UNAVAILABLE")
         binding = self._read_binding(project_id)
-        self._read(self._root / (self._key(project_id, "team_run", request_id) + ".json"))
-        result = await self._call(project_id, lambda client: client.management_team_result(request_id=request_id))
+        record = self._read(self._root / (self._key(project_id, "team_run", request_id) + ".json"))
+        result = await self._call_original(project_id, record,
+            lambda client: client.management_team_result(request_id=request_id))
         identity = {key: result[key] for key in ("status", "text", "truncated")}
         digest = hashlib.sha256(json.dumps(identity, ensure_ascii=True, sort_keys=True).encode("ascii")).hexdigest()
         if expected_hash is not None and expected_hash != digest:
@@ -471,10 +497,11 @@ class ManagementAdapter:
         result = await self._call(project_id, lambda client: client.management_team_list(**parameters))
         return {**result, "projectId": project_id}
 
-    async def authorization_status(self, project_id: str):
+    async def authorization_status(self, project_id: str, *, planned_scopes: list[str] | None = None):
         if project_id not in self._projects:
             raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")
-        result = await self._call(project_id, lambda client: client.management_authorization_status())
+        parameters = {"planned_scopes": planned_scopes} if planned_scopes else {}
+        result = await self._call(project_id, lambda client: client.management_authorization_status(**parameters))
         return {**result, "projectId": project_id}
 
     async def legacy_observers(self, project_id: str, *, offset=0, limit=3):

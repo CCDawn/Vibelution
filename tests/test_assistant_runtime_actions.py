@@ -41,8 +41,8 @@ class Dispatch:
 async def test_authorization_status_plans_all_missing_scopes_in_one_read():
     calls = []
 
-    async def status(project_id):
-        calls.append(project_id)
+    async def status(project_id, *, planned_scopes):
+        calls.append((project_id, planned_scopes))
         return {"scopes": ["teams:directory:read"], "grantRevision": 2}
 
     service = Dispatch()
@@ -52,7 +52,7 @@ async def test_authorization_status_plans_all_missing_scopes_in_one_read():
         result = await asyncio.to_thread(execute_action, "authorization_status", {
             "project_id": "test-project", "actions": ["team_list", "agent_list", "source_read", "source_search", "dispatch"],
         })
-        assert calls == ["test-project"]
+        assert calls == [("test-project", ["agents:directory:read", "source:read", "teams:directory:read"])]
         assert result["missingScopes"] == ["agents:directory:read", "source:read"]
         assert result["blockedActions"] == {
             "agent_list": ["agents:directory:read"], "source_read": ["source:read"], "source_search": ["source:read"],

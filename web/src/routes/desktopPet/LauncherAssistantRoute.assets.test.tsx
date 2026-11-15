@@ -389,6 +389,34 @@ describe("Launcher operator image consumption", () => {
     expect(preview?.tabIndex).toBe(0);
   });
 
+  it.each([1, 2])("permits a single project authorization recovery decision only for the supported preview version (%s)", async version => {
+    await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",
+      toolName: "personal_assistant_manage_tool", status: "pending", risk: "high", availableDecisions: ["accept", "decline"],
+      argumentSummary: { assistantAction: "authorization_recover", assistantRecoveryVersion: version,
+        assistantTargets: { project_id: "registered:1" }, assistantAddedScopes: ["source:read", "tasks:read"] } } });
+    const approve = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("允许本次"));
+    const reject = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("拒绝"));
+    const dialog = container.querySelector('[role="dialog"]')!;
+    expect(approve?.disabled).toBe(version !== 1);
+    expect(reject?.disabled).toBe(false);
+    if (version === 1) {
+      const preview = dialog.querySelector("[data-approval-full-preview]");
+      for (const value of ["恢复项目授权", "新的助理授权身份", "registered:1", "source:read", "tasks:read"]) {
+        expect(preview?.textContent).toContain(value);
+      }
+      expect(dialog.textContent).toContain("仅本次调用");
+    } else {
+      expect(dialog.textContent).toContain("参数无法核对");
+    }
+    await act(async () => {
+      approve?.click();
+      dialog.dispatchEvent(new KeyboardEvent("keydown", { key: "y", bubbles: true }));
+    });
+    await settle();
+    expect(invoke.mock.calls.filter(([request]) => request.operation === "resolveApproval" && request.decision === "accept"))
+      .toHaveLength(version === 1 ? 1 : 0);
+  });
+
   it("shows the complete write dispatch before allowing approval", async () => {
     const task = `请修改项目\n${"完整任务内容".repeat(100)}\n任务结尾`;
     await renderAssistant({ approval: { requestId: "r", sessionId: "s", turnId: "t", agentId: "a",

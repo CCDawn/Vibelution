@@ -143,7 +143,7 @@ def _coerce_action_parameters(parameters):
 
 
 def personal_assistant_action_tool(action: str = "index", parameters: dict | None = None) -> str:
-    """Execute an explicitly registered everyday action using object parameters."""
+    """Execute a registered action. In Launcher, use authorization_status with all current project actions to plan project grant recovery."""
     try:
         runtime = _identity()
         parameters = _coerce_action_parameters(parameters)

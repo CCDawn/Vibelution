@@ -281,6 +281,25 @@ async def authorization_status(request: Request):
     return await _call(lambda: _service().authorization_status(*_credentials(request)))
 
 
+@router.post("/subjects/recovery/{operation}", include_in_schema=False)
+async def recover_subject(operation: Literal["check", "enroll"], request: Request):
+    from core.infrastructure.launcher_assistant_authority import verify_launcher_authority
+    from core.web.services.external_management.recovery import RecoveryIdentity, RecoverSubject, recover
+
+    _require_control(request)
+    actor, capability = _credentials(request)
+    if actor != "launcher-local" or not verify_launcher_authority(capability):
+        raise HTTPException(status_code=403, detail={"code": "LAUNCHER_AUTHORITY_REQUIRED"})
+    if request.query_params:
+        raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"})
+    payload = await _body(request, unique_keys=True)
+    try:
+        data = (RecoverSubject if operation == "enroll" else RecoveryIdentity).model_validate(payload)
+    except ValueError:
+        raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"}) from None
+    return await _operator_call(request, lambda: recover(_service(), data, launcher_capability=capability))
+
+
 @router.post("/legacy-observers", response_model=LegacyObserverView)
 async def create_legacy_observer(request: Request):
     _require_control(request)
