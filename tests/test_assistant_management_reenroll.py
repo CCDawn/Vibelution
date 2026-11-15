@@ -99,3 +99,32 @@ async def test_old_management_reference_cannot_execute_under_new_subject(tmp_pat
     assert not reads and len(writes) == 1
     await adapter.invoke("p", **{**original, "request_id": "fresh"})
     assert len(writes) == 2
+
+
+@pytest.mark.asyncio
+async def test_recovery_plan_holds_proof_privately_and_only_for_the_original_turn(tmp_path):
+    scopes = ["agents:directory:read", "teams:directory:read"]
+    submitted = []
+
+    class Client:
+        async def management_authorization_status(self, *, planned_scopes):
+            assert planned_scopes == scopes
+            return {"status": "recovery_required", "scopes": [], "recovery_challenge": "private-proof"}
+
+        async def management_recover(self, **values):
+            submitted.append(values)
+            return {"status": "completed", "scopes": values["scopes"]}
+
+    async def call(_project, method):
+        return await method(Client())
+
+    adapter = ManagementAdapter(tmp_path, {"p": tmp_path / "p"}, call)
+    plan = await adapter.authorization_status("p", planned_scopes=scopes, turn_id="current")
+    assert plan == {"status": "recovery_required", "scopes": [], "recoveryPlanAvailable": True, "projectId": "p"}
+    for turn, consent_scopes in [("different", scopes), ("current", [*scopes, "source:read"])]:
+        with pytest.raises(DispatchError) as failure:
+            await adapter.recover("p", turn_id=turn, scopes=consent_scopes, request_id="one-consent")
+        assert failure.value.code == "RECOVERY_PLAN_UNAVAILABLE"
+    assert not submitted
+    assert (await adapter.recover("p", turn_id="current", scopes=scopes, request_id="one-consent"))["status"] == "completed"
+    assert submitted == [{"request_id": "one-consent", "scopes": scopes, "challenge": "private-proof"}]

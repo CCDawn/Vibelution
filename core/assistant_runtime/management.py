@@ -188,6 +188,7 @@ class ManagementAdapter:
         self._call = call
         self._read_binding = read_binding
         self._locks: dict[str, anyio.Lock] = {}
+        self._recovery_plans: dict[tuple[str, str], tuple[list[str], str]] = {}
 
     @property
     def _projects(self):
@@ -253,10 +254,17 @@ class ManagementAdapter:
             return await action(client)
         return await self._call(project_id, run)
 
-    async def recover(self, project_id: str, **parameters):
+    async def recover(self, project_id: str, *, turn_id: str, request_id: str, scopes: list[str]):
         if project_id not in self._projects:
             raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")
-        result = await self._call(project_id, lambda client: client.management_recover(**parameters))
+        plan_key = (project_id, turn_id)
+        plan = self._recovery_plans.get(plan_key)
+        if plan is None or plan[0] != scopes:
+            raise DispatchError("本轮缺少匹配的授权核对结果，请一次核对本次任务的权限。",
+                                code="RECOVERY_PLAN_UNAVAILABLE")
+        result = await self._call(project_id, lambda client: client.management_recover(
+            request_id=request_id, scopes=scopes, challenge=plan[1]))
+        self._recovery_plans.pop(plan_key, None)
         return {**result, "projectId": project_id}
 
     async def invoke(self, project_id: str, *, action: str, request_id: str, parameters: dict):
@@ -497,11 +505,20 @@ class ManagementAdapter:
         result = await self._call(project_id, lambda client: client.management_team_list(**parameters))
         return {**result, "projectId": project_id}
 
-    async def authorization_status(self, project_id: str, *, planned_scopes: list[str] | None = None):
+    async def authorization_status(self, project_id: str, *, planned_scopes: list[str] | None = None, turn_id: str = ""):
         if project_id not in self._projects:
             raise DispatchError("Project is not authorized.", code="PROJECT_NOT_AUTHORIZED")
         parameters = {"planned_scopes": planned_scopes} if planned_scopes else {}
         result = await self._call(project_id, lambda client: client.management_authorization_status(**parameters))
+        challenge = result.pop("recovery_challenge", None)
+        if turn_id and planned_scopes:
+            key = (project_id, turn_id)
+            self._recovery_plans.pop(key, None)
+            if challenge:
+                self._recovery_plans[key] = (planned_scopes, challenge)
+                if len(self._recovery_plans) > 64:
+                    self._recovery_plans.pop(next(iter(self._recovery_plans)))
+                result["recoveryPlanAvailable"] = True
         return {**result, "projectId": project_id}
 
     async def legacy_observers(self, project_id: str, *, offset=0, limit=3):
