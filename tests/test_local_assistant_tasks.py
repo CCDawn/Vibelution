@@ -308,6 +308,7 @@ def test_local_worker_preparation_preserves_launcher_boundary(monkeypatch, tmp_p
         assert "You are the assigned project Agent" in assignment
         assert "The Launcher assistant owns further dispatch" in assignment
         assert "Return your actual findings" in assignment
+        assert "Locate source using glob_tool for file names and grep_search_tool" in assignment
         assert original not in assignment
         assert ("Run real tests" in assignment) is (profile == "workspace_write")
         assert ("record_local_reuse_evidence_tool" in assignment) is (profile == "workspace_write")

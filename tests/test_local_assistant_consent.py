@@ -89,6 +89,22 @@ def test_local_reuse_evidence_is_only_preapproved_for_an_active_workspace_writer
         consent.local_approval_policy(runtime, tool, {}, None, "full_access")
 
 
+@pytest.mark.parametrize(("tool", "arg"), [("cli_tool", "command"), ("exec_command", "cmd")])
+@pytest.mark.parametrize(("command", "hint"), [
+    ('rg -n -i "docx|python-docx|word export" --glob "!*.lock"', "grep_search_tool.*glob_tool"),
+    ("python scripts/reuse_research_evidence.py record --help", "record_local_reuse_evidence_tool"),
+])
+def test_launcher_development_discovery_redirects_to_scoped_tools_without_approval(tmp_path, monkeypatch, tool, arg, command, hint):
+    monkeypatch.setattr(consent, "_native_launcher", lambda runtime: False)
+    monkeypatch.setattr(consent, "_task_runtime", lambda runtime: {"workspace": tmp_path, "profile": "workspace_write"})
+    runtime = {"runtimeToolSource": "launcher_assistant_task:workspace_write"}
+    args = {arg: command, "cwd": str(tmp_path)}
+    original = ("on_request", "execute")
+    with pytest.raises(consent.LocalTaskScopeError, match=hint):
+        consent.local_approval_policy(runtime, tool, args, original, "auto_review")
+    assert consent.local_approval_policy({}, tool, args, original, "request_approval") == (original, "request_approval")
+
+
 @pytest.mark.parametrize("command", [
     "python -m pytest --basetemp=C:/outside",
     "npm run test --prefix=C:/outside",

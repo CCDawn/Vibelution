@@ -1,4 +1,6 @@
 """Apply task-level local consent at the existing final execution gate."""
+import re
+
 from .policy import (LOCAL_REUSE_EVIDENCE_TOOL, LOCAL_RUNTIME_SOURCE_PREFIX, normal_development_call,
                      workspace_paths_allowed)
 
@@ -71,6 +73,13 @@ def local_approval_policy(runtime, tool_name, args, requirement, permission_pres
     workspace = task["workspace"]
     if not workspace_paths_allowed(tool_name, args, workspace):
         raise LocalTaskScopeError("工具路径超出本次派遣的工作区，请使用任务工作区内的路径。")
+    if tool_name in {"cli_tool", "exec_command"}:
+        command = args.get("command" if tool_name == "cli_tool" else "cmd")
+        if isinstance(command, str):
+            if re.match(r"(?i)^\s*rg(?:\.exe)?(?:\s|$)", command):
+                raise LocalTaskScopeError("本次派遣可直接用 grep_search_tool 搜源码，或用 glob_tool 查文件名。请用对应工具继续，路径限定在任务工作区。")
+            if re.fullmatch(r"(?i)\s*python(?:\.exe)?\s+scripts[\\/]reuse_research_evidence\.py\s+record\s+--help\s*", command):
+                raise LocalTaskScopeError("LOCAL_ONLY 复用记录请使用 record_local_reuse_evidence_tool，其参数由工具直接提供。")
     risk = requirement[1] if requirement else "execute"
     if risk not in {"network", "destructive"} and normal_development_call(tool_name, args, workspace):
         return None, permission_preset

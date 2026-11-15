@@ -15,6 +15,7 @@ def task_assignment_context(task: dict) -> str:
         f"RepositoryRoot: {task['workspace']}",
         f"ToolWorkspace: {task['workspace']}",
         "Use absolute paths inside ToolWorkspace for file tools and use it as CLI cwd.",
+        "Locate source using glob_tool for file names and grep_search_tool for contents. Use read_file_tool to inspect code. Use these scoped tools for discovery instead of shell rg.",
     ]
     if task["profile"] == "workspace_write":
         lines.extend([
