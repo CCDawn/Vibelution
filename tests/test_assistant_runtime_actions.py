@@ -50,7 +50,8 @@ async def test_authorization_status_plans_all_missing_scopes_in_one_read():
     bind_actions(service, asyncio.get_running_loop())
     try:
         result = await asyncio.to_thread(execute_action, "authorization_status", {
-            "project_id": "test-project", "actions": ["team_list", "agent_list", "source_read", "source_search", "dispatch"],
+            "project_id": "test-project",
+            "actions": ["team_list", "agent_list", "source_read", "source_search", "dispatch", "dispatch_list", "receipt"],
         })
         assert calls == [("test-project", ["agents:directory:read", "source:read", "teams:directory:read"])]
         assert result["missingScopes"] == ["agents:directory:read", "source:read"]

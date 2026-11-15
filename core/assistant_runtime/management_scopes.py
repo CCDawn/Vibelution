@@ -35,7 +35,7 @@ def plan_project_scopes(actions: list[str]) -> dict[str, list[str]]:
     for name in actions:
         scopes = read_scopes(name)
         if scopes is None:
-            if name in {"agents", "dispatch", "receipt", "dispatch_write"}:
+            if name in {"agents", "dispatch", "dispatch_list", "receipt", "dispatch_write"}:
                 scopes = []
             elif name in ACTION_SCOPES:
                 scope = ACTION_SCOPES[name]
@@ -43,6 +43,6 @@ def plan_project_scopes(actions: list[str]) -> dict[str, list[str]]:
                 if name == "team_archive":
                     scopes.append("agents:archive")
             else:
-                raise ValueError("Unknown project authorization action")
+                raise ValueError(f"无法核对动作 {name[:64]}。请使用实时动作目录的原名，派只读任务用 dispatch，取回结果用 receipt。")
         required[name] = scopes
     return required

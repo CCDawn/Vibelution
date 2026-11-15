@@ -12,15 +12,16 @@ from copy import deepcopy
 from concurrent.futures import TimeoutError
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model, model_validator
+
+from core.web.services.external_management.contracts import SCOPES, Scope
 
 from . import action_tiers
 from .dispatch import DispatchError
 from .dispatch_approval import DispatchWrite, MAX_WRITE_TASK_CHARS
 from .task_source import TaskSelector
-from core.web.services.external_management.contracts import SCOPES, Scope
 
 _REMINDER_CALL_APPROVAL: ContextVar[dict | None] = ContextVar("launcher_reminder_call_approval", default=None)
 ACTION_RESULT_MODEL_CHARS = 8000
@@ -55,8 +56,9 @@ class Project(Parameters):
 
 
 class AuthorizationStatus(Project):
-    actions: list[str] = Field(default_factory=list, max_length=16,
-        description="本次任务计划调用的项目动作名称，集中核对基础权限。参数相关的额外权限仍以动作说明为准。")
+    actions: list[Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")]] = Field(
+        default_factory=list, max_length=16, examples=[["team_list", "agent_list", "dispatch", "receipt"]],
+        description="填实时目录里的动作原名。例如查团队、查 Agent、派只读任务并取回结果用 team_list、agent_list、dispatch、receipt。集中核对基础权限，参数相关的额外权限以动作说明为准。")
 
 
 class AuthorizationRecover(Project):
