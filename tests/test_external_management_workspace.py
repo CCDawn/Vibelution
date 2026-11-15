@@ -238,7 +238,7 @@ def test_session_list_query_never_searches_body_or_preview(list_env, monkeypatch
 
 @pytest.mark.parametrize("fault", ["registry", "duplicate", "roster", "runtime", "binding", "scan_bound", "bad_kind",
                                   "runtime_role", "null_role"])
-def test_session_list_authority_damage_rejects_whole_page(list_env, monkeypatch, fault):
+def test_session_list_distinguishes_authority_failure_from_candidate_denial(list_env, monkeypatch, fault):
     env = list_env
     if fault == "registry":
         env.registry.unlink()
@@ -266,12 +266,22 @@ def test_session_list_authority_damage_rejects_whole_page(list_env, monkeypatch,
         original = env.store.repository.list_directory_page
         monkeypatch.setattr(env.store.repository, "list_directory_page", lambda **query: {**original(**query), "total": 10_001})
     response = env.client.get(URL.rsplit("/", 1)[0], headers=env.headers)
+    if fault in {"bad_kind", "null_role", "runtime", "runtime_role"}:
+        assert response.status_code == 200, response.text
+        assert response.json()["total"] == 7
+        rejected = "session-00" if fault in {"bad_kind", "null_role"} else "session-07"
+        assert all(row["id"] != rejected for row in response.json()["sessions"])
+        url = URL.rsplit("/", 1)[0]
+        assert env.client.get(url, params={"query": rejected}, headers=env.headers).json()["total"] == 0
+        if fault != "runtime_role":
+            assert env.client.get(url + "/" + rejected, headers=env.headers).status_code == 404
+        return
     assert response.status_code == 503, response.text
     assert response.json() == {"detail": {"code": "SESSION_LIST_UNAVAILABLE"}}
 
 
 @pytest.mark.parametrize("fault", ["binding", "runtime_owner", "missing_runtime", "different_direct_session"])
-def test_blank_legacy_role_does_not_mask_session_authority_damage(list_env, monkeypatch, fault):
+def test_blank_legacy_role_never_exposes_session_with_other_candidate_damage(list_env, monkeypatch, fault):
     env = list_env
     env.agents[0]["roleKey"] = ""
     if fault == "different_direct_session":
@@ -290,8 +300,9 @@ def test_blank_legacy_role_does_not_mask_session_authority_damage(list_env, monk
         monkeypatch.setattr(env.store.repository, "get_session_runtime_state", runtime)
 
     response = env.client.get(URL.rsplit("/", 1)[0], headers=env.headers)
-    assert response.status_code == 503, response.text
-    assert response.json() == {"detail": {"code": "SESSION_LIST_UNAVAILABLE"}}
+    assert response.status_code == 200, response.text
+    assert response.json()["total"] == 7
+    assert all(row["id"] != "session-00" for row in response.json()["sessions"])
 
 
 def test_session_list_cleans_title_before_preview_and_marks_every_change(list_env, monkeypatch):
@@ -366,7 +377,7 @@ def test_session_list_known_private_without_runtime_does_not_block_ordinary_rows
 
 
 @pytest.mark.parametrize("fault", ["owner_alias", "bad_binding", "runtime_owner"])
-def test_session_list_private_marker_never_hides_identity_or_binding_damage(list_env, monkeypatch, fault):
+def test_session_list_private_candidate_with_identity_damage_stays_excluded(list_env, monkeypatch, fault):
     if fault == "owner_alias":
         original = list_env.store.repository.get_session
         def row(sid, **kwargs):
@@ -384,8 +395,13 @@ def test_session_list_private_marker_never_hides_identity_or_binding_damage(list
         monkeypatch.setattr(list_env.store.repository, "get_session_runtime_state",
             lambda sid: {**original(sid), "agent_id": "foreign"} if sid == "session-08" else original(sid))
     response = list_env.client.get(URL.rsplit("/", 1)[0], headers=list_env.headers)
-    assert response.status_code == 503
-    assert response.json() == {"detail": {"code": "SESSION_LIST_UNAVAILABLE"}}
+    if fault == "bad_binding":
+        assert response.status_code == 503
+        assert response.json() == {"detail": {"code": "SESSION_LIST_UNAVAILABLE"}}
+    else:
+        assert response.status_code == 200, response.text
+        assert response.json()["total"] == 8
+        assert all(row["id"] != "session-08" for row in response.json()["sessions"])
 
 
 def test_session_list_never_silently_rewrites_an_identifier_during_model_projection(env, monkeypatch):
@@ -443,13 +459,14 @@ def test_session_list_accepts_ordinary_word_identifier_after_sentence_filter_nar
     {"read_only": True, "virtualHumanSelfWake": [1]},
     {"read_only": True, "lifeStewardForAgentId": 1},
 ])
-def test_session_list_unknown_native_semantics_cannot_hide_behind_private_marker(list_env, monkeypatch, patch):
+def test_session_list_never_exposes_a_candidate_with_unknown_native_semantics(list_env, monkeypatch, patch):
     original = list_env.store.repository.get_session_runtime_state
     monkeypatch.setattr(list_env.store.repository, "get_session_runtime_state",
         lambda sid: {**original(sid), **patch} if sid == "session-00" else original(sid))
     response = list_env.client.get(URL.rsplit("/", 1)[0], headers=list_env.headers)
-    assert response.status_code == 503, response.text
-    assert response.json() == {"detail": {"code": "SESSION_LIST_UNAVAILABLE"}}
+    assert response.status_code == 200, response.text
+    assert response.json()["total"] == 7
+    assert all(row["id"] != "session-00" for row in response.json()["sessions"])
 
 
 @pytest.mark.parametrize("role", ["", "primary", "workspace"])

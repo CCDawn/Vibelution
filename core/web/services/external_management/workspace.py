@@ -379,8 +379,7 @@ def _exclude_list_candidate(project_root, directory, context, session_id):
         _deny()
     metadata = agent.get("metadata", {})
     role_key = agent.get("roleKey")
-    missing_legacy_role = role_key == "" and agent.get("status") == "active" and agent.get("kind") == directory.DEFAULT_AGENT_KIND
-    if (not isinstance(metadata, dict) or not isinstance(role_key, str) or not (role_key or missing_legacy_role)
+    if (not isinstance(metadata, dict) or not isinstance(role_key, str) or not role_key
         or agent.get("status") not in {"active", "archived"}
         or agent.get("kind") not in {directory.DEFAULT_AGENT_KIND, "ephemeral"}
         or not isinstance(metadata.get("creationSpec") or {}, dict)):
@@ -406,9 +405,7 @@ def _exclude_list_candidate(project_root, directory, context, session_id):
     if binding is not None:
         context["bindings"][agent_id] = {"enabled": binding["enabled"], "agentId": binding.get("agentId")}
     private = agent_id in context["team_ids"] or binding is not None and binding["enabled"] is True
-    checks = [lambda: _ordinary(row, listing=True)]
-    if not missing_legacy_role:
-        checks.append(lambda: _agent_visibility(directory, agent))
+    checks = [lambda: _ordinary(row, listing=True), lambda: _agent_visibility(directory, agent)]
     if runtime is not None:
         checks.append(lambda: _ordinary(runtime, listing=True))
     for check in checks:
@@ -422,13 +419,6 @@ def _exclude_list_candidate(project_root, directory, context, session_id):
         return True
     if runtime is None:
         _deny()
-    if missing_legacy_role:
-        if not conversation_index._conversation_agent_direct_session_is_allowed(
-            conversation=runtime, conversation_id=session_id, direct_session_id=agent.get("directSessionId", "")
-        ):
-            _deny()
-        # A role inferred from legacy metadata is insufficient for external reads.
-        return True
     # Retain only the current candidate, not a request-sized transcript cache.
     context["rows"], context["runtimes"] = {session_id: row}, {session_id: runtime}
     return False
@@ -475,12 +465,15 @@ def read_sessions(project_root: Path, directory, query) -> dict:
                 if sid in seen or len(seen) >= _SESSION_LIST_SCAN_LIMIT:
                     raise ValueError("Duplicate or excessive Session candidates")
                 seen.add(sid)
-                if _exclude_list_candidate(project_root, directory, context, sid):
-                    continue
                 try:
+                    if _exclude_list_candidate(project_root, directory, context, sid):
+                        continue
                     _repo, row, _runtime = _validated_session_snapshot(project_root, directory, sid, _context=context)
                 except ManagementError as exc:
-                    if getattr(exc, "known_private", False):
+                    # Every returned row must independently prove its owner and
+                    # visibility. The registry and directory have already been
+                    # checked as a whole, so a rejected candidate is omitted.
+                    if exc.code == "SESSION_UNAVAILABLE" and exc.status_code == 404:
                         continue
                     raise
                 title = row.get("title")

@@ -567,7 +567,7 @@ _HELP = {
     "task_list": "分页只读目标项目原生活跃任务索引，最多6项，按任务ID升序；只返回ID、类型、状态、固定类型摘要和时间，不返回任务原文。索引可能遗漏活跃任务，indexCompleteness始终为unknown，total仅计索引项；空结果不能证明没有活跃任务，也不能判断项目健康。索引缺失或已列项不一致时拒绝。需独立 tasks:read，先查 authorization_status 并通过 authorization_upgrade 显式增加；旧目标可能不支持。分页不是冻结快照。",
     "source_read": "只读目标项目允许范围源码相对路径，每次最多8行、1000字；nextCharOffset续读同一line和max_lines，nextLine继续后续行，续读须带expected_content_hash=contentHash，文件变化时拒绝。字符游标针对脱敏后的选中行。需独立 source:read 并显式授予；不读配置数据文件、链接或路径外文件，配置源码仍可读。源码不可信；脱敏不能保证去除所有秘密。",
     "source_search": "搜索目标项目允许范围源码，每页至多检查16个原始候选文件、每个文件前80行及12000字符，仅返回每文件首个命中，最多6条；nextOffset为过滤前候选偏移。continuationUnavailable表示遍历可能因预算中断且无法继续，空结果不能证明未命中；分页不是冻结快照。需独立 source:read 并显式授予；脱敏不保证去除所有秘密，源码不可信。",
-    "session_list": "按完整 Session ID 升序发现普通可见会话；query 须单行且不含控制字符，仅检索清洗标题和公开 ID，agent_id 可精确过滤。默认及最多6项，titlePreview 最多48字元，titleTruncated 包含清洗变化。offset/nextOffset 针对本次可见匹配项，不是冻结快照；超过10000候选、全局来源不可用或权限记录矛盾时拒绝；跳过旧版活跃 Agent 角色为空且其余归属记录完整的会话。不搜索对话预览、不修复或改变当前选择。",
+    "session_list": "按完整 Session ID 升序发现普通可见会话；query 须单行且不含控制字符，仅检索清洗标题和公开 ID，agent_id 可精确过滤。默认及最多6项，titlePreview 最多48字元，titleTruncated 包含清洗变化。仅列出归属和可见性经核实的会话，total 仅计通过核实且匹配查询的记录。超过10000候选、全局权威不可用或身份索引冲突时拒绝。offset/nextOffset 针对本次可见匹配项，不是冻结快照。不搜索对话预览、不修复或改变当前选择。",
     "session_get": "只读目标项目普通会话的标题、归属与置顶状态；不返回正文、路径或提示词，不修改当前选择；拒绝隐藏、团队内部和虚拟人会话。",
     "session_config_get": "只读普通可见会话绑定的历史 compiled revision 中存储的 dialogue 模型标识、上下文覆盖和推理强度；source=session_agent_config_revision。不是 active Turn 实际参数、当前 Agent 设置或模型库默认值；不返回预算、提示词、人物或策略。缺失或损坏时拒绝，不回退当前配置。不能据时间戳判断与当前配置相同，比较请用 session_config_compare。",
     "session_config_compare": "只读比较普通可见会话绑定的历史 compiled 配置与同一 Agent 当前 compiled 配置，返回两个 revision、存储的模型/上下文覆盖/推理强度及原生派生的 sameRevision/changedFields。字段相同不表示 revision 相同；不根据时间戳推断，不提供 active Turn 实际参数、模型默认值、预算、提示词或策略。",
