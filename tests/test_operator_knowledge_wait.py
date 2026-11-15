@@ -58,8 +58,9 @@ def test_terminal_ready_requires_accepted_handoff_for_success() -> None:
         ("failed", "", True),
     ],
 )
+@pytest.mark.parametrize("legacy_cursor", [False, True])
 def test_real_sqlite_park_then_terminal_wake_preserves_original_cursor(
-    tmp_path, terminal, blocked, early
+    tmp_path, terminal, blocked, early, legacy_cursor
 ) -> None:
     harness = GraphHarness(tmp_path)
     try:
@@ -143,7 +144,7 @@ def test_real_sqlite_park_then_terminal_wake_preserves_original_cursor(
             finished_at_ms=None,
         )
         outbox = OutboxRecord(
-            action_id=action.action_id,
+            action_id="persisted-adapter-dispatch",
             run_id="parent",
             command_id="cmd",
             node_run_id=action.node_run_id,
@@ -229,7 +230,7 @@ def test_real_sqlite_park_then_terminal_wake_preserves_original_cursor(
         )
         defer()
         defer()  # Replaying a lost lease cannot produce another action.
-        parked = store.read(lambda repo: repo.get_outbox(action.action_id))
+        parked = store.read(lambda repo: repo.get_outbox(outbox.action_id))
         assert parked.status == ("pending" if early else "failed")
         assert store.get_run("parent").status == ("running" if early else "blocked")
         assert (
@@ -237,8 +238,23 @@ def test_real_sqlite_park_then_terminal_wake_preserves_original_cursor(
         )
         problem = json.loads(parked.last_problem_json)
         assert problem["action"]["actionId"] == action.action_id
+        assert problem["action"]["outboxActionId"] == outbox.action_id
         assert problem["action"]["inputSnapshotHash"] == action.input_snapshot_hash
         if not early:
+            if legacy_cursor:
+                del problem["action"]["outboxActionId"]
+                raw = json.dumps(problem)
+                def restore_legacy_cursor(uow):
+                    uow.repository.execute(
+                        "UPDATE outbox_actions SET last_problem_json=? WHERE action_id=?",
+                        (raw, outbox.action_id),
+                    )
+                    uow.repository.execute(
+                        "UPDATE workflow_runs SET blocked_problem_json=? WHERE run_id='parent'",
+                        (raw,),
+                    )
+                store.submit(restore_legacy_cursor, force_flush=True).result(timeout=10)
+                parked = store.read(lambda repo: repo.get_outbox(outbox.action_id))
             from core.web.services.team_workflow.research_runtime.command_service import _apply_ledger_reconcile_for_run
             def reconcile(uow):
                 return _apply_ledger_reconcile_for_run(uow, run=uow.repository.get_run("parent"),
@@ -277,7 +293,7 @@ def test_real_sqlite_park_then_terminal_wake_preserves_original_cursor(
         assert not store.submit(
             lambda uow: wake_knowledge_child(uow, "inv-1", 23), force_flush=True
         ).result(timeout=10)
-        assert store.read(lambda repo: repo.get_outbox(action.action_id)).status == (
+        assert store.read(lambda repo: repo.get_outbox(outbox.action_id)).status == (
             "failed" if blocked else "pending"
         )
         assert (

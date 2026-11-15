@@ -100,6 +100,7 @@ def defer_knowledge_child(
             "detail": str(error),
             "action": {
                 "actionId": action.action_id,
+                "outboxActionId": row.action_id,
                 "nodeRunId": action.node_run_id,
                 "inputSnapshotHash": action.input_snapshot_hash,
             },
@@ -138,6 +139,34 @@ def defer_knowledge_child(
     store.submit(mutate, force_flush=True).result(timeout=30)
 
 
+def _parked_dispatch(repo, run_id, problem):
+    cursor = problem.get("action") or {}
+    node_run_id = cursor.get("nodeRunId")
+    if not node_run_id:
+        return None
+    rows = repo.execute(
+        "SELECT action_id FROM outbox_actions WHERE run_id=? AND node_run_id=? "
+        "AND action_kind='adapter_dispatch' AND status='failed'",
+        (run_id, node_run_id),
+    ).fetchall()
+    matches = []
+    for (outbox_id,) in rows:
+        if cursor.get("outboxActionId", outbox_id) != outbox_id:
+            continue
+        outbox = repo.get_outbox(outbox_id)
+        try:
+            if json.loads(outbox.last_problem_json or "{}") != problem:
+                continue
+            action = PendingAction.from_dict(json.loads(outbox.payload_json))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if (action.action_id == cursor.get("actionId") and action.run_id == run_id
+                and action.node_run_id == node_run_id and action.node_id == _PARENT_NODE
+                and action.input_snapshot_hash == cursor.get("inputSnapshotHash")):
+            matches.append((outbox_id, action))
+    return matches[0] if len(matches) == 1 else None
+
+
 def _wake_in_uow(uow: Any, invocation_id: str, now_ms: int) -> bool:
     invocation = uow.repository.get_knowledge_invocation(invocation_id)
     if invocation is None or not _delivered_or_failed(uow, invocation):
@@ -163,58 +192,31 @@ def _wake_in_uow(uow: Any, invocation_id: str, now_ms: int) -> bool:
     ):
         return False
     run_problem = json.loads(run.blocked_problem_json or "{}")
-    if run_problem.get("code") != PENDING_CODE:
+    if (run_problem.get("code") != PENDING_CODE
+            or (run_problem.get("invocation") or {}).get("invocationId") != invocation_id
+            or (run_problem.get("child") or {}).get("childRunId") != child.run_id):
         return False
-    rows = uow.repository.execute(
-        "SELECT action_id, last_problem_json FROM outbox_actions "
-        "WHERE run_id = ? AND node_run_id = ? AND action_kind = 'adapter_dispatch' "
-        "AND status = 'failed'",
-        (run.run_id, attempt.node_run_id),
-    ).fetchall()
-    woke = False
-    for action_id, raw in rows:
-        problem = json.loads(raw or "{}")
-        if problem.get("code") != PENDING_CODE:
-            continue
-        cursor = problem.get("invocation") or {}
-        action_payload = problem.get("action") or {}
-        child_cursor = problem.get("child") or {}
-        if (
-            cursor.get("invocationId") != invocation_id
-            or action_payload.get("actionId") != action_id
-            or action_payload.get("nodeRunId") != attempt.node_run_id
-            or child_cursor.get("childRunId") != invocation.knowledge_child_run_id
-        ):
-            continue
-        try:
-            original = PendingAction.from_dict(
-                json.loads(uow.repository.get_outbox(action_id).payload_json)
-            )
-        except (TypeError, ValueError, json.JSONDecodeError, AttributeError):
-            continue
-        if (
-            original.action_id != action_payload.get("actionId")
-            or original.node_run_id != action_payload.get("nodeRunId")
-            or original.input_snapshot_hash != action_payload.get("inputSnapshotHash")
-        ):
-            continue
-        uow.repository.execute(
-            "UPDATE outbox_actions SET status='pending', available_at_ms=?, "
-            "lease_owner=NULL, lease_expires_at_ms=NULL, attempt_count=0, "
-            "updated_at_ms=? WHERE action_id=? AND status='failed'",
-            (now_ms, now_ms, action_id),
-        )
-        woke = True
-    if woke:
-        uow.repository.update_run_status(
-            run.run_id,
-            run.team_id,
-            "running",
-            now_ms,
-            active_node_id=run.active_node_id,
-            blocked_problem_json=None,
-        )
-    return woke
+    parked = _parked_dispatch(uow.repository, run.run_id, run_problem)
+    if parked is None:
+        return False
+    outbox_id, action = parked
+    if action.node_run_id != attempt.node_run_id or action.attempt != attempt.attempt:
+        return False
+    uow.repository.execute(
+        "UPDATE outbox_actions SET status='pending', available_at_ms=?, "
+        "lease_owner=NULL, lease_expires_at_ms=NULL, attempt_count=0, "
+        "updated_at_ms=? WHERE action_id=? AND status='failed'",
+        (now_ms, now_ms, outbox_id),
+    )
+    uow.repository.update_run_status(
+        run.run_id,
+        run.team_id,
+        "running",
+        now_ms,
+        active_node_id=run.active_node_id,
+        blocked_problem_json=None,
+    )
+    return True
 
 
 def wake_knowledge_child(uow: Any, invocation_id: str, now_ms: int) -> bool:
@@ -232,17 +234,10 @@ def reconcile_knowledge_wait(uow: Any, run: Any, now_ms: int) -> Any | None:
     problem = json.loads(run.blocked_problem_json or "{}")
     if problem.get("code") != PENDING_CODE:
         return None
-    cursor = problem.get("action") or {}
-    outbox = uow.repository.get_outbox(cursor.get("actionId", ""))
-    if (outbox is None or outbox.status != "failed" or outbox.action_kind != "adapter_dispatch"
-            or outbox.run_id != run.run_id or outbox.node_run_id != cursor.get("nodeRunId")
-            or json.loads(outbox.last_problem_json or "{}") != problem):
+    parked = _parked_dispatch(uow.repository, run.run_id, problem)
+    if parked is None:
         return None
-    action = PendingAction.from_dict(json.loads(outbox.payload_json))
-    if (action.action_id != outbox.action_id or action.run_id != run.run_id
-            or action.node_run_id != outbox.node_run_id
-            or action.input_snapshot_hash != cursor.get("inputSnapshotHash")):
-        return None
+    _, action = parked
     invocation = _valid_identity(uow, action,
         (problem.get("invocation") or {}).get("invocationId", ""),
         (problem.get("child") or {}).get("childRunId", ""))
