@@ -156,6 +156,38 @@ describe("Launcher assistant remote capability", () => {
     expect((await call(path)).status).toBe(404);
   });
 
+  it("binds terminal Assistant turns to exact requested submissions, including promoted queue items", async () => {
+    const { open, call, native } = fixture();
+    await open();
+    const row = (index: number, role: string, data: object) =>
+      ({ id: `${expected.sessionId}-message-${index}`, timestamp, role, ...data });
+    const detail = {
+      id: expected.sessionId, agentId: expected.agentId, messageWindow: { nextBeforeMessageIndex: null },
+      status: "idle", lastTurnTerminalTurnId: "latest-turn", lastTurnStatus: "failed_provider",
+      messages: [
+        row(1, "user", { content: "accepted queued message", turnId: "promoted-turn",
+          metadata: { clientSubmissionId: "queue-request", private: "never expose" } }),
+        row(2, "assistant", { turnId: "promoted-turn", turnState: "completed", turnEndedAt: timestamp }),
+        row(3, "user", { content: "request with an earlier stale reply", turnId: "pending-turn",
+          metadata: { clientSubmissionId: "pending-request" } }),
+        row(4, "assistant", { turnId: "wrong-turn", turnState: "completed", turnEndedAt: timestamp }),
+        row(5, "assistant", { turnId: "pending-turn", turnState: "completed" }),
+        row(6, "user", { content: "failed request", turnId: "latest-turn", metadata: { clientSubmissionId: "latest-request" } }),
+      ],
+    };
+    native.mockResolvedValueOnce(detail);
+    const response = await call(`/v1/assistant/messages?${bindingQuery}&completionId=queue-request&completionId=pending-request&completionId=latest-request`);
+    expect(response.headers["X-Vibelution-Assistant-Completion"]).toBe("v1");
+    expect(response.json().completions).toEqual([
+      { id: "queue-request", turnId: "promoted-turn", state: "completed" },
+      { id: "latest-request", turnId: "latest-turn", state: "failed" },
+    ]);
+    expect(response.body.toString("utf8")).not.toContain("never expose");
+    expect(native).toHaveBeenCalledWith({ operation: "detail" }, expected, expect.any(AbortSignal));
+    expect((await call(`/v1/assistant/messages?${bindingQuery}&completionId=queue-request&beforeMessageIndex=6`)).status).toBe(400);
+    expect(native).toHaveBeenCalledTimes(1);
+  });
+
   it("validates text-only writes, binds each native call, and preserves request IDs across ambiguous replies and retries", async () => {
     const { open, call, native } = fixture();
     await open();

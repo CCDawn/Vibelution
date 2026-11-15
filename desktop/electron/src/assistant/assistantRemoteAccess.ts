@@ -18,6 +18,7 @@ const RESPONSE_HEADERS = {
   "Cache-Control": "no-store",
   "Content-Security-Policy": "default-src 'none'; sandbox",
   "X-Content-Type-Options": "nosniff",
+  "X-Vibelution-Assistant-Completion": "v1",
   Connection: "close",
 };
 
@@ -121,7 +122,13 @@ async function readMessage(request: IncomingMessage): Promise<{
 
 function readQuery(url: URL, history: boolean) {
   const allowed = new Set(history ? ["agentId", "sessionId", "limit", "beforeMessageIndex"] : ["agentId", "sessionId"]);
-  for (const key of url.searchParams.keys()) if (!allowed.delete(key)) throw invalid();
+  const completionIds = history ? url.searchParams.getAll("completionId") : [];
+  if (completionIds.length > 16 || completionIds.some(value => !REQUEST_ID.test(value))
+    || completionIds.length && url.searchParams.has("beforeMessageIndex")) throw invalid();
+  for (const key of url.searchParams.keys()) {
+    if (history && key === "completionId") continue;
+    if (!allowed.delete(key)) throw invalid();
+  }
   const pagination = (key: string, maximum: number) => {
     const raw = url.searchParams.get(key);
     if (raw === null) return undefined;
@@ -133,6 +140,7 @@ function readQuery(url: URL, history: boolean) {
     binding: binding(url.searchParams.get("agentId"), url.searchParams.get("sessionId")),
     limit: pagination("limit", 50) ?? 50,
     beforeMessageIndex: pagination("beforeMessageIndex", 2_147_483_647),
+    completionIds,
   };
 }
 
@@ -163,13 +171,50 @@ function projectMessage(value: unknown, sessionId: string): RemoteMessage | null
   return { id: value.id, messageIndex, role, text: clipped, timestamp: value.timestamp };
 }
 
-function projectHistory(value: unknown, expected: AssistantHostBinding, limit: number, before?: number) {
+function projectCompletions(value: Record<string, unknown>, rows: unknown[], requested: string[]) {
+  const results = [];
+  const turns = new Map<string, string>();
+  const states = new Map<string, string>();
+  const wanted = new Set(requested);
+  for (const row of rows) {
+    if (!record(row) || !id(row.turnId) || (row.role !== "user" && row.role !== "assistant")) continue;
+    const requestId = record(row.metadata) ? row.metadata.clientSubmissionId : "";
+    if (typeof requestId === "string" && wanted.has(requestId)) {
+      const prior = turns.get(requestId);
+      turns.set(requestId, prior === undefined || prior === row.turnId ? row.turnId : "");
+    }
+    if (row.role === "assistant" && typeof row.turnState === "string" &&
+      ["completed", "failed", "interrupted"].includes(row.turnState) &&
+      typeof row.turnEndedAt === "string" && Number.isFinite(Date.parse(row.turnEndedAt))) {
+      states.set(row.turnId, row.turnState);
+    }
+  }
+  for (const [requestId, turnId] of turns) {
+    if (!turnId) continue;
+    let state = states.get(turnId);
+    if (!state && turnId === value.lastTurnTerminalTurnId) {
+      const status = value.lastTurnStatus;
+      if (typeof status === "string") {
+        if (["completed", "done", "success", "succeeded"].includes(status)) state = "completed";
+        else if (["failed", "failure", "error", "failed_runtime", "failed_provider", "timeout", "timed_out",
+          "blocked", "danger", "crashed", "unhealthy"].includes(status)) state = "failed";
+        else if (["stopped", "stopped_by_user", "force_stopped", "aborted", "interrupted", "stale_work_run_worker_gone",
+          "cancelled", "canceled", "superseded", "needs_continue", "paused_limit"].includes(status)) state = "interrupted";
+      }
+    }
+    if (state) results.push({ id: requestId, turnId, state });
+  }
+  return results;
+}
+
+function projectHistory(value: unknown, expected: AssistantHostBinding, limit: number, before?: number, completionIds: string[] = []) {
   if (!record(value) || value.id !== expected.sessionId || value.agentId !== expected.agentId
     || !record(value.messageWindow) || !Array.isArray(value.messages)) throw invalidNative();
   const { nextBeforeMessageIndex: cursor } = value.messageWindow;
   if (cursor !== null && !integer(cursor, 2_147_483_647)) throw invalidNative();
+  const completion = completionIds.length ? { completions: projectCompletions(value, value.messages, completionIds) } : {};
   const messages: RemoteMessage[] = [];
-  let remainingBytes = MAX_HISTORY_PAGE_BYTES - 1024;
+  let remainingBytes = MAX_HISTORY_PAGE_BYTES - 1024 - Buffer.byteLength(JSON.stringify(completion));
   for (let index = value.messages.length - 1; index >= 0; index--) {
     const message = projectMessage(value.messages[index], expected.sessionId);
     if (!message || (before !== undefined && message.messageIndex >= before)) continue;
@@ -177,11 +222,11 @@ function projectHistory(value: unknown, expected: AssistantHostBinding, limit: n
     if (messages.length === limit || remainingBytes < 0) {
       const nextBeforeMessageIndex = messages.at(-1)?.messageIndex;
       if (nextBeforeMessageIndex === undefined) throw invalidNative();
-      return { ...expected, messages: messages.reverse(), nextBeforeMessageIndex };
+      return { ...expected, messages: messages.reverse(), nextBeforeMessageIndex, ...completion };
     }
     messages.push(message);
   }
-  return { ...expected, messages: messages.reverse(), nextBeforeMessageIndex: cursor };
+  return { ...expected, messages: messages.reverse(), nextBeforeMessageIndex: cursor, ...completion };
 }
 
 function projectAvatar(value: unknown, expected: AssistantHostBinding) {
@@ -261,7 +306,7 @@ async function invoke(request: IncomingMessage, response: ServerResponse, author
         const input = readQuery(url, true);
         const result = await invokeHost({ operation: "detail", ...(input.beforeMessageIndex === undefined
           ? {} : { beforeMessageIndex: input.beforeMessageIndex }) }, input.binding);
-        reply(response, 200, projectHistory(result, input.binding, input.limit, input.beforeMessageIndex));
+        reply(response, 200, projectHistory(result, input.binding, input.limit, input.beforeMessageIndex, input.completionIds));
       } else if (url.pathname === "/v1/assistant/avatar") {
         const expected = readQuery(url, false).binding;
         const image = projectAvatar(await invokeHost({ operation: "assistantAvatar" }, expected), expected);
