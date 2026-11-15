@@ -50,6 +50,10 @@ from core.research.workflow.transitions import (
     require_run_transition,
 )
 from core.research.workflow.models import WorkflowStageId
+from core.research.workflow.operator_optimization_definition import (
+    OPERATOR_BASELINE_WORKFLOW_ID,
+    OPERATOR_WORKFLOW_ID,
+)
 from core.web.services.team_workflow.research_runtime.readiness import (
     NodeReadinessService,
 )
@@ -924,6 +928,27 @@ class WorkflowCommandService:
                 ),
                 force_flush=True,
             )
+        elif run.workflow_id in {OPERATOR_WORKFLOW_ID, OPERATOR_BASELINE_WORKFLOW_ID} and (
+            request.command is WorkflowCommandKind.CANCEL_RUN
+            or (request.command is WorkflowCommandKind.CANCEL_NODE
+                and request.node_id in {"operator_execution", "operator_baseline"})
+        ):
+            from ..operator_optimization.store import gpu_trial_start_lock
+
+            cancel_args = (
+                {"operator_id": authorized_operator_id}
+                if request.command is WorkflowCommandKind.CANCEL_RUN else {}
+            )
+            # Keep the fence through commit. A GPU child admitted before this
+            # point can complete and settle, but no later child may launch.
+            with gpu_trial_start_lock(self._store.path, request.run_id):
+                receipt = self._store.submit(
+                    lambda uow: handler(uow, request, request_hash, **cancel_args),
+                    force_flush=True,
+                ).result()
+            if request.command is WorkflowCommandKind.CANCEL_RUN and receipt.status == "accepted":
+                self._close_cancel_run_inflight_turns(request.run_id)
+            return receipt
         elif request.command in {
             WorkflowCommandKind.CANCEL_RUN, WorkflowCommandKind.ARCHIVE_RUN,
             WorkflowCommandKind.PAUSE_RUN, WorkflowCommandKind.RESUME_RUN,
