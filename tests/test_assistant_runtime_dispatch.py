@@ -373,6 +373,18 @@ async def test_dispatch_refs_survive_restart_without_prompt_or_duplicate_start(t
 
 
 @pytest.mark.anyio
+async def test_wait_for_result_reconciles_the_original_task_only(tmp_path):
+    probe = ClientProbe()
+    service = adapter(tmp_path, probe)
+    started = await start(service)
+    assert started["receipt"]["status"] == "running"
+    result = await service.wait_for_result(started, 3)
+    assert result["nativeTaskId"] == started["nativeTaskId"]
+    assert result["receipt"]["resultSummary"] == "native result"
+    assert [name for name, _ in probe.calls].count("start") == 1
+
+
+@pytest.mark.anyio
 async def test_changed_payload_or_rebound_project_cannot_reuse_dispatch(tmp_path):
     probe = ClientProbe()
     service = adapter(tmp_path, probe)

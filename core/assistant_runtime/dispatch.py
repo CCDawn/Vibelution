@@ -860,6 +860,21 @@ class DispatchService:
                     return self._public(record)
                 raise
 
+    async def wait_for_result(self, record: dict, seconds: float) -> dict:
+        """Wait within the caller's budget using only the original task receipt."""
+        with anyio.move_on_after(seconds):
+            while (record.get("receipt") or {}).get("status") not in {
+                *TASK_TERMINAL_STATUSES, "awaiting_approval", "stop_unconfirmed",
+            }:
+                await anyio.sleep(1)
+                try:
+                    record = await self.reconcile(record["dispatchId"])
+                except DispatchError:
+                    # The start is already acknowledged. Preserve the last
+                    # confirmed receipt so the same task can be queried again.
+                    break
+        return record
+
     async def resolve_approval(
         self,
         dispatch_id: str,
