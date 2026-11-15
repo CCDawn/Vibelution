@@ -20,6 +20,11 @@ class CampaignConflict(ValueError):
     """A stale version or a changed idempotent command cannot overwrite work."""
 
 
+def gpu_trial_start_lock(ledger_path: Path, run_id: str):
+    """Order a worker launch against the cancellation commit for its run."""
+    return inter_process_lock(ledger_path.parent / "operator-gpu-start" / sha256_hex(run_id))
+
+
 def _service():
     from core.web.services import team_workflow_orchestration_service
     return team_workflow_orchestration_service

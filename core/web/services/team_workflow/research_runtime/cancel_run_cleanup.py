@@ -1,4 +1,4 @@
-"""Durable cleanup worker for turns and budgets owned by a cancelled run.
+"""Durable cleanup worker for turns and receipts owned by a cancelled run.
 
 ``cancel_run`` is a ledger command, while stopping a web chat turn is a
 separate session-side effect.  Keeping the two operations separate is
@@ -23,6 +23,10 @@ from typing import Any
 
 from core.research.workflow.ledger import WorkflowLedgerStore
 from core.research.workflow.ledger import outbox as outbox_api
+from core.research.workflow.operator_optimization_definition import (
+    OPERATOR_BASELINE_WORKFLOW_ID,
+    OPERATOR_WORKFLOW_ID,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -147,9 +151,13 @@ class CancelRunCleanupWorker:
             return
 
         try:
-            complete = self._reconcile_run_turns(run_id)
-            if complete:
-                self._finalize_budget_receipts(run_id)
+            try:
+                complete = self._reconcile_run_turns(run_id)
+                if complete:
+                    self._finalize_budget_receipts(run_id)
+            finally:
+                gpu_complete = self._reconcile_operator_gpu(run_id)
+            complete = complete and gpu_complete
         except Exception as exc:
             logger.exception(
                 "cancel_run cleanup attempt failed: runId=%s actionId=%s attempt=%s/%s",
@@ -174,16 +182,14 @@ class CancelRunCleanupWorker:
             # re-run the settlement on the next tick.
             self._safe_ack(action, run_id=run_id)
         else:
-            # A stop request may only move the live turn to ``stopping``.  Do
-            # not acknowledge until the persisted terminal record and its
-            # activeRunId cleanup are both observable on the next read.  This
-            # is a legitimate long wait, so the attempt budget is reset.
+            # An admitted execution can still be finishing. Keep its cleanup
+            # pending until the terminal evidence is visible and settled.
             self._safe_requeue(
                 action,
                 run_id=run_id,
                 problem={
                     "code": "cancel_run_cleanup_pending",
-                    "detail": "one or more chat turns are not terminal yet",
+                    "detail": "one or more owned executions are not terminal yet",
                 },
                 reset_attempts=True,
             )
@@ -271,6 +277,21 @@ class CancelRunCleanupWorker:
             self._store,
             run_id,
             reason="run_cancelled",
+        )
+
+    def _reconcile_operator_gpu(self, run_id: str) -> bool:
+        run = self._store.get_run(run_id)
+        if run is None or run.workflow_id not in {OPERATOR_WORKFLOW_ID, OPERATOR_BASELINE_WORKFLOW_ID}:
+            return True
+
+        from core.research.operator_optimization.contracts import OperatorRunContext
+
+        from ..operator_optimization.dispatch import reconcile_run_gpu_receipts
+
+        snapshot = json.loads(run.input_snapshot_json)
+        context = OperatorRunContext.model_validate(snapshot["researchObjectiveContract"])
+        return reconcile_run_gpu_receipts(
+            run.team_id, run.project_id, context.optimizationCampaignId, run_id,
         )
 
     def _reconcile_run_turns(self, run_id: str) -> bool:

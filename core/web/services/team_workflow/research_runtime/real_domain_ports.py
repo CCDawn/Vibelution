@@ -3052,7 +3052,9 @@ def _execute_real_system_action(
         return refs, {"systemActionId": f"sys-{action.action_id}", "runnerId": "operator_knowledge_reuse_v1"}
     if node_id == "operator_baseline":
         from ..operator_optimization.dispatch import dispatch_baseline
-        dispatch_baseline(action, snapshot)
+        from ..operator_optimization.execution import gpu_trial_start_fence
+
+        dispatch_baseline(action, snapshot, start_fence=lambda: gpu_trial_start_fence(action, snapshot))
         refs = _collect_system_artifact_refs(required_kinds=required_kinds,
             team_id=snapshot["teamId"], workflow_run_id=action.run_id,
             source_collection_run_id=action.run_id)

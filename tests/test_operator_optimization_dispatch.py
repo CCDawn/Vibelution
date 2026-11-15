@@ -1,11 +1,13 @@
+import json
 import os
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
 
 pytest_plugins = ("tests.test_operator_optimization_budget",)
 
-from core.research.operator_optimization.cuda_worker import CudaTrialRequest
+from core.research.operator_optimization.cuda_worker import CudaMeasurementIdentity, CudaTrialRequest
 from core.research.operator_optimization.measurement import OperatorMeasurement, MeasurementProtocolRef
 from core.research.operator_optimization.contracts import BaselineVersion
 from core.research.workflow.contracts._canonical import sha256_hex
@@ -14,6 +16,12 @@ from core.web.services.team_workflow.operator_optimization.store import (
     CampaignConflict,
     read_campaign,
 )
+
+
+def failed_measurement(request):
+    identity = CudaMeasurementIdentity.from_request(request, "Fixture")
+    return OperatorMeasurement(**identity.model_dump(), status="failed",
+        failureReason="fixture compiler failure", gpuSeconds=3)
 
 
 @pytest.fixture(autouse=True)
@@ -30,12 +38,9 @@ def trial(activity, monkeypatch):
         measurement_id="trial1", expected_environment_hash="a" * 64, max_seconds=40)
     calls = []
     def execute(req, **kwargs):
-        calls.append(req)
-        return OperatorMeasurement(measurementId=req.measurement_id, optimizationCampaignId=req.campaign_id,
-            runId=req.run_id, protocolHash=sha256_hex(req.protocol.model_dump(mode="json")), workloadHash="b" * 64,
-            environmentHash="a" * 64, baselineSourceHash="c" * 64, parentSourceHash="c" * 64,
-            candidateSourceHash="c" * 64, deviceName="Fixture", status="failed",
-            failureReason="fixture compiler failure", gpuSeconds=3)
+        with kwargs["start_fence"]():
+            calls.append(req)
+        return failed_measurement(req)
     monkeypatch.setattr(dispatch, "execute_cuda_trial", execute)
     return request, calls
 
@@ -76,11 +81,19 @@ def test_retry_after_settlement_interruption_uses_saved_receipt(activity, trial,
 
 def test_admitted_without_receipt_never_automatically_reexecutes(activity, trial, monkeypatch):
     request, _ = trial
-    monkeypatch.setattr(dispatch, "execute_cuda_trial", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("crash")))
+    def crash_after_launch(*args, **kwargs):
+        with kwargs["start_fence"]():
+            pass
+        raise RuntimeError("crash")
+
+    monkeypatch.setattr(dispatch, "execute_cuda_trial", crash_after_launch)
     with pytest.raises(RuntimeError, match="crash"):
         dispatch.dispatch_trial(*activity[:2], request, device_name="Fixture")
+    monkeypatch.setattr(dispatch, "execute_cuda_trial", lambda *a, **k: pytest.fail("must not spawn"))
     with pytest.raises(CampaignConflict, match="reconcile"):
         dispatch.dispatch_trial(*activity[:2], request, device_name="Fixture")
+    with pytest.raises(CampaignConflict, match="no verifiable terminal receipt"):
+        dispatch.reconcile_run_gpu_receipts(*activity, request.run_id)
     assert read_campaign(*activity).gpuReservations[0].consumedSeconds is None
 
 
@@ -92,21 +105,9 @@ def test_busy_device_releases_admission_and_allows_retry(activity, trial, monkey
         calls.append(req)
         if len(calls) <= 2:
             raise BlockingIOError("device busy")
-        return OperatorMeasurement(
-            measurementId=req.measurement_id,
-            optimizationCampaignId=req.campaign_id,
-            runId=req.run_id,
-            protocolHash=sha256_hex(req.protocol.model_dump(mode="json")),
-            workloadHash="b" * 64,
-            environmentHash="a" * 64,
-            baselineSourceHash="c" * 64,
-            parentSourceHash="c" * 64,
-            candidateSourceHash="c" * 64,
-            deviceName="Fixture",
-            status="failed",
-            failureReason="fixture compiler failure",
-            gpuSeconds=3,
-        )
+        with kwargs["start_fence"]():
+            pass
+        return failed_measurement(req)
 
     monkeypatch.setattr(dispatch, "execute_cuda_trial", execute)
     for _ in range(2):
@@ -119,6 +120,101 @@ def test_busy_device_releases_admission_and_allows_retry(activity, trial, monkey
     reservation = read_campaign(*activity).gpuReservations[0]
     assert reservation.consumedSeconds == 3
     assert reservation.outcome == "failed"
+
+
+@pytest.mark.parametrize("receipt_only", [False, True])
+def test_receipt_survives_interruption_before_publication(activity, trial, monkeypatch, receipt_only):
+    request, calls = trial
+    with monkeypatch.context() as patch:
+        def crash(*args, **kwargs):
+            raise RuntimeError("interrupted before canonical publication")
+
+        patch.setattr(dispatch.artifacts, "put_workflow_artifact", crash)
+        with pytest.raises(RuntimeError, match="interrupted before canonical publication"):
+            dispatch.dispatch_trial(*activity[:2], request, device_name="Fixture")
+    before = read_campaign(*activity)
+    assert len(calls) == 1
+    assert before.gpuReservations[0].consumedSeconds is None
+
+    @contextmanager
+    def no_start_fence():
+        pytest.fail("receipt recovery must bypass the start fence")
+        yield
+
+    monkeypatch.setattr(dispatch, "execute_cuda_trial", lambda *a, **k: pytest.fail("must not spawn"))
+    if receipt_only:
+        assert dispatch.reconcile_run_gpu_receipts(*activity, request.run_id)
+    ref = dispatch.dispatch_trial(*activity[:2], request, device_name="Fixture", start_fence=no_start_fence)
+    after = read_campaign(*activity)
+    assert after.gpuReservations[0].measurementRef == ref
+    assert after.gpuReservations[0].consumedSeconds == 3
+    assert after.revision == before.revision + 1
+
+
+@pytest.mark.parametrize("tamper_key", ["launchId", "candidateSourceHash"])
+def test_recovery_rejects_receipt_from_different_launch_or_frozen_inputs(activity, trial, monkeypatch, tamper_key):
+    request, _ = trial
+    identity = "operator-trial:" + request.measurement_id
+    intent_path = dispatch._intent_path(*activity[:2], identity)
+    with monkeypatch.context() as patch:
+        patch.setattr(dispatch.artifacts, "put_workflow_artifact",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("interrupted")))
+        with pytest.raises(RuntimeError, match="interrupted"):
+            dispatch.dispatch_trial(*activity[:2], request, device_name="Fixture")
+    path = dispatch._receipt_path(intent_path)
+    receipt = json.loads(path.read_text(encoding="utf-8"))
+    if tamper_key == "launchId":
+        receipt[tamper_key] = "different-launch"
+    else:
+        receipt["measurement"][tamper_key] = "d" * 64
+    path.write_text(json.dumps(receipt), encoding="utf-8")
+    monkeypatch.setattr(dispatch, "execute_cuda_trial", lambda *a, **k: pytest.fail("must not spawn"))
+    with pytest.raises(CampaignConflict, match="receipt cannot be verified"):
+        dispatch.dispatch_trial(*activity[:2], request, device_name="Fixture")
+    assert read_campaign(*activity).gpuReservations[0].consumedSeconds is None
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_interruption_after_reserve_has_only_new_intent_no_start_proof(activity, trial, monkeypatch, legacy):
+    request, _ = trial
+    with monkeypatch.context() as patch:
+        reserve = dispatch.reserve_gpu_time
+        def interrupt(*args, **kwargs):
+            reserve(*args, **kwargs)
+            raise RuntimeError("interrupted before spawn")
+
+        patch.setattr(dispatch, "reserve_gpu_time", interrupt)
+        with pytest.raises(RuntimeError, match="interrupted before spawn"):
+            dispatch.dispatch_trial(*activity[:2], request, device_name="Fixture")
+    if legacy:
+        path = dispatch._intent_path(*activity[:2], "operator-trial:" + request.measurement_id)
+        path.write_text(dispatch._read_intent(path).fingerprint, encoding="utf-8")
+        with pytest.raises(CampaignConflict, match="no verifiable terminal receipt"):
+            dispatch.reconcile_run_gpu_receipts(*activity, request.run_id)
+        assert read_campaign(*activity).gpuReservations[0].consumedSeconds is None
+    else:
+        assert dispatch.reconcile_run_gpu_receipts(*activity, request.run_id)
+        assert read_campaign(*activity).gpuReservations == ()
+        dispatch.dispatch_trial(*activity[:2], request, device_name="Fixture")
+        assert read_campaign(*activity).gpuReservations[0].consumedSeconds == 3
+
+
+def test_start_fence_rejection_after_reserve_releases_without_spawn(activity, trial, monkeypatch):
+    request, _ = trial
+    gated = []
+
+    @contextmanager
+    def reject_launch():
+        gated.append(True)
+        if len(gated) == 2:
+            raise CampaignConflict("run cancelled")
+        yield
+
+    monkeypatch.setattr(dispatch, "execute_cuda_trial", executor.execute_cuda_trial)
+    monkeypatch.setattr(executor.subprocess, "Popen", lambda *a, **k: pytest.fail("must not spawn"))
+    with pytest.raises(CampaignConflict, match="run cancelled"):
+        dispatch.dispatch_trial(*activity[:2], request, device_name="Fixture", start_fence=reject_launch)
+    assert read_campaign(*activity).gpuReservations == ()
 
 
 def test_worker_start_failure_is_recorded_and_settled_without_gpu_cost(activity, trial, monkeypatch):
@@ -170,7 +266,11 @@ def test_system_baseline_dispatch_uses_operator_bridge(monkeypatch):
         real_domain_ports as ports,
     )
     calls = []
-    monkeypatch.setattr(dispatch, "dispatch_baseline", lambda action, snapshot: calls.append(action.run_id))
+    def baseline(action, snapshot, *, start_fence):
+        assert callable(start_fence)
+        calls.append(action.run_id)
+
+    monkeypatch.setattr(dispatch, "dispatch_baseline", baseline)
     monkeypatch.setattr(ports, "_collect_system_artifact_refs", lambda **kwargs: [{"kind": "operator_baseline"}])
     refs, meta = ports._execute_real_system_action(SimpleNamespace(node_id="operator_baseline", run_id="run1", action_id="a1"),
         input_snapshot={"teamId": "team1"}, required_kinds=("operator_baseline",))
@@ -188,13 +288,13 @@ def test_concurrent_dispatch_spends_only_once(activity, trial):
     assert len(calls) == 1
 
 
-@pytest.mark.parametrize("successful", [False, True])
-def test_baseline_bridge_verifies_frozen_inputs_and_preserves_failed_receipt(activity, trial, monkeypatch, successful):
+@pytest.mark.parametrize("outcome", ["failed", "succeeded", "cancel_before_activation"])
+def test_baseline_bridge_verifies_frozen_inputs_and_preserves_receipt(activity, trial, monkeypatch, outcome):
     from core.web.services.team_workflow.operator_optimization.store import (
         update_campaign,
     )
     request, calls = trial
-    if successful:
+    if outcome != "failed":
         from core.research.operator_optimization.measurement import (
             CaseMeasurement,
             PairedTiming,
@@ -240,8 +340,26 @@ def test_baseline_bridge_verifies_frozen_inputs_and_preserves_failed_receipt(act
             "baselineCandidateRef": candidate_ref.model_dump(mode="json")},
         "evaluationContract": {"protocolArtifactHash": protocol_artifact_hash, "protocolHash": sha256_hex(protocol)},
         "environmentSnapshotRef": environment_ref}
-    for _ in range(2):
-        if successful:
+    if outcome == "cancel_before_activation":
+        fences = []
+
+        @contextmanager
+        def cancel_before_activation():
+            fences.append(True)
+            if len(fences) == 3:
+                raise CampaignConflict("run cancelled before baseline activation")
+            yield
+
+        with pytest.raises(CampaignConflict, match="before baseline activation"):
+            dispatch.dispatch_baseline(
+                SimpleNamespace(run_id="run1"), snapshot, start_fence=cancel_before_activation
+            )
+        cancelled = read_campaign(*activity)
+        assert cancelled.baselineRef is None
+        assert cancelled.baselineVersions[0].status == "prepared"
+        assert cancelled.gpuReservations[0].measurementRef.kind == "operator_baseline"
+    for _ in range(2 if outcome != "cancel_before_activation" else 0):
+        if outcome == "succeeded":
             ref = dispatch.dispatch_baseline(SimpleNamespace(run_id="run1"), snapshot)
             activated = read_campaign(*activity)
             assert activated.baselineRef == ref
