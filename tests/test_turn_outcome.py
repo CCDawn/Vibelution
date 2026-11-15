@@ -7,7 +7,7 @@ can leave a turn spinning or resuming the wrong identity.
 
 import json
 
-from core.llm.types import CanonicalItemIdentity, TurnOutcome
+from core.llm.types import CanonicalItemIdentity, CanonicalToolCall, TurnOutcome
 from core.orchestration.turn_outcome import TurnOutcomeController
 
 
@@ -17,6 +17,26 @@ def _controller(**kwargs) -> TurnOutcomeController:
         get_attention_snapshot=lambda: {},
         **kwargs,
     )
+
+
+def test_structured_tool_arguments_leave_canonical_outcome_as_plain_json():
+    from core.infrastructure.llm_utils import parse_tool_args
+    from core.web.services.external_agent.approval_binding import freeze_execution_arguments
+    from tools.Key_Tools import create_key_tools
+
+    tool = next(item for item in create_key_tools() if item.name == "record_local_reuse_evidence_tool")
+    identity = CanonicalItemIdentity(session_id="session", turn_id="turn", invocation_id="call", iteration=1, item_id="item")
+    arguments = {"feature": "Ordered list fix", "local_reuse_decision": "ADAPT",
+                 "local_owner_paths": ["core/example.py", "core/related.py"], "reason": "Existing owner.",
+                 "implementation_boundary": "Only the renderer.", "verification_strategy": "Run regression."}
+    call = CanonicalToolCall(identity, "record", tool.name, arguments)
+    outcome = TurnOutcome("tool_calls", identity, tool_calls=(call,), terminal_event_seen=True)
+
+    projected = TurnOutcomeController.decide_llm_iteration(outcome).tool_calls[0]["args"]
+    parsed = parse_tool_args(projected, tool_name=tool.name)
+    assert json.loads(freeze_execution_arguments(tool.func, parsed)) == arguments
+    projected["local_owner_paths"].append("untrusted.py")
+    assert call.arguments["local_owner_paths"] == ("core/example.py", "core/related.py")
 
 
 def test_classify_turn_carryover_covers_absent_terminal_mismatch_and_accepted():

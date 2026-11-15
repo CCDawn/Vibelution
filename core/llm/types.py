@@ -50,6 +50,14 @@ def _freeze_json_value(value: Any) -> Any:
     return value
 
 
+def _copy_json_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _copy_json_value(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_copy_json_value(item) for item in value]
+    return value
+
+
 @dataclass
 class LLMCapabilities:
     supports_streaming: bool = True
@@ -165,6 +173,10 @@ class CanonicalToolCall:
         if not self.call_id.strip() or not self.name.strip():
             raise ValueError("canonical tool call requires call_id and name")
         object.__setattr__(self, "arguments", _freeze_json_value(self.arguments))
+
+    def copy_arguments(self) -> dict[str, Any]:
+        """Give execution a mutable JSON copy while preserving the canonical call."""
+        return _copy_json_value(self.arguments)
 
 
 @dataclass(frozen=True)

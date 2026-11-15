@@ -4199,7 +4199,7 @@ class LLMClient:
     @staticmethod
     def _canonical_compatibility_tool_calls(outcome: TurnOutcome) -> List[Dict[str, Any]]:
         return [
-            {"id": call.call_id, "name": call.name, "args": dict(call.arguments)}
+            {"id": call.call_id, "name": call.name, "args": call.copy_arguments()}
             for call in outcome.tool_calls
         ]
 
@@ -6055,8 +6055,8 @@ class LLMClient:
                                     ToolCall(
                                         id=call.call_id,
                                         name=call.name,
-                                        arguments=dict(call.arguments),
-                                        raw_arguments=json.dumps(dict(call.arguments), ensure_ascii=False),
+                                        arguments=call.copy_arguments(),
+                                        raw_arguments=json.dumps(call.arguments, ensure_ascii=False),
                                     )
                                     for call in turn_outcome.tool_calls
                                 ],
