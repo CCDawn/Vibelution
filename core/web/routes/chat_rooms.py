@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -114,11 +114,15 @@ def chat_room_create(payload: ChatRoomCreatePayload) -> dict:
     response_model=ChatRoomDetailResponse,
     response_model_exclude_unset=True,
 )
-def chat_room_detail(room_id: str) -> dict:
-    detail = get_chat_room_detail(room_id)
-    if detail is None:
+def chat_room_detail(room_id: str, detail: Literal["full", "transcript"] = "full") -> dict:
+    """Read persisted rounds without refreshing runtime state in transcript mode."""
+    if detail == "transcript":
+        room = get_chat_room_detail(room_id, reconcile=False, participant_index=False)
+    else:
+        room = get_chat_room_detail(room_id)
+    if room is None:
         raise HTTPException(status_code=404, detail="Chat room not found")
-    return detail
+    return room
 
 
 @router.get("/chat-rooms/{room_id}/events", response_class=StreamingResponse)
