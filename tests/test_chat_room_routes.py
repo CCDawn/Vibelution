@@ -38,6 +38,35 @@ def test_chat_room_purposes_api_exposes_conversation_purpose_modes():
     assert "natural replies" in purposes["chat"]["description"]
 
 
+def test_chat_room_transcript_detail_skips_reconcile_and_participant_index(monkeypatch):
+    detail = {
+        "roomId": "room-transcript",
+        "config": {"teamId": "team-1"},
+        "rounds": [{"roundId": "round-1", "messages": [{"messageId": "m1", "content": "reply"}]}],
+    }
+    calls = []
+
+    def get_detail(room_id, *, reconcile=True, participant_index=True):
+        calls.append((room_id, reconcile, participant_index))
+        return detail if room_id == detail["roomId"] else None
+
+    monkeypatch.setattr(chat_rooms_route, "get_chat_room_detail", get_detail)
+    path = "/api/chat-rooms/room-transcript"
+
+    full = client.get(path)
+    transcript = client.get(path, params={"detail": "transcript"})
+    missing = client.get("/api/chat-rooms/unknown", params={"detail": "transcript"})
+
+    assert full.status_code == transcript.status_code == 200
+    assert full.json() == transcript.json() == detail
+    assert missing.status_code == 404
+    assert calls == [
+        ("room-transcript", True, True),
+        ("room-transcript", False, False),
+        ("unknown", False, False),
+    ]
+
+
 def _seed_chat_sessions(root):
     save_chat_state(
         root,
