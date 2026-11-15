@@ -396,7 +396,7 @@ def _management_contracts():
     })
     result["dispatch_write"] = (DispatchWrite, {
         "action": "dispatch_write", "governed": True,
-        "description": "按原生审批策略派遣单个已有 Agent 修改项目，仅申请 workspace_write，实际权限以目标项目回执为准。task 必须是当前用户消息去除首尾空白后的完整正文，不得截取、改写或追加；过长时请用户重新提供完整消息，不截断。使用稳定 dispatch_id，未知时查询原回执，不换 ID 重派。",
+        "description": "按原生审批策略派遣单个已有 Agent 修改项目，仅申请 workspace_write，实际权限以目标项目回执为准。task 使用当前用户消息去除首尾空白后的完整正文，保留原文；执行者的角色和工作区由目标运行时下发。过长时请用户重新提供完整消息。你负责本轮按 nextAction 查询同一个 dispatch_id 到终态或明确受阻，并依据实际改动和测试结果向用户回报。",
         "parameters": DispatchWrite.model_json_schema(),
     })
     result["dispatch_cancel"] = (DispatchCancel, {
@@ -560,7 +560,7 @@ _HELP = {
     "agents": "仅查询当前调用通道的直接派遣候选，完整目录用agent_list。Launcher本地scope=launcher_local_dispatchable、dispatchContext=launcher_local；第三方为externally_dispatchable、dispatchContext=external。catalogComplete=false；返回1项不能推断项目只有1个Agent，不会创建项目内个人助理。团队成员使用所属团队的team_get与flow_list/flow_start调度，虚拟人使用专属会话，不能当普通worker派遣。",
     "agent_list": "分页只读完整Agent目录（Agent catalog），含活跃、归档、系统、团队及hidden Agent，仅公开名称、状态、归属等目录元数据。ownership.teams仅含当前roster实证成员关系；recordedTeams是Agent元数据保留但未确认当前成员的团队引用，不证明当前归属，也不改变派遣。createdBy是公开创建来源，templateId是登记模板，未知为空；ownerAgentId/ownerAgentName仅展示显式宿主Agent引用及同一目录公开名称，不读取对方Session或配置；kind=unknown不表示丢失Agent。dispatchContext标明资格口径；Launcher本地为launcher_local，dispatchable/counts.dispatchable与本地agents及任务提交共用判定，不使用第三方gateway开关/allowlist。external仅表示第三方调用资格。dispatchable=false不等于不可管理：当前团队成员使用ownership.teams对应团队的team_get、flow_list/flow_start，只有recordedTeams时先核对当前团队归属，虚拟人使用专属会话；已归档或明确禁用按dispatchReason说明。不扩大执行权限。total是本次query匹配总量，registryTotal是登记总量，当前页行数不能称总量。默认及最多6项，单行query最多64字符且无控制字符。保持query，用offset=nextOffset、expected_revision=revision续页，直到nextOffset为空才查全；revision变化则从首页重查。需独立agents:directory:read，缺scope先查authorization_status，再用authorization_upgrade只显式增加所需scope。旧目标不支持时明确不可用，不能把不可用说成空目录。",
     "dispatch": "以稳定 dispatch_id 派遣只读任务。优先用 task_source 的 start_after/end_before 唯一短锚点提取当前用户原文（都为空表示整条消息）；不得改写任务、ID或引号文字。task 仅允许用户消息的精确原文子串。用户要求拿回结果时设 wait_for_result_seconds=15；任务仍在执行时用返回的 nextAction 调用 receipt 原样查询，直到拿到结果或遇到明确阻塞。始终沿用原编号。",
-    "receipt": "查询派遣回执和最终结果（dispatch receipt），沿用原 dispatch_id。需要最终结果时设 wait_for_result_seconds=15；未完成时按 nextAction 继续核对原任务。以 receipt.resultSummary 复述目标 Agent 的实际结果。离线、超时和等待审批都不代表目标完成。",
+    "receipt": "查询派遣回执和最终结果（dispatch receipt），沿用原 dispatch_id。需要最终结果时设 wait_for_result_seconds=15；未完成时按 nextAction 继续核对原任务。succeeded 表示执行回合结束，以 receipt.resultSummary 的实际产出和验证证据判断用户目标是否达成。离线、超时和等待审批都不代表目标完成。",
     "agent_get": "读取目标项目普通 Agent 当前 configRevision、updatedAt、模型与头像，用于配置 CAS。可选 archiveEligibility 只读身份资格，不代表审批或空闲；eligible 对象用本次 configRevision 执行归档，blocked 说明阻止原因。",
     "agent_purge_preview": "只读预览永久删除已归档Agent，返回身份、名称、configRevision和固定删除影响，不执行删除。永久删除用agent_purge，必须沿用预览的agentId和configRevision；活跃或受保护对象拒绝。需agents:read。",
     "avatar_options": "分页只读目标项目现有 Agent 头像 filename/path 候选；offset最多50000，limit最多30。仅使用返回的路径，不接收模型、URL、目录或图片内容；来源不可用时不得猜测路径。",
@@ -1294,8 +1294,8 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
             return _browser_model_result(value)
         if action == "dispatch_write" and isinstance(value.get("receipt"), dict):
             if value["receipt"].get("effectivePermissionProfile") == "read_only":
-                return {**value, "permissionNotice": "目标项目将实际权限限制为只读，不能据此认为已执行修改。"}
-        if action in {"dispatch", "receipt"} and value.get("nativeTaskId"):
+                value = {**value, "permissionNotice": "目标项目将实际权限限制为只读，不能据此认为已执行修改。"}
+        if action in {"dispatch", "dispatch_write", "dispatch_derived", "receipt"} and value.get("nativeTaskId"):
             from core.external_agent.contracts import TASK_TERMINAL_STATUSES
             current_status = (value.get("receipt") or {}).get("status")
             if current_status not in {*TASK_TERMINAL_STATUSES, "awaiting_approval", "stop_unconfirmed"}:

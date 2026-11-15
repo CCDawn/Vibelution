@@ -1506,7 +1506,7 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
     )
     external_runtime_permission_profile = _external_agent_runtime_permission_profile(context)
     from core.web.services.external_agent.approval_binding import registered_launcher_session
-    from core.web.services.local_assistant.runtime import verified_task_runtime
+    from core.web.services.local_assistant.runtime import task_assignment_context, verified_task_runtime
     local_assistant_task = verified_task_runtime(project_root=s.PROJECT_ROOT, session_id=session_id,
         agent_id=agent_id, metadata=context.get("message_metadata"))
     if external_runtime_permission_profile:
@@ -2355,18 +2355,9 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                         if str(part or "").strip()
                     ).strip()
                 if local_assistant_task is not None:
-                    local_workspace_context = "\n".join([
-                        "## Authorized Local Development Workspace",
-                        f"RepositoryRoot: {local_assistant_task['workspace']}",
-                        f"ToolWorkspace: {local_assistant_task['workspace']}",
-                        "This native task is authorized for ordinary development in this worktree.",
-                        "Use absolute paths inside ToolWorkspace for every file tool and use it as CLI cwd.",
-                        "Normal file edits and local tests/builds do not need repeated confirmation.",
-                        "Preserve the original user constraints. Do not publish, delete unrelated data, change permissions or write to the integration checkout.",
-                        "Run real tests and report their command, exit code, changed files and worktree path.",
-                    ])
-                    dynamic_runtime_context_block = "\n\n".join(filter(None,
-                        (dynamic_runtime_context_block, local_workspace_context)))
+                    dynamic_runtime_context_block = "\n\n".join(filter(None, (
+                        dynamic_runtime_context_block, task_assignment_context(local_assistant_task),
+                    )))
                 runtime_context_block = "\n\n".join(
                     part
                     for part in (static_runtime_context_block, dynamic_runtime_context_block)

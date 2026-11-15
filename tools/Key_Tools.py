@@ -3161,6 +3161,8 @@ def _build_key_tools() -> List[BaseTool]:
         归档前agent_get核对configRevision及返回的archiveEligibility；资格不代表空闲或审批已通过。
         dispatch使用project_id、agent_id、稳定dispatch_id；优先task_source的start_after/end_before唯一短锚点提取用户原文，
         两锚点为空时使用整条用户消息；task使用精确原文子串，不能添加目标或改写任务。
+        用户明确要求修项目中的一个问题时，按已知文件或症状定向定位，用agents找到可派遣的执行者，再经manage调用dispatch_write。用户原文保留完整，目标运行时会分配执行者角色。
+        你在同一轮负责按照nextAction继续查询原派遣receipt；得到终态后，根据实际修改和测试证据回复用户，遇审批或明确阻塞时报告该环节。
         多轮需求、需要整理或拆分的开发任务，优先delegation_goal_create绑定用户目标，再用dispatch_derived派遣你整理的任务，申请workspace_write。
         不要因直派的原文约束要求用户重新替你编写工具参数；保留原目标和限制，只有真实缺少需求才提问。
         已建立本机授权的普通派工会按任务连续执行；目标任务临时获得开发工具和专属worktree，不改变第三方MCP权限或Agent永久工具策略。
