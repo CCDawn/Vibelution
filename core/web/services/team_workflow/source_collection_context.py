@@ -423,6 +423,7 @@ def compact_source_collection_quotable_sources(sources: Any) -> list[dict[str, A
             if not text or used + len(text) > QUOTE_SOURCES_TOTAL_CHAR_BUDGET:
                 break
             used += len(text)
+            finding_receipt = block.get("findingReceipt")
             blocks_out.append(
                 {
                     "origin": trim_text(block.get("origin"), max_length=40),
@@ -431,6 +432,10 @@ def compact_source_collection_quotable_sources(sources: Any) -> list[dict[str, A
                     "text": text,
                     "chars": len(text),
                     "truncated": bool(block.get("truncated")),
+                    **({"findingReceipt": {
+                        key: trim_text(finding_receipt.get(key), max_length=200)
+                        for key in ("nodeRunId", "taskId", "artifactReceiptId", "sessionId", "turnId")
+                    }} if isinstance(finding_receipt, dict) else {}),
                 }
             )
         entry = {

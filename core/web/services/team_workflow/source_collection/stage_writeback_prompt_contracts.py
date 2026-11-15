@@ -50,6 +50,7 @@ def _stage_writeback_prompt_lines(stage_id: str) -> list[str]:
         return [
             "- 调用 `source_collection_stage_writeback_tool` 时，结构化结果必须 JSON 序列化到参数 `result_json`；该工具没有 `payload_json` 参数，禁止使用 `payload_json`。",
             "- 本任务只负责资料寻找：新资料只写入 `candidateLeads[]`，无效来源只写入 `invalidSources[]`；不要把检索结果写成 `candidateExtractions[]`、`recordExtractions[]` 或 `candidateDecisions[]`。",
+            "- 写回前，每类视角优先挑一条已选中的来源，用 `web_fetch_tool` 抓取正式检索回执中返回的 URL，供后续提炼引用原文。最多尝试四条来源，每条一次，失败就继续。抓取不替代正式检索回执，也不把抓取原文另写入候选摘要。",
             "- 检索计划必须同时覆盖四类视角：`mechanism`（机制/支持）、`independent_baseline`（独立基线或复现）、`limitation_or_null`（限制、失败或零结果）和 `falsification`（反例或可证伪线索）；不得只检索支持当前设想的资料。",
             "- 先从 `source_collection_context_tool` 返回的 `assignments[].assignedQueries[]` 读取服务端冻结查询；调用 `batch_web_search_tool` 时必须逐字使用其中的 `query`，不得改写、扩展或提交未分配的 generic query。每条正式查询的 `assignmentId`、`queryId` 与 `perspective` 由服务端回执链绑定。",
             "- 每条 `candidateLeads[]` 至少包含 `title`、`locator`（可验证 DOI 或 https URL）、`sourceType`、`summary`、本条资料对应的 `query`，以及上述四类之一的 `perspective`；可额外填写 `doi`、`authors`、`year`、`container`、`relevance`。",
@@ -71,7 +72,7 @@ def _stage_writeback_prompt_lines(stage_id: str) -> list[str]:
             "- `evidenceRefs[]` 只写页码、PDF 页、段落、章节、引文或受控记录锚点；`claims[]` / `keyFindings[]` / `citations[]` 每项必须包含 `sourceRef`，并至少包含 `page/pageRange/citation/evidenceRef` 之一。",
             "- 要进入正式 `ClaimEvidenceStore` 的主张，`claims[]` 还必须提供来源中可复核的有界原文 `quote`，并且每条 `claims[]`/`keyFindings[]` 项都要自带显式事实字段 `fact`；`claim` 是归纳主张的别名，运行时只认 `fact`，不能用 `claim` 替代。",
             "- 正式 claim 路径的 completed 提炼回写被服务端强制校验：候选/记录有可引用原文块（上下文 `quotableSources[].blocks`）时，每条非 `exclude` 条目必须至少带一个逐字 quote 锚——嵌套 `claims[]`/`keyFindings[]` 项含 `quote`，或 `evidenceRefs[]` 项含 `{id, quote}`；`quote` 必须是对应来源原文块的逐字子串，从上下文原样复制，禁止改写、拼接或凭记忆重写。",
-            "- 上下文 `quotableSources[]` 是唯一的 quote 来源：`quote` 只能从对应 `sourceId` 的 `blocks[].text` 逐字复制（来源为本任务 `web_fetch_tool` 成功回执，截断块只引块内文本）；抓取页面不等于整篇论文核验；`sourceAccess.access=no_quotable_text` 的来源没有可引用原文——先用 `web_fetch_tool` 抓取既有 URL，再重读上下文；抓取失败后跳过它的 quote 并声明 `evidenceStatus=missing_evidence_anchor`，不要为它产出 claim 或空 `quote`。",
+            "- 先读上下文 `quotableSources[]`：`quote` 只能从对应 `sourceId` 的 `blocks[].text` 逐字复制（来自本任务或经正式搜集交接绑定的 `web_fetch_tool` 成功回执，截断块只引块内文本）。已有原文就直接引用，用该块的 `locator` 填 `source_url`，无需再次抓取（有明确补抓要求的修复任务除外）。无可引用原文时，用 `web_fetch_tool` 抓取既有 URL，再重读上下文；抓取失败后跳过它的 quote 并声明 `evidenceStatus=missing_evidence_anchor`，不要为它产出 claim 或空 `quote`。抓取页面不等于整篇论文核验。",
             "- 多轮抓取（含 DOI 链接改道与镜像备援）后仍无法取得原文的来源：若该来源并非结论成立的必需证据，用 `decision=exclude` 并在 `defects`/`reason` 写明不可得原因（付费墙/登录墙/无 DOI 元数据等）诚实剔除，不要保留 `evidenceStatus=missing_evidence_anchor` 阻塞整批；仅当缺少该来源结论不成立、确需人工介入时才保留 `missing_evidence_anchor` 申请复审。",
             "- quote 不匹配的一次性修正：`quote` 首次不是原文块逐字子串时，completed 回写不拒绝，任务停靠 `needs_review` 并返回 `quoteAnchorRemediation`（含最近匹配块片段与相似度），按其 `findings[]` 逐条替换为逐字文本后重写；该修正机会只有一次，再次不匹配会被直接拒绝；空 `quote`/缺锚回写始终直接拒绝，不进入修正反馈。",
             "- 模型生成的 `summary` 只作检索线索，禁止作为论文引文；只有真实抓取文本确为原始摘要时才写 `evidenceStatus=verified_abstract`，其他有原文支持的条目可写 `evidenceStatus=evidence_ready`；证据状态字段名是 `evidenceStatus`，不是 `verification_status`（`verification_status` 只属于 Challenge v2 证据卡元数据，其取值不会被当作条目证据状态）；没有真实抓取原文的来源必须声明 `evidenceStatus=missing_evidence_anchor` 诚实跳过（不物化），不得虚构页码、直接引语或全文结论。",

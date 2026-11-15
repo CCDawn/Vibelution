@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -2910,6 +2911,8 @@ def _seed_counter_evidence_graph(
     monkeypatch: pytest.MonkeyPatch,
     graph_record: dict,
     candidate_ids: list[str],
+    *,
+    anchorable: bool = True,
 ) -> None:
     from core.web.services.team_workflow.source_collection import (
         candidates as candidates_module,
@@ -2924,14 +2927,13 @@ def _seed_counter_evidence_graph(
                 {
                     "candidateId": candidate_id,
                     "candidateType": "source_manifest",
+                    "sourceCollectionRunId": kwargs.get("run_id"),
                     "title": f"Collected source {candidate_id}",
                     "sourceUrl": f"https://example.org/{candidate_id}",
-                    # Anchorable summaries: the counter-evidence bridge runs
-                    # inside the materialized path, after the fact phase.
                     "summary": (
                         f"Collected abstract for {candidate_id} reports a "
                         "bounded mechanism."
-                    ),
+                    ) if anchorable else "",
                     "createdAt": "2026-10-20T10:45:06Z",
                 }
                 for candidate_id in candidate_ids
@@ -3101,6 +3103,138 @@ def test_chain_collection_counter_evidence_replay_is_zero_write(
     assert replay["counterEvidence"]["counterEvidenceCount"] == 2
     assert replay["counterEvidence"]["status"] == "materialized"
     assert [dict(item) for item in store.list(team_id)] == snapshot_after_first
+
+
+@pytest.mark.parametrize("anchorable", [True, False])
+def test_chain_collection_resolves_canonical_counter_evidence_refs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, anchorable: bool
+) -> None:
+    from core.infrastructure import path_containment
+    from core.web.services.team_workflow.research_runtime.agent_claim_evidence_materializer import (
+        materialize_chain_collection_evidence,
+    )
+    from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
+        load_evidence_relation_graph_payload,
+    )
+
+    team_id, scope = _claim_bridge_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(path_containment, "PROJECT_ROOT", tmp_path)
+    collection_run = "dprun-20261020104506966426-72158dab"
+    workflow_run = "run-fbc374b1caf6"
+    candidate_id = "dprec-20261020104507-aaaa"
+    claim = "The mechanism holds under every load."
+    claim_row = claim_ledger.propose_claim(
+        team_id,
+        {**scope, "claim": claim, "createdBy": scope["agentId"], "source": "agent"},
+    )["claim"]
+    store = ClaimEvidenceStore(tmp_path)
+    source_payload = {
+        "claimId": claim_row["claimId"],
+        "candidateId": candidate_id,
+        "sourceId": "https://example.org/canonical-source",
+        "sourceRevision": "sha256:" + "1" * 64,
+        "locator": {"kind": "pdf_page", "page": 4, "section": "Results"},
+        "quote": "At high load the mechanism is absent in the control group.",
+        "evidenceKind": "primary_result",
+        "reasoningRole": "inference",
+        "supportLevel": "supports",
+        "extractionMethod": "manual",
+        "extractorAgentId": "agent-extractor",
+        "sourceCollectionRunId": collection_run,
+        "workflowRunId": workflow_run,
+        "collectionEnvelope": {
+            "title": "High load controls",
+            "sourceUrl": "https://example.org/canonical-source",
+            "sourceType": "peer_reviewed_paper",
+            "retrievedAt": "2026-10-20T10:45:06Z",
+        },
+    }
+    source_card = store.register(team_id, source_payload)
+    source_ref = source_card["claimEvidenceId"]
+    counter_ref = {
+        "evidenceRef": source_ref,
+        "claim": claim,
+        "disposition": "challenges_ontology",
+    }
+    record = _counter_evidence_graph_record(counter_refs=[counter_ref])
+    graph = record["metadata"]["graph"]
+    graph["edges"] = [{"evidenceRefs": [source_ref]}]
+    graph["evidenceGaps"] = [{"id": "gap-control-replication"}]
+    _seed_counter_evidence_graph(
+        monkeypatch, record, candidate_ids=[candidate_id], anchorable=anchorable
+    )
+    assert load_evidence_relation_graph_payload(
+        team_id=team_id, authority_run_id=collection_run, workflow_run_id=workflow_run
+    )["counterEvidenceRefs"] == [counter_ref]
+
+    kwargs = {
+        "project_root": tmp_path,
+        "team_id": team_id,
+        "question_scope": scope,
+        "collection_run_id": collection_run,
+        "workflow_run_id": workflow_run,
+    }
+    handoff = materialize_chain_collection_evidence(**kwargs)
+    assert handoff["status"] == "materialized"
+    assert handoff["factClaimCount"] == int(anchorable)
+    result = handoff["counterEvidence"]
+    assert result["status"] == "materialized"
+    assert result["counterEvidenceCount"] == 1
+    cards = store.list(team_id)
+    [derived] = [card for card in cards if card["evidenceKind"] == "counter_evidence"]
+    for field in (
+        "claimId", "candidateId", "sourceId", "sourceRevision", "locator", "quote",
+        "reasoningRole", "collectionEnvelope",
+    ):
+        assert derived[field] == source_card[field]
+    assert derived["derivedFromClaimEvidenceId"] == source_ref
+    assert derived["claimEvidenceId"] != source_ref
+    assert derived["supportLevel"] == "contradicts"
+    assert derived["sourceCollectionRunId"] == collection_run
+    assert derived["workflowRunId"] == workflow_run
+    assert materialize_chain_collection_evidence(**kwargs)["counterEvidence"] == result
+    assert store.list(team_id) == cards
+
+    if not anchorable:
+        return
+    foreign_run, foreign_workflow, altered_locator, altered_quote_hash, rejected = [
+        store.register(team_id, {**source_payload, "claimId": f"claim-{index}", **overrides})[
+            "claimEvidenceId"
+        ]
+        for index, overrides in enumerate((
+            {"sourceCollectionRunId": "collection-other"},
+            {"workflowRunId": "workflow-other"},
+            {},
+            {},
+            {},
+        ))
+    ]
+    store.review(team_id, rejected, decision="rejected", reviewed_by="human-reviewer")
+    rows = store.list(team_id)
+    for row in rows:
+        if row["claimEvidenceId"] == altered_locator:
+            row["locator"]["page"] = 9
+        if row["claimEvidenceId"] == altered_quote_hash:
+            row["quoteHash"] = "sha256:" + "2" * 64
+    store._path(team_id).write_text(
+        "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+    )
+    invalid_refs = [foreign_run, foreign_workflow, altered_locator, altered_quote_hash, rejected]
+    graph["counterEvidenceRefs"] = [
+        {**counter_ref, "disposition": "limit_scope"},
+        counter_ref,
+        *({**counter_ref, "evidenceRef": ref} for ref in invalid_refs),
+    ]
+    result = materialize_chain_collection_evidence(**kwargs)["counterEvidence"]
+    assert result["counterEvidenceCount"] == 1
+    assert result["unknownDispositionSkipped"] == [
+        {"evidenceRef": source_ref, "disposition": "limit_scope"}
+    ]
+    assert result["unresolvedEvidenceSkipped"] == [
+        {"evidenceRef": ref, "reason": "canonical_evidence_unresolved"}
+        for ref in invalid_refs
+    ]
+    assert store.list(team_id) == rows
 
 
 def test_chain_collection_counter_evidence_bridge_is_fail_open(

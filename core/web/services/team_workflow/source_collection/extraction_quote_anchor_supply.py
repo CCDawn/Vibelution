@@ -195,25 +195,31 @@ def _normalized_locator_keys(url: Any) -> list[str]:
     return keys
 
 
+def linked_source_record_id(source: Mapping[str, Any]) -> str:
+    metadata = source.get("metadata") if isinstance(source.get("metadata"), dict) else {}
+    linked_id = _clean(metadata.get("sourceRecordId"))
+    if linked_id:
+        return linked_id
+    for key in _LINKED_RECORD_KEYS:
+        linked = metadata.get(key) if isinstance(metadata.get(key), dict) else {}
+        if linked_id := _clean(linked.get("recordId")):
+            return linked_id
+    return ""
+
+
 def source_quotable_blocks(
     source: Mapping[str, Any],
     record_by_id: Mapping[str, Mapping[str, Any]],
     *,
     fetched_text_by_locator: Mapping[str, Mapping[str, str]] | None = None,
+    finding_text_by_locator: Mapping[str, Mapping[str, str]] | None = None,
     block_max_chars: int = QUOTE_BLOCK_MAX_CHARS,
 ) -> list[dict[str, Any]]:
-    """Bind a source locator to original text from this task's fetch receipts."""
+    """Bind the source locator to task text, then to its scoped finding text."""
     from .doi_enrichment import source_metadata_doi
 
     records = [source]
-    metadata = source.get("metadata") if isinstance(source.get("metadata"), dict) else {}
-    linked_id = _clean(metadata.get("sourceRecordId"))
-    if not linked_id:
-        for key in _LINKED_RECORD_KEYS:
-            linked = metadata.get(key) if isinstance(metadata.get(key), dict) else {}
-            linked_id = _clean(linked.get("recordId"))
-            if linked_id:
-                break
+    linked_id = linked_source_record_id(source)
     if linked_id in record_by_id:
         records.append(record_by_id[linked_id])
     fetched = fetched_text_by_locator or {}
@@ -262,11 +268,25 @@ def source_quotable_blocks(
             seen.add(text)
             clipped, truncated = _clip_at_boundary(text, block_max_chars)
             if clipped:
-                blocks.append({
+                block = {
                     **{k: receipt[k] for k in ("locator", "resolvedUrl", "eventId", "sessionId", "turnId") if k in receipt},
                     "origin": "fetched_text", "text": clipped,
                     "chars": len(clipped), "truncated": truncated,
-                })
+                }
+                if receipt.get("findingNodeRunId"):
+                    block["findingReceipt"] = {
+                        "nodeRunId": receipt["findingNodeRunId"],
+                        "taskId": receipt["findingTaskId"],
+                        "artifactReceiptId": receipt["findingArtifactReceiptId"],
+                        "sessionId": receipt["sessionId"],
+                        "turnId": receipt["turnId"],
+                    }
+                blocks.append(block)
+    if not blocks and finding_text_by_locator:
+        return source_quotable_blocks(
+            source, record_by_id, fetched_text_by_locator=finding_text_by_locator,
+            block_max_chars=block_max_chars,
+        )
     return blocks
 
 
@@ -322,6 +342,7 @@ def extraction_quotable_sources(
     *,
     failed_fetch_by_candidate_id: Mapping[str, Mapping[str, Any]] | None = None,
     fetched_text_by_locator: Mapping[str, Mapping[str, str]] | None = None,
+    finding_text_by_source: Mapping[tuple[str, str], Mapping[str, Mapping[str, str]]] | None = None,
     block_max_chars: int = QUOTE_BLOCK_MAX_CHARS,
     total_char_budget: int = QUOTE_SOURCES_TOTAL_CHAR_BUDGET,
 ) -> list[dict[str, Any]]:
@@ -339,6 +360,7 @@ def extraction_quotable_sources(
         if _clean(record.get("recordId"))
     }
     failed_fetch_by_candidate_id = failed_fetch_by_candidate_id or {}
+    finding_text_by_source = finding_text_by_source or {}
     sources: list[dict[str, Any]] = []
     linked_record_ids: set[str] = set()
     used = 0
@@ -350,16 +372,10 @@ def extraction_quotable_sources(
             candidate,
             record_by_id,
             fetched_text_by_locator=fetched_text_by_locator,
+            finding_text_by_locator=finding_text_by_source.get(("candidate", candidate_id)),
             block_max_chars=block_max_chars,
         )
-        metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
-        linked_record_id = _clean(metadata.get("sourceRecordId"))
-        if not linked_record_id:
-            for key in _LINKED_RECORD_KEYS:
-                linked = metadata.get(key) if isinstance(metadata.get(key), dict) else {}
-                linked_record_id = _clean(linked.get("recordId"))
-                if linked_record_id:
-                    break
+        linked_record_id = linked_source_record_id(candidate)
         if linked_record_id:
             linked_record_ids.add(linked_record_id)
         source = _quotable_source_entry(
@@ -380,6 +396,7 @@ def extraction_quotable_sources(
             record,
             {},
             fetched_text_by_locator=fetched_text_by_locator,
+            finding_text_by_locator=finding_text_by_source.get(("record", record_id)),
             block_max_chars=block_max_chars,
         )
         source = _quotable_source_entry(
