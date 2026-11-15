@@ -51,6 +51,20 @@ def test_ordinary_development_commands_can_continue(tmp_path, command):
     assert policy.normal_development_call("cli_tool", {"command": command, "cwd": "."}, tmp_path)
 
 
+@pytest.mark.parametrize("separator", [" ", " -- "])
+def test_git_diff_does_not_implicitly_compare_a_file_outside_the_task(tmp_path, separator):
+    allowed = {"cmd": "git diff HEAD~1 HEAD -- core/example.py"}
+    outside = {"cmd": f'git diff{separator}core/example.py "{tmp_path.parent / "outside.py"}"'}
+    assert policy.normal_development_call("exec_command", allowed, tmp_path)
+    assert not policy.normal_development_call("exec_command", outside, tmp_path)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows device namespace")
+@pytest.mark.parametrize("path", ["NUL", "subdir/NUL.txt", "CON", "COM1"])
+def test_native_file_tool_does_not_grant_win32_device_names(tmp_path, path):
+    assert not policy.workspace_paths_allowed("write_file_tool", {"file_path": path}, tmp_path)
+
+
 @pytest.mark.parametrize("command", [
     "git switch main", "git switch -c codex/example", "git branch codex/example",
     "git stash push -m wip -- core/example.py", "git stash pop",

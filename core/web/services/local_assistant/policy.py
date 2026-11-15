@@ -7,7 +7,7 @@ and builds execute project code; this is a consent policy, not an OS sandbox.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import os
 import re
 import shlex
@@ -132,7 +132,7 @@ def _contained_path(value: Any, base: Path, root: Path) -> Path | None:
         return None
     candidate = Path(value)
     if (candidate.anchor and not candidate.is_absolute()) or any(
-        part.rstrip(" .").casefold() == ".git" or (os.name == "nt" and ":" in part)
+        part.rstrip(" .").casefold() == ".git" or (os.name == "nt" and (":" in part or PureWindowsPath(part).is_reserved()))
         for part in candidate.parts if part != candidate.anchor
     ):
         return None
@@ -245,14 +245,19 @@ def _trusted_tool(executable: str, cwd: Path, root: Path) -> str | None:
 
 
 def _git_options_allowed(argv: list[str], flags: frozenset[str], values: frozenset[str],
-                         short_flags: str, short_values: str) -> bool:
+                         short_flags: str, short_values: str, *,
+                         diff_scope: tuple[Path, Path] | None = None) -> bool:
     index = 0
     while index < len(argv):
         token = argv[index]
         index += 1
         if token == "--":
-            return True
+            return diff_scope is None or all(_contained_path(path, *diff_scope) is not None for path in argv[index:])
         if not token.startswith("-") or token == "-":
+            # Git diff implicitly chooses --no-index when a path is outside
+            # the checkout, even if every explicit option is read-only.
+            if diff_scope is not None and _contained_path(token, *diff_scope) is None:
+                return False
             continue
         if token.startswith("--"):
             option, equals, _ = token.partition("=")
@@ -383,7 +388,8 @@ def _git_development(argv: list[str], cwd: Path, root: Path) -> bool:
         return _scoped_arguments(rest, schema, cwd, root)
     if action in _GIT_READ:
         return _git_options_allowed(rest, _GIT_READ_FLAGS, _GIT_READ_VALUES,
-                                    "abcehilnopqrtuvwzBCDEHILNPSVW", "UfeGS")
+                                    "abcehilnopqrtuvwzBCDEHILNPSVW", "UfeGS",
+                                    diff_scope=(cwd, root) if action == "diff" else None)
     if action == "add":
         return _git_options_allowed(rest, frozenset({"--all", "--intent-to-add", "--verbose",
                                     "--dry-run", "--update", "--renormalize"}), frozenset(), "ANvnu", "")

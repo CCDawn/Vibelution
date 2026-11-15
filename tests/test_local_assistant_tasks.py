@@ -239,10 +239,12 @@ def test_private_route_requires_both_control_and_launcher_capability(monkeypatch
     assert external.calls
 
 
-def test_local_worker_preparation_reaches_native_model_handoff(monkeypatch, tmp_path):
+@pytest.mark.parametrize("active_task", [True, False])
+def test_local_worker_preparation_preserves_launcher_boundary(monkeypatch, tmp_path, active_task):
     from core.web.services import session_service
     from core.web.services.session import worker
     from core.web.services.local_assistant import runtime
+    from core.web.services.external_agent.approval_binding import register_external_session, unregister_external_session
     from tests.test_session_worker import _install_full_prepare_reach_harness
     calls, lifecycle, workspaces = [], [], []
     workspace = tmp_path / "owned-worktree"
@@ -256,18 +258,31 @@ def test_local_worker_preparation_reaches_native_model_handoff(monkeypatch, tmp_
     monkeypatch.setattr(session_service, "_session_reasoning_effort_snapshot", lambda *a: "")
     monkeypatch.setattr(session_service, "_resolve_session_agent_llm", lambda *a, **kw: None)
     monkeypatch.setattr(session_service, "build_agent_context", lambda *a, **kw: None)
-    monkeypatch.setattr(runtime, "verified_task_runtime", lambda **kwargs:
-        {"taskId": "eat-local", "workspace": workspace, "profile": "workspace_write"})
+    task = {"taskId": "eat-local", "workspace": workspace, "profile": "workspace_write"}
+    monkeypatch.setattr(runtime, "verified_task_runtime", lambda **kwargs: task if active_task else None)
     from contextlib import nullcontext
+    bindings = []
     def capture_workspace(path, **kwargs):
         workspaces.append(path)
         return nullcontext()
     monkeypatch.setattr(session_service, "_session_tool_workspace_override", capture_workspace)
+    monkeypatch.setattr(session_service, "active_agent_runtime",
+                        lambda *args, **kwargs: bindings.append(kwargs) or nullcontext())
     control = session_service.SessionTurnControl(session_id="session-1", turn_id="turn-1")
-    worker._run_session_turn_impl({"session_id": "session-1", "turn_id": "turn-1",
-        "turn_control": control, "agent_id": "coder", "user_message": "Implement and test", "message_metadata": {}})
+    registration = {"task_id": "eat-local", "session_id": "session-1", "agent_id": "coder"}
+    register_external_session(**registration, launcher_local=True)
+    try:
+        worker._run_session_turn_impl({"session_id": "session-1", "turn_id": "turn-1",
+            "turn_control": control, "agent_id": "coder", "user_message": "Implement and test",
+            "user_message_source": "external_agent_task", "message_metadata": {"source": "external_agent_task",
+                "taskId": "eat-local", "effectivePermissionProfile": "workspace_write"}})
+    finally:
+        unregister_external_session(**registration)
     assert "continuation" in calls
-    assert workspace in workspaces
+    assert (workspace in workspaces) is active_task
+    expected = "workspace_write" if active_task else "inactive"
+    assert bindings[-1]["runtime_tool_source"] == f"launcher_assistant_task:{expected}"
+    assert bool(bindings[-1]["runtime_tool_grants"]) is active_task
 
 
 def test_expired_local_task_loses_execution_grant_and_is_stopped_by_reconcile(tmp_path):

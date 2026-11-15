@@ -1505,6 +1505,7 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
         else ""
     )
     external_runtime_permission_profile = _external_agent_runtime_permission_profile(context)
+    from core.web.services.external_agent.approval_binding import registered_launcher_session
     from core.web.services.local_assistant.runtime import verified_task_runtime
     local_assistant_task = verified_task_runtime(project_root=s.PROJECT_ROOT, session_id=session_id,
         agent_id=agent_id, metadata=context.get("message_metadata"))
@@ -1517,6 +1518,13 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
         from core.web.services.local_assistant.policy import local_runtime_tool_grants, LOCAL_RUNTIME_SOURCE_PREFIX
         runtime_tool_grants = list(local_runtime_tool_grants(local_assistant_task["profile"]))
         runtime_tool_source = LOCAL_RUNTIME_SOURCE_PREFIX + local_assistant_task["profile"]
+    elif registered_launcher_session(session_id=session_id, agent_id=agent_id):
+        from core.web.services.local_assistant.policy import LOCAL_RUNTIME_SOURCE_PREFIX
+
+        # The task's identity survives a revoked lease or missing workspace.
+        # Never recover the wider third-party grant when that local check fails.
+        runtime_tool_grants = []
+        runtime_tool_source = LOCAL_RUNTIME_SOURCE_PREFIX + "inactive"
     runtime_metadata: dict[str, Any] = {}
     from core.agent_plugins.runtime_extensions import (
         agent_plugin_proactive_runtime_metadata,
