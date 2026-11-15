@@ -345,7 +345,9 @@ def test_project_planner_receives_only_verified_directional_evidence(monkeypatch
 
     payloads = {
         "evidence_card_batch": {"evidenceCards": [
-            card("ce-support", "supports", "Rows fit in SRAM"),
+            {**card("ce-support", "supports", "Rows fit in SRAM"),
+             "locator": {"kind": "evidence_ref", "anchor": "source-record",
+                         "url": "https://example.org/evidence"}},
             card("ce-boundary", "contradicts", "Higher occupancy does not guarantee higher performance"),
             card("ce-counter", "supports", "Registers can reduce the number of resident blocks"),
             card("ce-unbound", "supports", "This card was not used by the reviewed relation graph"),
@@ -360,6 +362,8 @@ def test_project_planner_receives_only_verified_directional_evidence(monkeypatch
             "counterEvidenceRefs": [
                 {"evidenceRef": "ce-boundary", "claim": "Occupancy predicts gains on this workload",
                  "disposition": "limit_scope"},
+                {"evidenceRef": "ce-boundary", "claim": "Every candidate uses the same code generation path",
+                 "disposition": "alternative_pathway"},
                 {"evidenceRef": "ce-counter", "claim": "Register use cannot reduce residency",
                  "disposition": "challenges_ontology"},
             ]},
@@ -423,6 +427,9 @@ def test_project_planner_receives_only_verified_directional_evidence(monkeypatch
     assert projected["evidenceCards"][1]["sourceSupportLevel"] == "supports"
     assert projected["evidenceCards"][1]["counterClaims"] == [
         {"claim": "Register use cannot reduce residency", "disposition": "challenges_ontology"}
+    ]
+    assert [counter["disposition"] for counter in projected["evidenceCards"][2]["counterClaims"]] == [
+        "limit_scope", "alternative_pathway",
     ]
 
 

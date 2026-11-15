@@ -58,6 +58,9 @@ def _clip_at_boundary(text: str, max_chars: int) -> tuple[str, bool]:
 # arXiv /abs/ paper id with an optional trailing version suffix, e.g.
 # ``/abs/2502.01542v2`` (new style) or ``/abs/math.GT/0309136v2`` (old style).
 _ARXIV_VERSIONED_ABS_PATH = re.compile(r"^(?P<base>/abs/.+?)v\d+$")
+_ARXIV_ABS_ID = re.compile(
+    r"^/abs/(?P<id>\d{4}\.\d{4,5}|[a-z][a-z.-]*/\d{7})/?$", re.IGNORECASE
+)
 
 # DOI path segment for cross-host receipt bridging: a registrant prefix plus
 # suffix, e.g. ``/10.21656/1000-0887.390245`` on doi.org itself or
@@ -175,14 +178,22 @@ def _normalized_locator_keys(url: Any) -> list[str]:
     if host == "export.arxiv.org":
         host = "arxiv.org"
     path = parsed.path
+    arxiv_doi = ""
     if host == "arxiv.org":
         versioned = _ARXIV_VERSIONED_ABS_PATH.match(path)
         if versioned:
             path = versioned.group("base")
+        paper = _ARXIV_ABS_ID.fullmatch(path)
+        if paper and port is None and parsed.scheme in {"http", "https"}:
+            # The arXiv DOI names this paper even when search reported an
+            # HTTP abstract locator and the tool fetched the HTTPS form.
+            arxiv_doi = f"doi:10.48550/arxiv.{paper['id'].lower()}"
     netloc = host if port is None else f"{host}:{port}"
     normalized = urlunsplit((parsed.scheme, netloc, path, parsed.query, parsed.fragment))
     if normalized != raw and normalized not in keys:
         keys.append(normalized)
+    if arxiv_doi:
+        keys.append(arxiv_doi)
     doi_key = _doi_locator_key(path)
     if doi_key and doi_key not in keys:
         keys.append(doi_key)

@@ -19,11 +19,7 @@ _EVIDENCE_NODES = {
 }
 _MAX_PER_DIRECTION = 4
 _QUOTE_LIMIT = 1000
-_COUNTER_DIRECTIONS = {
-    "challenges_ontology": "refutes",
-    "alternative_interpretation": "refutes",
-    "limit_scope": "qualifies",
-}
+_REFUTING_DISPOSITIONS = {"challenges_ontology", "alternative_interpretation"}
 
 
 def _producing_run(repo, package):
@@ -99,9 +95,9 @@ def _excerpt_cards(evidence: dict, graph: dict, approved_sources: set[str]) -> l
     counters = defaultdict(lambda: defaultdict(list))
     for counter in graph.get("counterEvidenceRefs", []):
         disposition = counter.get("disposition")
-        direction = _COUNTER_DIRECTIONS.get(disposition)
         claim = counter.get("claim")
-        if direction and claim:
+        if disposition and claim:
+            direction = "refutes" if disposition in _REFUTING_DISPOSITIONS else "qualifies"
             counters[counter["evidenceRef"]][direction].append({
                 "claim": claim,
                 "disposition": disposition,
@@ -112,8 +108,11 @@ def _excerpt_cards(evidence: dict, graph: dict, approved_sources: set[str]) -> l
     for card in evidence["evidenceCards"]:
         locator = card.get("locator") or {}
         quote = card.get("quote") or ""
+        source = card.get("collectionEnvelope") or {}
+        source_url = source.get("sourceUrl") or locator.get("url") or ""
         if (card.get("candidateId") not in approved_sources
-                or card.get("reviewStatus") in {"rejected", "stale"} or locator.get("kind") == "evidence_ref"
+                or card.get("reviewStatus") in {"rejected", "stale"}
+                or (locator.get("kind") == "evidence_ref" and not source_url)
                 or not locator or not quote):
             continue
         evidence_id = card["claimEvidenceId"]
@@ -122,7 +121,6 @@ def _excerpt_cards(evidence: dict, graph: dict, approved_sources: set[str]) -> l
             relations["refutes"] = []
         if evidence_id in linked and card.get("supportLevel") == "supports":
             relations["supports"] = []
-        source = card.get("collectionEnvelope") or {}
         for direction, counter_claims in relations.items():
             if len(selected[direction]) >= _MAX_PER_DIRECTION:
                 continue
@@ -134,7 +132,7 @@ def _excerpt_cards(evidence: dict, graph: dict, approved_sources: set[str]) -> l
                 "counterClaims": counter_claims[:_MAX_PER_DIRECTION],
                 "sourceId": card["sourceId"],
                 "sourceRevision": card["sourceRevision"],
-                "sourceUrl": source.get("sourceUrl") or locator.get("url") or "",
+                "sourceUrl": source_url,
                 "locator": locator,
                 "quote": quote[:_QUOTE_LIMIT],
                 "quoteHash": card["quoteHash"],
