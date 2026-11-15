@@ -120,7 +120,8 @@ def test_recovery_transport_requires_launcher_and_privileged_operator(grants, mo
 
 
 @pytest.mark.asyncio
-async def test_corrupt_enrollment_ack_remains_resumable_after_restart(grants, tmp_path, monkeypatch):
+@pytest.mark.parametrize("failure_code", ["BACKEND_PROTOCOL_ERROR", "RECOVERY_STATE_UNAVAILABLE"])
+async def test_unconfirmed_enrollment_remains_resumable_after_restart(grants, tmp_path, monkeypatch, failure_code):
     launcher_key = "x" * 43
     project = tmp_path / "p"
     state_path = tmp_path / "state.json"
@@ -139,7 +140,7 @@ async def test_corrupt_enrollment_ack_remains_resumable_after_restart(grants, tm
             assert path.endswith("/enroll")
             result = recover(grants.service, RecoverSubject.model_validate(json_payload), launcher_capability=launcher_key)
             enroll_calls.append(result["subject_id"])
-            if len(enroll_calls) <= 2:
+            if failure_code == "BACKEND_PROTOCOL_ERROR" and len(enroll_calls) <= 2:
                 raise BackendClientError("Malformed or missing response", code="BACKEND_PROTOCOL_ERROR")
             return result
         except ManagementError as exc:
@@ -152,17 +153,113 @@ async def test_corrupt_enrollment_ack_remains_resumable_after_restart(grants, tm
     grants.subject.unlink()
     grants.index.unlink()
     monkeypatch.setattr(client, "_request_json", request)
+    save = client._save_state_locked
+
+    def save_except_new_subject():
+        if client.management_epoch and failure_code == "RECOVERY_STATE_UNAVAILABLE":
+            raise PermissionError("fixture blocks local activation after enrollment")
+        save()
+
+    monkeypatch.setattr(client, "_save_state_locked", save_except_new_subject)
     plan = await client.management_authorization_status(planned_scopes=scopes)
     with pytest.raises(BackendClientError) as failure:
         await client.management_recover(request_id="original-consent", scopes=scopes, challenge=plan["recovery_challenge"])
-    assert failure.value.code == "BACKEND_PROTOCOL_ERROR"
+    assert failure.value.code == failure_code
+    assert client.management_epoch == ""
 
     restarted = LocalAssistantBackendClient(project, capability=launcher_key, state_path=state_path)
     monkeypatch.setattr(restarted, "_request_json", request)
     status = await restarted.management_authorization_status()
     assert status["scopes"] == scopes
     assert "pendingRecovery" not in restarted._state["management"]
-    assert enroll_calls == [status["subjectId"]] * 3
+    assert enroll_calls == [status["subjectId"]] * (3 if failure_code == "BACKEND_PROTOCOL_ERROR" else 2)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blocker", ["operator", "launcher", "control"])
+async def test_lost_enrollment_ack_survives_later_access_denials(grants, tmp_path, monkeypatch, blocker):
+    import httpx
+    from fastapi import FastAPI
+
+    from core.infrastructure import launcher_assistant_authority
+    from core.web import control
+    from core.web.routes import launcher_assistant_management as route
+    from core.web.services.team_workflow.research_runtime.operator_authorization import CONTROL_OPERATOR_ROLES_ENV
+
+    launcher_key = "x" * 43
+    original_control = "fixture-control-token"
+    monkeypatch.setattr(control, "_CONTROL_TOKEN", original_control)
+    grants.subject.unlink()
+    grants.index.unlink()
+    monkeypatch.setattr(route, "_SERVICE", grants.service)
+    monkeypatch.setenv(CONTROL_OPERATOR_ROLES_ENV, "operator")
+    monkeypatch.setattr(launcher_assistant_authority, "verify_launcher_authority", lambda key: key == launcher_key)
+    app = FastAPI()
+    app.include_router(route.router, prefix="/api")
+    asgi = httpx.ASGITransport(app=app)
+    submitted = []
+    recovered_subject = None
+
+    async def handler(request):
+        nonlocal recovered_subject
+        response = await asgi.handle_async_request(request)
+        if not request.url.path.endswith("/enroll"):
+            return response
+        submitted.append(request.content)
+        if len(submitted) == 1:
+            assert response.status_code == 200
+            await response.aread()
+            recovered_subject = response.json()["subject_id"]
+            if blocker == "operator":
+                monkeypatch.setenv(CONTROL_OPERATOR_ROLES_ENV, "viewer")
+            elif blocker == "launcher":
+                monkeypatch.setattr(launcher_assistant_authority, "verify_launcher_authority", lambda _: False)
+            else:
+                monkeypatch.setattr(control, "_CONTROL_TOKEN", "temporarily-rotated-token")
+            raise httpx.ReadTimeout("fixture drops the committed response", request=request)
+        return response
+
+    state_path = tmp_path / "state.json"
+
+    def new_client(capability=launcher_key):
+        client = LocalAssistantBackendClient(tmp_path / "p", capability=capability,
+            state_path=state_path, transport=httpx.MockTransport(handler))
+        client._verified = True
+        client._base_url = "http://127.0.0.1:8123"
+        client._control_token = original_control
+        return client
+
+    client = new_client()
+    client._state["management"] = {"clientId": grants.identity.client_id, "subjectId": grants.old["subject_id"],
+        "capability": grants.old["subject_capability"], "binding": grants.old["binding"], "scopes": grants.old["scopes"]}
+    client._save_state_locked()
+    scopes = ["agents:directory:read", "teams:directory:read"]
+    plan = await client.management_authorization_status(planned_scopes=scopes)
+    assert plan["status"] == "recovery_required"
+    error = "LAUNCHER_AUTHORITY_REQUIRED" if blocker == "launcher" else "OPERATOR_CONTROL_REQUIRED"
+    with pytest.raises(BackendClientError, match=error):
+        await client.management_recover(request_id="original-consent", scopes=scopes,
+                                        challenge=plan["recovery_challenge"])
+
+    restarted = new_client()
+    with pytest.raises(BackendClientError, match=error):
+        await restarted.management_authorization_status(planned_scopes=["source:read"])
+    assert restarted.management_epoch == ""
+    with pytest.raises(BackendClientError) as missing_local_authority:
+        await new_client(capability="").management_authorization_status()
+    assert missing_local_authority.value.code == "LAUNCHER_AUTHORITY_REQUIRED"
+
+    monkeypatch.setenv(CONTROL_OPERATOR_ROLES_ENV, "operator")
+    monkeypatch.setattr(launcher_assistant_authority, "verify_launcher_authority", lambda key: key == launcher_key)
+    monkeypatch.setattr(control, "_CONTROL_TOKEN", original_control)
+    status = await new_client().management_authorization_status(planned_scopes=["source:read"])
+    assert status["subjectId"] == recovered_subject
+    assert status["scopes"] == scopes
+    assert status["grantRevision"] == 0
+    assert "recovery_challenge" not in status
+    # A stale control token may be denied on the binding pre-check after restart.
+    assert len(submitted) == (3 if blocker == "control" else 4) and len(set(submitted)) == 1
+    assert "pendingRecovery" not in new_client()._state["management"]
 
 
 @pytest.mark.asyncio

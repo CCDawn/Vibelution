@@ -34,7 +34,7 @@ _MANAGE_ACTIONS = frozenset({"dispatch_write", "dispatch_derived", "delegation_g
 _SHELL_SYNTAX = re.compile(r"[\x00-\x1f\x7f;&|<>`$%!^(){}#]")
 _COMMAND_SYNTAX = re.compile(r"[\x00-\x1f\x7f;|<>`$%!^(){}#]")
 _MAX_COMMAND_SEGMENTS = 16
-_PATCH_PATH = re.compile(r"^\*\*\* (?:Add File|Update File|Move to): (.+)$", re.MULTILINE)
+_PATCH_PATH = re.compile(r"^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$", re.MULTILINE)
 _GIT_READ = frozenset({"status", "diff", "log", "show", "ls-files", "ls-tree", "rev-parse",
                        "grep", "blame", "shortlog", "describe"})
 _GIT_READ_FLAGS = frozenset({
@@ -84,10 +84,6 @@ _COMPILEALL_OPTIONS = {
     **dict.fromkeys(("-q", "-f", "-l", "-b"), "flag"),
     "-j": "value", "-o": "value", "--invalidation-mode": "value",
 }
-_PIP_INSTALL_OPTIONS = {
-    **dict.fromkeys(("-q", "--quiet", "--upgrade", "--no-input"), "flag"),
-    "-r": "path", "--requirement": "path", "--target": "path",
-}
 _VITEST_OPTIONS = {
     **dict.fromkeys(("--root", "--dir", "--config", "-c", "--outputFile",
                     "--coverage.reportsDirectory", "--related"), "path"),
@@ -135,6 +131,11 @@ def _contained_path(value: Any, base: Path, root: Path) -> Path | None:
     if not isinstance(value, str) or not value.strip() or "\x00" in value:
         return None
     candidate = Path(value)
+    if (candidate.anchor and not candidate.is_absolute()) or any(
+        part.rstrip(" .").casefold() == ".git" or (os.name == "nt" and ":" in part)
+        for part in candidate.parts if part != candidate.anchor
+    ):
+        return None
     resolved = (candidate if candidate.is_absolute() else base / candidate).resolve()
     if not resolved.is_relative_to(root) or any(
         part.rstrip(" .").casefold() == ".git" for part in resolved.relative_to(root).parts
@@ -390,11 +391,7 @@ def _git_development(argv: list[str], cwd: Path, root: Path) -> bool:
         return _git_options_allowed(rest, frozenset({"--all", "--allow-empty", "--allow-empty-message"}),
                                     frozenset({"--message"}), "avq", "m")
     if action == "branch":
-        return all(not token.startswith("-") or token in {"--list", "--show-current", "-v", "-vv"}
-                   for token in rest)
-    if action == "switch":
-        return bool(rest) and all(not token.startswith("-") or token in {"-c", "--create"}
-                                  for token in rest)
+        return all(token in {"--list", "--show-current", "-v", "-vv"} for token in rest)
     if action == "merge":
         return len(rest) == 2 and rest[0] == "--ff-only" and not rest[1].startswith("-")
     if action == "stash":
@@ -403,35 +400,7 @@ def _git_development(argv: list[str], cwd: Path, root: Path) -> bool:
         if rest[0] in {"list", "show"}:
             return _git_options_allowed(
                 rest[1:], _GIT_READ_FLAGS, _GIT_READ_VALUES, "abcehilnopqrtuvwzBCDEHILNPSVW", "UfeGS")
-        if rest[0] == "pop":
-            return not rest[1:]
-        if rest[0] == "push":
-            return _stash_push_options_allowed(rest[1:])
-        return False
     return False
-
-
-def _stash_push_options_allowed(argv: list[str]) -> bool:
-    """``git stash push`` keeps worktree changes recoverable, so only message
-    options, the ``--`` separator and in-repository pathspecs are covered;
-    interactive or deeper flags keep native approval. ``drop``/``clear``
-    destroy entries and never enter this predicate."""
-    index = 0
-    while index < len(argv):
-        token = argv[index]
-        index += 1
-        if token == "--":
-            # Stash only matches pathspecs inside the repository worktree.
-            return True
-        if token in {"-m", "--message"}:
-            # The message is free text, but never hide an option behind it.
-            if index >= len(argv) or argv[index].startswith("-"):
-                return False
-            index += 1
-            continue
-        if not token.startswith("--message=") and token.startswith("-"):
-            return False
-    return True
 
 
 def _vitest_run(argv: list[str], cwd: Path, root: Path) -> bool:
@@ -477,15 +446,9 @@ def _development_argv(argv: list[str], cwd: Path, root: Path) -> bool:
     if executable == "git":
         return _git_development(argv, cwd, root)
     if re.fullmatch(r"python(?:\d+(?:\.\d+)*)?", executable):
-        if len(argv) < 2 or argv[0] != "-m" or argv[1] not in {"pytest", "unittest", "compileall", "pip"}:
+        if len(argv) < 2 or argv[0] != "-m" or argv[1] not in {"pytest", "unittest", "compileall"}:
             return False
         module, arguments = argv[1], argv[2:]
-        if module == "pip":
-            # Only the install subcommand; uninstall, custom indexes and bare
-            # pip stay with native approval. Package specs resolve like
-            # relative paths, so local installs must remain in the workspace.
-            return bool(arguments) and arguments[0] == "install" and _scoped_arguments(
-                arguments[1:], _PIP_INSTALL_OPTIONS, cwd, root)
         if module == "unittest" and arguments[:1] == ["discover"]:
             arguments = arguments[1:]
         schema = {"pytest": _PYTEST_OPTIONS, "unittest": _UNITTEST_OPTIONS, "compileall": _COMPILEALL_OPTIONS}[module]
@@ -581,6 +544,47 @@ def _development_command(command: Any, cwd: Path, root: Path) -> bool:
     return True
 
 
+def workspace_paths_allowed(tool_name: str, args: Mapping[str, Any], root: Path) -> bool:
+    """Check the explicit paths accepted by the task's file and terminal tools."""
+    try:
+        if tool_name in _FILE_TOOLS:
+            value = args.get("file_path")
+            if not isinstance(value, str):
+                return False
+            value = value.strip()
+            if tool_name == "write_file_tool" and not Path(value).is_absolute() and value.startswith("workspace"):
+                # Match create_file's legacy workspace-prefix normalization.
+                value = value[len("workspace"):].lstrip("/\\")
+            return _contained_path(value, root, root) is not None
+        if tool_name in {"grep_search_tool", "glob_tool"}:
+            path = args.get("search_dir", ".")
+            if not isinstance(path, str) or _contained_path(path.strip() or ".", root, root) is None:
+                return False
+            if tool_name == "glob_tool":
+                pattern = args.get("pattern")
+                if not isinstance(pattern, str) or not pattern or Path(pattern).anchor:
+                    return False
+                return all(part.rstrip(" ").casefold() != ".." and part.rstrip(" .").casefold() != ".git"
+                           and not (os.name == "nt" and ":" in part)
+                           for part in pattern.replace("\\", "/").split("/"))
+        if tool_name in {"cli_tool", "exec_command", "apply_patch_tool"}:
+            raw_cwd = args.get("cwd", "")
+            if not isinstance(raw_cwd, str):
+                return False
+            cwd = _contained_path(raw_cwd.strip() or ".", root, root)
+            if cwd is None:
+                return False
+            if tool_name == "apply_patch_tool":
+                patch = args.get("patch_text")
+                return isinstance(patch, str) and all(
+                    _contained_path(path.strip(), cwd, cwd) is not None
+                    for path in _PATCH_PATH.findall(patch)
+                )
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return False
+    return True
+
+
 def normal_development_call(tool_name: str, args: Mapping[str, Any], workspace_root: Path | str) -> bool:
     """Whether ordinary local development consent covers this already-bound call."""
     if not isinstance(tool_name, str) or not isinstance(args, Mapping) or not _ordinary_metadata(tool_name):
@@ -595,25 +599,17 @@ def normal_development_call(tool_name: str, args: Mapping[str, Any], workspace_r
             return False
         if tool_name == "write_stdin":
             return args.get("chars", "") == "" and bool(args.get("session_id"))
-        if tool_name in _FILE_TOOLS:
-            file_path = args.get("file_path")
-            if tool_name == "write_file_tool" and isinstance(file_path, str) and not Path(file_path).is_absolute():
-                # create_file retains a legacy workspace-prefix normalization.
-                if file_path.startswith("workspace"):
-                    file_path = file_path[len("workspace"):].lstrip("/\\")
-            return _contained_path(file_path, root, root) is not None
+        if tool_name in _FILE_TOOLS or tool_name in {"glob_tool", "grep_search_tool"}:
+            return workspace_paths_allowed(tool_name, args, root)
         if tool_name == "apply_patch_tool":
-            base = _contained_path(args.get("cwd") or ".", root, root)
             patch = args.get("patch_text")
-            if base is None or not isinstance(patch, str) or "*** Delete File:" in patch:
-                return False
-            targets = _PATCH_PATH.findall(patch)
-            return bool(targets) and all(_contained_path(path, base, root) is not None for path in targets)
+            return (isinstance(patch, str) and "*** Delete File:" not in patch and bool(_PATCH_PATH.search(patch))
+                    and workspace_paths_allowed(tool_name, args, root))
         if tool_name in {"cli_tool", "exec_command"}:
             raw_cwd = args.get("cwd", "")
             if not isinstance(raw_cwd, str):
                 return False
-            cwd = _contained_path(raw_cwd or ".", root, root)
+            cwd = _contained_path(raw_cwd.strip() or ".", root, root)
             command = args.get("command" if tool_name == "cli_tool" else "cmd")
             return cwd is not None and cwd.is_dir() and _development_command(command, cwd, root)
     except (OSError, RuntimeError, TypeError, ValueError):

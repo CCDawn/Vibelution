@@ -1,6 +1,10 @@
 """Project scopes used by Launcher assistant permission planning."""
 
 
+# These action names alone cannot determine the original request's scope.
+ORIGINAL_REFERENCE_ACTIONS = frozenset({"management_receipt", "management_reconcile"})
+
+
 def read_scopes(action: str) -> list[str] | None:
     return {
         "task_list": ["tasks:read"], "source_read": ["source:read"], "source_search": ["source:read"],
@@ -35,7 +39,7 @@ def plan_project_scopes(actions: list[str]) -> dict[str, list[str]]:
     for name in actions:
         scopes = read_scopes(name)
         if scopes is None:
-            if name in {"agents", "dispatch", "dispatch_list", "receipt", "dispatch_write"}:
+            if name in ORIGINAL_REFERENCE_ACTIONS or name in {"agents", "dispatch", "dispatch_list", "receipt", "dispatch_write"}:
                 scopes = []
             elif name in ACTION_SCOPES:
                 scope = ACTION_SCOPES[name]

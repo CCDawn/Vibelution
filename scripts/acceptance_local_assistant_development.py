@@ -345,7 +345,7 @@ def git(root: Path, *args: str) -> str:
     return result.stdout
 
 
-def verify_workspace(workspace: Path, source: Path, main_head: str) -> dict:
+def verify_workspace(workspace: Path, source: Path, base_commit: str) -> dict:
     require(workspace.resolve() != source.resolve() and workspace.is_dir(), "task_workspace_not_isolated")
     worktrees = git(source, "worktree", "list", "--porcelain")
     registered = any(Path(line[9:]).resolve() == workspace.resolve()
@@ -353,8 +353,8 @@ def verify_workspace(workspace: Path, source: Path, main_head: str) -> dict:
     require(registered and (workspace / ".git").is_file(), "task_workspace_not_native_git_worktree")
     branch = git(workspace, "branch", "--show-current").strip()
     require(branch.startswith("codex/assistant-"), "unexpected_task_branch")
-    require(git(workspace, "merge-base", "HEAD", main_head).strip() == main_head, "task_workspace_not_from_main")
-    changed = set(git(workspace, "diff", "--name-only", "-z", main_head).split("\0")) - {""}
+    require(git(workspace, "merge-base", "HEAD", base_commit).strip() == base_commit, "task_workspace_wrong_base")
+    changed = set(git(workspace, "diff", "--name-only", "-z", base_commit).split("\0")) - {""}
     changed.update(set(git(workspace, "ls-files", "--others", "--exclude-standard", "-z").split("\0")) - {""})
     require(changed == FIXTURE_FILES, "task_changed_files_outside_fixture_or_missing_fixture")
     for name in FIXTURE_FILES:
@@ -460,6 +460,7 @@ def run(args: argparse.Namespace, evidence: dict[str, Any]) -> None:
         session_id = assistant.get("directSessionId")
         require(isinstance(session_id, str) and session_id, "assistant_session_missing")
         main_head = git(source, "rev-parse", "main").strip()
+        selected_head = git(source, "rev-parse", "HEAD").strip()
         request(host_url, "/api/assistant/messages", token=host_token,
                 payload={"message": task_message(project_id, agent_id, dispatch_id), "requestId": dispatch_id})
         deadline = time.monotonic() + args.timeout
@@ -521,7 +522,7 @@ def run(args: argparse.Namespace, evidence: dict[str, Any]) -> None:
         require(SUCCESS_MARKER in final_answer(target_events), "target_final_answer_missing_success")
         workspace_value = task.get("localWorkspacePath")
         require(isinstance(workspace_value, str) and Path(workspace_value).is_absolute(), "task_workspace_missing")
-        evidence.update(verify_workspace(Path(workspace_value), source, main_head))
+        evidence.update(verify_workspace(Path(workspace_value), source, selected_head))
         evidence["observedMainAdvanced"] = git(source, "rev-parse", "main").strip() != main_head
         require(not git(source, "status", "--porcelain", "--", *sorted(FIXTURE_FILES)).strip(),
                 "fixture_written_in_parent_checkout")

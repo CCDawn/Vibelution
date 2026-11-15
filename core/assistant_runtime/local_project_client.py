@@ -65,9 +65,18 @@ class LocalAssistantBackendClient(ManagedAgentBackendClient):
         from core.web.services.external_management.store import digest
         return hmac.digest(self._launcher_capability.encode(), digest([payload, scopes]).encode(), "sha256").hex()
 
+    def _save_recovery_state_locked(self, management: dict) -> None:
+        previous = self._state["management"]
+        self._state["management"] = management
+        try:
+            self._save_state_locked()
+        except OSError:
+            self._state["management"] = previous
+            raise BackendClientError("Unable to persist management recovery state.", code="RECOVERY_STATE_UNAVAILABLE") from None
+
     async def management_authorization_status(self, *, planned_scopes: list[str] | None = None):
         pending = (self._state.get("management") or {}).get("pendingRecovery")
-        if pending and self._launcher_capability:
+        if pending:
             await self.management_recover(**pending)
         try:
             return await super().management_authorization_status()
@@ -103,13 +112,14 @@ class LocalAssistantBackendClient(ManagedAgentBackendClient):
             expected_client = "recovered-" + key
             expected_subject = "ops-" + key[:32]
             payload = RecoverSubject.model_validate({**payload, "request_id": request_id, "scopes": scopes}).model_dump()
+            scopes = payload["scopes"]
             old = self._state["management"]
             approved = {"request_id": request_id, "scopes": scopes, "challenge": challenge}
             pending = old.get("pendingRecovery")
             if pending is not None and pending != approved:
                 raise BackendClientError("An earlier recovery is unresolved.", code="RECOVERY_CONFLICT")
-            self._state["management"] = {**old, "pendingRecovery": approved}
-            self._save_state_locked()
+            if pending is None:
+                self._save_recovery_state_locked({**old, "pendingRecovery": approved})
             for attempt in range(2):
                 try:
                     response = await self._request_json("POST", _RECOVERY_PREFIX + "enroll",
@@ -118,11 +128,13 @@ class LocalAssistantBackendClient(ManagedAgentBackendClient):
                 except BackendClientError as exc:
                     ambiguous = exc.code in {"BACKEND_TIMEOUT", "BACKEND_UNAVAILABLE", "MANAGEMENT_UNAVAILABLE",
                                              "MANAGEMENT_BUSY", "BACKEND_PROTOCOL_ERROR"}
+                    # An authority or control rejection covers just this
+                    # delivery. An earlier POST may already have enrolled the
+                    # subject, so retain its approved request for recovery.
                     if exc.code in {"ORIGINAL_GRANT_PRESENT", "SUBJECT_REVOKED", "TARGET_BINDING_CHANGED",
-                                    "RECOVERY_CONFLICT", "LAUNCHER_AUTHORITY_REQUIRED", "OPERATOR_CONTROL_REQUIRED",
-                                    "INVALID_INPUT"}:
-                        self._state["management"].pop("pendingRecovery", None)
-                        self._save_state_locked()
+                                    "RECOVERY_CONFLICT", "INVALID_INPUT"}:
+                        self._save_recovery_state_locked({name: value for name, value in old.items()
+                                                          if name != "pendingRecovery"})
                     if attempt or not ambiguous:
                         raise
             client_id = response.pop("client_id", None)
@@ -139,8 +151,7 @@ class LocalAssistantBackendClient(ManagedAgentBackendClient):
             current = await self._authorization_state(saved)
             if current["scopes"] != scopes or current["grantRevision"] != 0:
                 raise BackendClientError("Recovery authorization changed.", code="RECOVERY_CONFLICT")
-            self._state["management"] = saved
-            self._save_state_locked()
+            self._save_recovery_state_locked(saved)
             return {"status": "completed", "scopes": scopes, "grantRevision": 0}
 
     def _load_state(self) -> dict[str, Any]:

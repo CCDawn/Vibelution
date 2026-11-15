@@ -155,6 +155,7 @@ def glob_files(
     cancel_reason = ""
     midway_error = ""
     deadline_at = time.monotonic() + GLOB_DEADLINE_SECONDS
+    task_workspace = _local_assistant_workspace()
 
     try:
         for match in glob_module.iglob(
@@ -176,6 +177,8 @@ def glob_files(
                 truncated = True
                 break
             abs_path = os.path.join(abs_search_dir, match)
+            if task_workspace is not None and not _task_path_allowed(Path(abs_path), task_workspace):
+                continue
             try:
                 match_mtime = os.path.getmtime(abs_path)
             except OSError:
@@ -1085,6 +1088,25 @@ def _path_is_within(path: Path, root: Path) -> bool:
             return False
 
 
+def _local_assistant_workspace() -> Path | None:
+    from core.web.services.agent_directory_service import current_agent_runtime
+    from core.web.services.local_assistant.policy import LOCAL_RUNTIME_SOURCE_PREFIX
+
+    source = current_agent_runtime().get("runtimeToolSource", "")
+    if str(source).startswith(LOCAL_RUNTIME_SOURCE_PREFIX):
+        return get_workspace_root_override()
+    return None
+
+
+def _task_path_allowed(path: Path, workspace: Path) -> bool:
+    from core.web.services.local_assistant.policy import _contained_path
+
+    try:
+        return _contained_path(str(path), workspace, workspace) is not None
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
 def resolve_agent_tool_path(
     path_str: str | Path,
     *,
@@ -1109,6 +1131,9 @@ def resolve_agent_tool_path(
     except Exception:
         resolved = raw.resolve() if raw.is_absolute() else (anchor / raw).resolve()
 
+    task_workspace = _local_assistant_workspace()
+    if task_workspace is not None and not _task_path_allowed(resolved, task_workspace):
+        raise PermissionError("操作路径超出本次派遣的工作区。")
     if _agent_has_danger_full_access():
         return resolved
 
@@ -1295,6 +1320,9 @@ def _is_path_allowed(file_path: str) -> bool:
     （任意绝对路径都可读写）。需要跨边界时用 `security.allowed_directories`
     或 danger_full_access 显式开启。
     """
+    task_workspace = _local_assistant_workspace()
+    if task_workspace is not None:
+        return _task_path_allowed(Path(file_path), task_workspace)
     if _agent_has_danger_full_access():
         return True
     try:

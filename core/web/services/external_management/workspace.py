@@ -361,8 +361,8 @@ def read_session_config_comparison(project_root: Path, directory, session_id: st
         raise ManagementError("SESSION_CONFIG_COMPARISON_UNAVAILABLE", 404) from None
 
 
-def _list_private_candidate(project_root, directory, context, session_id):
-    """Validate every available identity before filtering an established private row."""
+def _exclude_list_candidate(project_root, directory, context, session_id):
+    """Validate available authority before filtering a private or unclassified row."""
     from core.web.services.session import conversation_index
     row = context["store"].repository.get_session(session_id, include_archived=False)
     runtime = context["store"].repository.get_session_runtime_state(session_id)
@@ -378,7 +378,9 @@ def _list_private_candidate(project_root, directory, context, session_id):
     if agent is None or context["direct_owners"].get(session_id, agent_id) != agent_id:
         _deny()
     metadata = agent.get("metadata", {})
-    if (not isinstance(metadata, dict) or not isinstance(agent.get("roleKey"), str) or not agent["roleKey"]
+    role_key = agent.get("roleKey")
+    missing_legacy_role = role_key == "" and agent.get("status") == "active" and agent.get("kind") == directory.DEFAULT_AGENT_KIND
+    if (not isinstance(metadata, dict) or not isinstance(role_key, str) or not (role_key or missing_legacy_role)
         or agent.get("status") not in {"active", "archived"}
         or agent.get("kind") not in {directory.DEFAULT_AGENT_KIND, "ephemeral"}
         or not isinstance(metadata.get("creationSpec") or {}, dict)):
@@ -404,26 +406,39 @@ def _list_private_candidate(project_root, directory, context, session_id):
     if binding is not None:
         context["bindings"][agent_id] = {"enabled": binding["enabled"], "agentId": binding.get("agentId")}
     private = agent_id in context["team_ids"] or binding is not None and binding["enabled"] is True
-    for check in (lambda: _ordinary(row, listing=True), lambda: _agent_visibility(directory, agent),
-                  *((lambda: _ordinary(runtime, listing=True),) if runtime is not None else ())):
+    checks = [lambda: _ordinary(row, listing=True)]
+    if not missing_legacy_role:
+        checks.append(lambda: _agent_visibility(directory, agent))
+    if runtime is not None:
+        checks.append(lambda: _ordinary(runtime, listing=True))
+    for check in checks:
         try:
             check()
         except ManagementError as exc:
             if not getattr(exc, "known_private", False):
                 raise
             private = True
-    if runtime is None and not private:
+    if private:
+        return True
+    if runtime is None:
         _deny()
+    if missing_legacy_role:
+        if not conversation_index._conversation_agent_direct_session_is_allowed(
+            conversation=runtime, conversation_id=session_id, direct_session_id=agent.get("directSessionId", "")
+        ):
+            _deny()
+        # A role inferred from legacy metadata is insufficient for external reads.
+        return True
     # Retain only the current candidate, not a request-sized transcript cache.
     context["rows"], context["runtimes"] = {session_id: row}, {session_id: runtime}
-    return private
+    return False
 
 
 _SESSION_LIST_SCAN_LIMIT = 10_000
 
 
 def read_sessions(project_root: Path, directory, query) -> dict:
-    """Discover ordinary sessions; no repair, preview search or partial authority."""
+    """Discover ordinary sessions with proven visibility, without repair or preview search."""
     import unicodedata
     from core.chat.conversation_store import parse_directory_cursor_entry
     from core.infrastructure.tool_result import project_tool_result_for_model
@@ -460,7 +475,7 @@ def read_sessions(project_root: Path, directory, query) -> dict:
                 if sid in seen or len(seen) >= _SESSION_LIST_SCAN_LIMIT:
                     raise ValueError("Duplicate or excessive Session candidates")
                 seen.add(sid)
-                if _list_private_candidate(project_root, directory, context, sid):
+                if _exclude_list_candidate(project_root, directory, context, sid):
                     continue
                 try:
                     _repo, row, _runtime = _validated_session_snapshot(project_root, directory, sid, _context=context)

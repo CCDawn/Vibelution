@@ -179,6 +179,7 @@ def _rooms(snapshot):
     rows = _rows(snapshot, formal_workspace_path(snapshot.project_root, "chat_rooms", "chat_rooms.json"), "rooms")
     teams = _teams(snapshot)
     result, links = {}, {}
+    seen = set()
     for tid, team in teams.items():
         linked = team["row"].get("linkedChatRoomId")
         if linked:
@@ -187,12 +188,15 @@ def _rooms(snapshot):
             links[linked] = tid
     for row in rows:
         rid = _identity(row.get("roomId"))
-        if rid in result or "id" in row and row["id"] != rid or "room_id" in row and row["room_id"] != rid:
+        if rid in seen or "id" in row and row["id"] != rid or "room_id" in row and row["room_id"] != rid:
             raise ValueError("Ambiguous room identity")
+        seen.add(rid)
         if row.get("status") not in {"ready", "running", "stopping", "failed", "archived"}:
             raise ValueError("Unknown room status")
         if "archived" in row and (type(row["archived"]) is not bool or row["archived"] != (row["status"] == "archived")):
             raise ValueError("Conflicting room archive marker")
+        if not isinstance(row.get("title"), str):
+            raise ValueError("Invalid room title")
         config = row.get("config")
         if not isinstance(config, dict):
             raise ValueError("Invalid room config")
@@ -227,15 +231,19 @@ def _rooms(snapshot):
         if tid:
             _identity(tid)
             team = teams.get(tid)
-            if team is None:
-                raise ValueError("Missing room Team authority")
-            classifications = [_team_classification(record) for record in (row, config, team["row"])]
+            records = (row, config, team["row"]) if team is not None else (row, config)
+            classifications = [_team_classification(record) for record in records]
             if len({value for value in classifications if value}) > 1:
                 raise ValueError("Conflicting room Team classification")
             for key in ("teamKind", "teamSource", "teamTemplateId"):
-                values = [record[key] for record in (row, config, team["row"]) if key in record]
+                values = [record[key] for record in records if key in record]
                 if len(set(values)) > 1:
                     raise ValueError("Conflicting room Team metadata")
+            if team is None:
+                if rid in links:
+                    raise ValueError("Conflicting room Team binding")
+                # A stale Team reference cannot establish the room's visibility.
+                continue
             if team["private"]:
                 # Scoped research workflow rooms share a system Team, but are
                 # intentionally distinct from its canonical linked room. Their
