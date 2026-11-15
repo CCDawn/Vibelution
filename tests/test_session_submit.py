@@ -1092,13 +1092,13 @@ def test_same_session_second_submit_stays_busy(tmp_path: Path, monkeypatch) -> N
         _reset_seeded_session_runtime(session_id)
 
 
-def _spawn_hidden_child(code: str):
+def _spawn_hidden_child(code: str, *, stdin=subprocess.DEVNULL):
     """Spawn a real foreign process for ownership stamps (no console window)."""
 
     hidden = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
     return subprocess.Popen(
         [sys.executable, "-c", code],
-        stdin=subprocess.DEVNULL,
+        stdin=stdin,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         **hidden,
@@ -1189,9 +1189,10 @@ def test_hot_restart_resume_exempt_past_dead_process_work_run_residue(tmp_path: 
 
     session_id = "session-live"
     store = _prepare_hot_restart_submit_env(tmp_path, monkeypatch, session_id)
-    child = _spawn_hidden_child("pass")
-    child_create_time = psutil.Process(child.pid).create_time()
-    child.wait(timeout=15)
+    # Hold the child alive until the ownership timestamp has been captured.
+    with _spawn_hidden_child("import sys; sys.stdin.read()", stdin=subprocess.PIPE) as child:
+        child_create_time = psutil.Process(child.pid).create_time()
+        child.communicate(timeout=15)
     try:
         _seed_foreign_owner_work_run(
             store,
