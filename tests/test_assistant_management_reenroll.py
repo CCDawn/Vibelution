@@ -4,7 +4,10 @@ from types import SimpleNamespace
 import pytest
 
 from core.assistant_runtime.dispatch import DispatchError
+from core.assistant_runtime.local_project_client import LocalAssistantBackendClient
 from core.assistant_runtime.management import ManagementAdapter
+from core.assistant_runtime.migration_io import MigrationIOError
+from core.external_agent.backend_client import BackendClientError
 from core.web.services.external_management.recovery import RecoverSubject, RecoveryIdentity, recover
 from core.web.services.external_management.service import ManagementError, ManagementService, TargetIdentity
 
@@ -67,6 +70,97 @@ def test_recovery_retries_exact_approved_subject_after_missing_ack(grants, monke
             recover(grants.service, changed, launcher_capability=token)
 
 
+def test_recovery_refuses_an_unsafe_namespace_before_taking_locks(grants, monkeypatch):
+    original = type(grants.subject).lstat
+    directory = grants.subject.parent
+
+    def lstat(path, *args, **kwargs):
+        value = original(path, *args, **kwargs)
+        if path == directory:
+            return SimpleNamespace(st_mode=value.st_mode, st_file_attributes=0x400)
+        return value
+
+    monkeypatch.setattr(type(directory), "lstat", lstat)
+    monkeypatch.setattr(grants.service.store, "lock", lambda *_: pytest.fail("unsafe namespace must not be locked"))
+    with pytest.raises(MigrationIOError, match="linked_source"):
+        recover(grants.service, grants.identity, launcher_capability="trusted-launcher")
+
+
+def test_recovery_transport_requires_launcher_and_privileged_operator(grants, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from core.infrastructure import launcher_assistant_authority
+    from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
+    from core.web.routes import launcher_assistant_management as route
+    from core.web.services.team_workflow.research_runtime.operator_authorization import CONTROL_OPERATOR_ROLES_ENV
+
+    monkeypatch.setattr(route, "_SERVICE", grants.service)
+    monkeypatch.setattr(launcher_assistant_authority, "verify_launcher_authority", lambda key: key == "launcher-proof")
+    grants.subject.unlink()
+    grants.index.unlink()
+    app = FastAPI()
+    app.include_router(route.router, prefix="/api")
+    url = "/api/v1/launcher-assistant-management/subjects/recovery/check"
+    headers = {CONTROL_TOKEN_HEADER: get_control_token(), route.SUBJECT_HEADER: "launcher-local",
+               route.CAPABILITY_HEADER: "launcher-proof"}
+    with TestClient(app) as http:
+        assert http.post(url, json=grants.identity.model_dump()).status_code == 403
+        weak = {**headers, route.CAPABILITY_HEADER: "untrusted"}
+        assert http.post(url, json=grants.identity.model_dump(), headers=weak).json()["detail"]["code"] == "LAUNCHER_AUTHORITY_REQUIRED"
+        monkeypatch.setenv(CONTROL_OPERATOR_ROLES_ENV, "viewer")
+        assert http.post(url, json=grants.identity.model_dump(), headers=headers).json()["detail"]["code"] == "OPERATOR_CONTROL_REQUIRED"
+        monkeypatch.setenv(CONTROL_OPERATOR_ROLES_ENV, "operator")
+        assert http.post(url, json=grants.identity.model_dump(), headers=headers).json() == {"available": True}
+    assert url not in app.openapi()["paths"]
+
+
+@pytest.mark.asyncio
+async def test_corrupt_enrollment_ack_remains_resumable_after_restart(grants, tmp_path, monkeypatch):
+    launcher_key = "x" * 43
+    project = tmp_path / "p"
+    state_path = tmp_path / "state.json"
+    scopes = ["agents:directory:read", "teams:directory:read"]
+    enroll_calls = []
+
+    async def request(_method, path, management_auth=None, json_payload=None):
+        try:
+            if path.endswith("/binding"):
+                return grants.service.binding()
+            if path.endswith("/authorization"):
+                return grants.service.authorization_status(*management_auth)
+            if path.endswith("/check"):
+                return recover(grants.service, RecoveryIdentity.model_validate(json_payload),
+                               launcher_capability=launcher_key)
+            assert path.endswith("/enroll")
+            result = recover(grants.service, RecoverSubject.model_validate(json_payload), launcher_capability=launcher_key)
+            enroll_calls.append(result["subject_id"])
+            if len(enroll_calls) <= 2:
+                raise BackendClientError("Malformed or missing response", code="BACKEND_PROTOCOL_ERROR")
+            return result
+        except ManagementError as exc:
+            raise BackendClientError(str(exc), code=exc.code) from None
+
+    client = LocalAssistantBackendClient(project, capability=launcher_key, state_path=state_path)
+    client._state["management"] = {"clientId": grants.identity.client_id, "subjectId": grants.old["subject_id"],
+        "capability": grants.old["subject_capability"], "binding": grants.old["binding"], "scopes": grants.old["scopes"]}
+    client._save_state_locked()
+    grants.subject.unlink()
+    grants.index.unlink()
+    monkeypatch.setattr(client, "_request_json", request)
+    plan = await client.management_authorization_status(planned_scopes=scopes)
+    with pytest.raises(BackendClientError) as failure:
+        await client.management_recover(request_id="original-consent", scopes=scopes, challenge=plan["recovery_challenge"])
+    assert failure.value.code == "BACKEND_PROTOCOL_ERROR"
+
+    restarted = LocalAssistantBackendClient(project, capability=launcher_key, state_path=state_path)
+    monkeypatch.setattr(restarted, "_request_json", request)
+    status = await restarted.management_authorization_status()
+    assert status["scopes"] == scopes
+    assert "pendingRecovery" not in restarted._state["management"]
+    assert enroll_calls == [status["subjectId"]] * 3
+
+
 @pytest.mark.asyncio
 async def test_old_management_reference_cannot_execute_under_new_subject(tmp_path):
     writes, reads = [], []
@@ -82,6 +176,10 @@ async def test_old_management_reference_cannot_execute_under_new_subject(tmp_pat
             reads.append(arguments)
             return {"status": "unknown"}
 
+        async def management_reconciliation(self, **arguments):
+            reads.append(arguments)
+            return {"status": "unavailable"}
+
     client = Client()
 
     async def call(_project, method):
@@ -96,6 +194,8 @@ async def test_old_management_reference_cannot_execute_under_new_subject(tmp_pat
     assert failure.value.code == "ORIGINAL_MANAGEMENT_IDENTITY_UNAVAILABLE"
     with pytest.raises(DispatchError, match="原请求"):
         await adapter.receipt("p", action="agent_create", request_id="old")
+    with pytest.raises(DispatchError, match="原请求"):
+        await adapter.reconciliation("p", action="agent_create", request_id="old")
     assert not reads and len(writes) == 1
     await adapter.invoke("p", **{**original, "request_id": "fresh"})
     assert len(writes) == 2

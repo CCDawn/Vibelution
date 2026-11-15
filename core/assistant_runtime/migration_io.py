@@ -71,11 +71,16 @@ def path_identity(path: Path) -> tuple:
     return _stamp(path.stat())
 
 
-def check_path(path: Path) -> Path:
+def check_path(path: Path, *, missing_ok: bool = False) -> Path:
     path = validate_path(path)
     try:
         for node in (*reversed(path.parents), path):
-            value = node.lstat()
+            try:
+                value = node.lstat()
+            except FileNotFoundError:
+                if missing_ok:
+                    return path
+                raise
             if stat.S_ISLNK(value.st_mode) or getattr(value, "st_file_attributes", 0) & 0x400:
                 raise MigrationIOError("linked_source")
             if node != path and not stat.S_ISDIR(value.st_mode):

@@ -117,8 +117,10 @@ class LocalAssistantBackendClient(ManagedAgentBackendClient):
                     break
                 except BackendClientError as exc:
                     ambiguous = exc.code in {"BACKEND_TIMEOUT", "BACKEND_UNAVAILABLE", "MANAGEMENT_UNAVAILABLE",
-                                             "MANAGEMENT_BUSY"}
-                    if not ambiguous:
+                                             "MANAGEMENT_BUSY", "BACKEND_PROTOCOL_ERROR"}
+                    if exc.code in {"ORIGINAL_GRANT_PRESENT", "SUBJECT_REVOKED", "TARGET_BINDING_CHANGED",
+                                    "RECOVERY_CONFLICT", "LAUNCHER_AUTHORITY_REQUIRED", "OPERATOR_CONTROL_REQUIRED",
+                                    "INVALID_INPUT"}:
                         self._state["management"].pop("pendingRecovery", None)
                         self._save_state_locked()
                     if attempt or not ambiguous:

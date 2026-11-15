@@ -468,7 +468,14 @@ class ManagementAdapter:
         return await self._bound_read(project_id, lambda client: client.management_knowledge_catalog(**parameters))
 
     async def reconciliation(self, project_id: str, **parameters):
-        return await self._bound_read(project_id, lambda client: client.management_reconciliation(**parameters))
+        path = self._root / (self._key(project_id, parameters["action"], parameters["request_id"]) + ".json")
+
+        async def read(client):
+            if path.exists():
+                self._check_epoch(client, self._read(path))
+            return await client.management_reconciliation(**parameters)
+
+        return await self._bound_read(project_id, read)
 
     async def research(self, project_id: str, **parameters):
         return await self._bound_read(project_id, lambda client: client.management_research(**parameters))

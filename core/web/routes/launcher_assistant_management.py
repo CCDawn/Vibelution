@@ -285,6 +285,8 @@ async def authorization_status(request: Request):
 async def recover_subject(operation: Literal["check", "enroll"], request: Request):
     from core.infrastructure.launcher_assistant_authority import verify_launcher_authority
     from core.web.services.external_management.recovery import RecoveryIdentity, RecoverSubject, recover
+    from core.web.services.team_workflow.research_runtime.operator_authorization import current_server_operator
+    from core.web.services.team_workflow.research_runtime.operator_permissions import operator_has_privileged_role
 
     _require_control(request)
     actor, capability = _credentials(request)
@@ -297,7 +299,13 @@ async def recover_subject(operation: Literal["check", "enroll"], request: Reques
         data = (RecoverSubject if operation == "enroll" else RecoveryIdentity).model_validate(payload)
     except ValueError:
         raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"}) from None
-    return await _operator_call(request, lambda: recover(_service(), data, launcher_capability=capability))
+    def execute():
+        operator = current_server_operator()
+        if operator is None or not operator.operator_id or not operator_has_privileged_role(operator.roles):
+            raise ManagementError("OPERATOR_CONTROL_REQUIRED", 403)
+        return recover(_service(), data, launcher_capability=capability)
+
+    return await _operator_call(request, execute)
 
 
 @router.post("/legacy-observers", response_model=LegacyObserverView)

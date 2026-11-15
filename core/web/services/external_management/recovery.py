@@ -1,7 +1,10 @@
 """One approved enrollment when both records of a prior subject are gone."""
 import secrets
+import stat
 
 from pydantic import Field, field_validator
+
+from core.assistant_runtime.migration_io import check_path
 
 from .contracts import Binding, Closed, SCOPES, Scope
 from .store import digest
@@ -30,9 +33,17 @@ def recovery_key(binding: dict, client_id: str, subject_id: str) -> str:
 
 
 def _read_record(store, path):
-    if path.is_symlink() or path.parent.is_symlink() or store.root.is_symlink():
+    check_path(path, missing_ok=True)
+    try:
+        mode = path.lstat().st_mode
+    except FileNotFoundError:
+        return None
+    if not stat.S_ISREG(mode):
         raise ValueError("Unverified management record")
-    return store.read(path)
+    record = store.read(path)
+    if record is None:
+        raise ValueError("Management record changed under lock")
+    return record
 
 
 def recover(service, request: RecoveryIdentity, *, launcher_capability: str):
@@ -43,17 +54,23 @@ def recover(service, request: RecoveryIdentity, *, launcher_capability: str):
     new_client = "recovered-" + key
     new_subject = "ops-" + key[:32]
     store = service.store
+    old_subject_path = store.path("subjects", request.subject_id)
+    old_index_path = store.path("clients", request.client_id)
+    for record in (old_subject_path, old_index_path):
+        check_path(record.with_suffix(".lock"), missing_ok=True)
     with store.lock("clients", request.client_id), store.lock("subjects", request.subject_id):
         service._expected(binding)
-        old_subject = _read_record(store, store.path("subjects", request.subject_id))
+        old_subject = _read_record(store, old_subject_path)
         if old_subject and old_subject.get("revoked") is True:
             raise ManagementError("SUBJECT_REVOKED")
-        if old_subject is not None or _read_record(store, store.path("clients", request.client_id)) is not None:
+        if old_subject is not None or _read_record(store, old_index_path) is not None:
             raise ManagementError("ORIGINAL_GRANT_PRESENT", 409)
         path = store.path("subjects", new_subject)
         index_path = store.path("clients", new_client)
         if not isinstance(request, RecoverSubject):
             return {"available": _read_record(store, path) is None and _read_record(store, index_path) is None}
+        for record in (path, index_path):
+            check_path(record.with_suffix(".lock"), missing_ok=True)
         with store.lock("clients", new_client), store.lock("subjects", new_subject):
             current = service._expected(binding)
             fingerprint = digest([current.signature, request.model_dump(), launcher_capability])
