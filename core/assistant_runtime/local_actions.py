@@ -43,6 +43,8 @@ def contracts() -> dict:
     result.update(discovery_actions.contracts())
     from . import operator_image_actions
     result.update(operator_image_actions.contracts())
+    from . import attachments
+    result.update(attachments.contracts())
     from . import history_actions
     result.update(history_actions.contracts())
     from . import affairs_conflict_actions
@@ -95,6 +97,9 @@ def execute(action: str, parameters: dict, runtime: dict, *, governed: bool = Fa
     if action in {"preference_proposals", "preference_proposal_accept", "preference_proposal_reject", "dispatch_list", "management_requests"}:
         from .discovery_actions import execute as execute_discovery
         return execute_discovery(action, parameters, runtime, governed=governed)
+    if action in {"attachment_list", "attachment_read"}:
+        from . import attachments
+        return attachments.execute(action, parameters, runtime)
     if action in {"history_list", "history_read", "history_search", "history_commentary_read"}:
         from .history_actions import execute as execute_history
         return execute_history(action, parameters)

@@ -3165,6 +3165,8 @@ def _build_key_tools() -> List[BaseTool]:
         回答支持或不支持前查当前index/describe，不凭历史记忆判断能力。
         用户要求实测哪些模型厂商或连接能用时，用provider_test_batch_plan（默认当前全部已启用连接；指定厂商用query；只重测失败用failed_only）。
         把返回的approvalArguments原样交给manage的provider_test_batch，一张审批卡覆盖整批；无可测项直接报告。拿到results后用同一条最终回复逐项说明模型、通过、失败原因或未测项。只查最近结果用provider_test_batch_status。
+        用户提到已上传的附件或预览被截断时，先用attachment_list找本会话已有附件，再用attachment_read按源码行或next继续读取。
+        用户要求项目Agent核对代码和日志时，用agents定位已授权的执行者并走项目派遣，沿用原回执。
         projects定位已授权项目，agents/agent_list发现目标。用户只要求读取源码时先source_search/source_read。
         已知对象或状态用agent_list的query筛选（如archived）；沿用query分页，revision变化只重读该范围，不因每批删除重扫全目录。
         归档前agent_get核对configRevision及返回的archiveEligibility；资格不代表空闲或审批已通过。

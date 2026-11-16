@@ -14,6 +14,7 @@ def test_catalog_reuses_native_schema_and_governance_without_project_actions():
     expected = set(assistant.contracts()) | set(config.contracts()) | {
         "settings_catalog", "settings_update", "model_add", "model_options", "configuration_references",
         "operator_image_options", "operator_image_select",
+        "attachment_list", "attachment_read",
         "history_list", "history_read", "history_search", "history_commentary_read",
         "affairs_conflict_sets", "affairs_conflict_list", "affairs_conflict_read", "affairs_sync_receipt",
         "episodic_conflict_review", "episodic_sync_receipt", "personal_memory_list",
@@ -197,3 +198,74 @@ def test_ordinary_settings_cannot_be_used_as_project_or_policy_writes(monkeypatc
     for section, key in (("agent", "display_name"), ("authorization", "writeScopes"), ("llm", "providers")):
         result = local.execute("settings_update", {"updates": [{"section": section, "key": key, "value": "x"}]}, {})
         assert not result["ok"] and result["error"] == "invalid_input"
+
+
+def test_current_session_can_find_and_read_a_prior_document_after_preview(monkeypatch, tmp_path):
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+
+    from core.assistant_runtime import actions, attachments, native
+    from core.chat import turn_journal
+
+    source = tmp_path / "user-doc-1-dawn.html"
+    source.write_bytes(("<!-- " + "x" * 30 + " -->\r\n").encode() * 892 + "第893行\r\n下一行".encode())
+
+    @contextmanager
+    def command():
+        yield SimpleNamespace(PROJECT_ROOT=tmp_path), "current"
+
+    def event(session_id, artifact_id, kind, sequence):
+        return turn_journal.TurnJournalEvent.from_dict({
+            "eventType": "user_message", "sessionId": session_id, "turnId": str(sequence),
+            "sequence": sequence, "payload": {"attachments": [{
+                "kind": kind, "artifactId": artifact_id, "filename": "Dawn.html"
+            }]},
+        })
+
+    rows = [
+        event("current", source.name, "user_document", 1),
+        event("other", "user-doc-other.html", "user_document", 2),
+        event("current", "sec_token", "user_secret", 3),
+    ]
+    monkeypatch.setattr(native, "_AGENT_ID", "launcher")
+    monkeypatch.setattr(native, "_source_command", command)
+    monkeypatch.setattr(actions, "_binding", (object(), object(), None))
+    monkeypatch.setattr(turn_journal, "load_turn_events", lambda root, session: rows)
+
+    def resolve(session, artifact_id):
+        assert session == "current"
+        assert artifact_id == source.name
+        return source, "text/plain"
+
+    monkeypatch.setattr(attachments, "resolve", resolve)
+    runtime = {"agentId": "launcher", "sessionId": "current", "turnId": "later"}
+
+    def run(name, **params):
+        return actions.execute_action(name, params, runtime=runtime)
+
+    assert {row["action"] for row in run("index", query="文档附件")["actions"]} >= {
+        "attachment_list", "attachment_read"
+    }
+    assert not run("describe", action="attachment_read")["governed"]
+    assert run("attachment_list", query="dawn")["attachments"] == [
+        {"artifactId": source.name, "filename": "Dawn.html"}
+    ]
+    params = {"artifact_id": source.name, "start_line": 893, "line_count": 1, "max_characters": 2}
+    part = run("attachment_read", **params)
+    assert part["text"] == "第8"
+    assert part["next"] == {"start_line": 893, "character_offset": 2}
+    tail = run("attachment_read", artifact_id=source.name, **part["next"])
+    assert tail["text"] == "93行\n下一行"
+    assert tail["startLine"] == 893
+    assert tail["endLine"] == 894
+    assert tail["next"] is None
+    assert tail["untrustedContent"] is True
+    assert run("attachment_read", artifact_id="user-doc-other.html")["code"] == "ATTACHMENT_UNAVAILABLE"
+    assert run("attachment_read", artifact_id=source.name, start_line=895)["code"] == "ATTACHMENT_RANGE_INVALID"
+    with pytest.raises(ValueError):
+        run("attachment_read", artifact_id="../user-doc-1-dawn.html")
+    with pytest.raises(ValueError):
+        run("attachment_read", artifact_id=source.name, session_id="other")
+    assert actions.execute_action("attachment_list", {}, runtime={**runtime, "sessionId": "other"}) == {
+        "ok": False, "code": "ATTACHMENT_IDENTITY_INVALID",
+    }
