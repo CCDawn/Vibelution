@@ -455,3 +455,81 @@ def test_bound_extraction_reuses_finding_text_before_network_fetch(setup, tmp_pa
     runtime["agentId"] = "unrelated-agent"
     assert fetch.invoke({"url": _URL}) == "network result"
     assert requests == [_URL + "v2", _URL.replace("/abs/", "/pdf/"), "https://arxiv.org/abs/2401.12345v1", _URL]
+
+
+def test_bound_extraction_reissues_pinned_arxiv_edition_without_network_retry(setup, tmp_path, monkeypatch):
+    from core.web.services import agent_directory_service
+    from core.web.services.team_workflow.source_collection import stage_session
+    from core.web.services.team_workflow.source_collection.extraction_fetch_text import task_fetched_text
+    from tools import web_search_tool
+    from tools.Key_Tools import create_key_tools
+
+    task, _, stored_candidates, _, _, _ = setup
+    for index, candidate in enumerate(stored_candidates, start=1):
+        candidate["sourceUrl"] = f"{_URL}v{index}"
+    stored_candidates.append({
+        **stored_candidates[0],
+        "candidateId": "candidate-from-another-workflow",
+        "sourceUrl": _URL + "v3",
+        "metadata": {"sourceRecordId": "other-record", "workflowRunId": "other-workflow"},
+    })
+    active_task = {**task, "turn": {"turnId": "extract-turn"}, "status": "running"}
+    monkeypatch.setattr(stage_session, "_read_source_collection_stage_session_task_record", lambda *_: active_task)
+    runtime = {
+        "agentId": task["agentId"], "sessionId": task["sessionId"], "turnId": "extract-turn",
+        "runtimeMetadata": {"sourceCollectionExtraction": {
+            key: task[key] for key in ("teamId", "runId", "taskId", "stageId")
+        }},
+    }
+    monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda *, bound_only: runtime)
+    requests = []
+
+    def network_fetch(*, url, **_):
+        requests.append(url)
+        return f"[PDF 文本] {url}\n\n{_ORIGINAL}"
+
+    monkeypatch.setattr(web_search_tool, "web_fetch", network_fetch)
+    fetch = next(tool for tool in create_key_tools() if tool.name == "web_fetch_tool")
+    for url in (_URL, _URL + "v3"):
+        notice = fetch.invoke({"url": url})
+        assert "未发起抓取" in notice
+        assert f"- {_URL}v1" in notice and f"- {_URL}v2" in notice
+        assert f"- {_URL}v3" not in notice
+        append_conversation_event(
+            tmp_path, task["sessionId"], "extract-turn", "tool_result", status="done",
+            payload={"toolCall": {
+                "name": "web_fetch_tool", "status": "done", "arguments": {"url": url}, "result": notice,
+            }},
+        )
+    assert not task_fetched_text(active_task)
+    assert requests == []
+
+    pinned_pdf = _URL.replace("/abs/", "/pdf/") + "v2"
+    result = fetch.invoke({"url": pinned_pdf})
+    assert result == f"[PDF 文本] {pinned_pdf}\n\n{_ORIGINAL}"
+    event = append_conversation_event(
+        tmp_path, task["sessionId"], "extract-turn", "tool_result", status="done",
+        payload={"toolCall": {
+            "name": "web_fetch_tool", "status": "done", "arguments": {"url": pinned_pdf}, "result": result,
+        }},
+    )
+    runtime["turnId"] = "continued-extract-turn"
+    runtime["runtimeMetadata"]["sourceCollectionExtraction"] = {"teamId": _TEAM, "taskId": task["taskId"]}
+    _append_message(tmp_path, task["sessionId"], runtime["turnId"], "Continue", {
+        "kind": _FINDING_TASK_KIND,
+        "teamId": _TEAM,
+        "taskId": task["taskId"],
+        "sourceCollectionStageTaskId": task["taskId"],
+        "continuationOfTurnId": "extract-turn",
+        "sourceSurface": "team_workflow_agent_turn_continuation",
+    })
+    assert fetch.invoke({"url": pinned_pdf}) == (
+        f"[已复用提炼原文] {pinned_pdf}\n提炼抓取回执: {event.event_id}\n\n{_ORIGINAL}"
+    )
+    assert requests == [pinned_pdf]
+
+    unrelated_url = "https://arxiv.org/abs/2401.12345"
+    assert fetch.invoke({"url": unrelated_url}).startswith(f"[PDF 文本] {unrelated_url}")
+    runtime["agentId"] = "unbound-agent"
+    assert fetch.invoke({"url": _URL}).startswith(f"[PDF 文本] {_URL}")
+    assert requests == [pinned_pdf, unrelated_url, _URL]

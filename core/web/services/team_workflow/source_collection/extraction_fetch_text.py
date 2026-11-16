@@ -417,8 +417,61 @@ def finding_fetched_text_for_task(task: dict[str, Any]) -> dict[tuple[str, str],
     )
 
 
+def _pinned_arxiv_fetch_notice(task: dict[str, Any], url: str) -> str | None:
+    """Explain how to reissue a fetch when the active sources pin an edition."""
+    from ..research_runtime.artifact_readback_registry import (
+        _source_finding_candidate_source,
+        load_scoped_artifact_payload,
+    )
+    from .extraction_quote_anchor_supply import _arxiv_locator, _publisher_doi_locator, _source_locators
+
+    requested = _arxiv_locator(url)
+    if requested is None or not task.get("runId") or not task.get("workflowRunId"):
+        return None
+    work_id, requested_edition, _ = requested
+    batch = load_scoped_artifact_payload(
+        "source_candidate_batch", team_id=task["teamId"], authority_run_id=task["runId"],
+        workflow_run_id=task["workflowRunId"],
+    ) or {}
+    choices: dict[str, str] = {}
+    for candidate in batch.get("candidates") or []:
+        source = _source_finding_candidate_source(candidate)
+        locators = _source_locators(source)
+        # The discovery identity takes precedence over presentation aliases,
+        # just as it does for matching a candidate to a fetch receipt.
+        authority = next((
+            locator for locator in (source["sourceRef"], *locators)
+            if _arxiv_locator(locator) or _publisher_doi_locator(locator)
+        ), "")
+        expected = _arxiv_locator(authority)
+        if not expected or expected[0] != work_id:
+            continue
+        edition_urls = {
+            locator: parsed[1] for locator in locators
+            if (parsed := _arxiv_locator(locator)) and parsed[0] == work_id and parsed[1]
+        }
+        edition = expected[1]
+        if not edition:
+            editions = set(edition_urls.values())
+            if len(editions) != 1:
+                return None  # unpinned or ambiguous current source
+            edition = next(iter(editions))
+        if requested_edition == edition:
+            return None
+        for locator, locator_edition in edition_urls.items():
+            if locator_edition == edition and locator.startswith(("https://", "http://")):
+                choices.setdefault(edition, locator)
+    if not choices:
+        return None
+    return (
+        "[提炼来源版本] 当前地址未匹配候选资料指定的 arXiv 版本，未发起抓取。\n"
+        "请按所选候选资料另行调用 web_fetch_tool，使用以下对应的版本地址：\n"
+        + "\n".join(f"- {locator}" for locator in choices.values())
+    )
+
+
 def reuse_bound_extraction_text(runtime: dict[str, Any], url: str, max_chars: int) -> str | None:
-    """Prefer the accepted finding body, then reuse any completed supplemental fetch."""
+    """Validate the requested edition and replay any matching original fetch."""
     scope = _object(_object(runtime.get("runtimeMetadata")).get("sourceCollectionExtraction"))
     if scope.get("stageId") not in {None, "", "extraction"} or not all(
         scope.get(key) for key in ("teamId", "taskId")
@@ -444,6 +497,8 @@ def reuse_bound_extraction_text(runtime: dict[str, Any], url: str, max_chars: in
         if not s._source_collection_stage_session_task_turn_references_task(task, runtime["sessionId"], runtime["turnId"]):
             return None
 
+    if edition_notice := _pinned_arxiv_fetch_notice(task, url):
+        return edition_notice
     finding_receipts = (
         receipts for (kind, _), receipts in finding_fetched_text_for_task(task).items() if kind == "candidate"
     )
