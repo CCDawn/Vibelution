@@ -91,12 +91,8 @@ def test_explicit_setup_uses_native_identity_and_restricted_policy_from_creation
     assert calls[0]["llm_bindings"] == {"dialogue": {"modelId": "test-model"}}
     initial = calls[0]["initial_tool_policy"]
     assert initial["allowedTools"] and "*" not in initial["allowedTools"]
-    assert not {
-        "cli_tool",
-        "shell_tool",
-        "edit_file_tool",
-        "write_file_tool",
-    }.intersection(initial["allowedTools"])
+    assert {"cli_tool", "write_file_tool"} <= set(initial["allowedTools"])
+    assert not {"edit_file_tool", "shell_tool"}.intersection(initial["allowedTools"])
     agent = directory.get_agent(row["agentId"])
     assert agent["toolPolicyId"] == "tool-" + row["agentId"]
     assert agent["personaProfile"]["identityNotes"]
@@ -806,7 +802,7 @@ def test_pre_toolset_snapshot_upgrades_to_search_and_compress_tools(personal_env
 def test_agent_message_generation_is_provisioned_and_described(personal_env):
     from core.web.services import tool_catalog
 
-    assert service.TOOLS == (*service._PRE_MESSAGES_TOOLS, "agent_message_tool", "personal_assistant_action_tool")
+    assert service.TOOLS == (*service._PRE_MESSAGES_TOOLS, "agent_message_tool", "personal_assistant_action_tool", *service.DEV_TOOLS)
     row = service.create_personal_assistant()["assistant"]
     agent = directory.get_agent(row["agentId"])
     assert "agent_message_tool" in agent["toolPolicy"]["allowedTools"]

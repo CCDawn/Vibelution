@@ -75,10 +75,32 @@ _PRE_MESSAGES_TOOLS = (*_PRE_PLATFORM_TOOLS, "personal_assistant_platform_api_to
 # Cross-agent collaboration generation: the assistant can dispatch work to other
 # agents' sessions via agent_message_tool and collect receipts in its inbox.
 _PRE_ACTIONS_TOOLS = (*_PRE_MESSAGES_TOOLS, "agent_message_tool")
-TOOLS = (*_PRE_ACTIONS_TOOLS, "personal_assistant_action_tool")
+# Development and rescue tools: the assistant may inspect and change the
+# checkout, run commands/tests, and read git state. Every write/execute still
+# goes through the native per-call approval path; only the tool surface widens.
+DEV_TOOLS = (
+    "grep_search_tool",
+    "glob_tool",
+    "code_symbol_tool",
+    "read_file_tool",
+    "apply_patch_tool",
+    "apply_diff_edit_tool",
+    "write_file_tool",
+    "cli_tool",
+    "python_lint_tool",
+    "run_test_for_tool",
+    "dev_task_board_tool",
+    "get_git_status_summary_tool",
+    "get_recent_changes_tool",
+)
+TOOLS = (*_PRE_ACTIONS_TOOLS, "personal_assistant_action_tool", *DEV_TOOLS)
 # Older provisioning toolsets that may still live in persisted snapshots; each
 # generation stays recognizable so explicit re-provisioning upgrades it to TOOLS.
-_TOOLSET_GENERATIONS = (_LEGACY_TOOLS + _DESKTOP_TOOLS, _PRE_COMPUTER_TOOLS)
+_TOOLSET_GENERATIONS = (
+    _LEGACY_TOOLS + _DESKTOP_TOOLS,
+    _PRE_COMPUTER_TOOLS,
+    _PRE_ACTIONS_TOOLS + ("personal_assistant_action_tool",),
+)
 
 
 def _max_calls_per_turn() -> int:

@@ -77,8 +77,6 @@ _LEGACY_LAUNCHER_TOOLS = (
     "personal_affairs_tool", "append_personal_memory_tool", "supersede_personal_memory_tool",
     "search_agent_private_memory_tool", "compress_context_tool",
 )
-_INITIAL_TOOLS = (*_LEGACY_LAUNCHER_TOOLS,
-                  "personal_assistant_computer_observe_tool", "personal_assistant_computer_action_tool")
 
 # Launcher detail reads a bounded recent window, aligned with the native session
 # detail window ceiling (_SESSION_DETAIL_MESSAGE_WINDOW_MAX_LIMIT) and the
@@ -124,6 +122,17 @@ def _services():
     from core.web.services.session import directory_runtime
 
     return agent_directory_service, personal_assistant_service, session_service, directory_runtime
+
+
+def _initial_tools() -> tuple[str, ...]:
+    """Resolve the current provisioning tool surface without a module import cycle."""
+    _, personal, _, _ = _services()
+    return (
+        *_LEGACY_LAUNCHER_TOOLS,
+        "personal_assistant_computer_observe_tool",
+        "personal_assistant_computer_action_tool",
+        *personal.DEV_TOOLS,
+    )
 
 
 def _projection() -> dict[str, Any]:
@@ -195,8 +204,8 @@ def _bootstrap(root: Path | str, *, offline_migration: bool) -> dict[str, Any]:
             if existing is None:
                 policy = {
                     **personal.current_policy(),
-                    "allowedTools": list(_INITIAL_TOOLS),
-                    "preferredTools": list(_INITIAL_TOOLS),
+                    "allowedTools": list(_initial_tools()),
+                    "preferredTools": list(_initial_tools()),
                     "approvalOverrides": {},
                 }
                 task = {
@@ -255,7 +264,7 @@ def _bootstrap(root: Path | str, *, offline_migration: bool) -> dict[str, Any]:
                         and existing.get("toolPolicyId") == policy_id and isinstance(policy, dict)
                         and personal._matches_provisioning_snapshot(policy, old_default, policy_id)):
                     directory.update_agent_instance(agent_id,
-                        tool_policy={**policy, "allowedTools": list(_INITIAL_TOOLS), "preferredTools": list(_INITIAL_TOOLS)},
+                        tool_policy={**policy, "allowedTools": list(_initial_tools()), "preferredTools": list(_initial_tools())},
                         expected_tool_policy_fingerprint=directory.tool_policy_fingerprint(policy))
             # Reuse native direct-Session provisioning/repair and its existing
             # preservation rules for user-authored profiles and tool policies.
