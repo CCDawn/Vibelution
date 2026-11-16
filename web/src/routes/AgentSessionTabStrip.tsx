@@ -56,6 +56,16 @@ import {
 import styles from "./AgentSessionTabStrip.styles";
 
 /** Palette accent per group colour; the swatch colours live in the styles module. */
+/** Colour names are localised palette labels; the stored value stays a token. */
+const GROUP_COLOR_LABELS: Record<AgentSessionTabGroupColor, { zh: string; en: string }> = {
+  gray: { zh: "灰色", en: "Gray" },
+  blue: { zh: "蓝色", en: "Blue" },
+  green: { zh: "绿色", en: "Green" },
+  amber: { zh: "琥珀", en: "Amber" },
+  violet: { zh: "紫色", en: "Violet" },
+  rose: { zh: "玫红", en: "Rose" },
+};
+
 const GROUP_SWATCH_CLASS: Record<AgentSessionTabGroupColor, string> = {
   gray: styles.agentSessionTabGroupSwatchGray,
   blue: styles.agentSessionTabGroupSwatchBlue,
@@ -887,7 +897,12 @@ export function AgentSessionTabStrip({
               ].filter(Boolean).join(" ")}
               aria-hidden="true"
             />
-            {color}
+            <span className={styles.agentSessionTabGroupMenuLabel}>
+              {GROUP_COLOR_LABELS[color][lang === "zh" ? "zh" : "en"]}
+            </span>
+            {activeColor === color ? (
+              <Check size={12} className={styles.agentSessionTabGroupMenuCheck} aria-hidden="true" />
+            ) : null}
           </span>
         ),
         onSelect: () =>
@@ -984,6 +999,8 @@ export function AgentSessionTabStrip({
           open
           position={{ x: menu.x, y: menu.y }}
           items={menuItems}
+          contentClassName={styles.agentSessionTabGroupMenu}
+          itemClassName={styles.agentSessionTabGroupMenuRow}
           aria-label={lang === "zh" ? "分组设置" : "Group settings"}
           onOpenChange={(next) => {
             if (!next) {
