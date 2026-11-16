@@ -1734,7 +1734,7 @@ class LogConfig(BaseModel):
     )
     date_format: str = Field(
         default="%Y-%m-%d %H:%M:%S",
-        description="日期时间格式"
+        description="已退役兼容字段：日志时间格式由日志记录器固定渲染（毫秒精度），本字段不参与运行时决策"
     )
     file_enabled: bool = Field(
         default=False,
@@ -1752,11 +1752,11 @@ class LogConfig(BaseModel):
     backup_count: int = Field(
         default=5,
         ge=0,
-        description="保留的日志文件数量"
+        description="已退役兼容字段：轮转保留数由 core.logging.log_rotation.DEFAULT_LOG_BACKUP_COUNT 决定，本字段不参与运行时决策"
     )
     detailed_traceback: bool = Field(
         default=False,
-        description="是否启用详细错误堆栈"
+        description="已退役兼容字段：堆栈详细程度由日志级别与调用方决定，本字段不参与运行时决策"
     )
     third_party: LogThirdPartyConfig = Field(
         default_factory=LogThirdPartyConfig,
@@ -1799,7 +1799,7 @@ class NetworkConfig(BaseModel):
     retry_delay: float = Field(
         default=1.0,
         ge=0,
-        description="重试延迟（秒）"
+        description="已退役兼容字段：网络重试退避由各客户端自身常量决定，本字段不参与运行时决策"
     )
     verify_ssl: bool = Field(
         default=True,
