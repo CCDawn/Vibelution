@@ -13,6 +13,7 @@ from core.research.workflow.ledger.records import KnowledgeInvocationRecord
 
 from core.web.services.team_workflow.research_runtime.knowledge_artifact_authority import (
     load_knowledge_package_draft_payload,
+    load_knowledge_package_payload,
 )
 
 from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
@@ -150,6 +151,46 @@ def test_draft_readback_searches_tail_beyond_public_candidate_page(
 
     assert payload is not None
     assert payload["candidateId"] == "draft-at-tail"
+
+
+def test_source_inbox_receipt_unlocks_reviewable_draft_only(monkeypatch) -> None:
+    scope = {
+        "team_id": "research-team",
+        "authority_run_id": "sc-run-1",
+        "workflow_run_id": "run-test",
+    }
+    trace = {
+        "teamId": scope["team_id"],
+        "sourceCollectionRunId": scope["authority_run_id"],
+        "workflowRunId": scope["workflow_run_id"],
+    }
+    ingestion = {"status": "pending_source_review"}
+    candidate = {
+        "candidateId": "draft-1",
+        "teamId": scope["team_id"],
+        "metadata": {
+            "taskType": "steward_pack_draft",
+            "output": {"sourceTrace": trace, "requiresReview": True},
+            "validation": {"valid": True},
+            "knowledgeIngestion": ingestion,
+        },
+    }
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.source_collection.candidates.list_candidate_store_authority_records",
+        lambda *_args, **_kwargs: [candidate],
+    )
+
+    assert load_knowledge_package_draft_payload(**scope) is None
+    ingestion["inboxSourceId"] = "inbox-exact-1"
+    assert load_knowledge_package_draft_payload(**{**scope, "workflow_run_id": "run-other"}) is None
+    draft = load_knowledge_package_draft_payload(**scope)
+    assert draft is not None
+    assert draft["reviewable"] is True
+    assert load_knowledge_package_payload(**scope) is None
+
+    ingestion["status"] = "pending_review"
+    assert load_knowledge_package_draft_payload(**scope, content_hash=canonical_sha256(draft)) == draft
+    assert load_knowledge_package_payload(**scope) is None
 
 
 def _stale_inventory_package() -> dict[str, Any]:

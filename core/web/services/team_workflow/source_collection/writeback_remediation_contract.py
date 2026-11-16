@@ -152,21 +152,35 @@ def relation_missing_field_findings(error_text: str) -> list[dict[str, Any]]:
 def collect_relation_ref_violations(
     result: Mapping[str, Any],
     allowed_refs: set[str],
+    *,
+    evidence_context: Sequence[Mapping[str, Any]] = (),
 ) -> list[dict[str, Any]]:
     """Find every non-canonical evidence reference in the submitted result.
 
-    Scans the relation collections the agent actually writes (root keys plus a
-    nested ``candidateGraph.edges`` and the implicit root ``edges`` shape the
-    merge path also accepts) and the counter-evidence refs.  Each finding
-    carries the exact submitted path and offending value so the agent can fix
-    deterministically instead of re-reading context blind.
+    Each finding identifies the submitted path and value. An exact source
+    or candidate alias with one scoped match also identifies its canonical ref.
     """
     findings: list[dict[str, Any]] = []
     if not isinstance(result, Mapping):
         return findings
 
-    def _edge_findings(container: Mapping[str, Any], path_prefix: str) -> None:
-        items = container.get("edges") if isinstance(container.get("edges"), list) else []
+    refs_by_alias: dict[str, set[str]] = {}
+    for card in evidence_context:
+        evidence_id = card.get("claimEvidenceId")
+        if not isinstance(evidence_id, str) or not evidence_id.startswith("ce-") or evidence_id not in allowed_refs:
+            continue
+        for alias in (card.get("candidateId"), card.get("recordId")):
+            if isinstance(alias, str) and alias:
+                refs_by_alias.setdefault(alias, set()).add(evidence_id)
+
+    def _append_invalid(path: str, ref: Any, finding: str) -> None:
+        item = {"finding": finding, "path": path, "value": _clip(ref)}
+        matches = refs_by_alias.get(ref, set()) if isinstance(ref, str) else set()
+        if len(matches) == 1:
+            item["suggestedEvidenceRef"] = next(iter(matches))
+        findings.append(item)
+
+    def _edge_findings(items: list[Any], path_prefix: str) -> None:
         for index, edge in enumerate(items):
             if not isinstance(edge, Mapping):
                 continue
@@ -179,69 +193,37 @@ def collect_relation_ref_violations(
                 continue
             for ref_index, ref in enumerate(refs):
                 if not isinstance(ref, str) or ref not in allowed_refs:
-                    findings.append(
-                        {
-                            "finding": "non_canonical_ref",
-                            "path": f"{base}[{ref_index}]",
-                            "value": _clip(ref),
-                        }
+                    _append_invalid(
+                        f"{base}[{ref_index}]", ref, "non_canonical_ref"
                     )
 
-    # Implicit graph write shape: a root ``edges`` array feeds the merged graph
-    # exactly like ``candidateGraph.edges`` (writeback_materialize's agent
-    # payload reader), so it needs the same violation sweep.
-    _edge_findings(result, "edges")
-    scanned_keys: set[str] = set()
-    for key_group in _RELATION_COLLECTION_KEY_GROUPS:
-        for key in key_group:
-            if key in scanned_keys or not isinstance(result.get(key), list):
-                continue
-            scanned_keys.add(key)
-            display_key = key_group[0]
-            for index, edge in enumerate(result[key]):
-                if not isinstance(edge, Mapping):
-                    continue
-                refs = edge.get("evidenceRefs")
-                if isinstance(edge.get("evidence_refs"), list):
-                    refs = edge["evidence_refs"]
-                base = f"{display_key}[{index}].evidenceRefs"
-                if not isinstance(refs, list) or not refs:
-                    findings.append({"finding": "missing_evidence_refs", "path": base})
-                    continue
-                for ref_index, ref in enumerate(refs):
-                    if not isinstance(ref, str) or ref not in allowed_refs:
-                        findings.append(
-                            {
-                                "finding": "non_canonical_ref",
-                                "path": f"{base}[{ref_index}]",
-                                "value": _clip(ref),
-                            }
-                        )
-    graph = result.get("candidateGraph") if isinstance(result.get("candidateGraph"), Mapping) else (
-        result.get("candidate_graph") if isinstance(result.get("candidate_graph"), Mapping) else None
-    )
-    if graph is not None:
-        _edge_findings(graph, "candidateGraph.edges")
-    for key in _COUNTER_REF_KEYS:
-        items = result.get(key) if isinstance(result.get(key), list) else None
-        if items is None:
-            continue
+    def _counter_findings(items: list[Any], path_prefix: str) -> None:
         for index, item in enumerate(items):
-            base = f"counterEvidenceRefs[{index}].evidenceRef"
-            if not isinstance(item, Mapping):
-                findings.append(
-                    {"finding": "non_canonical_counter_ref", "path": base, "value": _clip(item)}
-                )
-                continue
-            evidence_ref = item.get("evidenceRef")
+            field = next(
+                (key for key in ("evidenceRef", "evidence_ref", "refId") if isinstance(item, Mapping) and key in item),
+                "evidenceRef",
+            )
+            evidence_ref = item.get(field) if isinstance(item, Mapping) else item
             if not isinstance(evidence_ref, str) or evidence_ref not in allowed_refs:
-                findings.append(
-                    {
-                        "finding": "non_canonical_counter_ref",
-                        "path": base,
-                        "value": _clip(evidence_ref),
-                    }
+                _append_invalid(
+                    f"{path_prefix}[{index}].{field}", evidence_ref, "non_canonical_counter_ref"
                 )
+
+    for key in ("edges", *(key for group in _RELATION_COLLECTION_KEY_GROUPS for key in group)):
+        if isinstance(result.get(key), list):
+            _edge_findings(result[key], key)
+    for container, prefix in (
+        (result, ""),
+        (result.get("candidateGraph"), "candidateGraph."),
+        (result.get("candidate_graph"), "candidate_graph."),
+    ):
+        if not isinstance(container, Mapping):
+            continue
+        if prefix and isinstance(container.get("edges"), list):
+            _edge_findings(container["edges"], f"{prefix}edges")
+        for key in _COUNTER_REF_KEYS:
+            if isinstance(container.get(key), list):
+                _counter_findings(container[key], f"{prefix}{key}")
     return findings
 
 
@@ -267,8 +249,9 @@ _RELATION_REFS_INSTRUCTION = (
     "关系图 evidenceRefs/counterEvidenceRefs 引用了不属于 allowedEvidenceRefs "
     "的 canonical claimEvidenceId。请读取最新 source_collection_context_tool："
     "上下文会带本契约（writebackRemediation）与 allowedEvidenceRefs；"
-    "把 findings[] 里每个 path 上的违规 value 替换为 allowedEvidenceRefs 中的"
-    "某个 claimEvidenceId（逐字复制，禁止改写或拼接）。没有可绑定的 canonical "
+    "逐条修正 findings[] 指定的 path。有 suggestedEvidenceRef 时逐字使用该 ID，"
+    "否则通过 relationEvidence 核对来源和支持方向，再选择匹配的 claimEvidenceId。"
+    "没有可绑定的 canonical "
     "证据时不得伪造引用：把对应边删掉或写 status=blocked 附真实原因。"
     "这是同类违规唯一一次系统修正机会：再次违规将按契约直接拒绝。"
 )
@@ -278,7 +261,8 @@ _RELATION_MISSING_FIELDS_INSTRUCTION = (
     "edges 必须是对象数组且每条边绑定 canonical evidenceRefs；"
     "evidenceGaps[] 每项含 id、description、neededEvidence、blocksConclusion；"
     "counterEvidenceRefs[] 每项含 evidenceRef、claim、disposition，"
-    "evidenceRef 必须是 allowedEvidenceRefs 中的 canonical claimEvidenceId。"
+    "evidenceRef 必须是 allowedEvidenceRefs 中的 canonical claimEvidenceId，"
+    "claim 写被挑战的命题。直接反证引用 supportLevel=contradicts 且原文直接反驳该命题的卡。"
     "没有真实反证时写 counterEvidenceRefs=[] 并回写 status=blocked 附真实原因，"
     "不得伪造。这是同类违规唯一一次系统修正机会：再次违规将按契约直接拒绝。"
 )
@@ -325,6 +309,8 @@ def build_writeback_remediation_contract(
             item["value"] = _clip(finding.get("value"))
         if finding.get("detail") not in (None, ""):
             item["detail"] = _clip(finding.get("detail"), 400)
+        if finding.get("suggestedEvidenceRef"):
+            item["suggestedEvidenceRef"] = _clean(finding["suggestedEvidenceRef"])
         rendered.append({key: value for key, value in item.items() if value != ""})
     return {
         "schemaVersion": WRITEBACK_REMEDIATION_SCHEMA_VERSION,
@@ -399,9 +385,10 @@ def _violations_hint(findings: Sequence[Mapping[str, Any]]) -> str:
     for finding in list(findings)[:_ALLOWED_REFS_HINT_LIMIT]:
         path = _clean(finding.get("path"))
         value = _clean(finding.get("value"))
+        suggested = _clean(finding.get("suggestedEvidenceRef"))
         kind = _clean(finding.get("finding"))
         if path and value:
-            rendered.append(f"{path}={value}")
+            rendered.append(f"{path}={value} → {suggested}" if suggested else f"{path}={value}")
         elif path:
             rendered.append(f"{path}（{kind}）")
         else:

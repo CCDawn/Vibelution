@@ -29,6 +29,10 @@ def test_finding_prompt_requires_counter_search_without_fabrication() -> None:
     assert "limitation_or_null" in prompt
     assert "falsification" in prompt
     assert "canonical searchTrace" in prompt
+    assert "`paper_search_tool`" in prompt
+    assert "`parent_query_id` 填对应 `queryId`" in prompt
+    assert "无需重复调用批量搜索" in prompt
+    assert "每个去重后的候选最多抓取一次" in prompt
     assert "Agent 自报 `result.searchTrace[]` 不作为审计权威" in prompt
     assert "status=needs_review" in prompt
     assert "不得伪造负面资料" in prompt

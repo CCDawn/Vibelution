@@ -50,9 +50,13 @@ def _stage_writeback_prompt_lines(stage_id: str) -> list[str]:
         return [
             "- 调用 `source_collection_stage_writeback_tool` 时，结构化结果必须 JSON 序列化到参数 `result_json`；该工具没有 `payload_json` 参数，禁止使用 `payload_json`。",
             "- 本任务只负责资料寻找：新资料只写入 `candidateLeads[]`，无效来源只写入 `invalidSources[]`；不要把检索结果写成 `candidateExtractions[]`、`recordExtractions[]` 或 `candidateDecisions[]`。",
-            "- 写回前，每类视角优先挑一条已选中的来源，用 `web_fetch_tool` 抓取正式检索回执中返回的 URL，供后续提炼引用原文。最多尝试四条来源，每条一次，失败就继续。抓取不替代正式检索回执，也不把抓取原文另写入候选摘要。",
+            "- 写回前，每类视角优先挑一条已选中的来源，用 `web_fetch_tool` 抓取正式检索回执中返回的 URL，供后续提炼引用原文。"
+            "每个去重后的候选最多抓取一次，本任务最多尝试四条来源，失败就继续。抓取不替代正式检索回执，也不把抓取原文另写入候选摘要。",
             "- 检索计划必须同时覆盖四类视角：`mechanism`（机制/支持）、`independent_baseline`（独立基线或复现）、`limitation_or_null`（限制、失败或零结果）和 `falsification`（反例或可证伪线索）；不得只检索支持当前设想的资料。",
-            "- 先从 `source_collection_context_tool` 返回的 `assignments[].assignedQueries[]` 读取服务端冻结查询；调用 `batch_web_search_tool` 时必须逐字使用其中的 `query`，不得改写、扩展或提交未分配的 generic query。每条正式查询的 `assignmentId`、`queryId` 与 `perspective` 由服务端回执链绑定。",
+            "- 先从 `source_collection_context_tool` 返回的 `assignments[].assignedQueries[]` 读取服务端冻结查询。"
+            "可按已分配视角调用 `paper_search_tool`：`topic` 使用原样 `query`，`parent_query_id` 填对应 `queryId`。"
+            "也可用 `batch_web_search_tool`，逐字使用已分配的 `query`。每条正式查询的 `assignmentId`、`queryId` 与 `perspective` 由服务端回执链绑定。"
+            "同一轮论文检索已有真实回执、四类视角通过服务端校验后即可写回收口，无需重复调用批量搜索。",
             "- 每条 `candidateLeads[]` 至少包含 `title`、`locator`（可验证 DOI 或 https URL）、`sourceType`、`summary`、本条资料对应的 `query`，以及上述四类之一的 `perspective`；可额外填写 `doi`、`authors`、`year`、`container`、`relevance`。",
             "- 服务端会从真实检索执行事件生成 canonical searchTrace；你可以在结果中提交查询说明，但 Agent 自报 `result.searchTrace[]` 不作为审计权威，也不能替代真实 provider 调用。",
             "- 至少一条候选资料必须属于 `limitation_or_null` 或 `falsification`，并能作为后续反证候选；如果真实检索后仍未找到，保留完整 `searchTrace[]`、写 `status=needs_review`，不得伪造负面资料或把支持性背景冒充反证。",
@@ -72,7 +76,7 @@ def _stage_writeback_prompt_lines(stage_id: str) -> list[str]:
             "- `evidenceRefs[]` 只写页码、PDF 页、段落、章节、引文或受控记录锚点；`claims[]` / `keyFindings[]` / `citations[]` 每项必须包含 `sourceRef`，并至少包含 `page/pageRange/citation/evidenceRef` 之一。",
             "- 要进入正式 `ClaimEvidenceStore` 的主张，`claims[]` 还必须提供来源中可复核的有界原文 `quote`，并且每条 `claims[]`/`keyFindings[]` 项都要自带显式事实字段 `fact`；`claim` 是归纳主张的别名，运行时只认 `fact`，不能用 `claim` 替代。",
             "- 正式 claim 路径的 completed 提炼回写被服务端强制校验：候选/记录有可引用原文块（上下文 `quotableSources[].blocks`）时，每条非 `exclude` 条目必须至少带一个逐字 quote 锚——嵌套 `claims[]`/`keyFindings[]` 项含 `quote`，或 `evidenceRefs[]` 项含 `{id, quote}`；`quote` 必须是对应来源原文块的逐字子串，从上下文原样复制，禁止改写、拼接或凭记忆重写。",
-            "- 先读 `quotableSources[]`。每条 `claims[]` 从同一个 `sourceId` 的 `blocks[].text` 逐字复制一小段 `quote`，将该块的 `citationUrl` 同时写入 `source_url` 和 `sourceRef`（若写定位 URL，也用同一个地址）。完整证据从该块复用。浏览的是 arXiv 摘要时，只引用该预印本版本；省略其他版本的会议 DOI。没有可引用原文时抓取既有 URL，再次读取上下文。抓取失败如实标记 `evidenceStatus=missing_evidence_anchor`，跳过该条 claim。",
+            "- 先读 `quotableSources[]`。`quoteAvailable=true` 的同版本来源直接从 `blocks[].text` 选一小段连续原文，复制到 `claims[].quote`，省去 `web_fetch_tool`。`source_url`、`sourceRef` 和定位 URL 都取同一块的 `citationUrl`。arXiv 摘要引用该预印本地址，省略其他出版版本的 DOI。只有原文缺失、版次不同或缺少支持该事实的原文片段时，才用 `web_fetch_tool` 补抓该版本，随后重读上下文。抓取失败标记 `evidenceStatus=missing_evidence_anchor`，跳过该条 claim。",
             "- 多轮抓取（含 DOI 链接改道与镜像备援）后仍无法取得原文的来源：若该来源并非结论成立的必需证据，用 `decision=exclude` 并在 `defects`/`reason` 写明不可得原因（付费墙/登录墙/无 DOI 元数据等）诚实剔除，不要保留 `evidenceStatus=missing_evidence_anchor` 阻塞整批；仅当缺少该来源结论不成立、确需人工介入时才保留 `missing_evidence_anchor` 申请复审。",
             "- quote 不匹配的一次性修正：`quote` 首次不是原文块逐字子串时，completed 回写不拒绝，任务停靠 `needs_review` 并返回 `quoteAnchorRemediation`（含最近匹配块片段与相似度），按其 `findings[]` 逐条替换为逐字文本后重写；该修正机会只有一次，再次不匹配会被直接拒绝；空 `quote`/缺锚回写始终直接拒绝，不进入修正反馈。",
             "- 模型生成的 `summary` 只作检索线索，禁止作为论文引文；只有真实抓取文本确为原始摘要时才写 `evidenceStatus=verified_abstract`，其他有原文支持的条目可写 `evidenceStatus=evidence_ready`；证据状态字段名是 `evidenceStatus`，不是 `verification_status`（`verification_status` 只属于 Challenge v2 证据卡元数据，其取值不会被当作条目证据状态）；没有真实抓取原文的来源必须声明 `evidenceStatus=missing_evidence_anchor` 诚实跳过（不物化），不得虚构页码、直接引语或全文结论。",
@@ -87,20 +91,21 @@ def _stage_writeback_prompt_lines(stage_id: str) -> list[str]:
         return [
             "- `result_json` 使用根级结构化集合，不要用数字写集合摘要。最小合法形状：`{\"themeNodes\":[{\"themeId\":\"theme-x\",\"label\":\"主题 X\"}],\"candidateRelations\":[{\"sourceCandidateId\":\"candidate-a\",\"targetCandidateId\":\"candidate-b\",\"relation\":\"constrains\",\"evidenceRefs\":[\"ce-support\"]}],\"sourceThemeEdges\":[],\"topicRelations\":[],\"missingLinks\":[],\"evidenceGaps\":[{\"id\":\"gap-x\",\"description\":\"缺少跨设备验证\",\"neededEvidence\":\"多设备基准\",\"blocksConclusion\":true}],\"counterEvidenceRefs\":[{\"evidenceRef\":\"ce-limit\",\"claim\":\"该结论受设备与负载边界限制\",\"disposition\":\"limit_scope\"}]}`。如果提交 `candidateGraph`，其中 `nodes`、`edges` 等集合也必须是对象数组，禁止写 `\"edges\":5` 之类计数。",
             "- 证据关系阶段必须在 `evidenceGaps[]` 逐条写出证据缺口；每项包含稳定 `id`、`description`、`neededEvidence` 和 `blocksConclusion`。`missingLinks[]` 只用于图结构缺失端点，不能替代 evidenceGaps。",
-            "- 必须显式写 `counterEvidenceRefs[]`：只登记真实限制、反例或否定性证据，每项包含 `evidenceRef`、`claim` 和处置 `disposition`；支持性背景关系不得冒充反证。",
+            "- 必须显式写 `counterEvidenceRefs[]`。每项的 `claim` 写被挑战或需要限定的命题，`evidenceRef` 引用该反例或限制的证据卡，`disposition` 写处理方式。",
+            "- 直接反证使用 `disposition=challenges_ontology`，绑定 `supportLevel=contradicts` 的 canonical 证据卡，且该卡逐字 `quote` 必须直接反驳被挑战的命题。适用范围或实验条件的限制使用 `limit_scope`。支持性背景不得作为反证。",
             "- 如果没有真实反证或限制性证据，`counterEvidenceRefs=[]` 并回写 `status=blocked` 和真实原因；不得为了通过门禁伪造反证引用。",
             "- `candidateRelations[]`、`sourceThemeEdges[]`、`topicRelations[]` 的每条边都必须绑定真实 `evidenceRefs[]`，逐字使用上下文 allowedEvidenceRefs 中的 claimEvidenceId；关系图只表达候选事实，不得升级为正式结论。",
-            "- 上下文 `relationEvidence[]` 是全量证据绑定图（不因分页截断）：每张卡给出 claimEvidenceId → candidateId/sourceId 的映射、原文引述与支持方向，`inCurrentPage` 只标注该候选是否在当前分页，不代表页外绑定不可用；边端点与证据绑定都以全量图为准，不要因为某张卡的候选不在当前页就报告证据缺失。",
+            "- 上下文 `relationEvidence[]` 是全量证据绑定图（不因分页截断）：每张卡给出 claimEvidenceId → candidateId/sourceId 的映射、可用的 recordId、原文引述与支持方向。边端点用候选或已声明的主题 ID，证据引用只用 claimEvidenceId。页外绑定仍然有效。",
             "- 先用 `source_collection_context_tool` 读到本批候选与写回契约：边端点优先用契约 `endpointPolicy.allowedEndpointIds` 中的完整 `candidateId`（主题枢纽端点用已声明主题的主题 ID，物化为 `source-theme:<themeId>`）。",
             "- 端点记不住完整 ID 时可写候选标题或已声明主题的 label/裸主题 ID 作语义端点，服务端会确定性解析回注册表节点；解析不了的边按悬空处理计入 `missingLinks`（danglingEdgeCount），阻塞下游 knowledge_ingestion。",
             "- 语义枢纽必须先在同一轮回写的 `themeNodes[]` 中声明（themeId+label）再连边；禁止发明 `rh_claim` 之类未声明的逻辑端点或展示别名。",
-            "- 写回被 `evidence_relation_graph_invalid` 拒绝后，系统会在拒绝点计算确定性补救契约：下一次读取上下文时若带 `writebackRemediation`（kind=relation_refs 或 relation_missing_fields），它是系统算出的精确补救指令——按 `findings[]` 每条的 `path`/`value` 把违规 evidenceRef 值替换为 `allowedEvidenceRefs` 中的 canonical claimEvidenceId，或补全缺失的必需集合，然后重新回写。同类违规只有一次系统修正机会：契约 `exhausted=true` 后上下文不再注入，再次违规将按契约直接拒绝。",
+            "- 写回被 `evidence_relation_graph_invalid` 拒绝后，按 `writebackRemediation.findings[]` 的 `path` 修正引用或补全缺失的集合。逐字使用明确给出的 `suggestedEvidenceRef`；没有建议时，根据 `relationEvidence[]` 的来源、原文和支持方向选择匹配的 canonical claimEvidenceId。同类违规只有一次系统修正机会。",
         ]
     if stage_id == "ingestion":
         return [
             "- 资料入库只调用当前任务提供的 `source_collection_context_tool` 与 `source_collection_stage_writeback_tool`；不要调用 knowledge_governance_tasks_tool 或其他知识治理工具，正式知识物化由本次写回后的服务端门禁负责。",
             "- 调用 `source_collection_stage_writeback_tool` 时，只传工具签名中的 `team_id`、`task_id`、`status`、`summary`、`result_json` 等参数；该工具没有 `stage_id`，也没有 `writesFormalKnowledgeViaGate` 参数。",
             "- 将 `stewardActionPacket.writebackResultSkeleton` 完整 JSON 序列化到参数 `result_json`；不要把 skeleton 的字段展开成工具顶层参数。",
-            "- 写回成功且返回 completionGate.passed=true 后立即结束本轮，不再读取上下文或调用其他工具。",
+            "- 写回成功且返回 completionGate.passed=true 后立即结束本轮。服务端暂存草案后会交给独立来源审核与知识审核。",
         ]
     return []

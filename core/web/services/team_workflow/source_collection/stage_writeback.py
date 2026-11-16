@@ -559,10 +559,36 @@ def _source_collection_stage_finding_receipt_postcheck(
             "error": s._trim_text(str(exc), max_length=1200),
             "quality": {},
         }
+    paper_receipt_observed = False
+    if isinstance(payload, dict):
+        turn = task.get("turn") if isinstance(task.get("turn"), dict) else {}
+        task_id = s._trim_text(task.get("taskId"), max_length=160)
+        session_id = s._trim_text(task.get("sessionId") or turn.get("sessionId"), max_length=160)
+        turn_id = s._trim_text(turn.get("turnId"), max_length=160)
+        verified_event_ids = {
+            event_id
+            for row in payload.get("searchTrace") or []
+            for event_id in row.get("eventIds") or []
+        }
+        if task_id and session_id and turn_id and verified_event_ids:
+            events_path = s._source_collection_storage_artifact_paths(team_id, run_id)["searchEventsPath"]
+            paper_receipt_observed = any(
+                isinstance(event, dict)
+                and event.get("eventId") in verified_event_ids
+                and event.get("eventType") == "search.tool_result_returned"
+                and event.get("toolName") == "paper_search_tool"
+                and event.get("taskId") == task_id
+                and event.get("sessionId") == session_id
+                and event.get("turnId") == turn_id
+                and event.get("receiptKey")
+                and event.get("toolCallId")
+                for event in s._read_jsonl(events_path)
+            )
     return {
         "passed": isinstance(payload, dict),
         "error": "" if isinstance(payload, dict) else "source finding receipt is missing",
         "quality": payload.get("quality") if isinstance(payload, dict) and isinstance(payload.get("quality"), dict) else {},
+        "sameTurnPaperSearchObserved": paper_receipt_observed,
     }
 
 
@@ -574,8 +600,13 @@ def _apply_finding_receipt_gate_to_closure(
     if receipt_gate is None:
         return
     closure_summary["sourceFindingReceiptGate"] = receipt_gate
+    completion_gate = closure_summary.get("completionGate")
+    if isinstance(completion_gate, dict):
+        completion_gate["sourceFindingReceiptComplete"] = bool(receipt_gate.get("passed"))
     if receipt_gate.get("passed"):
         return
+    if isinstance(completion_gate, dict):
+        completion_gate.update({"passed": False, "artifactComplete": False})
     closure_summary["artifactComplete"] = False
     closure_summary["completionGatePassed"] = False
     if closure_summary.get("userStatus") in {"interrupted", "failed"}:
@@ -830,6 +861,7 @@ def writeback_source_collection_stage_session_task(
         materialized_source_quality=materialized_source_quality,
         materialized_candidate_graph=materialized_candidate_graph,
         materialized_knowledge_ingestion=materialized_knowledge_ingestion,
+        finding_receipt_gate=finding_receipt_gate,
     )
     if status == "completed" and not bool(closure_summary.get("artifactComplete")):
         status = (
@@ -847,8 +879,8 @@ def writeback_source_collection_stage_session_task(
             materialized_source_quality=materialized_source_quality,
             materialized_candidate_graph=materialized_candidate_graph,
             materialized_knowledge_ingestion=materialized_knowledge_ingestion,
+            finding_receipt_gate=finding_receipt_gate,
         )
-    _apply_finding_receipt_gate_to_closure(closure_summary, finding_receipt_gate)
     task_checklist = [
         item for item in list(task.get("taskChecklist") or [])
         if isinstance(item, dict)
@@ -859,14 +891,9 @@ def writeback_source_collection_stage_session_task(
         artifact_complete=bool(closure_summary.get("artifactComplete")),
         task_checklist_complete=bool(closure_summary.get("taskChecklistComplete")),
     )
-    if finding_receipt_gate is not None:
-        completion_gate["sourceFindingReceiptComplete"] = bool(
-            finding_receipt_gate.get("passed")
-        )
-        if not finding_receipt_gate.get("passed"):
-            completion_gate["passed"] = False
     closure_summary["completionGate"] = completion_gate
     closure_summary["completionGatePassed"] = bool(completion_gate.get("passed"))
+    _apply_finding_receipt_gate_to_closure(closure_summary, finding_receipt_gate)
     if status == "completed" and not bool(closure_summary.get("completionGatePassed")):
         status = "needs_review"
         writeback["status"] = status
@@ -879,6 +906,7 @@ def writeback_source_collection_stage_session_task(
             materialized_source_quality=materialized_source_quality,
             materialized_candidate_graph=materialized_candidate_graph,
             materialized_knowledge_ingestion=materialized_knowledge_ingestion,
+            finding_receipt_gate=finding_receipt_gate,
         )
         task_tool_progress = closure_summary.get("taskToolProgress") if isinstance(closure_summary.get("taskToolProgress"), dict) else {}
         completion_gate = s._source_collection_stage_completion_gate(
@@ -888,6 +916,7 @@ def writeback_source_collection_stage_session_task(
         )
         closure_summary["completionGate"] = completion_gate
         closure_summary["completionGatePassed"] = bool(completion_gate.get("passed"))
+        _apply_finding_receipt_gate_to_closure(closure_summary, finding_receipt_gate)
     writeback["materializedSources"] = materialized_sources
     writeback["materializedContentExtraction"] = materialized_content_extraction
     writeback["materializedSourceQuality"] = materialized_source_quality

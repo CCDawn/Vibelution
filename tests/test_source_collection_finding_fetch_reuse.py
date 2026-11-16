@@ -384,3 +384,46 @@ def test_url_claim_materializes_from_reused_journal_not_the_agent_declaration(se
         "contentHash": stored["sourceRevision"],
     }
     assert ClaimEvidenceStore.has_content_identity(stored)
+
+
+def test_bound_extraction_reuses_finding_text_before_network_fetch(setup, tmp_path, monkeypatch):
+    from core.web.services import agent_directory_service
+    from core.web.services.team_workflow.source_collection import stage_session
+    from core.web.services.team_workflow.source_collection.extraction_fetch_text import task_fetched_text
+    from tools import web_search_tool
+    from tools.Key_Tools import create_key_tools
+
+    task, _, _, _, _, event = setup
+    active_task = {**task, "turn": {"turnId": "extract-turn"}, "status": "running"}
+    monkeypatch.setattr(stage_session, "_read_source_collection_stage_session_task_record", lambda *_: active_task)
+    runtime = {
+        "agentId": task["agentId"], "sessionId": task["sessionId"], "turnId": "extract-turn",
+        "runtimeMetadata": {"sourceCollectionExtraction": {
+            key: task[key] for key in ("teamId", "runId", "taskId", "stageId")
+        }},
+    }
+    monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda *, bound_only: runtime)
+    requests = []
+
+    def network_fetch(*, url, **_):
+        requests.append(url)
+        return "network result"
+
+    monkeypatch.setattr(web_search_tool, "web_fetch", network_fetch)
+    fetch = next(tool for tool in create_key_tools() if tool.name == "web_fetch_tool")
+    reused = fetch.invoke({"url": _URL})
+    assert reused == f"[已复用搜集原文] {_URL}\n搜集抓取回执: {event.event_id}\n\n{_ORIGINAL}"
+    assert requests == []
+    append_conversation_event(
+        tmp_path, task["sessionId"], "extract-turn", "tool_result", status="done",
+        payload={"toolCall": {
+            "name": "web_fetch_tool", "status": "done", "arguments": {"url": _URL}, "result": reused,
+        }},
+    )
+    assert not task_fetched_text(active_task)
+
+    for locator in (_URL + "v2", _URL.replace("/abs/", "/pdf/"), "https://arxiv.org/abs/2401.12345"):
+        assert fetch.invoke({"url": locator}) == "network result"
+    runtime["agentId"] = "unrelated-agent"
+    assert fetch.invoke({"url": _URL}) == "network result"
+    assert requests == [_URL + "v2", _URL.replace("/abs/", "/pdf/"), "https://arxiv.org/abs/2401.12345", _URL]

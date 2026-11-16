@@ -716,8 +716,25 @@ def _build_key_tools() -> List[BaseTool]:
         Returns:
             去除 HTML 标签后的纯文本内容
         """
-        from tools.web_search_tool import web_fetch as _web_fetch
-        return _web_fetch(url=url, max_chars=max_chars, prompt=prompt)
+        from core.web.services.agent_directory_service import current_agent_runtime
+        from tools.web_search_tool import _clamp_int, web_fetch as _web_fetch
+
+        runtime = current_agent_runtime(bound_only=True)
+        scope = (runtime.get("runtimeMetadata") or {}).get("sourceCollectionExtraction")
+        is_extraction = isinstance(scope, dict) and scope.get("teamId") and scope.get("taskId")
+        if is_extraction:
+            from core.web.services.team_workflow.source_collection.extraction_fetch_text import reuse_bound_finding_text
+
+            limit = _clamp_int(max_chars, default=8000, minimum=500, maximum=50000)
+            reused = reuse_bound_finding_text(runtime, url.strip(), limit)
+            if reused is not None:
+                return reused
+        result = _web_fetch(url=url, max_chars=max_chars, prompt=prompt)
+        if is_extraction:
+            from tools.source_collection_stage_tools import _invalidate_source_context_cache
+
+            _invalidate_source_context_cache(team_id=scope["teamId"], task_id=scope["taskId"])
+        return result
 
     @tool
     def batch_web_search_tool(

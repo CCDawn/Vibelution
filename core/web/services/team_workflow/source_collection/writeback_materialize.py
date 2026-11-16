@@ -1304,6 +1304,7 @@ def _source_collection_stage_writeback_closure_summary(
     materialized_source_quality: dict[str, Any],
     materialized_candidate_graph: dict[str, Any],
     materialized_knowledge_ingestion: dict[str, Any],
+    finding_receipt_gate: dict[str, Any] | None = None,
     conversation_events_by_session: dict[str, list[Any]] | None = None,
 ) -> dict[str, Any]:
     s = _service()
@@ -1489,6 +1490,12 @@ def _source_collection_stage_writeback_closure_summary(
         task,
         task_checklist,
         artifact_complete=artifact_complete,
+        formal_paper_search_received=bool(
+            finding_receipt_gate
+            and finding_receipt_gate.get("passed")
+            and finding_receipt_gate.get("sameTurnPaperSearchObserved")
+            and writeback.get("recordedAt")
+        ),
         conversation_events_by_session=conversation_events_by_session,
     )
     task_checklist_complete = bool(task_tool_progress.get("complete"))
@@ -1708,25 +1715,18 @@ def _prepare_relation_graph_writeback_remediation(
     except Exception:  # noqa: BLE001 - diff degrades to violations-only
         allowed_refs = []
     try:
-        # Same authority as the allowed list: pair each inlined ref with its
-        # candidateId so the agent can bind refs without an extra context read.
-        evidence_context = {
-            str(card.get("claimEvidenceId")): str(card.get("candidateId") or "")
-            for card in load_relation_evidence_context(
-                team_id=team_id,
-                authority_run_id=run_id,
-                workflow_run_id=workflow_run_id,
-            )
-            if isinstance(card, dict)
-            and isinstance(card.get("claimEvidenceId"), str)
-            and card["claimEvidenceId"].strip()
-        }
+        evidence_cards = load_relation_evidence_context(
+            team_id=team_id,
+            authority_run_id=run_id,
+            workflow_run_id=workflow_run_id,
+        )
     except Exception:  # noqa: BLE001 - hint degrades to refs without pairing
-        evidence_context = {}
+        evidence_cards = []
     if kind == WRITEBACK_REMEDIATION_KIND_RELATION_REFS:
         findings = collect_relation_ref_violations(
             result_payload if isinstance(result_payload, dict) else {},
             set(allowed_refs),
+            evidence_context=evidence_cards,
         )
     else:
         findings = relation_missing_field_findings(error_text)
@@ -1749,6 +1749,10 @@ def _prepare_relation_graph_writeback_remediation(
         task,
         contract,
     )
+    evidence_context = {
+        str(card.get("claimEvidenceId") or ""): str(card.get("candidateId") or "")
+        for card in evidence_cards
+    }
     return writeback_remediation_hint_block(kind, findings, allowed_refs, evidence_context)
 
 

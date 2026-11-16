@@ -116,3 +116,74 @@ def test_receipt_persistence_failure_does_not_return_paper_results(scoped_search
     monkeypatch.setattr(search_execution, "append_bound_tool_search_receipts", fail)
     with pytest.raises(OSError, match="receipt disk failure"):
         research_search_tools.paper_search("specific method", parent_query_id="base-1")
+
+
+@pytest.mark.parametrize("paper_turn,perspectives_complete,expected_complete", [
+    ("current", True, True),
+    ("other-turn", True, False),
+    ("current", False, False),
+])
+def test_finding_checklist_accepts_paper_receipts_from_its_turn(
+    tmp_path, monkeypatch, paper_turn, perspectives_complete, expected_complete,
+):
+    from core.chat.conversation_ledger import append_conversation_event
+    from core.web.services import team_workflow_orchestration_service as service
+    from core.web.services.team_workflow.source_collection.stage_task_query import get_source_collection_stage_session_task
+    from tests._support.team_workflow.cases_source_collection import _finding_close_first_step_task
+
+    env = _finding_close_first_step_task(tmp_path, monkeypatch)
+    team_id = env["team"]["teamId"]
+    run_id = env["runId"]
+    task = env["task"]["task"]
+    session_id = task["sessionId"]
+    turn_id = task["turn"]["turnId"]
+    perspectives = ("mechanism", "independent_baseline", "limitation_or_null", "falsification")
+    queries = [
+        {"queryId": f"base-{index}", "query": f"assigned question {index}", "perspective": perspective}
+        for index, perspective in enumerate(perspectives, start=1)
+    ]
+    if not perspectives_complete:
+        queries.pop()
+    context = {
+        "teamId": team_id, "sourceCollectionRunId": run_id, "taskId": task["taskId"],
+        "sessionId": session_id, "turnId": turn_id if paper_turn == "current" else paper_turn,
+        "assignments": [{
+            "assignmentId": "assignment-1", "agentId": task["agentId"], "agentRole": "source_finder",
+            "scope": {"assignedQueries": queries},
+        }],
+    }
+    monkeypatch.setattr(search_execution, "resolve_bound_source_search_context", lambda *_: context)
+    leads = []
+    for index, query in enumerate(queries, start=1):
+        url = f"https://arxiv.org/abs/2601.{index:05d}v1"
+        title = f"Paper for {query['perspective']}"
+        monkeypatch.setattr(research_search_tools.research_search_backends, "collect_provider_results", lambda *_a, **_kw: {
+            "providers": [{"provider": "arxiv", "status": "ok"}],
+            "results": [{"provider": "arxiv", "url": url, "title": title}],
+        })
+        research_search_tools.paper_search(query["query"], parent_query_id=query["queryId"])
+        leads.append({
+            "title": title, "sourceUrl": url, "sourceType": "preprint", "summary": title,
+            "query": query["query"], "perspective": query["perspective"],
+        })
+
+    def record_tool(tool_name):
+        append_conversation_event(tmp_path, session_id, turn_id, "tool_result", status="done", payload={
+            "toolCall": {"name": tool_name, "status": "done", "args": {"task_id": task["taskId"]}},
+        })
+
+    record_tool("source_collection_context_tool")
+    record_tool("paper_search_tool")
+    result = service.writeback_source_collection_stage_session_task(team_id, task["taskId"], {
+        "status": "completed", "result": {"candidateLeads": leads, "invalidSources": []},
+    })
+    assert result["writeback"]["receiptGate"]["passed"] is perspectives_complete
+    assert result["task"]["completionGate"]["sourceFindingReceiptComplete"] is perspectives_complete
+    assert result["writeback"]["status"] == ("completed" if expected_complete else "needs_review")
+
+    record_tool("source_collection_stage_writeback_tool")
+    reconciled = get_source_collection_stage_session_task(team_id, task["taskId"])
+    assert reconciled["task"]["completionGate"]["passed"] is expected_complete
+    assert reconciled["task"]["completionGate"]["sourceFindingReceiptComplete"] is perspectives_complete
+    progress = reconciled["task"]["taskToolProgress"]
+    assert ("search_and_dedupe_sources" in progress["completedIds"]) is expected_complete

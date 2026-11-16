@@ -308,6 +308,47 @@ def test_first_rejection_persists_contract_and_context_injects_remediation(
     )
 
 
+def test_rejection_suggests_only_unique_scoped_replacements_for_nested_refs(
+    tmp_path, monkeypatch,
+):
+    setup = _start_stage_task(
+        tmp_path, monkeypatch, stage_id="relations", agent_role="source_relation_mapper"
+    )
+    _stub_relation_graph(monkeypatch, graph=_valid_graph())
+    _stub_writeback_acceptance_path(monkeypatch)
+    monkeypatch.setattr(
+        registry,
+        "load_relation_evidence_context",
+        lambda **_: [
+            {
+                "claimEvidenceId": "ce-good-alpha",
+                "candidateId": "cand-a",
+                "recordId": _OFFENDING_REF,
+            },
+            {"claimEvidenceId": "ce-good-alpha", "candidateId": "ambiguous"},
+            {"claimEvidenceId": "ce-good-beta", "candidateId": "ambiguous"},
+            {"claimEvidenceId": "ce-other-run", "candidateId": "unscoped"},
+        ],
+    )
+
+    message = _reject_relations_writeback(setup, {
+        "candidateGraph": {
+            "edges": [{"evidenceRefs": [_OFFENDING_REF, "ambiguous", "unscoped"]}],
+            "counterEvidenceRefs": [{"evidenceRef": "cand-a"}],
+        }
+    })
+    findings = {
+        finding["path"]: finding
+        for finding in _read_context(setup)["writebackRemediation"]["findings"]
+    }
+    assert findings["candidateGraph.edges[0].evidenceRefs[0]"]["suggestedEvidenceRef"] == "ce-good-alpha"
+    assert "suggestedEvidenceRef" not in findings["candidateGraph.edges[0].evidenceRefs[1]"]
+    assert "suggestedEvidenceRef" not in findings["candidateGraph.edges[0].evidenceRefs[2]"]
+    assert findings["candidateGraph.counterEvidenceRefs[0].evidenceRef"]["suggestedEvidenceRef"] == "ce-good-alpha"
+    assert "candidateGraph.counterEvidenceRefs[0].evidenceRef=cand-a → ce-good-alpha" in message
+    assert _stored_task(setup)["status"] == "running"
+
+
 def test_second_same_kind_rejection_exhausts_contract_and_stops_injection(
     tmp_path, monkeypatch
 ):
