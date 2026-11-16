@@ -1,3 +1,4 @@
+import { orderSessionSearchResults } from "./chat/sessionSearch";
 import { useMemo } from "react";
 
 import type {
@@ -813,7 +814,7 @@ function computeConversationIndexModel({
       }
       return true;
     });
-  const filteredConversations = term
+  const matchedConversations = term
     ? visibleConversations.filter((conversation) => {
         const sessionId = conversation.directSessionId || conversation.conversationId;
         const session = sessionsById.get(sessionId);
@@ -844,6 +845,9 @@ function computeConversationIndexModel({
         ].some((value) => String(value ?? "").toLowerCase().includes(term));
       })
     : visibleConversations;
+  const filteredConversations = term
+    ? orderBySessionRelevance(matchedConversations, sessionsById, sessionFilter)
+    : matchedConversations;
   const filteredStandaloneGroupConversations = (conversations ?? [])
     .filter((conversation) => {
       if (conversation.type !== "group_room") {
@@ -1133,4 +1137,35 @@ export function useConversationIndexModel(options: BuildConversationIndexModelOp
       options.teams,
     ],
   );
+}
+
+/**
+ * Relevance order for already-filtered conversations.
+ *
+ * The panel filter keeps rows this module cannot re-derive (teams, group rooms,
+ * folder labels), so this only reorders: a conversation without a reachable
+ * session keeps its relative position at the tail instead of disappearing.
+ */
+function orderBySessionRelevance<T extends { conversationId: string; directSessionId?: string }>(
+  conversations: T[],
+  sessionsById: Map<string, { id: string; title?: string; agentId?: string }>,
+  query: string,
+): T[] {
+  const sessions = conversations
+    .map((conversation) => sessionsById.get(conversation.directSessionId || conversation.conversationId))
+    .filter((session): session is { id: string; title?: string; agentId?: string } => Boolean(session));
+  const ordered = orderSessionSearchResults(
+    sessions.map((session) => ({
+      id: session.id,
+      title: String(session.title ?? ""),
+      agentLabel: String(session.agentId ?? ""),
+    })),
+    query,
+  );
+  const rankById = new Map(ordered.map((session, index) => [session.id, index]));
+  return [...conversations].sort((left, right) => {
+    const leftRank = rankById.get(left.directSessionId || left.conversationId);
+    const rightRank = rankById.get(right.directSessionId || right.conversationId);
+    return (leftRank ?? Number.MAX_SAFE_INTEGER) - (rightRank ?? Number.MAX_SAFE_INTEGER);
+  });
 }
