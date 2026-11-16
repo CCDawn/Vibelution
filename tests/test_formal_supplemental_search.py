@@ -118,13 +118,15 @@ def test_receipt_persistence_failure_does_not_return_paper_results(scoped_search
         research_search_tools.paper_search("specific method", parent_query_id="base-1")
 
 
-@pytest.mark.parametrize("paper_turn,perspectives_complete,expected_complete", [
-    ("current", True, True),
-    ("other-turn", True, False),
-    ("current", False, False),
+@pytest.mark.parametrize("paper_turn,perspectives_complete,expected_complete,closing_only", [
+    ("current", True, True, None),
+    ("other-turn", True, False, None),
+    ("current", False, False, None),
+    ("current", True, True, {"candidateLeads": [], "invalidSources": []}),
+    ("current", True, True, {}),
 ])
 def test_finding_checklist_accepts_paper_receipts_from_its_turn(
-    tmp_path, monkeypatch, paper_turn, perspectives_complete, expected_complete,
+    tmp_path, monkeypatch, paper_turn, perspectives_complete, expected_complete, closing_only,
 ):
     from core.chat.conversation_ledger import append_conversation_event
     from core.web.services import team_workflow_orchestration_service as service
@@ -174,9 +176,19 @@ def test_finding_checklist_accepts_paper_receipts_from_its_turn(
 
     record_tool("source_collection_context_tool")
     record_tool("paper_search_tool")
+    if closing_only is not None:
+        partial = service.writeback_source_collection_stage_session_task(team_id, task["taskId"], {
+            "status": "running", "result": {"candidateLeads": leads, "invalidSources": []},
+        })
+        assert partial["writeback"]["status"] == "running"
+        assert len(partial["writeback"]["materializedSources"]["lineage"]) == len(leads)
     result = service.writeback_source_collection_stage_session_task(team_id, task["taskId"], {
-        "status": "completed", "result": {"candidateLeads": leads, "invalidSources": []},
+        "status": "completed", "result": closing_only if closing_only is not None else {
+            "candidateLeads": leads, "invalidSources": [],
+        },
     })
+    if closing_only is not None:
+        assert len(result["writeback"]["materializedSources"]["lineage"]) == len(leads)
     assert result["writeback"]["receiptGate"]["passed"] is perspectives_complete
     assert result["task"]["completionGate"]["sourceFindingReceiptComplete"] is perspectives_complete
     assert result["writeback"]["status"] == ("completed" if expected_complete else "needs_review")

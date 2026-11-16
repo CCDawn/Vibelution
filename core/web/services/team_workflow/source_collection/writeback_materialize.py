@@ -3857,11 +3857,13 @@ def _merge_source_collection_stage_writeback_result_payload(
     incoming: dict[str, Any],
 ) -> dict[str, Any]:
     s = _service()
-    if not isinstance(incoming, dict) or not incoming:
+    if not isinstance(incoming, dict):
         return {}
     stage_id = s._normalize_source_collection_stage_id(task.get("stageId"), default="")
     agent_role = s._normalize_source_collection_agent_role(task.get("agentRole"))
     merge_candidate_leads = stage_id == "finding" or agent_role == "source_finder"
+    if not incoming and not merge_candidate_leads:
+        return {}
     merged_previous: dict[str, Any] = {}
     for ancestor_result in s._source_collection_stage_retry_ancestor_results(team_id, run_id, task):
         merged_previous = s._merge_source_collection_stage_writeback_result_pair(
@@ -3944,6 +3946,7 @@ def _merge_source_collection_stage_writeback_result_pair(
             ).hexdigest(),
             valid_existing_ids=set(),
             max_items=80,
+            preserve_on_empty=True,
         )
     s._merge_source_collection_stage_writeback_array_group(
         merged,
@@ -4070,12 +4073,15 @@ def _merge_source_collection_stage_writeback_array_group(
     item_id: Any,
     valid_existing_ids: set[str],
     max_items: int,
+    preserve_on_empty: bool = False,
 ) -> None:
     s = _service()
     incoming_items = s._source_collection_stage_writeback_array_items(incoming, aliases=aliases, containers=containers)
-    if not incoming_items:
+    if not incoming_items and not preserve_on_empty:
         return
     previous_items = s._source_collection_stage_writeback_array_items(previous, aliases=aliases, containers=containers)
+    if not incoming_items and not previous_items:
+        return
     merged_items = s._merge_source_collection_stage_writeback_array_items(
         previous_items,
         incoming_items,
