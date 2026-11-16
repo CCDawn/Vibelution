@@ -1,4 +1,5 @@
-import { Archive, EyeOff, LayoutDashboard, Pencil, Settings2 } from "lucide-react";
+import { Archive, CheckCheck, EyeOff, LayoutDashboard, MessageSquareText, Pencil, Settings2 } from "lucide-react";
+
 import type { Team } from "../../api/types";
 import { VDropdownMenu, type VDropdownMenuItem } from "../../components/vui";
 import styles from "./TeamContextMenu.styles";
@@ -8,27 +9,52 @@ export type TeamContextMenuState = { x: number; y: number; team: Team };
 type Props = {
   lang: "zh" | "en";
   state: TeamContextMenuState;
+  /** Unread count for the team; 0 disables "mark team read". */
+  unreadCount?: number;
   onRename: (team: Team) => void;
   onManage: (team: Team) => void;
   onOpenWorkspace: (team: Team) => void;
+  onOpenChat: (team: Team) => void;
+  onMarkRead: (team: Team) => void;
   onHide: (team: Team) => void;
   onArchive: (team: Team) => void;
   onDismiss: () => void;
 };
 
 export function teamContextMenuItems(props: Props): VDropdownMenuItem[] {
-  const { lang, state: { team }, onRename, onManage, onOpenWorkspace, onHide, onArchive } = props;
+  const {
+    lang,
+    state: { team },
+    unreadCount = 0,
+    onRename,
+    onManage,
+    onOpenWorkspace,
+    onOpenChat,
+    onMarkRead,
+    onHide,
+    onArchive,
+  } = props;
   const zh = lang === "zh";
   const locked = isReadOnlyTeam(team);
   const lockReason = zh ? "该团队由系统工作流维护，不能在这里修改或归档" : "This team is maintained by a system workflow.";
+  const roomId = String(team.linkedChatRoomId || team.linkedChatRoom?.roomId || "").trim();
+  const unread = Math.max(0, unreadCount);
   return [
-    { id: "rename", label: zh ? "重命名" : "Rename", icon: <Pencil size={14} />, disabled: locked,
-      title: locked ? lockReason : undefined, onSelect: () => onRename(team) },
+    { id: "open-chat", label: zh ? "打开团队群聊" : "Open team chat", icon: <MessageSquareText size={14} />, disabled: !roomId,
+      onSelect: () => onOpenChat(team) },
+    { id: "mark-read", label: unread
+        ? (zh ? `标记团队已读（${unread}）` : `Mark team read (${unread})`)
+        : (zh ? "标记团队已读" : "Mark team read"),
+      icon: <CheckCheck size={14} />, disabled: unread === 0,
+      title: unread === 0 ? (zh ? "没有未读内容" : "Nothing unread") : undefined,
+      onSelect: () => onMarkRead(team) },
     { id: "manage", label: zh ? "管理团队" : "Manage team", icon: <Settings2 size={14} />,
       title: locked ? (zh ? "查看团队设置（只读）" : "View team settings (read-only)") : undefined,
       onSelect: () => onManage(team) },
     { id: "workspace", label: zh ? "打开团队工作台" : "Open team workspace", icon: <LayoutDashboard size={14} />,
       onSelect: () => onOpenWorkspace(team) },
+    { id: "rename", label: zh ? "重命名" : "Rename", icon: <Pencil size={14} />, disabled: locked,
+      title: locked ? lockReason : undefined, onSelect: () => onRename(team) },
     { id: "hide", label: zh ? "隐藏团队" : "Hide team", icon: <EyeOff size={14} />,
       title: zh ? "仅从当前浏览器的左栏隐藏，保留全部记录；可在已隐藏团队中恢复" : "Hide from this browser's rail; keep all records and restore later.",
       onSelect: () => onHide(team) },

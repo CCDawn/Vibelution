@@ -50,6 +50,8 @@ const styles = {
     "agentActivityError h-2.5 w-2.5 rounded-full bg-[var(--state-error)]",
   agentActivityCompleted:
     "agentActivityCompleted h-2.5 w-2.5 rounded-full bg-[var(--accent-cool)]",
+  teamUnreadBadge:
+    "teamUnreadBadge inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--accent-cool)] px-1 text-[10px] font-semibold leading-none text-white",
   agentMeta:
     "agentMeta flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 whitespace-normal break-words [font-size:var(--vui-font-micro-11)] font-normal leading-[1.35] [color:var(--fg-secondary)] [overflow-wrap:anywhere]",
   agentMetaItem:

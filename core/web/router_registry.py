@@ -53,6 +53,7 @@ _ROUTE_MODULE_NAMES: tuple[str, ...] = (
     "core.web.routes.kernel",
     "core.web.routes.team_templates",
     "core.web.routes.teams",
+    "core.web.routes.read_cursors",
     "core.web.routes.team_bundles",
     "core.web.routes.team_workflows",
     "core.web.routes.skills",

@@ -28,6 +28,9 @@ import styles from "./AgentConversationDirectory.styles";
 import { teamWorkspaceRoute } from "./teams/researchWorkspaceModel";
 import { TeamContextMenu } from "./teams/TeamContextMenu";
 import { useTeamDirectoryManagement } from "./chat/useTeamDirectoryManagement";
+import { useReadCursors } from "./chat/useReadCursors";
+import { countTeamUnread } from "./chat/teamUnreadModel";
+import type { MarkReadEntry } from "../api/readCursors";
 
 const TeamDirectoryManagementOverlay = lazy(() => import("./chat/TeamDirectoryManagementOverlay").then((module) => ({
   default: module.TeamDirectoryManagementOverlay,
@@ -164,12 +167,32 @@ export function AgentConversationDirectory({
   onOpenGroupRoom,
 }: AgentConversationDirectoryProps) {
   const management = useTeamDirectoryManagement(teams);
+  const readCursors = useReadCursors();
+  const unreadReady = readCursors.loaded && readCursors.cursors.length > 0;
   const partition = useMemo(
     () => buildAgentDirectoryPartition({ agents, teams, sessions, filterText, lang, resolveModelLabel }),
     [agents, teams, sessions, filterText, lang, resolveModelLabel],
   );
   const { conversationAgents, specialAgents, teamBlocks } = partition;
   const visibleTeamBlocks = teamBlocks.filter((block) => !management.hiddenTeamIds.includes(block.team.teamId));
+  useEffect(() => {
+    if (!readCursors.loaded || readCursors.cursors.length > 0) return;
+    const entries: MarkReadEntry[] = [];
+    for (const session of sessions) {
+      const scopeId = String(session.id || "").trim();
+      if (scopeId) entries.push({ scopeKind: "conversation", scopeId });
+    }
+    teamRoomsByTeamId?.forEach((rooms) => {
+      for (const room of rooms) {
+        const scopeId = String(room.roomId || room.conversationId || "").trim();
+        if (scopeId) entries.push({ scopeKind: "conversation", scopeId });
+      }
+    });
+    if (!entries.length) return;
+    for (let start = 0; start < entries.length; start += 400) {
+      readCursors.markRead(entries.slice(start, start + 400));
+    }
+  }, [readCursors.loaded, readCursors.cursors.length, readCursors.markRead, sessions, teamRoomsByTeamId]);
 
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>(() => ({
     ...DEFAULT_COLLAPSED_DIRECTORY_SECTIONS,
@@ -347,6 +370,10 @@ export function AgentConversationDirectory({
     const count = block.agents.length;
     const filterTerm = filterText.trim().toLowerCase();
     const teamRooms = teamRoomsByTeamId?.get(teamId) ?? [];
+    const memberSessions = block.agents.flatMap((agent) => sessionsByAgentId.get(agent.agentId) ?? []);
+    const unreadCount = unreadReady
+      ? countTeamUnread({ team: block.team, sessions: memberSessions, rooms: teamRooms, index: readCursors.index })
+      : 0;
     const historyRooms = filterTerm
       ? teamRooms.filter((room) => `${room.title} ${room.summary}`.toLowerCase().includes(filterTerm))
       : teamRooms;
@@ -365,7 +392,9 @@ export function AgentConversationDirectory({
         className={styles.agentSection}
         count={count}
         countLabel={lang === "zh" ? `${count} 个 Agent` : `${count} Agents`}
-        activity={sectionActivity(block.agents, expanded)}
+        activity={unreadCount > 0
+          ? <span className={styles.teamUnreadBadge} aria-label={lang === "zh" ? `${unreadCount} 条未读` : `${unreadCount} unread`}>{unreadCount}</span>
+          : sectionActivity(block.agents, expanded)}
         expanded={expanded}
         label={block.team.name || teamId}
         onToggle={() => toggleSection(sectionKey, defaultCollapsed)}
@@ -470,7 +499,9 @@ export function AgentConversationDirectory({
           </div>) : <p>{lang === "zh" ? "没有隐藏的团队。" : "No hidden teams."}</p>}
         </div>
       </VDialog> : null}
-      {management.menu ? <TeamDirectoryContextMenu lang={lang} management={management} /> : null}
+      {management.menu ? <TeamDirectoryContextMenu lang={lang} management={management}
+        sessions={sessions} teamRoomsByTeamId={teamRoomsByTeamId} readCursors={readCursors} unreadReady={unreadReady}
+        onOpenChat={(roomId) => { management.setMenu(null); onOpenGroupRoom?.(roomId); }} /> : null}
       {management.action ? <Suspense fallback={null}>
         <TeamDirectoryManagementOverlay key={`${management.action.teamId}:${management.action.mode}`}
           action={management.action} team={teams.find((team) => team.teamId === management.action?.teamId) ?? null}
@@ -481,13 +512,51 @@ export function AgentConversationDirectory({
 }
 
 /** Navigation is mounted only with an open menu; static directory consumers need no Router. */
-function TeamDirectoryContextMenu({ lang, management }: {
-  lang: "zh" | "en"; management: ReturnType<typeof useTeamDirectoryManagement>;
+function TeamDirectoryContextMenu({ lang, management, sessions, teamRoomsByTeamId, readCursors, unreadReady, onOpenChat }: {
+  lang: "zh" | "en";
+  management: ReturnType<typeof useTeamDirectoryManagement>;
+  sessions: SessionSummary[];
+  teamRoomsByTeamId?: ReadonlyMap<string, readonly ConversationSummary[]>;
+  readCursors: ReturnType<typeof useReadCursors>;
+  unreadReady: boolean;
+  onOpenChat: (roomId: string) => void;
 }) {
   const navigate = useNavigate();
+  const menuTeam = management.menu?.team;
+  const teamRooms = menuTeam ? (teamRoomsByTeamId?.get(menuTeam.teamId) ?? []) : [];
+  const memberAgentIds = new Set((menuTeam?.members ?? []).map((member) => String(member.agentId || "").trim()).filter(Boolean));
+  const memberSessions = menuTeam ? sessions.filter((session) => memberAgentIds.has(String(session.agentId || "").trim())) : [];
+  const unreadCount = menuTeam && unreadReady
+    ? countTeamUnread({ team: menuTeam, sessions: memberSessions, rooms: teamRooms, index: readCursors.index })
+    : 0;
+  const markTeamRead = (team: Team) => {
+    const readAt = new Date().toISOString();
+    const entries: MarkReadEntry[] = [];
+    const agentIds = new Set((team.members ?? []).map((member) => String(member.agentId || "").trim()).filter(Boolean));
+    for (const session of sessions) {
+      const scopeId = String(session.id || "").trim();
+      if (scopeId && agentIds.has(String(session.agentId || "").trim())) {
+        entries.push({ scopeKind: "conversation", scopeId, readAt });
+      }
+    }
+    for (const room of (teamRoomsByTeamId?.get(team.teamId) ?? [])) {
+      const scopeId = String(room.roomId || room.conversationId || "").trim();
+      if (scopeId) entries.push({ scopeKind: "conversation", scopeId, readAt });
+    }
+    const linkedRoomId = String(team.linkedChatRoomId || team.linkedChatRoom?.roomId || "").trim();
+    if (linkedRoomId) entries.push({ scopeKind: "conversation", scopeId: linkedRoomId, readAt });
+    readCursors.markRead(entries);
+    management.setMenu(null);
+  };
   return management.menu ? <TeamContextMenu lang={lang} state={management.menu}
+    unreadCount={unreadCount}
     onRename={(team) => management.begin(team, "rename")} onManage={(team) => management.begin(team, "settings")}
     onArchive={(team) => management.begin(team, "archive")} onHide={management.hide}
+    onMarkRead={markTeamRead}
+    onOpenChat={(team) => {
+      const roomId = String(team.linkedChatRoomId || team.linkedChatRoom?.roomId || "").trim();
+      if (roomId) onOpenChat(roomId);
+    }}
     onOpenWorkspace={(team) => { management.setMenu(null); navigate(teamWorkspaceRoute(team.teamId)); }}
     onDismiss={() => management.setMenu(null)} /> : null;
 }
