@@ -3753,21 +3753,36 @@ class RuntimeManagerDaemon:
         backend_code_stale = bool(
             backend_freshness.get("available") and backend_freshness.get("behind")
         )
+        # A running workbench must never keep serving a frontend release or a
+        # backend process that no longer match the checkout.  The preflight
+        # above already published the current frontend, so a single restart
+        # retires the old backend and moves both halves together.  A workbench
+        # that is genuinely closed keeps the normal open path: the backend it
+        # launches reads the fresh release directly.
+        observed_running = bool(observation) and str(observation.get("observedState") or "closed") in {"open", "partial"}
+        workbench_running = observed_running or (
+            str(workbench.get("desiredState") or "") == "open"
+            and str(workbench.get("observedState") or "") in {"open", "partial"}
+        )
         if (
-            backend_code_stale
-            and observation
-            and str(observation.get("observedState") or "closed") in {"open", "partial"}
+            (backend_code_stale or frontend_release_changed)
+            and workbench_running
             and not force_frontend_rebuild
         ):
-            # A launcher takeover must not keep serving the previous checkout.
-            # The settle step records resumable turns before the backend retires,
-            # so active work no longer vetoes switching to current code.
+            reason = str(args.get("reason") or (
+                "backend_code_stale" if backend_code_stale else "frontend_release_changed"
+            ))
+            message = (
+                "Workbench restarted with the current backend code."
+                if backend_code_stale
+                else "Workbench restarted after publishing the latest frontend release."
+            )
             blocked = self._block_lifecycle_command_if_active_work(
                 command_id=command_id,
                 command_type="restart_workbench",
                 args={
                     **args,
-                    "reason": str(args.get("reason") or "backend_code_stale"),
+                    "reason": reason,
                     "source": str(args.get("source") or "runtime_manager"),
                 },
             )
@@ -3777,7 +3792,7 @@ class RuntimeManagerDaemon:
                 command_id=command_id,
                 args={
                     **args,
-                    "reason": str(args.get("reason") or "backend_code_stale"),
+                    "reason": reason,
                     "source": str(args.get("source") or "runtime_manager"),
                     "skipFrontendBuildPreflight": True,
                 },
@@ -3785,45 +3800,10 @@ class RuntimeManagerDaemon:
             return self._finish_command(
                 command_id,
                 ok=True,
-                message="Workbench restarted with the current backend code.",
+                message=message,
                 result_data={
                     "buildPreflight": build_preflight,
                     "backendFreshness": backend_freshness,
-                    **restart_data,
-                },
-            )
-        if frontend_release_changed and observation and str(observation.get("observedState") or "closed") in {"open", "partial"}:
-            # Publishing a new release invalidates the already-open fast path:
-            # the running backend has pinned the previous dist.  Reuse the
-            # restart implementation so active-work protection and the normal
-            # close/retire verification remain in force.  The build just ran,
-            # therefore the restart must not build a second release.
-            blocked = self._block_lifecycle_command_if_active_work(
-                command_id=command_id,
-                command_type="restart_workbench",
-                args={
-                    **args,
-                    "reason": str(args.get("reason") or "frontend_release_changed"),
-                    "source": str(args.get("source") or "runtime_manager"),
-                },
-            )
-            if blocked is not None:
-                return blocked
-            restart_data = self._perform_restart_workbench(
-                command_id=command_id,
-                args={
-                    **args,
-                    "reason": str(args.get("reason") or "frontend_release_changed"),
-                    "source": str(args.get("source") or "runtime_manager"),
-                    "skipFrontendBuildPreflight": True,
-                },
-            )
-            return self._finish_command(
-                command_id,
-                ok=True,
-                message="Workbench restarted after publishing the latest frontend release.",
-                result_data={
-                    "buildPreflight": build_preflight,
                     **restart_data,
                 },
             )
