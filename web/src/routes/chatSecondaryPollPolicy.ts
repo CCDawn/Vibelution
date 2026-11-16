@@ -5,6 +5,8 @@
 import { resolvePollingInterval, type PollingInterval } from "../app/pollingPolicy";
 
 export const CHAT_SECONDARY_RUNTIME_POLL_MS = 20_000;
+/** Running-session chrome cannot wait for the 20s secondary beat. */
+export const CHAT_RUNTIME_STATUS_POLL_MS = 5_000;
 export const CHAT_SECONDARY_PET_POLL_MS = 30_000;
 export const CHAT_SECONDARY_TEAMS_POLL_MS = 15_000;
 export const CHAT_SECONDARY_PROJECT_BUS_POLL_MS = 8_000;
@@ -13,6 +15,8 @@ export type ChatSecondaryPollPolicyInput = {
   chatPollingVisible: boolean;
   chatStartupWarmupActive: boolean;
   secondaryChatDataEnabled: boolean;
+  /** Running-session status; independent of the active session detail settling. */
+  runtimeStatusPollingEnabled?: boolean;
   /** True while the user is in the direct-session surface (not group/bus primary). */
   directSessionPanelActive: boolean;
   /** Group create composer or standard group room needs team picker freshness. */
@@ -22,6 +26,7 @@ export type ChatSecondaryPollPolicyInput = {
 
 export type ChatSecondaryPollPolicy = {
   runtimeRefetchInterval: PollingInterval;
+  runtimeStatusRefetchInterval: PollingInterval;
   petRefetchInterval: PollingInterval;
   teamsRefetchInterval: PollingInterval;
   projectBusRefetchInterval: PollingInterval;
@@ -30,11 +35,15 @@ export type ChatSecondaryPollPolicy = {
 
 export function resolveChatSecondaryPollPolicy(input: ChatSecondaryPollPolicyInput): ChatSecondaryPollPolicy {
   const secondaryEnabled = input.secondaryChatDataEnabled;
+  const runtimeStatusEnabled = input.runtimeStatusPollingEnabled ?? secondaryEnabled;
   const background = input.chatStartupWarmupActive;
 
   return {
     runtimeRefetchInterval: secondaryEnabled
       ? resolvePollingInterval(input.chatPollingVisible, CHAT_SECONDARY_RUNTIME_POLL_MS)
+      : false,
+    runtimeStatusRefetchInterval: runtimeStatusEnabled
+      ? resolvePollingInterval(input.chatPollingVisible, CHAT_RUNTIME_STATUS_POLL_MS)
       : false,
     petRefetchInterval: secondaryEnabled
       ? resolvePollingInterval(input.chatPollingVisible, CHAT_SECONDARY_PET_POLL_MS)

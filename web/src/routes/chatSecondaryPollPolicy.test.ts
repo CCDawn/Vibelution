@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  CHAT_RUNTIME_STATUS_POLL_MS,
   CHAT_SECONDARY_PET_POLL_MS,
   CHAT_SECONDARY_PROJECT_BUS_POLL_MS,
   CHAT_SECONDARY_RUNTIME_POLL_MS,
@@ -42,5 +43,14 @@ describe("resolveChatSecondaryPollPolicy", () => {
     expect(policy.runtimeRefetchInterval).toBe(false);
     expect(policy.petRefetchInterval).toBe(false);
     expect(policy.teamsRefetchInterval).toBe(false);
+  });
+
+  it("keeps running-session polling alive while the active session detail settles", () => {
+    const policy = resolveChatSecondaryPollPolicy({
+      ...base,
+      secondaryChatDataEnabled: false,
+      runtimeStatusPollingEnabled: true,
+    });
+    expect(policy.runtimeStatusRefetchInterval).toBe(CHAT_RUNTIME_STATUS_POLL_MS);
   });
 });

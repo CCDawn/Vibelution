@@ -81,10 +81,12 @@ def test_ledger_settle_is_idempotent_per_head(tmp_path: Path) -> None:
 def test_settle_advances_from_previous_position(tmp_path: Path) -> None:
     (tmp_path / "VERSION").write_text("2.0.0", encoding="utf-8")
     ledger = VersionLedger(tmp_path, ledger_path=tmp_path / "ledger.jsonl")
-    unreleased = extract_unreleased("## Unreleased\n\n### Fixed\n\n- One fix.\n")
-    assert unreleased is not None
     versions = []
     for index in range(6):
+        unreleased = extract_unreleased(
+            f"## Unreleased\n\n### Fixed\n\n- Fix {index}.\n"
+        )
+        assert unreleased is not None
         entry = ledger.settle(
             head_sha=f"{index:040d}", head_subject="fix", unreleased=unreleased
         )
@@ -131,3 +133,20 @@ def test_router_prefix_survives_web_registration() -> None:
     from core.web.routes import platform_version
 
     assert platform_version.router.prefix == "/platform-version"
+
+def test_settle_ignores_a_repeated_unreleased_digest(tmp_path: Path) -> None:
+    """A new main head must not recount an unchanged Unreleased block."""
+
+    (tmp_path / "VERSION").write_text("2.0.0\n", encoding="utf-8")
+    changelog = "# Changelog\n## Unreleased\n### Added\n- first change\n\n## 2.0.0\n"
+    (tmp_path / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
+    ledger = VersionLedger(tmp_path, ledger_path=tmp_path / "ledger.jsonl")
+    unreleased = extract_unreleased(changelog)
+    assert unreleased is not None
+
+    first = ledger.settle(head_sha="a" * 40, head_subject="first merge", unreleased=unreleased)
+    second = ledger.settle(head_sha="b" * 40, head_subject="second merge", unreleased=unreleased)
+
+    assert first is not None and first.version == "2.0.1"
+    assert second is None
+    assert len(ledger.read()) == 2
