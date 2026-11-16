@@ -773,6 +773,25 @@ def test_arxiv_unversioned_record_matches_versioned_receipt():
     assert [b["text"] for b in blocks] == [text]
 
 
+@pytest.mark.parametrize("source_url", [
+    "https://doi.org/10.48550/arXiv.2410.10989",
+    "http://arxiv.org/abs/2410.10989v1",
+])
+def test_arxiv_discovery_doi_and_http_bind_real_abstract_receipt(source_url):
+    locator = "https://arxiv.org/abs/2410.10989"
+    text = "A short verbatim abstract excerpt."
+    fetched = {locator: _receipt(locator, text)}
+    blocks = source_quotable_blocks(
+        {"candidateId": "candidate", "sourceUrl": source_url}, {},
+        fetched_text_by_locator=fetched,
+    )
+    assert [(block["locator"], block["text"]) for block in blocks] == [(locator, text)]
+    assert source_quotable_blocks(
+        {"candidateId": "other", "sourceUrl": "https://doi.org/10.48550/arXiv.2410.10990"}, {},
+        fetched_text_by_locator=fetched,
+    ) == []
+
+
 def test_arxiv_locator_host_case_and_www_normalization():
     """www. 前缀与 host 大小写差异归一后命中。"""
     text = "Host normalization body."

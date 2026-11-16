@@ -91,6 +91,16 @@ _RESUMED_TURN_KEYS: set[str] = set()
 # ceiling stops mattering, so it stays small on purpose.
 _SWEEP_MAX_WORKERS = 8
 
+# Fixed gap between candidate submissions on the pool. Every resumed turn
+# immediately starts appending to its turn_journal, and each append invalidates
+# the session detail projection: parallel "all at once" recovery makes several
+# sessions replay full journals concurrently on the GIL at the same moment the
+# frontend starts polling, starving the asyncio loop's SSE heartbeats (client
+# disconnect/reconnect storm = UI flicker). Rolling submissions keep automatic
+# recovery fully intact while spreading the projection-rebuild load: N
+# candidates come up across roughly (N-1) * this many seconds.
+_RECOVERY_STAGGER_SECONDS = 7.0
+
 
 def _service():
     from core.web.services import session_service
@@ -1341,7 +1351,7 @@ def _run_session_candidates(
     active_turn_session_ids: set[str] | None,
     pending_turn_ids: set[str],
 ) -> list[dict[str, Any]]:
-    """Run one candidate per session, serially or on a bounded pool.
+    """Run one candidate per session, serially or on a staggered pool.
 
     Each call gets a private summary so no counter is shared between threads;
     the caller merges them afterwards into the same shape a serial sweep
@@ -1376,7 +1386,24 @@ def _run_session_candidates(
     with ThreadPoolExecutor(
         max_workers=worker_count, thread_name_prefix="session-recovery"
     ) as pool:
-        return list(pool.map(run_one, session_ids))
+        futures = []
+        for index, session_id in enumerate(session_ids):
+            if index and not _shutdown_requested(should_stop):
+                # 恢复错峰：重启后 N 个候选若同时拉起，N 个会话立刻并行追加
+                # turn_journal，每个进行中会话的 detail 投影全量重建在 GIL 上
+                # 互踩（35MB journal 单次 1.5-4.5s，并发劣化 2-3 倍），SSE 心跳
+                # 被饿死导致前端断连重连风暴。滚动提交让恢复约每
+                # _RECOVERY_STAGGER_SECONDS 拉起一个会话，投影重建压力随之摊开；
+                # 自动恢复语义不变，只是不再齐发。
+                _stagger_sleep(_RECOVERY_STAGGER_SECONDS)
+            futures.append(pool.submit(run_one, session_id))
+        return [future.result() for future in futures]
+
+
+def _stagger_sleep(seconds: float) -> None:
+    """Submit-gap between recovery candidates; module-level for testability."""
+
+    time.sleep(seconds)
 
 
 def _merge_recovery_summaries(target: dict[str, Any], parts: list[dict[str, Any]]) -> None:

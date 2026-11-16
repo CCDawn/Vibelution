@@ -66,7 +66,11 @@ def test_native_dispatcher_discussion_receipt_wait_and_completion(activity, disc
         store.submit(seed, force_flush=True).result()
         for module in (discussion, authority, discussion_runtime, formal_write_runtime):
             monkeypatch.setattr(module, "get_write_store", lambda: store)
-        members = [{"agentId": "reviewer", "role": "reviewer"}, {"agentId": "planner", "role": "experiment_planner"}]
+        members = [
+            {"agentId": "reviewer", "role": "challenge_cup_evaluator"},
+            {"agentId": "planner", "role": "experiment_planner"},
+            {"agentId": "search", "role": "challenge_cup_search"},
+        ]
         monkeypatch.setattr(authority.team_service, "get_team", lambda _: {"members": members})
         monkeypatch.setattr(authority.agent_directory_service, "get_agent", lambda agent_id, **_: {"agentId": agent_id})
         route = dict(modelRef="default/qwen-alias", providerId="default", modelId="qwen-plus")

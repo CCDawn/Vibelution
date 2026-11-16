@@ -818,6 +818,7 @@ def _persist_session_turn_result(
         final_status = "cancelled"
     feedback_events_for_result = s._extract_chat_feedback_events(result, final_status=final_status)
     runtime_failed = final_status in {"failed_runtime", "failed"} and not stop_requested
+    terminal_problem_code = ""
     if runtime_failed:
         error_type = s._failure_error_type(assistant_text)
         turn_error = s._make_session_turn_error(
@@ -828,6 +829,8 @@ def _persist_session_turn_result(
             llm_failure=result.get("llm_failure") if isinstance(result.get("llm_failure"), dict) else None,
             llm_payload_trace=s._current_session_live_llm_payload_trace(session_id),
         )
+        if turn_error.get("reason_code") == "operator_knowledge_budget_exhausted":
+            terminal_problem_code = turn_error["reason_code"]
         assistant_entry = s._make_turn_error_chat_message(
             turn_error,
             error_type=error_type,
@@ -945,8 +948,7 @@ def _persist_session_turn_result(
         conversation["last_turn_terminal_problem_code"] = _CHALLENGE_DEADLINE_PROBLEM_CODE
         conversation["last_turn_terminal_reason"] = _CHALLENGE_DEADLINE_PROBLEM_CODE
     else:
-        conversation.pop("last_turn_terminal_problem_code", None)
-        conversation.pop("lastTurnTerminalProblemCode", None)
+        _apply_turn_failure_problem_code(conversation, terminal_problem_code)
     # Terminal anchor: "ready" is also written by stop handling and stale
     # restart repair, so the completion snapshot can only trust "ready" as a
     # terminal verdict when it is anchored to THIS turn's real settlement.
@@ -1166,6 +1168,7 @@ def _persist_session_turn_result(
             "errorType": error_type if runtime_failed else "",
             "summary": visible_assistant_text,
             "llmUsage": turn_llm_usage,
+            **({"terminalProblemCode": terminal_problem_code} if terminal_problem_code else {}),
         },
         source="persist_session_turn_result",
     )

@@ -1,11 +1,12 @@
-"""Read original text from successful fetch receipts of the stage task session.
+"""Read original text from successful fetch receipts in the Session Journal.
 
 The Session Journal remains the authority. Candidate summaries and Agent
 writeback metadata cannot manufacture a fetch receipt or its source text.
 Every turn of the task's session is in supply scope: the agent may fetch in
 an earlier turn or in a continuation turn (after a remediation parking), and
-those receipts must not vanish at the turn boundary.  The session boundary —
-not the turn boundary — decides what this task can quote.  A cross-host
+those receipts must not vanish at the turn boundary. For formal extraction,
+the accepted finding handoff can also supply receipts for its own candidates.
+A cross-host
 redirect parking message additionally registers its original URL as an alias
 of an already-fetched redirect target, so a candidate locator parked at the
 redirect still quotes the text actually fetched at the landing page.
@@ -13,7 +14,11 @@ redirect still quotes the text actually fetched at the landing page.
 
 from __future__ import annotations
 
-from typing import Any
+import json
+from sqlite3 import Error as SQLiteError
+from typing import Any, Iterable
+
+from core.research.workflow.ledger.errors import WorkflowLedgerError
 
 # web_fetch_tool 成功回执的两种前缀（tools/web_search_tool.web_fetch）：
 # HTML 走 [网页内容]，PDF 走 [PDF 文本]。PDF 回执同样携带真实抓取原文，
@@ -71,7 +76,12 @@ def task_fetched_text(task: dict[str, Any]) -> dict[str, dict[str, str]]:
     session_id = str(task.get("sessionId") or turn.get("sessionId") or "").strip()
     if not session_id:
         return {}
-    events = s._source_collection_stage_conversation_events(session_id)
+    return _session_fetched_text(s._source_collection_stage_conversation_events(session_id), session_id)
+
+
+def _session_fetched_text(events: list[Any], session_id: str) -> dict[str, dict[str, str]]:
+    from core.web.services import team_workflow_orchestration_service as s
+
     texts: dict[str, dict[str, str]] = {}
     for event in events:
         if str(getattr(event, "event_type", "")) != "tool_result":
@@ -100,6 +110,8 @@ def task_fetched_text(task: dict[str, Any]) -> dict[str, dict[str, str]]:
                 continue
             # Keep fetched text only, excluding the tool's truncation notice.
             body = body.rsplit("\n\n... [截断，原内容 ", 1)[0].strip()
+            if not body:
+                continue
             texts[locator] = {
                 "text": body,
                 "locator": locator,
@@ -128,6 +140,8 @@ def task_fetched_text(task: dict[str, Any]) -> dict[str, dict[str, str]]:
             original, target = _redirect_alias_pair(result)
             if not original or not target:
                 continue
+            if str(s._source_collection_stage_tool_call_args(call).get("url") or "").strip() != original:
+                continue
             if texts.get(original):
                 continue
             fetched = texts.get(target)
@@ -138,3 +152,259 @@ def task_fetched_text(task: dict[str, Any]) -> dict[str, dict[str, str]]:
             alias["aliasOf"] = target
             texts[original] = alias
     return texts
+
+
+def _object(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _finding_handoff(repo, team_id: str, run_id: str, task: dict[str, Any]):
+    """Resolve the accepted upstream attempt from server-owned ledger records."""
+    from .stage_reconcile import _source_collection_stage_task_idempotency_key
+
+    workflow_run_id = task["workflowRunId"]
+    run = repo.get_run(workflow_run_id)
+    if not run or run.team_id != team_id:
+        return None
+    snapshot = _object(json.loads(run.input_snapshot_json))
+    if snapshot.get("sourceCollectionRunId") != run_id:
+        return None
+    operator = _object(task.get("operatorSourceAuthority"))
+    contract = _object(task.get("challengeTaskContract"))
+    node_run_id = operator.get("formalNodeRunId") or contract.get("nodeRunId")
+    extraction = (
+        repo.get_attempt(node_run_id) if node_run_id
+        else repo.latest_attempt(workflow_run_id, "source_extraction")
+    )
+    if not extraction or extraction.run_id != workflow_run_id or extraction.node_id != "source_extraction":
+        return None
+    frozen_operator = _object(snapshot.get("operatorSourceAuthorities")).get(extraction.node_run_id)
+    if (operator or frozen_operator) and (
+        operator != frozen_operator
+        or operator.get("formalNodeId") != extraction.node_id
+        or operator.get("workflowRunId") != workflow_run_id
+        or operator.get("agentId") != task.get("agentId")
+        or operator.get("agentRole") != task.get("agentRole")
+    ):
+        return None
+    expected_key = _source_collection_stage_task_idempotency_key(
+        team_id=team_id, run_id=run_id, stage_id="extraction", agent_id=task["agentId"],
+        agent_role=task["agentRole"], task_id="", requested_key=f"agent-task:{extraction.node_run_id}",
+    )
+    if task.get("idempotencyKey") != expected_key:
+        return None
+
+    finding = repo.latest_attempt(workflow_run_id, "source_finding")
+    if (
+        not finding or finding.status != "succeeded" or finding.finished_at_ms is None
+        or finding.finished_at_ms > extraction.started_at_ms
+    ):
+        return None
+    handoffs = [
+        row for row in repo.list_handoffs_for_node(workflow_run_id, extraction.node_id)
+        if row[3] == finding.node_run_id and row[8] == "accepted"
+        and (not row[5] or row[5] == extraction.node_run_id)
+    ]
+    if len(handoffs) != 1:
+        return None
+    anchor = repo.get_anchor_by_node_run(finding.node_run_id)
+    if not anchor or anchor[0] != finding.execution_anchor_id or not all(anchor[index] for index in (3, 4, 5, 7, 8)):
+        return None
+    receipts = [
+        row for receipt_id in repo.list_handoff_receipts(handoffs[0][0])
+        if (row := repo.get_artifact_receipt(receipt_id))
+        and row[1:5] == (workflow_run_id, finding.node_run_id, team_id, "source_candidate_batch")
+        and row[9] == 1
+    ]
+    if len(receipts) != 1:
+        return None
+    return finding.node_run_id, anchor, receipts[0]
+
+
+def _finding_task_events(
+    finding_task: dict[str, Any], session_id: str, turn_id: str, node_run_id: str,
+) -> list[Any]:
+    """Read the accepted final turn and its verified predecessors in Journal order."""
+    from core.web.services import team_workflow_orchestration_service as s
+    from .stage_reconcile import (
+        _source_collection_stage_event_metadata,
+        _source_collection_stage_task_turn_ids,
+    )
+
+    events = s._source_collection_stage_conversation_events(session_id)
+    # Manual continue submits inherit the original stage task scope but have
+    # no explicit predecessor. Only the persisted stage task's adopted turn
+    # list can connect those legacy turns. Formal continues carry their edge.
+    adopted = list(dict.fromkeys(_source_collection_stage_task_turn_ids(finding_task)))
+    legacy_parents = dict(zip(adopted[1:], adopted))
+    messages: dict[str, tuple[int, str]] = {}
+    for index, event in enumerate(events):
+        message_turn_id = getattr(event, "turn_id", "")
+        if not message_turn_id or getattr(event, "event_type", "") != "user_message":
+            continue
+        metadata = _source_collection_stage_event_metadata(event)
+        if (
+            metadata.get("kind") != s.SOURCE_COLLECTION_STAGE_SESSION_TASK_KIND
+            or metadata.get("sourceCollectionStageTaskId") != finding_task["taskId"]
+            or metadata.get("teamId") != finding_task["teamId"]
+        ):
+            continue
+        surface = metadata.get("sourceSurface")
+        if surface == "team_workflow_agent_turn_continuation":
+            if (
+                metadata.get("workflowRunId") != finding_task["workflowRunId"]
+                or metadata.get("workflowNodeId") != "source_finding"
+                or metadata.get("nodeRunId") != node_run_id
+                or metadata.get("taskId") != finding_task["taskId"]
+                or _object(getattr(event, "payload", {})).get("source") != "agent_inbox"
+            ):
+                continue
+            predecessor = metadata.get("continuationOfTurnId")
+            if not isinstance(predecessor, str) or not predecessor:
+                continue
+        else:
+            if (
+                surface != "team_workflow_stage_task"
+                or not all(metadata.get(key) == finding_task.get(key) for key in ("runId", "stageId", "agentId", "agentRole"))
+                or metadata.get("sourceCollectionStageTaskKey") != finding_task.get("idempotencyKey")
+            ):
+                continue
+            if metadata.get("sourceCollectionStageContinuation") is True:
+                predecessor = legacy_parents.get(message_turn_id, "")
+            elif metadata.get("workflowRunId") == finding_task["workflowRunId"]:
+                predecessor = ""
+            else:
+                continue
+        messages.setdefault(message_turn_id, (index, predecessor))
+
+    turn_ids = {turn_id}
+    current = messages.get(turn_id)
+    while current:
+        position, predecessor = current
+        previous = messages.get(predecessor)
+        if not previous or previous[0] >= position:
+            break
+        turn_ids.add(predecessor)
+        current = previous
+    return [event for event in events if getattr(event, "turn_id", "") in turn_ids]
+
+
+def finding_fetched_text_by_source(
+    team_id: str,
+    run_id: str,
+    task: dict[str, Any],
+    candidates: Iterable[dict[str, Any]] | None = None,
+) -> dict[tuple[str, str], dict[str, dict[str, str]]]:
+    """Give each source only the accepted finding task's own matching text."""
+    if (
+        task.get("teamId") != team_id or task.get("runId") != run_id or task.get("stageId") != "extraction"
+        or not all(task.get(key) for key in ("workflowRunId", "taskId", "agentId", "agentRole"))
+    ):
+        return {}
+    selected_ids = (
+        {candidate.get("candidateId") for candidate in candidates if isinstance(candidate, dict)} - {None, ""}
+        if candidates is not None else None
+    )
+    if selected_ids == set():
+        return {}
+
+    from core.web.services import team_workflow_orchestration_service as s
+    from ..research_runtime.artifact_readback_registry import (
+        _source_finding_candidate_source,
+        load_scoped_artifact_payload,
+        parse_canonical_ref,
+    )
+    from ..research_runtime.formal_read_runtime import FormalReadRuntimeUnavailable, get_formal_read_store
+    from ..research_runtime.formal_write_runtime import WorkflowMigrationRequired
+    from .extraction_quote_anchor_supply import linked_source_record_id
+    from .search_execution import (
+        _source_finding_candidate_receipt_is_bound,
+        _source_finding_receipt_binding_keys,
+        _source_finding_trace_receipt_ref_sets,
+        project_source_collection_search_trace,
+    )
+
+    try:
+        binding = get_formal_read_store().read(lambda repo: _finding_handoff(repo, team_id, run_id, task))
+        if binding is None:
+            return {}
+        node_run_id, anchor, receipt = binding
+        ref = parse_canonical_ref(_object(json.loads(receipt[5])).get("canonicalRef") or "")
+    except (SQLiteError, WorkflowLedgerError, FormalReadRuntimeUnavailable, WorkflowMigrationRequired, ValueError):
+        return {}
+    if ref != {
+        "kind": "source_candidate_batch", "teamId": team_id,
+        "authorityRunId": run_id, "contentHash": receipt[7],
+    }:
+        return {}
+
+    agent_id, agent_role, session_id, _, task_id, turn_id = anchor[3:9]
+    if session_id == task.get("sessionId"):
+        return {}
+    finding_task, stored_run_id = s._find_source_collection_stage_session_task_by_id(team_id, task_id)
+    if stored_run_id != run_id or not isinstance(finding_task, dict) or any(
+        finding_task.get(key) != value for key, value in {
+            "teamId": team_id, "runId": run_id, "workflowRunId": task["workflowRunId"], "stageId": "finding",
+            "taskId": task_id, "sessionId": session_id, "agentId": agent_id, "agentRole": agent_role,
+            "status": "completed",
+        }.items()
+    ) or _object(finding_task.get("turn")).get("turnId") != turn_id:
+        return {}
+
+    # The batch hash is a receipt of what finding accepted, not a pin on the
+    # mutable candidate store (extraction itself updates it). Join the stored
+    # materialization lineage by candidate AND record ID, then check the
+    # current authoritative locator against one real grouped search result.
+    materialized = _object(_object(finding_task.get("writeback")).get("materializedSources"))
+    lineage: dict[str, set[str]] = {}
+    for entry in materialized.get("lineage") or []:
+        candidate = _object(_object(entry).get("candidate"))
+        candidate_id = candidate.get("candidateId")
+        record_id = _object(_object(entry).get("record")).get("recordId")
+        if (
+            candidate_id and record_id and candidate.get("status") in {"created", "reused"}
+            and (selected_ids is None or candidate_id in selected_ids)
+        ):
+            lineage.setdefault(candidate_id, set()).add(record_id)
+    if not lineage:
+        return {}
+
+    events = _finding_task_events(finding_task, session_id, turn_id, node_run_id)
+    fetched = {
+        locator: {**value, "findingNodeRunId": node_run_id, "findingTaskId": task_id, "findingArtifactReceiptId": receipt[0]}
+        for locator, value in _session_fetched_text(events, session_id).items()
+        if value.get("eventId")
+    }
+    if not fetched:
+        return {}
+    candidate_batch = load_scoped_artifact_payload(
+        "source_candidate_batch", team_id=team_id, authority_run_id=run_id, workflow_run_id=task["workflowRunId"],
+    ) or {}
+    search_trace = project_source_collection_search_trace(team_id, run_id)
+    groups = _source_finding_trace_receipt_ref_sets(search_trace)
+    fetch_keys = {locator: _source_finding_receipt_binding_keys(locator) for locator in fetched}
+    by_source: dict[tuple[str, str], dict[str, dict[str, str]]] = {}
+    for candidate in candidate_batch.get("candidates") or []:
+        candidate_id = candidate.get("candidateId")
+        record_id = linked_source_record_id(candidate)
+        if not record_id or record_id not in lineage.get(candidate_id, ()):
+            continue
+        projected = _source_finding_candidate_source(candidate)
+        matching_groups = [group for group in groups if _source_finding_candidate_receipt_is_bound(projected, [group])]
+        if not matching_groups:
+            continue
+        matched = {
+            locator: value for locator, value in fetched.items()
+            if any(fetch_keys[locator] & group for group in matching_groups)
+        }
+        if matched:
+            by_source[("candidate", candidate_id)] = matched
+            by_source.setdefault(("record", record_id), {}).update(matched)
+    return by_source
+
+
+def finding_fetched_text_for_task(task: dict[str, Any]) -> dict[tuple[str, str], dict[str, dict[str, str]]]:
+    """Resolve scoped finding receipts at an extraction evidence read point."""
+    return finding_fetched_text_by_source(
+        str(task.get("teamId") or ""), str(task.get("runId") or ""), task,
+    )

@@ -7,6 +7,19 @@ const summary = () => ({ argumentKeys: ["action", "arguments_json"], assistantAc
   assistantTargets: { provider_id: "relay-1", model_query: "Opus 5.5", upstream_id: "vendor/claude-opus-5.5", verify: "true", offset: "0", limit: "20" } });
 
 describe("provider model native approval preview", () => {
+  it("shows every requested batch connection in a single approval", () => {
+    const { assistantTargets: _, ...base } = summary();
+    const row = { providerId: "chatgpt", modelId: "chatgpt/gpt-6.1-sol-high", origin: "https://api.openai.com", protocol: "responses" };
+    const local = { providerId: "local", modelId: "local/qwen", origin: "http://127.0.0.1:8081", protocol: "chat_completions" };
+    const input = { ...base, assistantAction: "provider_test_batch", assistantProbeTargets: [row, local] };
+    expect(managementApprovalActionIsKnown(input.assistantAction)).toBe(true);
+    expect(providerModelApprovalPreviewIsValid(input)).toBe(true);
+    const preview = toolApprovalActionPreview(input, "personal_assistant_manage_tool", "zh");
+    for (const value of ["最多 2 次", row.modelId, row.origin, local.modelId, local.origin]) expect(preview).toContain(value);
+    for (const targets of [[], [row, row], [{ ...row, modelId: "unrelated/model" }], [{ ...row, origin: "https://example.com/private" }]]) {
+      expect(providerModelApprovalPreviewIsValid({ ...input, assistantProbeTargets: targets })).toBe(false);
+    }
+  });
   it("recognizes the action and displays every complete decision field and the paid-test effect", () => {
     expect(managementApprovalActionIsKnown("provider_model_resolve")).toBe(true);
     expect(managementApprovalActionIsKnown("provider_unknown_write")).toBe(false);

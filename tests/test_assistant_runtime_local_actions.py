@@ -19,6 +19,7 @@ def test_catalog_reuses_native_schema_and_governance_without_project_actions():
         "episodic_conflict_review", "episodic_sync_receipt", "personal_memory_list",
         "legacy_memory_list", "legacy_memory_read",
         "provider_prepare", "provider_model_resolve",
+        "provider_test_batch_plan", "provider_test_batch", "provider_test_batch_status",
         "preference_proposals", "preference_proposal_accept", "preference_proposal_reject", "dispatch_list", "management_requests",
         "branch_cleanup_plan", "branch_cleanup_execute",
     }

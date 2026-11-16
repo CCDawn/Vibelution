@@ -75,6 +75,7 @@ def test_reuses_parent_for_confirmatory_rerun(activity, proposal):
 @pytest.mark.parametrize("change", [
     {"inputHash": "f" * 64}, {"trialCount": 12}, {"trialTimeoutSeconds": 3600},
     {"gapChecks": [{"gap": "invented gap", "experimentCheck": "invented check"}]},
+    {"candidate": {"implementation": "torch_softmax", "numWarps": 8}},
 ])
 def test_invalid_decisions_publish_nothing(activity, proposal, change):
     run_id, output = proposal

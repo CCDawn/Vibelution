@@ -84,7 +84,7 @@ class UpgradeOwner:
             bound = _binding(grant.get("binding"))
             if not isinstance(grant.get("authority"), str) or not grant["authority"] or not isinstance(current.signature, str) or not current.signature:
                 raise ValueError("Invalid grant authority")
-            if (bound != _binding(current.binding) or grant.get("authority") != current.signature
+            if (bound != _binding(current.binding) or not current.accepts(grant.get("authority"), subject)
                 or expected_binding is not None and expected_binding != bound):
                 _error("TARGET_BINDING_CHANGED", 409)
             _scopes(grant.get("scopes"))

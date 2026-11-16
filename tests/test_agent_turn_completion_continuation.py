@@ -137,6 +137,43 @@ def _wait_waiter(events: list[str], continuations: list[str]):
     return _wait, _submit
 
 
+@pytest.mark.parametrize("active_turn", ["turn-main", "unrelated-turn"])
+def test_continuation_retries_only_after_predecessor_admission_race(monkeypatch, active_turn):
+    from core.web.services.session import submit, turn_diagnostics
+    from core.web.services.session.admission_lock import mark_native_admission_rejected
+    from core.web.services.session_service import SessionBusyError
+    from core.web.services.team_workflow.research_runtime import agent_turn_completion as completion
+
+    submissions = []
+
+    def send(_session_id, _message, **kwargs):
+        submissions.append(kwargs["message_metadata"]["continuationOfTurnId"])
+        if len(submissions) == 1:
+            raise mark_native_admission_rejected(SessionBusyError("finishing"))
+        return {"turnId": "turn-continued"}
+
+    monkeypatch.setattr(submit, "submit_session_message", send)
+    monkeypatch.setattr(turn_diagnostics, "get_session_turn_completion_snapshot", lambda *_: {
+        "terminal": True,
+        "activeTurnId": active_turn,
+    })
+    monkeypatch.setattr(completion, "_record_turn_continuation_scene_event", lambda *a, **k: None)
+
+    def continue_turn():
+        return completion._submit_agent_turn_continuation(
+            _handle(), action=_action(), input_snapshot=_input_snapshot(),
+            attempt=1, from_turn_id="turn-main", paused_status="paused_limit",
+        )
+
+    if active_turn == "turn-main":
+        assert continue_turn() == "turn-continued"
+        assert submissions == ["turn-main", "turn-main"]
+    else:
+        with pytest.raises(SessionBusyError):
+            continue_turn()
+        assert submissions == ["turn-main"]
+
+
 def test_completed_turn_with_actionable_stage_remediation_continues_same_session_once(
     monkeypatch,
 ) -> None:

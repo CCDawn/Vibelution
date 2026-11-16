@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+### Added
+- 平台版本按本地演进节奏自动推进：每次带 Unreleased 声明的合入结算一个小版本，满 5 个进中版本，满 10 个进大版本；`/platform-version` 页面实时展示当前版本、build、档位进度与结算记录。
 
 ## 2.0.0 - 2026-10-03
 

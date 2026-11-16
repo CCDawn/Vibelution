@@ -177,6 +177,41 @@ def detect_task_status(adapter_id: str, text: str, *, completion_marker: str = "
     return ""
 
 
+def codex_screen_answer(screen_text: str, completion_marker: str) -> str | None:
+    """Read the visible answer before the task's standalone completion marker."""
+    if not completion_marker:
+        return None
+    answer_lines: list[str] = []
+    marker_fragment = ""
+    for line in screen_text.splitlines():
+        if line.startswith("›"):
+            answer_lines.clear()
+            marker_fragment = ""
+            continue
+        bullet = line.startswith("• ")
+        body = line.removeprefix("• ") if bullet else line.removeprefix("  ")
+        if bullet:
+            answer_lines.clear()
+            marker_fragment = ""
+        stripped = body.strip()
+        if marker_fragment:
+            candidate = marker_fragment + stripped
+            if stripped and completion_marker.startswith(candidate):
+                if candidate == completion_marker:
+                    return "\n".join(answer_lines).strip()
+                marker_fragment = candidate
+                continue
+            answer_lines.append(marker_fragment)
+            marker_fragment = ""
+        if stripped == completion_marker:
+            return "\n".join(answer_lines).strip()
+        if stripped and completion_marker.startswith(stripped):
+            marker_fragment = stripped
+            continue
+        answer_lines.append(body)
+    return None
+
+
 def summarize_segments(segments: list[dict[str, Any]]) -> str:
     lines: list[str] = []
     for item in list(segments or []):

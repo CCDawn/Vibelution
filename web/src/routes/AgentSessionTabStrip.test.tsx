@@ -856,7 +856,7 @@ describe("AgentSessionTabStrip two-stage close confirm", () => {
     expect(markup).not.toContain("折叠组内的非活动会话");
   });
 
-  it("skips empty groups and always offers a create-group control", () => {
+  it("keeps empty groups visible so they can be refilled, and offers a create-group control", () => {
     localStorage.setItem(
       "vibelution.agentSessionTabGroups.v1",
       JSON.stringify({
@@ -867,7 +867,10 @@ describe("AgentSessionTabStrip two-stage close confirm", () => {
       }),
     );
     const markup = renderStrip();
-    expect(markup).not.toContain("空组");
+    // An empty group must stay discoverable: it is the only way back after a
+    // session outage pruned the members, and it still accepts drops.
+    expect(markup).toContain("空组");
+    expect(markup).toContain('data-session-tab-group="ga"');
     expect(markup).toContain('aria-label="新建分组"');
   });
 });

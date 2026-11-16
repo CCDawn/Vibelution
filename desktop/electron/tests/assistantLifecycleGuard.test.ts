@@ -251,4 +251,55 @@ describe("resident assistant lifecycle admission", () => {
     expect(input.reminders.resumeAfterMigration).not.toHaveBeenCalled();
     expect(input.releaseOwner).not.toHaveBeenCalled();
   });
+
+  it("bounds the release wait when the host can never reach stopped and still resets the owner", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const { input, admission, registry } = fixture();
+      const controller = new AbortController();
+      const lease = await acquireAssistantLifecycleLease({ ...input, signal: controller.signal, releaseWaitBudgetMs: 300 });
+      // Respawn budget exhausted, host dead: from now on the snapshot stays
+      // "failed" forever and every barrier release reply is lost.
+      input.host.snapshot = vi.fn(() => ({ state: "failed" as const, errorCode: "ASSISTANT_HOST_UNAVAILABLE" }));
+      input.host.migrationBarrier.mockRejectedValue(new Error("ASSISTANT_NOT_READY"));
+      controller.abort();
+      const released = lease.release();
+      await vi.advanceTimersByTimeAsync(100);
+      expect(admission.release).not.toHaveBeenCalled();
+      expect(input.releaseOwner).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(600);
+      await released;
+      expect(warn.mock.calls.some(([message]) => String(message).includes("ASSISTANT_LIFECYCLE_RELEASE_WAIT_TIMEOUT"))).toBe(true);
+      // The bounded budget hands the fences back to the shell: a later
+      // lifecycle command is refused on real evidence, not on a stuck latch.
+      expect(admission.release).toHaveBeenCalledOnce();
+      expect(registry.release).toHaveBeenCalledOnce();
+      expect(input.reminders.resumeAfterMigration).toHaveBeenCalledOnce();
+      expect(input.releaseOwner).toHaveBeenCalledOnce();
+    } finally {
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the shutdown-owned fence handback bounded without calling the owner", async () => {
+    vi.useFakeTimers();
+    try {
+      const { input, admission } = fixture();
+      input.reopen = () => false;
+      const controller = new AbortController();
+      const lease = await acquireAssistantLifecycleLease({ ...input, signal: controller.signal, releaseWaitBudgetMs: 200 });
+      input.host.snapshot = vi.fn(() => ({ state: "failed" as const, errorCode: null }));
+      input.host.migrationBarrier.mockRejectedValue(new Error("ASSISTANT_NOT_READY"));
+      controller.abort();
+      const released = lease.release();
+      await vi.advanceTimersByTimeAsync(1000);
+      await released;
+      expect(input.host.migrationBarrier.mock.calls.filter(([operation]) => operation === "release").length)
+        .toBeLessThan(12);
+      expect(admission.release).not.toHaveBeenCalled();
+      expect(input.releaseOwner).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
 });

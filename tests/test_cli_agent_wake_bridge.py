@@ -64,7 +64,12 @@ def test_cli_agent_task_result_wake_status_is_returned(monkeypatch, tmp_path):
     monkeypatch.setattr(session_service, "_record_session_cycle_message", lambda *args, **kwargs: None)
     monkeypatch.setattr(session_service, "_record_cli_agent_task_result_event", lambda *args, **kwargs: None)
     monkeypatch.setattr(session_service, "_record_chat_next_state_signal", lambda *args, **kwargs: {"signalId": "sig-1"})
-    monkeypatch.setattr(session_service, "_wake_agent_for_cli_agent_task_result", lambda *args, **kwargs: "wake_scheduled")
+    wake_results = []
+    def schedule_wake(session_id, *, result_content, **kwargs):
+        wake_results.append((session_id, result_content))
+        return "wake_scheduled"
+
+    monkeypatch.setattr(session_service, "_wake_agent_for_cli_agent_task_result", schedule_wake)
     save_chat_state(
         tmp_path,
         build_chat_state(
@@ -74,16 +79,19 @@ def test_cli_agent_task_result_wake_status_is_returned(monkeypatch, tmp_path):
         ),
     )
 
+    answer = "VIBE-RETURN-6126791009:467\n\n  indented  line\n" + "\n".join(f"line {i}" for i in range(10))
     event = session_service.append_cli_agent_task_result_event(
         "session-1",
         task_result={
             "taskId": "cli-task-2",
             "status": "completed",
             "code": "CLI_AGENT_TASK_COMPLETED",
-            "adapterId": "mimo_code",
-            "label": "MiMo Code",
+            "adapterId": "codex_code",
+            "label": "Codex Code",
             "terminalSessionId": "cli-term-2",
-            "stdoutPreview": "已完成",
+            "resultSource": "codex_screen_answer",
+            "resultSegments": [{"kind": "answer", "text": answer}],
+            "stdoutPreview": answer,
         },
         wake_agent=True,
         wake_reason="test",
@@ -91,3 +99,7 @@ def test_cli_agent_task_result_wake_status_is_returned(monkeypatch, tmp_path):
 
     assert event is not None
     assert event["_cliAgentWakeStatus"] == "wake_scheduled"
+    assert wake_results == [("session-1", "CLI Agent 任务结果回流：Codex Code\n状态：完成\n" + answer)]
+    journal_events = load_turn_events(tmp_path, "session-1")
+    assert len(journal_events) == 1
+    assert journal_events[0].payload["toolCall"]["result"] == wake_results[0][1]

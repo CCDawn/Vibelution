@@ -17,7 +17,7 @@ import os
 import re
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from core.infrastructure import git_process
 from core.infrastructure.branch_workspace import (
@@ -656,6 +656,7 @@ def _materialize_worktree(
     absolute: Path,
     branch: str,
     *,
+    base_ref: Literal["main", "HEAD"] = "main",
     timeout_seconds: float = _WORKTREE_ADD_TIMEOUT_SECONDS,
 ) -> None:
     if absolute.exists():
@@ -675,11 +676,11 @@ def _materialize_worktree(
             own_process_tree=True,
         )
     else:
-        if not _branch_exists(root, "main"):
+        if base_ref == "main" and not _branch_exists(root, "main"):
             raise DevTaskBoardError(_WORKSPACE_FAILURE)
         added = _git_at(
             root,
-            ["worktree", "add", str(absolute), "-b", branch, "main"],
+            ["worktree", "add", str(absolute), "-b", branch, base_ref],
             timeout=timeout_seconds,
             own_process_tree=True,
         )

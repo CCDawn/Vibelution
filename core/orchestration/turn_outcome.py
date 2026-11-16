@@ -172,7 +172,7 @@ class TurnOutcomeController:
             {
                 "id": call.call_id,
                 "name": call.name,
-                "args": dict(call.arguments),
+                "args": call.copy_arguments(),
                 "canonical_tool_call": call,
             }
             for call in outcome.tool_calls

@@ -60,6 +60,7 @@ import {
 } from "./workbenchBackendRetire.js";
 import {
   blockLifecycleIfActiveWork,
+  finalizeWorkRunsForStoppedBackend,
   listActiveWorkRuns,
   type ActiveWorkRun
 } from "./activeWorkGuard.js";
@@ -159,6 +160,10 @@ export type ExecuteMainLineWorkbenchInput = {
   readState?: () => WorkbenchBackendState;
   writeState?: (state: WorkbenchBackendState) => void | Promise<void>;
   listActiveWork?: () => ActiveWorkRun[];
+  /** Test seam. Production settles the workspace's active work_runs snapshots
+   * at every verified backend stop so a refused lifecycle command's reason
+   * cannot outlive the process that would have finished the work. */
+  settleActiveWorkOnStop?: (workspaceRoot: string) => void;
   ensureFrontend?: (input: { force: boolean; signal?: AbortSignal; env?: NodeJS.ProcessEnv }) => Promise<void>;
   now?: () => string;
   connect?: (port: number, host: string) => Promise<boolean>;
@@ -2083,6 +2088,26 @@ export async function executeMainLineWorkbench(
   const operation = input.operation;
   const commandId = input.command.commandId;
   const trackCommandBackground = (work: Promise<unknown>) => trackMainLineBackgroundWork(input.command, work);
+  // A verified backend stop is the deterministic terminal signal for this
+  // workspace's active work_runs snapshots. Without it an indexed activeRunId
+  // keeps every later restart refused forever (its stale grace is
+  // intentionally disabled while the run is considered current). Best-effort:
+  // bookkeeping must never fail the lifecycle command itself.
+  const settleActiveWorkOnStop = (root: string): void => {
+    if (input.settleActiveWorkOnStop) {
+      input.settleActiveWorkOnStop(root);
+      return;
+    }
+    try {
+      const settled = finalizeWorkRunsForStoppedBackend({ workspaceRoot: root });
+      if (settled.settledRunIds.length > 0) {
+        console.warn(`WORK_RUNS_SETTLED_ON_STOP count=${settled.settledRunIds.length} `
+          + `kinds=${JSON.stringify(settled.clearedIndexKinds)}`);
+      }
+    } catch (error) {
+      console.warn(`WORK_RUNS_SETTLE_ON_STOP_FAILED ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
   const pendingRetirement = getBackgroundWorkbenchRetirement(input.workspaceRoot);
   if (pendingRetirement?.status === "pending") {
     trackMainLineBackgroundWork(input.command, pendingRetirement.completion);
@@ -2226,6 +2251,7 @@ export async function executeMainLineWorkbench(
             // Admission proved the recorded daemon pid was dead before this
             // retirement started, so its record files are stale leftovers.
             const daemonRecordCleanup = clearStaleRuntimeManagerDaemonRecords(input.workspaceRoot);
+            settleActiveWorkOnStop(input.workspaceRoot);
             const closed = { ...readRetirementState(), desiredState: "closed", observedState: "closed", phase: "steady",
               failureMessage: "", lifecycleWarning: daemonRecordCleanup.failedPaths.length > 0
                 ? `Runtime Manager daemon records could not be cleared: ${daemonRecordCleanup.failedPaths.join(", ")}`
@@ -2263,6 +2289,7 @@ export async function executeMainLineWorkbench(
       // the pid is dead here and its record files are stale leftovers.
       const daemonRecordCleanup = clearStaleRuntimeManagerDaemonRecords(input.workspaceRoot);
       clearWorkbenchLauncherRuntimeState(input.workspaceRoot);
+      settleActiveWorkOnStop(input.workspaceRoot);
       await writeState({
         ...previous, desiredState: "closed", observedState: "closed", phase: "steady",
         failureMessage: "",
@@ -2536,6 +2563,7 @@ export async function executeMainLineWorkbench(
     const lifecycleWarning = lifecycleWarnings.join("; ");
     input.signal?.throwIfAborted();
     clearWorkbenchLauncherRuntimeState(input.workspaceRoot);
+    settleActiveWorkOnStop(input.workspaceRoot);
     await writeState({
       ...previous,
       desiredState: "closed",
@@ -2836,6 +2864,9 @@ export async function executeMainLineWorkbench(
     throw error;
   }
   input.signal?.throwIfAborted();
+  // A restart/rebuild verified the previous backend tree's retirement above;
+  // settle the snapshots its stop left behind before the replacement spawns.
+  if (operation !== "start") settleActiveWorkOnStop(input.workspaceRoot);
   try { input.beforeSpawn?.(); }
   catch (error) { await persistStartPreflightFailure(error); throw error; }
   const spawned = spawnWorkbenchBackend({

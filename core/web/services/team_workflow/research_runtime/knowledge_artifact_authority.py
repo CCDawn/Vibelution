@@ -206,6 +206,34 @@ def _is_materialized_scoped_draft(
     )
 
 
+def approved_package_source_candidates(
+    *, team_id: str, authority_run_id: str, workflow_run_id: str, package: dict[str, Any]
+) -> set[str]:
+    """Resolve only the source candidates named by the receipt-bound steward drafts."""
+    from core.web.services.team_workflow.source_collection.candidates import (
+        list_candidate_store_authority_records,
+    )
+
+    draft_ids = set(package.get("candidateIds") or [package.get("candidateId")]) - {"", None}
+    if not draft_ids:
+        return set()
+    approved = set()
+    for draft in list_candidate_store_authority_records(
+        team_id, run_id=authority_run_id, metadata_task_type="steward_pack_draft"
+    ):
+        if (draft.get("candidateId") not in draft_ids
+                or not _is_materialized_scoped_draft(
+                    draft, team_id=team_id, authority_run_id=authority_run_id,
+                    workflow_run_id=workflow_run_id,
+                )
+                or _official_package_identity(draft) is None):
+            continue
+        output = draft["metadata"]["output"]
+        candidate_ids = output.get("candidateIds") or []
+        approved.update(value for value in candidate_ids if isinstance(value, str) and value)
+    return approved
+
+
 def _draft_payload(
     candidate: dict[str, Any],
     *,

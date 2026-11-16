@@ -33,6 +33,7 @@ _EXTERNAL_FORBIDDEN_CATEGORIES = frozenset(
 )
 _EXTERNAL_FORBIDDEN_RISK_TAGS = frozenset(
     {
+        "launcher_task_only",
         "research_database_access",
         "session_data_access",
         "team_knowledge_access",

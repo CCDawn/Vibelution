@@ -310,7 +310,7 @@ def _provider_credential_compatibility(provider: dict[str, Any]) -> dict[str, An
     requires = bool(provider.get("requires_credential", True)) and str(
         provider.get("auth_kind") or "api_key"
     ).strip().lower() != "none"
-    configured = not requires or bool(resolution.secret)
+    configured = not requires or resolution.state == "configured"
     canonical_ref = str(resolution.reference or "none")
     return {
         "apiKeyEnv": canonical_ref.removeprefix("env:") if canonical_ref.startswith("env:") else "",

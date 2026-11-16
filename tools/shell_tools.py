@@ -155,6 +155,7 @@ def glob_files(
     cancel_reason = ""
     midway_error = ""
     deadline_at = time.monotonic() + GLOB_DEADLINE_SECONDS
+    task_workspace = _local_assistant_workspace()
 
     try:
         for match in glob_module.iglob(
@@ -176,6 +177,8 @@ def glob_files(
                 truncated = True
                 break
             abs_path = os.path.join(abs_search_dir, match)
+            if task_workspace is not None and not _task_path_allowed(Path(abs_path), task_workspace):
+                continue
             try:
                 match_mtime = os.path.getmtime(abs_path)
             except OSError:
@@ -1085,6 +1088,25 @@ def _path_is_within(path: Path, root: Path) -> bool:
             return False
 
 
+def _local_assistant_workspace() -> Path | None:
+    from core.web.services.agent_directory_service import current_agent_runtime
+    from core.web.services.local_assistant.policy import LOCAL_RUNTIME_SOURCE_PREFIX
+
+    source = current_agent_runtime().get("runtimeToolSource", "")
+    if str(source).startswith(LOCAL_RUNTIME_SOURCE_PREFIX):
+        return get_workspace_root_override()
+    return None
+
+
+def _task_path_allowed(path: Path, workspace: Path) -> bool:
+    from core.web.services.local_assistant.policy import _contained_path
+
+    try:
+        return _contained_path(str(path), workspace, workspace) is not None
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
 def resolve_agent_tool_path(
     path_str: str | Path,
     *,
@@ -1109,6 +1131,9 @@ def resolve_agent_tool_path(
     except Exception:
         resolved = raw.resolve() if raw.is_absolute() else (anchor / raw).resolve()
 
+    task_workspace = _local_assistant_workspace()
+    if task_workspace is not None and not _task_path_allowed(resolved, task_workspace):
+        raise PermissionError("操作路径超出本次派遣的工作区。")
     if _agent_has_danger_full_access():
         return resolved
 
@@ -1295,6 +1320,9 @@ def _is_path_allowed(file_path: str) -> bool:
     （任意绝对路径都可读写）。需要跨边界时用 `security.allowed_directories`
     或 danger_full_access 显式开启。
     """
+    task_workspace = _local_assistant_workspace()
+    if task_workspace is not None:
+        return _task_path_allowed(Path(file_path), task_workspace)
     if _agent_has_danger_full_access():
         return True
     try:
@@ -1395,6 +1423,40 @@ EDITABLE_EXTENSIONS = _config_defaults.get("EDITABLE_EXTENSIONS", {
     '.json', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.md', '.txt',
     '.sh', '.sql', '.xml', '.svg'
 })
+
+
+# tools.file.* switches: edit/create gates and the encoding probe order.
+DEFAULT_ENCODING_PRIORITY = (
+    "utf-8", "utf-8-sig", "gbk", "gb2312", "latin-1", "cp1252",
+)
+
+
+def _file_tool_policy() -> dict:
+    """Resolve tools.file switches for write/edit/encoding behaviour.
+
+    A config failure keeps every capability on with the historical defaults:
+    a broken config must not silently disable writing.
+    """
+    try:
+        from config import get_config
+
+        file_cfg = get_config().tools.file
+        priority = [
+            str(item).strip()
+            for item in (getattr(file_cfg, "encoding_priority", None) or ())
+            if str(item).strip()
+        ]
+        return {
+            "edit_enabled": bool(getattr(file_cfg, "edit_enabled", True)),
+            "create_enabled": bool(getattr(file_cfg, "create_enabled", True)),
+            "encoding_priority": priority or list(DEFAULT_ENCODING_PRIORITY),
+        }
+    except Exception:
+        return {
+            "edit_enabled": True,
+            "create_enabled": True,
+            "encoding_priority": list(DEFAULT_ENCODING_PRIORITY),
+        }
 
 # 禁止删除的文件/目录模式
 FORBIDDEN_DELETE_PATTERNS = _config_defaults.get("FORBIDDEN_DELETE_PATTERNS", [
@@ -1509,8 +1571,8 @@ def _is_path_safe(file_path: str) -> bool:
 
 
 def _detect_encoding(file_path: Path) -> str:
-    """自动检测文件编码"""
-    encodings = ['utf-8', 'utf-8-sig', 'gbk', 'gb2312', 'latin-1', 'cp1252']
+    """自动检测文件编码（顺序来自 tools.file.encoding_priority）"""
+    encodings = _file_tool_policy()["encoding_priority"]
     for enc in encodings:
         try:
             with open(file_path, 'r', encoding=enc) as f:
@@ -2142,6 +2204,8 @@ def create_file(
     Returns:
         操作结果
     """
+    if not _file_tool_policy()["create_enabled"]:
+        return "[创建文件] [禁用] 文件创建已在配置中关闭（tools.file.create_enabled=false）。"
     # 获取绝对路径（稳定锚定到 project/workspace，而不是当前 cwd）
     original_is_absolute = os.path.isabs(file_path)
     if use_workspace and not original_is_absolute:
@@ -2229,6 +2293,8 @@ def edit_file(
     Returns:
         操作结果
     """
+    if not _file_tool_policy()["edit_enabled"]:
+        return "[文件编辑] [禁用] 文件编辑已在配置中关闭（tools.file.edit_enabled=false）。"
     if not file_path or not search_string:
         return "[文件编辑] 错误: 文件路径和搜索字符串不能为空"
 

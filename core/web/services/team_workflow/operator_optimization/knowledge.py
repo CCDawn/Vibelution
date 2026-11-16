@@ -26,6 +26,7 @@ from ..research_runtime.knowledge_sideflow_service import (
     ensure_knowledge_invocation,
 )
 from .discussion import _write_readback, discussion_input
+from .planning_evidence import project_package_evidence
 from .store import CampaignConflict, read_campaign, update_campaign
 
 
@@ -548,13 +549,22 @@ def load_knowledge_snapshot(team_id: str, run_id: str) -> OperatorKnowledgeSnaps
 def planning_knowledge_evidence(team_id: str, run_id: str, record, snapshot):
     seed = _seed_for_record(team_id, record)
     if seed is not None and record.knowledgeRef == seed.knowledgeRef:
-        return _verified_seed_packages(team_id, seed, snapshot)
-    if not snapshot.packages:
+        packages = _verified_seed_packages(team_id, seed, snapshot)
+    elif not snapshot.packages:
         return []
+    else:
+        pinned = {(ref.invocationId, ref.canonicalRef, ref.sha256) for ref in snapshot.packages}
+        packages = [
+            package for package in verified_packages(
+                team_id, run_id, build_knowledge_request(team_id, run_id)
+            )
+            if (package["invocationId"], package["knowledgePackageRef"], package["packageContentHash"]) in pinned
+        ]
+        if len(packages) != len(pinned):
+            raise CampaignConflict("Accepted knowledge source is no longer readable or accepted")
+    store = get_write_store()
+    project_id = store.get_run(run_id).project_id
     return [
-        package
-        for package in verified_packages(
-            team_id, run_id, build_knowledge_request(team_id, run_id)
-        )
-        if package["invocationId"] in {ref.invocationId for ref in snapshot.packages}
+        project_package_evidence(store, team_id, project_id, package)
+        for package in packages
     ]

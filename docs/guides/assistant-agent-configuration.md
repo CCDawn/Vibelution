@@ -16,6 +16,12 @@
 
 参考 [OpenCode 固定版本 Provider 配置](https://github.com/anomalyco/opencode/blob/b155b15694dbcc6768f11d2f25cc2bdd1f738ab4/packages/opencode/src/provider/provider.ts#L1451) 的显式地址与人工模型覆盖，以及 [Open WebUI 模型发现与手填入口](https://docs.openwebui.com/getting-started/quick-start/connect-a-provider/starting-with-openai-compatible/)；复用本项目原生事务、发现目录和探测，不引入外部执行器。
 
+## 在个人助理里测试已配置连接
+
+用户说「帮我测一下哪些厂商能用」时，`provider_test_batch_plan` 从已保存配置选择每条启用连接的一个文本模型。指定厂商传 `query`，重测本会话上次未通过的连接传 `failed_only`。准备清单不调用上游。
+
+将清单返回的 `approvalArguments` 交给 `provider_test_batch`。原生审批一次展示本批所有模型、协议、目标域名和最多请求次数。批准后按原清单各尝试一次，可能消耗 API 或订阅额度。配置变动后需要重新生成清单。结果返回实际测试的模型、状态、用时及安全的失败原因；`provider_test_batch_status` 读取本会话最近结果并注明是否过期。
+
 ## 管理 Agent 的已有配置
 
 | 配置面 | 读取与发现 | 修改与核对 |

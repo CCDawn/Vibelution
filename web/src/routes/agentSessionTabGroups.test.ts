@@ -91,17 +91,22 @@ describe("agentSessionTabGroups", () => {
     expect(state.membership).toEqual({});
   });
 
-  it("renders only non-empty groups with the ungrouped section last", () => {
+  it("keeps every group visible with the ungrouped section last", () => {
     let state = createAgentSessionTabGroup(emptyAgentSessionTabGroupState(), "A", {
       id: "ga",
     }).state;
     state = createAgentSessionTabGroup(state, "B", { id: "gb" }).state;
     state = assignSessionToTabGroup(state, "s2", "ga");
     const sections = resolveSessionTabGroupSections(sessions, state);
-    expect(sections.map((section) => section.groupId)).toEqual(["ga", UNGROUPED_SECTION_ID]);
+    expect(sections.map((section) => section.groupId)).toEqual([
+      "ga",
+      "gb",
+      UNGROUPED_SECTION_ID,
+    ]);
     expect(sections[0].sessions.map((item) => item.id)).toEqual(["s2"]);
-    expect(sections[1].sessions.map((item) => item.id)).toEqual(["s1", "s3"]);
-    expect(sections[1].ungrouped).toBe(true);
+    expect(sections[1].sessions).toEqual([]);
+    expect(sections[2].sessions.map((item) => item.id)).toEqual(["s1", "s3"]);
+    expect(sections[2].ungrouped).toBe(true);
   });
 
   it("drops the ungrouped section when every session is grouped", () => {

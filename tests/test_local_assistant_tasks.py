@@ -239,10 +239,14 @@ def test_private_route_requires_both_control_and_launcher_capability(monkeypatch
     assert external.calls
 
 
-def test_local_worker_preparation_reaches_native_model_handoff(monkeypatch, tmp_path):
+@pytest.mark.parametrize(("profile", "launcher_local"), [
+    ("workspace_write", True), ("read_only", True), (None, True), (None, False),
+])
+def test_local_worker_preparation_preserves_launcher_boundary(monkeypatch, tmp_path, profile, launcher_local):
     from core.web.services import session_service
     from core.web.services.session import worker
     from core.web.services.local_assistant import runtime
+    from core.web.services.external_agent.approval_binding import register_external_session, unregister_external_session
     from tests.test_session_worker import _install_full_prepare_reach_harness
     calls, lifecycle, workspaces = [], [], []
     workspace = tmp_path / "owned-worktree"
@@ -256,18 +260,59 @@ def test_local_worker_preparation_reaches_native_model_handoff(monkeypatch, tmp_
     monkeypatch.setattr(session_service, "_session_reasoning_effort_snapshot", lambda *a: "")
     monkeypatch.setattr(session_service, "_resolve_session_agent_llm", lambda *a, **kw: None)
     monkeypatch.setattr(session_service, "build_agent_context", lambda *a, **kw: None)
-    monkeypatch.setattr(runtime, "verified_task_runtime", lambda **kwargs:
-        {"taskId": "eat-local", "workspace": workspace, "profile": "workspace_write"})
+    task = {"taskId": "eat-local", "workspace": workspace, "profile": profile}
+    monkeypatch.setattr(runtime, "verified_task_runtime", lambda **kwargs: task if profile else None)
     from contextlib import nullcontext
+    from types import SimpleNamespace
+    bindings = []
+    seeds = []
+    prompts = []
+    original = "Choose a project Agent to fix the parser, then report the result back to me."
+
+    monkeypatch.setattr(session_service, "_acquire_chat_agent_for_session",
+                        lambda *args, **kwargs: (SimpleNamespace(seed_volatile_runtime_context=seeds.append), {}))
+    run_turn = worker._run_session_continuation_loop
+
+    def capture_turn(*args, **kwargs):
+        prompts.append(kwargs["initial_prompt"])
+        return run_turn(*args, **kwargs)
+
+    monkeypatch.setattr(worker, "_run_session_continuation_loop", capture_turn)
     def capture_workspace(path, **kwargs):
         workspaces.append(path)
         return nullcontext()
     monkeypatch.setattr(session_service, "_session_tool_workspace_override", capture_workspace)
+    monkeypatch.setattr(session_service, "active_agent_runtime",
+                        lambda *args, **kwargs: bindings.append(kwargs) or nullcontext())
     control = session_service.SessionTurnControl(session_id="session-1", turn_id="turn-1")
-    worker._run_session_turn_impl({"session_id": "session-1", "turn_id": "turn-1",
-        "turn_control": control, "agent_id": "coder", "user_message": "Implement and test", "message_metadata": {}})
+    registration = {"task_id": "eat-local", "session_id": "session-1", "agent_id": "coder"}
+    register_external_session(**registration, launcher_local=launcher_local)
+    try:
+        worker._run_session_turn_impl({"session_id": "session-1", "turn_id": "turn-1",
+            "turn_control": control, "agent_id": "coder", "user_message": original,
+            "user_message_source": "external_agent_task", "message_metadata": {"source": "external_agent_task",
+                "taskId": "eat-local", "effectivePermissionProfile": profile or "workspace_write"}})
+    finally:
+        unregister_external_session(**registration)
     assert "continuation" in calls
-    assert workspace in workspaces
+    assert original in prompts[0]
+    assert (workspace in workspaces) is bool(profile)
+    expected = f"launcher_assistant_task:{profile or 'inactive'}" if launcher_local else "external_agent_task:workspace_write"
+    assert bindings[-1]["runtime_tool_source"] == expected
+    assert bool(bindings[-1]["runtime_tool_grants"]) is bool(profile or not launcher_local)
+    assert ("record_local_reuse_evidence_tool" in bindings[-1]["runtime_tool_grants"]) is (profile == "workspace_write")
+    assignment = next((block for block in seeds if "Launcher Task Assignment" in block), "")
+    if not profile:
+        assert assignment == ""
+    else:
+        assert "You are the assigned project Agent" in assignment
+        assert "The Launcher assistant owns further dispatch" in assignment
+        assert "Return your actual findings" in assignment
+        assert "Locate source using glob_tool for file names and grep_search_tool" in assignment
+        assert original not in assignment
+        assert ("Run real tests" in assignment) is (profile == "workspace_write")
+        assert ("record_local_reuse_evidence_tool" in assignment) is (profile == "workspace_write")
+        assert ("read-only assignment" in assignment) is (profile == "read_only")
 
 
 def test_expired_local_task_loses_execution_grant_and_is_stopped_by_reconcile(tmp_path):

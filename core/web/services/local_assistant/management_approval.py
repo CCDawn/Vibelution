@@ -17,7 +17,7 @@ _ROUTINE = frozenset({
 })
 _DESTRUCTIVE = frozenset({"agent_archive", "agent_purge", "agent_purge_batch", "team_archive", "project_lifecycle",
                           "branch_cleanup_execute"})
-_EXPLICIT = frozenset({"authorization_upgrade", "agent_tool_policy_update", "knowledge_acl_grant",
+_EXPLICIT = frozenset({"authorization_upgrade", "authorization_recover", "agent_tool_policy_update", "knowledge_acl_grant",
                        "config_update", "reminder_handoff_recover"})
 _READS = frozenset({"delegation_goal_get", "delegation_goal_list", "branch_cleanup_plan"})
 
@@ -48,10 +48,10 @@ def parse_arguments(raw: str) -> dict:
 
 def _risk(action: str, parameters: dict) -> str:
     from core.assistant_runtime import actions
-    from core.assistant_runtime.provider_approval import PROVIDER_APPROVAL_ACTIONS, validate_provider_model_resolve
+    from core.assistant_runtime.provider_approval import PROVIDER_APPROVAL_ACTIONS, provider_approval_summary
 
     if action in PROVIDER_APPROVAL_ACTIONS:
-        validate_provider_model_resolve(parameters)
+        provider_approval_summary(action, parameters)
         return "write"
 
     managed = actions._management_contracts()

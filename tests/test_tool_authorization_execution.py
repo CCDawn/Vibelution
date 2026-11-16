@@ -520,7 +520,7 @@ def test_long_wait_rechecks_real_registered_task_authority(monkeypatch, tmp_path
         record = service.store.get_task(task_id)
         service.store.transition(task_id, status=record["status"], fields=revocation)
         result = poll(40)
-        assert not result.allowed and result.code == "terminal_wait_turn_budget_exhausted"
+        assert not result.allowed and result.code == "local_task_scope_denied"
     finally:
         unregister_external_session(task_id=task_id, session_id="session-1", agent_id="coder")
 

@@ -480,7 +480,9 @@ def _resolve_codex_executable() -> str:
 
 
 def _resolve_cwd(cwd: str | None) -> Path:
-    from tools.shell_tools import _get_workspace_root, get_workspace_root_override
+    from tools.shell_tools import (
+        _get_workspace_root, _local_assistant_workspace, _task_path_allowed, get_workspace_root_override,
+    )
 
     active_workspace = _get_workspace_root().resolve()
     workspace_root = active_workspace if (active_workspace / ".git").exists() else PROJECT_ROOT
@@ -488,6 +490,9 @@ def _resolve_cwd(cwd: str | None) -> Path:
     if not raw.is_absolute():
         raw = workspace_root / raw
     resolved = raw.resolve()
+    task_workspace = _local_assistant_workspace()
+    if task_workspace is not None and not _task_path_allowed(resolved, task_workspace):
+        raise PermissionError("终端工作目录超出本次派遣的工作区。")
     if (
         get_workspace_root_override() is not None
         and _current_agent_sandbox_mode() != _DANGER_FULL_ACCESS_SANDBOX_MODE

@@ -1,25 +1,12 @@
 """Apply task-level local consent at the existing final execution gate."""
-from pathlib import Path
+import re
 
-from .policy import _FORBIDDEN_TAGS, LOCAL_RUNTIME_SOURCE_PREFIX, normal_development_call
+from .policy import (LOCAL_REUSE_EVIDENCE_TOOL, LOCAL_RUNTIME_SOURCE_PREFIX, normal_development_call,
+                     workspace_paths_allowed)
 
 
-def _ordinary_read(tool_name, args, workspace):
-    root = Path(workspace).resolve()
-    if tool_name == "read_file_tool":
-        value = args.get("file_path")
-    elif tool_name in {"glob_tool", "grep_search_tool"}:
-        value = args.get("search_dir") or "."
-        if tool_name == "glob_tool":
-            pattern = args.get("pattern", "")
-            if not isinstance(pattern, str) or Path(pattern).is_absolute() or Path(pattern).drive or ".." in pattern.replace("\\", "/").split("/"):
-                return False
-    else:
-        return False
-    if not isinstance(value, str) or not value:
-        return False
-    target = Path(value)
-    return (target if target.is_absolute() else root / target).resolve().is_relative_to(root)
+class LocalTaskScopeError(PermissionError):
+    """An invocation is outside its task grant and cannot receive an approval."""
 
 
 def _native_launcher(runtime):
@@ -38,10 +25,8 @@ def _task_runtime(runtime):
     from .service import task_store
     from core.web.services.external_agent.store import ExternalAgentTaskStoreError
     session_id, agent_id = runtime.get("sessionId", ""), runtime.get("agentId", "")
-    task_id = external_session_task(session_id=session_id, agent_id=agent_id)
-    if not task_id:
-        return None
     try:
+        task_id = external_session_task(session_id=session_id, agent_id=agent_id)
         record = task_store(directory.PROJECT_ROOT).get_task(task_id)
         metadata = {"source": "external_agent_task", "taskId": task_id,
                     "effectivePermissionProfile": record["effectivePermissionProfile"]}
@@ -53,39 +38,50 @@ def _task_runtime(runtime):
 
 def local_terminal_wait_allowed(runtime):
     """An active native task may wait until its command/deadline, not eight polls."""
-    return (str(runtime.get("runtimeToolSource", "")).startswith(LOCAL_RUNTIME_SOURCE_PREFIX)
-            and _task_runtime(runtime) is not None)
+    if not str(runtime.get("runtimeToolSource", "")).startswith(LOCAL_RUNTIME_SOURCE_PREFIX):
+        return False
+    _active_task(runtime)
+    return True
+
+
+def _active_task(runtime):
+    task = _task_runtime(runtime)
+    if task is None:
+        raise LocalTaskScopeError("本次派遣的工作区授权已失效，请结束任务并将结果交回个人助理。")
+    return task
+
+
+def require_local_workspace_write(runtime):
+    """Require a current server-bound worktree write grant, even after tool selection."""
+    if runtime.get("runtimeToolSource") == LOCAL_RUNTIME_SOURCE_PREFIX + "workspace_write":
+        task = _active_task(runtime)
+        if task["profile"] == "workspace_write":
+            return task
+    raise LocalTaskScopeError("本地复用记录工具仅供持有工作区写权限的当前 Launcher 派遣任务使用。")
 
 
 def local_approval_policy(runtime, tool_name, args, requirement, permission_preset):
+    if tool_name == LOCAL_REUSE_EVIDENCE_TOOL:
+        require_local_workspace_write(runtime)
+        return None, permission_preset
     if _native_launcher(runtime) and tool_name == "personal_assistant_manage_tool":
         from .management_approval import approval_requirement
         return approval_requirement(runtime, args), "request_approval"
     if not str(runtime.get("runtimeToolSource", "")).startswith(LOCAL_RUNTIME_SOURCE_PREFIX):
         return requirement, permission_preset
-    task = _task_runtime(runtime)
+    task = _active_task(runtime)
+    workspace = task["workspace"]
+    if not workspace_paths_allowed(tool_name, args, workspace):
+        raise LocalTaskScopeError("工具路径超出本次派遣的工作区，请使用任务工作区内的路径。")
+    if tool_name in {"cli_tool", "exec_command"}:
+        command = args.get("command" if tool_name == "cli_tool" else "cmd")
+        if isinstance(command, str):
+            if re.match(r"(?i)^\s*rg(?:\.exe)?(?:\s|$)", command):
+                raise LocalTaskScopeError("本次派遣可直接用 grep_search_tool 搜源码，或用 glob_tool 查文件名。请用对应工具继续，路径限定在任务工作区。")
+            if re.fullmatch(r"(?i)\s*python(?:\.exe)?\s+scripts[\\/]reuse_research_evidence\.py\s+record\s+--help\s*", command):
+                raise LocalTaskScopeError("LOCAL_ONLY 复用记录请使用 record_local_reuse_evidence_tool，其参数由工具直接提供。")
     risk = requirement[1] if requirement else "execute"
-    from core.web.services.tool_catalog import TOOL_CATALOG
-    metadata = TOOL_CATALOG.get(tool_name) or {}
-    red_line = bool(_FORBIDDEN_TAGS.intersection(metadata.get("riskTags") or ()))
-    if task and "read_only" in (metadata.get("capabilityTags") or ()):
-        if red_line:
-            return ("always", "read"), "request_approval"
-        # 已验证任务的非红线只读发现跟随任务权限档：full_access 静默放行；
-        # 其他档位保持询问，但降为普通审批卡（信任按钮可用，不再 always 钉死）。
-        if permission_preset == "full_access" or _ordinary_read(tool_name, args, task["workspace"]):
-            return None, permission_preset
-        return ("on_request", "read"), permission_preset
-    if (task and risk not in {"network", "destructive"}
-            and normal_development_call(tool_name, args, task["workspace"])):
+    if risk not in {"network", "destructive"} and normal_development_call(tool_name, args, workspace):
         return None, permission_preset
-    if task and not red_line and permission_preset == "full_access":
-        # 已验证任务的 full_access 档与普通会话 full_access 短路同语义：非红线
-        # 调用免卡放行；红线标签在上方各分支保持钉死。
-        return None, permission_preset
-    # This includes revoked tasks, forged sources and calls outside normal
-    # development for non-full_access presets. Red-line tagged tools stay
-    # pinned for every preset: no collaboration mode or Agent preset can
-    # silently authorize a publish, delete, arbitrary shell script or
-    # privilege change.
+    # The target Agent's standing preset cannot grant consent for a dispatched task.
     return ("always", risk), "request_approval"

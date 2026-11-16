@@ -124,6 +124,8 @@ def derive_server_verification_status(
     source_url: object,
     quote: object,
     fetched_text: Mapping[str, Mapping[str, Any]] | None,
+    finding_text_by_source: Mapping[tuple[str, str], Mapping[str, Mapping[str, Any]]] | None = None,
+    source: Mapping[str, Any] | None = None,
 ) -> str:
     """Derive a card's ``verification_status`` from server authorities only.
 
@@ -137,11 +139,16 @@ def derive_server_verification_status(
     (legacy fixtures and non-collection readers) keep the declared value by
     passing ``None``; callers that hold a stage task must pass its receipts so
     the declaration can no longer self-certify an unfetched source.
+    The accepted finding handoff is a fallback scoped to this card's source ID.
     """
 
-    if fetched_text is None:
+    if fetched_text is None and finding_text_by_source is None:
         return str(declared or "").strip().lower() or _UNVERIFIED_STATUS
-    receipt = _fetch_receipt_for_url(source_url, fetched_text)
+    receipt = _fetch_receipt_for_url(source_url, fetched_text or {})
+    if not receipt and finding_text_by_source and source:
+        candidate_id = _text(source.get("candidateId"))
+        source_key = ("candidate", candidate_id) if candidate_id else ("record", _text(source.get("recordId")))
+        receipt = _fetch_receipt_for_url(source_url, finding_text_by_source.get(source_key, {}))
     if not receipt:
         return _UNVERIFIED_STATUS
     quoted = str(quote or "").strip()
@@ -451,6 +458,7 @@ def _v2_card(
     *,
     path: str,
     fetched_text: Mapping[str, Mapping[str, Any]] | None = None,
+    finding_text_by_source: Mapping[tuple[str, str], Mapping[str, Mapping[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     fields = normalize_challenge_evidence_fields(item, parent, path=path)
     fields["verification_status"] = derive_server_verification_status(
@@ -458,6 +466,8 @@ def _v2_card(
         source_url=fields.get("source_url"),
         quote=item.get("quote"),
         fetched_text=fetched_text,
+        finding_text_by_source=finding_text_by_source,
+        source=fields,
     )
     locator = _citation_locator(item)
     if not _has_locator_value(locator):
@@ -551,6 +561,7 @@ def build_source_extraction_evidence_cards(
     *,
     mode: str = "challenge_v2",
     fetched_text: Mapping[str, Mapping[str, Any]] | None = None,
+    finding_text_by_source: Mapping[tuple[str, str], Mapping[str, Mapping[str, Any]]] | None = None,
 ) -> list[dict[str, Any]]:
     """Build canonical cards; legacy projection requires an explicit mode.
 
@@ -593,6 +604,7 @@ def build_source_extraction_evidence_cards(
                         extraction,
                         path=f"{key}[{extraction_index}].{collection_key}[{finding_index}]",
                         fetched_text=fetched_text,
+                        finding_text_by_source=finding_text_by_source,
                     )
                     identity = json.dumps(
                         card,
@@ -612,6 +624,7 @@ def build_source_extraction_evidence_cards(
                     extraction,
                     path=f"{key}[{extraction_index}]",
                     fetched_text=fetched_text,
+                    finding_text_by_source=finding_text_by_source,
                 )
             )
     return cards

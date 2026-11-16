@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 
 from core.research.operator_optimization.cuda_worker import CudaTrialRequest
 from core.research.operator_optimization.plan import OptimizationPlan
 from core.research.workflow.contracts._canonical import sha256_hex
+from core.research.workflow.operator_optimization_definition import (
+    OPERATOR_BASELINE_WORKFLOW_ID,
+    OPERATOR_WORKFLOW_ID,
+)
 
 from ..research_runtime.artifact_readback_registry import (
     build_canonical_ref,
@@ -16,16 +21,17 @@ from ..research_runtime.formal_write_runtime import get_write_store
 from .dispatch import dispatch_trial
 from .knowledge import read_ref, round_context
 from .planning import planning_input, validate_plan_candidates
-from .store import CampaignConflict
+from .store import CampaignConflict, gpu_trial_start_lock
 
 
 def require_active_node(action, snapshot: dict, node_id: str):
     store = get_write_store()
     run = store.get_run(action.run_id)
     attempt = store.latest_attempt(action.run_id, node_id)
+    workflow_id = OPERATOR_BASELINE_WORKFLOW_ID if node_id == "operator_baseline" else OPERATOR_WORKFLOW_ID
     if (
         run is None
-        or run.workflow_id != "operator-optimization"
+        or run.workflow_id != workflow_id
         or run.status not in {"running", "blocked"}
         or attempt is None
         or attempt.node_run_id != action.node_run_id
@@ -39,6 +45,13 @@ def require_active_node(action, snapshot: dict, node_id: str):
     ):
         raise CampaignConflict("Execution locator differs from its Ledger run")
     return run
+
+
+@contextmanager
+def gpu_trial_start_fence(action, snapshot: dict):
+    with gpu_trial_start_lock(get_write_store().path, action.run_id):
+        require_active_node(action, snapshot, action.node_id)
+        yield
 
 
 def load_frozen_plan(run):
@@ -101,8 +114,12 @@ def execute_plan(action, snapshot: dict) -> list[dict[str, str]]:
         or plan.trialTimeoutSeconds > campaign.budget.trialTimeoutSeconds
     ):
         raise CampaignConflict("Frozen plan exceeds the authorized trial limits")
+
     refs = []
     for index in range(plan.trialCount):
+        # A launched trial can still publish and settle after cancellation.
+        # Check again before admitting any sibling trial.
+        require_active_node(action, snapshot, "operator_execution")
         # Stable across node retries: dispatch_trial owns durable admission,
         # terminal receipt recovery and settlement, including failed trials.
         request = CudaTrialRequest(
@@ -123,6 +140,7 @@ def execute_plan(action, snapshot: dict) -> list[dict[str, str]]:
             run.project_id,
             request,
             device_name=environment["deviceName"],
+            start_fence=lambda: gpu_trial_start_fence(action, snapshot),
         )
         refs.append(
             {

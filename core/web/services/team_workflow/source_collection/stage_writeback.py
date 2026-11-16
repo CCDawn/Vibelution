@@ -9,7 +9,7 @@ from typing import Any
 
 from ..source_collection_common import project_source_version_families
 from .doi_enrichment import enrich_candidates_missing_doi
-from .extraction_fetch_text import task_fetched_text
+from .extraction_fetch_text import finding_fetched_text_by_source, task_fetched_text
 from .extraction_quote_anchor_supply import (
     QUOTE_BLOCK_MAX_CHARS,
     QUOTE_SOURCES_TOTAL_CHAR_BUDGET,
@@ -136,7 +136,7 @@ def _source_collection_stage_writeback_quote_anchor_blocks(
     run_id: str,
     task: dict[str, Any],
 ) -> tuple[dict[str, list[dict[str, Any]]], set[str]]:
-    """Use the same task-scoped original texts as the context supply."""
+    """Use the same scoped original texts as the context supply."""
     s = _service()
     records = s._source_collection_stage_records_for_run(run_id)
     try:
@@ -150,8 +150,10 @@ def _source_collection_stage_writeback_quote_anchor_blocks(
         if s._trim_text(record.get("recordId"), max_length=160)
     }
     fetched_text = task_fetched_text(task)
+    candidates = s._source_collection_candidates_for_run(team_id, run_id)
+    finding_text = finding_fetched_text_by_source(team_id, run_id, task, candidates)
     blocks_by_id: dict[str, list[dict[str, Any]]] = {}
-    for candidate in s._source_collection_candidates_for_run(team_id, run_id):
+    for candidate in candidates:
         candidate_id = s._trim_text(candidate.get("candidateId"), max_length=160)
         if not candidate_id:
             continue
@@ -159,6 +161,7 @@ def _source_collection_stage_writeback_quote_anchor_blocks(
             candidate,
             record_by_id,
             fetched_text_by_locator=fetched_text,
+            finding_text_by_locator=finding_text.get(("candidate", candidate_id)),
             block_max_chars=4000,
         )
     for record_id, record in record_by_id.items():
@@ -168,6 +171,7 @@ def _source_collection_stage_writeback_quote_anchor_blocks(
                 record,
                 {},
                 fetched_text_by_locator=fetched_text,
+                finding_text_by_locator=finding_text.get(("record", record_id)),
                 block_max_chars=4000,
             )
     return blocks_by_id, set(blocks_by_id)
@@ -1191,21 +1195,36 @@ def get_source_collection_stage_task_context(
     selected_candidates = pageable_candidates[candidate_page_offset:candidate_page_offset + candidate_page_limit]
     next_candidate_offset = candidate_page_offset + len(selected_candidates)
     candidate_has_more = next_candidate_offset < len(pageable_candidates)
+    finding_text = {}
     if (
         normalized_stage_id == "extraction"
         or task_agent_role == "source_extractor"
     ) and normalized_context_mode != "minimal":
+        # A record-only page can refer to a candidate on another page.
+        finding_text = finding_fetched_text_by_source(
+            normalized_team_id, normalized_run_id, task, inventory_candidates,
+        )
         # SCI-021 read-through: legacy candidates materialized without
         # ``metadata.doi`` get an OpenAlex exact-title reverse-lookup here
         # (bounded real-network lookups, fail-open).  Hits mutate the in-page
         # dicts — so ``candidates[]``, ``quotableSources`` locators and the
         # writeback audit all see the DOI — and persist back to the candidate
-        # store, so the enrichment survives this read.
+        # store, so the enrichment survives this read. Do not add a DOI to a
+        # candidate that already has original text: a new identity may not be
+        # part of the accepted search receipt and would invalidate its binding.
+        page_records_by_id = {item["recordId"]: item for item in selected_records if item.get("recordId")}
+        candidates_needing_doi = [
+            item for item in selected_candidates if isinstance(item, dict)
+            and not source_quotable_blocks(
+                item, page_records_by_id,
+                fetched_text_by_locator=finding_text.get(("candidate", item.get("candidateId"))),
+            )
+        ]
         try:
             enrich_candidates_missing_doi(
                 normalized_team_id,
                 normalized_run_id,
-                [item for item in selected_candidates if isinstance(item, dict)],
+                candidates_needing_doi,
             )
         except Exception:  # noqa: BLE001 - context reads stay available when enrichment breaks
             pass
@@ -1360,7 +1379,8 @@ def get_source_collection_stage_task_context(
     if normalized_context_mode in {"evidence", "retry_missing", "retry_evidence"} and normalized_stage_id != "relations" and task_agent_role != "source_relation_mapper":
         context["usage"]["evidenceInstruction"] = (
             "candidates[].summary 是搜集阶段保存的摘要或元数据，不等于全文；"
-            "模型摘要只作检索线索；请用 web_fetch_tool 抓取既有 URL 后重新读取上下文，quote 仅引用 quotableSources 的真实抓取文本。"
+            "模型摘要只作检索线索。先读 quotableSources，已有可引用原文就直接使用；"
+            "仅在缺原文时用 web_fetch_tool 抓取既有 URL 后重读上下文。"
         )
     if (normalized_stage_id == "extraction" or task_agent_role == "source_extractor") and (
         normalized_context_mode != "minimal"
@@ -1387,13 +1407,15 @@ def get_source_collection_stage_task_context(
             [item for item in selected_records if isinstance(item, dict)],
             failed_fetch_by_candidate_id=failed_fetch_by_candidate_id,
             fetched_text_by_locator=task_fetched_text(task),
+            finding_text_by_source=finding_text,
             block_max_chars=QUOTE_BLOCK_MAX_CHARS,
             total_char_budget=QUOTE_SOURCES_TOTAL_CHAR_BUDGET,
         )
         context["usage"]["quoteAnchorInstruction"] = (
             "quote 锚供给：quotableSources[] 为每个候选/记录给出可逐字复制的原文块"
-            "（blocks[].text 来自本任务 web_fetch_tool 的成功回执，"
+            "（blocks[].text 来自本任务或经正式搜集交接绑定的 web_fetch_tool 成功回执，"
             "超长块已截断并标注 truncated=true，只允许引用块内文本）；"
+            "有可引用原文的来源直接使用现有块，无需重复抓取；"
             "claims[].quote 与 evidenceRefs[].quote 必须逐字取自对应 sourceId 的 blocks[].text，"
             "原样复制，禁止改写、拼接、凭记忆重写或写空串；"
             "抓取页面不等于获取整篇论文，必须按实际文本判断主张；"

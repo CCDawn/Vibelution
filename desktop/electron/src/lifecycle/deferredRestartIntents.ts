@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { appendSupervisorEventFallback } from "./supervisorEventFallback.js";
@@ -41,6 +41,12 @@ export type FulfillDeferredRestartIntentInput = {
 };
 
 type IntentStatus = "pending" | "claimed" | "completed" | "failed" | "expired" | "superseded";
+
+/** Terminal intents keep no durable promise; their settle events are already
+ * recorded in the supervisor event fallback, so the files are garbage. */
+const TERMINAL_INTENT_STATUSES: ReadonlySet<string> = new Set<IntentStatus>([
+  "completed", "failed", "expired", "superseded"
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -322,4 +328,31 @@ export function supersedePendingDeferredRestartIntents(input: {
     superseded.push(intent.intentId);
   }
   return superseded;
+}
+
+/**
+ * Every restart rejection persists a fresh pending intent (workbench restart
+ * guard), and fulfilment settles them failed/expired/completed/superseded —
+ * but nothing removed the settled files, so a restart-happy operator
+ * accumulated intents forever. Their settle events are durably recorded in
+ * the supervisor event fallback, so the terminal files are garbage collected
+ * here; pending/claimed files are never touched.
+ */
+export function pruneTerminalDeferredRestartIntents(input: {
+  runtimeManagerDir: string;
+}): string[] {
+  const pruned: string[] = [];
+  for (const intent of listDeferredRestartIntents(input.runtimeManagerDir)) {
+    if (!TERMINAL_INTENT_STATUSES.has(intent.status) || !intentTargetMatches(intent)) {
+      continue;
+    }
+    try {
+      unlinkSync(deferredRestartIntentPath(input.runtimeManagerDir, intent.intentId));
+      pruned.push(intent.intentId);
+    } catch {
+      // Best-effort GC: a locked or already-deleted file must not fail the
+      // lifecycle command or the fulfilment poll this runs behind.
+    }
+  }
+  return pruned;
 }

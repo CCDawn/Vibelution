@@ -216,17 +216,26 @@ export function agentPurgePreviewIsValid(summary: Record<string, unknown> | null
     && effects.every((effect, index) => (summary.assistantPurgeEffects as unknown[])[index] === effect);
 }
 
+function authorizationScopesAreDisplayable(scopes: unknown): boolean {
+  // Keep identifiers single-line and unambiguous without truncating them.
+  return Array.isArray(scopes) && scopes.length > 0
+    && Array.from(scopes).every((scope) => typeof scope === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]*(?![\s\S])/.test(scope));
+}
+
 /** Validate the exact authorization details before rendering or enabling approval. */
 export function authorizationUpgradePreviewIsValid(summary: Record<string, unknown> | null | undefined): boolean {
   if (!summary || summary.assistantAction !== "authorization_upgrade" || summary.assistantArgumentsInvalid) return false;
-  const targets = summary.assistantTargets;
-  const projectId = targets && typeof targets === "object" && !Array.isArray(targets)
-    ? (targets as Record<string, unknown>).project_id : undefined;
-  const scopes = summary.assistantAddedScopes;
-  // Keep identifiers single-line and unambiguous without truncating them.
-  return typeof projectId === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}(?![\s\S])/.test(projectId)
-    && Array.isArray(scopes) && scopes.length > 0
-    && Array.from(scopes).every((scope) => typeof scope === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]*(?![\s\S])/.test(scope));
+  return previewRecord(summary.assistantTargets) && previewId(summary.assistantTargets.project_id)
+    && authorizationScopesAreDisplayable(summary.assistantAddedScopes);
+}
+
+export function authorizationRecoverPreviewIsValid(summary: Record<string, unknown> | null | undefined): boolean {
+  return previewExact(summary, {
+    assistantAction: previewOneOf("authorization_recover"),
+    assistantRecoveryVersion: previewOneOf(1),
+    assistantTargets: targets => previewExact(targets, { project_id: previewId }),
+    assistantAddedScopes: authorizationScopesAreDisplayable,
+  });
 }
 
 /** Lifecycle approval must show the complete bound request. */
@@ -345,7 +354,7 @@ export function toolApprovalActionPreview(
     if (summary.assistantArgumentsInvalid || !managementApprovalActionIsKnown(action)) {
       return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新发起。" : "Arguments cannot be verified. Decline and request again."}`;
     }
-    if (action === "provider_model_resolve" || Object.hasOwn(summary, "assistantProviderPreviewVersion")) {
+    if (["provider_model_resolve", "provider_test_batch"].includes(action) || Object.hasOwn(summary, "assistantProviderPreviewVersion")) {
       return providerModelApprovalText(summary, lang);
     }
     if (agentConfigurationApprovalActionIsKnown(action)) return agentConfigurationApprovalText(summary, lang);
@@ -524,15 +533,21 @@ export function toolApprovalActionPreview(
         lang === "zh" ? "目标项目可能限制实际权限，请以回执为准。" : "The project may restrict effective permission; check the receipt.",
         `${lang === "zh" ? "任务原文" : "Original task"}:`, summary.assistantTask as string].join("\n");
     }
-    if (action === "authorization_upgrade") {
-      const projectId = targets && typeof targets === "object" && !Array.isArray(targets)
-        ? (targets as Record<string, unknown>).project_id : undefined;
-      const scopes = summary.assistantAddedScopes;
-      if (!authorizationUpgradePreviewIsValid(summary)) {
+    if (action === "authorization_upgrade" || action === "authorization_recover") {
+      const recovering = action === "authorization_recover";
+      const valid = recovering ? authorizationRecoverPreviewIsValid(summary) : authorizationUpgradePreviewIsValid(summary);
+      if (!valid) {
         return `${title}\n${lang === "zh" ? "参数无法核对，请拒绝并重新发起。" : "Arguments cannot be verified. Decline and request again."}`;
       }
-      return [title, `${lang === "zh" ? "项目" : "Project"}: ${projectId}`,
-        lang === "zh" ? "新增权限:" : "Added permissions:", ...(scopes as string[]).map((scope) => `- ${scope}`)].join("\n");
+      const { project_id: projectId } = targets as Record<string, string>;
+      const scopeLines = (summary.assistantAddedScopes as string[]).map((scope) => `- ${scope}`);
+      const project = `${lang === "zh" ? "项目" : "Project"}: ${projectId}`;
+      if (recovering) {
+        const description = lang === "zh" ? "批准后会为此项目建立新的助理授权身份，仅授予下列权限。"
+          : "Approval creates a new assistant authorization identity for this project and grants it only the permissions listed below.";
+        return [title, project, description, ...scopeLines].join("\n");
+      }
+      return [title, project, lang === "zh" ? "新增权限:" : "Added permissions:", ...scopeLines].join("\n");
     }
     const targetLines = targets && typeof targets === "object" && !Array.isArray(targets)
       ? Object.entries(targets).filter(([, value]) => typeof value === "string")

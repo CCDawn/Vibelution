@@ -12,6 +12,7 @@ from core.research.workflow.ledger import KnowledgeInvocationRecord
 from core.web.services.team_workflow.operator_optimization import (
     knowledge,
     planning,
+    planning_evidence,
 )
 from core.web.services.team_workflow.operator_optimization.store import (
     CampaignConflict,
@@ -331,6 +332,107 @@ def test_request_identity_changes_for_gap_or_root_changes(activity, handoff):
     )
 
 
+@pytest.mark.parametrize("mode", ["fresh", "reused", "foreign_project", "changed_card"])
+def test_project_planner_receives_only_verified_directional_evidence(monkeypatch, mode):
+    def card(evidence_id, level, quote):
+        return {
+            "claimEvidenceId": evidence_id, "claimId": "softmax-assumption", "supportLevel": level,
+            "candidateId": evidence_id + "-candidate", "sourceId": evidence_id + "-source",
+            "sourceRevision": "sha256:" + "4" * 64,
+            "locator": {"kind": "web_section", "url": "https://example.org/evidence"},
+            "quote": quote, "quoteHash": sha256_hex(quote),
+        }
+
+    payloads = {
+        "evidence_card_batch": {"evidenceCards": [
+            {**card("ce-support", "supports", "Rows fit in SRAM"),
+             "locator": {"kind": "evidence_ref", "anchor": "source-record",
+                         "url": "https://example.org/evidence"}},
+            card("ce-boundary", "contradicts", "Higher occupancy does not guarantee higher performance"),
+            card("ce-counter", "supports", "Registers can reduce the number of resident blocks"),
+            card("ce-unbound", "supports", "This card was not used by the reviewed relation graph"),
+            card("ce-unapproved", "supports", "The knowledge manager did not approve this source"),
+            {**card("ce-rejected", "supports", "Revoked source"), "reviewStatus": "rejected"},
+            {**card("ce-placeholder", "contradicts", "Graph claim only"),
+             "locator": {"kind": "evidence_ref", "anchor": "candidate-id"}},
+        ]},
+        "evidence_relation_graph": {"edges": [
+            {"evidenceRefs": ["ce-support", "ce-rejected", "ce-placeholder", "ce-unapproved"]}
+        ],
+            "counterEvidenceRefs": [
+                {"evidenceRef": "ce-boundary", "claim": "Occupancy predicts gains on this workload",
+                 "disposition": "limit_scope"},
+                {"evidenceRef": "ce-boundary", "claim": "Every candidate uses the same code generation path",
+                 "disposition": "alternative_pathway"},
+                {"evidenceRef": "ce-counter", "claim": "Register use cannot reduce residency",
+                 "disposition": "challenges_ontology"},
+            ]},
+    }
+    package = {
+        "invocationId": "inv-reuse" if mode == "reused" else "inv-new",
+        "producerRunId": "" if mode == "reused" else "child",
+        "knowledgePackageRef": build_canonical_ref(
+            kind="knowledge_package", team_id="team", authority_run_id="sources", content_hash="5" * 64,
+        ),
+        "packageContentHash": "5" * 64,
+        "package": {"accepted": True},
+    }
+    scope = dict(parent_run_id="parent", scope_hash="scope", status="completed", handoff_state="accepted",
+                 package_content_hash="5" * 64)
+    invocations = {
+        "inv-new": SimpleNamespace(invocation_id="inv-new", knowledge_child_run_id="child", **scope),
+        "inv-reuse": SimpleNamespace(invocation_id="inv-reuse", knowledge_child_run_id=None, **scope),
+    }
+    child = SimpleNamespace(run_id="child", team_id="team", status="succeeded",
+        project_id="elsewhere" if mode == "foreign_project" else "project",
+        workflow_id="challenge-cup-knowledge-sideflow")
+
+    def receipt(kind):
+        digest = sha256_hex(payloads[kind])
+        ref = build_canonical_ref(kind=kind, team_id="team", authority_run_id="sources", content_hash=digest)
+        return ("receipt", "child", kind, "team", kind, json.dumps({"canonicalRef": ref}), 1, digest, "", 1)
+
+    receipts = {kind: receipt(kind) for kind in payloads}
+    repo = SimpleNamespace(
+        get_knowledge_invocation=invocations.get,
+        get_run=lambda _: child,
+        get_event_by_id=lambda _: SimpleNamespace(run_id="parent", event_type="knowledge_invocation_reused",
+            payload_json=json.dumps({"invocationId": "inv-reuse", "reusedFromInvocationId": "inv-new",
+                                     "packageContentHash": "5" * 64})),
+        latest_attempt=lambda _, node: SimpleNamespace(status="succeeded", node_run_id={
+            "source_extraction": "evidence_card_batch", "evidence_relations": "evidence_relation_graph"}[node]),
+        list_receipts_for_node_run=lambda node: [receipts[node]],
+    )
+    store = SimpleNamespace(read=lambda reader: reader(repo))
+    if mode == "changed_card":
+        payloads["evidence_card_batch"]["evidenceCards"][0]["quote"] = "Changed after publication"
+    monkeypatch.setattr(planning_evidence, "load_scoped_artifact_payload", lambda kind, **_: payloads[kind])
+    monkeypatch.setattr(planning_evidence, "approved_package_source_candidates", lambda **_: {
+        c["candidateId"] for c in payloads["evidence_card_batch"]["evidenceCards"]
+        if c["claimEvidenceId"] != "ce-unapproved"
+    })
+    if mode in {"foreign_project", "changed_card"}:
+        with pytest.raises(CampaignConflict, match="scope|after verification"):
+            planning_evidence.project_package_evidence(store, "team", "project", package)
+        return
+
+    projected = planning_evidence.project_package_evidence(store, "team", "project", package)
+    assert projected["producerRunId"] == "child"
+    assert set(projected["evidenceArtifactRefs"]) == set(payloads)
+    assert [(c["claimEvidenceId"], c["direction"], c["quote"]) for c in projected["evidenceCards"]] == [
+        ("ce-support", "supports", "Rows fit in SRAM"),
+        ("ce-counter", "refutes", "Registers can reduce the number of resident blocks"),
+        ("ce-boundary", "qualifies", "Higher occupancy does not guarantee higher performance"),
+    ]
+    assert projected["evidenceCards"][1]["sourceSupportLevel"] == "supports"
+    assert projected["evidenceCards"][1]["counterClaims"] == [
+        {"claim": "Register use cannot reduce residency", "disposition": "challenges_ontology"}
+    ]
+    assert [counter["disposition"] for counter in projected["evidenceCards"][2]["counterClaims"]] == [
+        "limit_scope", "alternative_pathway",
+    ]
+
+
 @pytest.mark.parametrize("gaps", [False, True])
 def test_system_executor_and_readiness_only_enable_verified_reuse(
     activity, handoff, gaps
@@ -443,6 +545,10 @@ def test_discovers_existing_package_and_atomically_binds_current_round_without_c
         created_at_ms=1,
         updated_at_ms=1,
     )
+    evidence_payloads = {
+        "evidence_card_batch": {"evidenceCards": []},
+        "evidence_relation_graph": {"edges": [], "counterEvidenceRefs": []},
+    }
 
     def seed(u):
         u.repository.insert_run(
@@ -454,6 +560,18 @@ def test_discovers_existing_package_and_atomically_binds_current_round_without_c
         u.repository.insert_run(replace(build_run_record(run_id="source-child", team_id=activity[0]),
             project_id=activity[1], parent_run_id="previous-run", status="succeeded",
             workflow_id="challenge-cup-knowledge-sideflow"))
+        u.repository.insert_command(build_command_record(run_id="source-child", command_id="source-command"))
+        for kind, node_id in planning_evidence._EVIDENCE_NODES.items():
+            attempt_id = f"source-{node_id}"
+            u.repository.insert_attempt(build_attempt_record(attempt_id, run_id="source-child", node_id=node_id,
+                status="succeeded", command_id="source-command"))
+            content_hash = sha256_hex(evidence_payloads[kind])
+            ref = build_canonical_ref(kind=kind, team_id=activity[0], authority_run_id="source-child",
+                                      content_hash=content_hash)
+            u.repository.insert_artifact_receipt(receipt_id=f"receipt-{kind}", run_id="source-child",
+                node_run_id=attempt_id, team_id=activity[0], artifact_kind=kind,
+                canonical_ref_json=json.dumps({"canonicalRef": ref}), artifact_version="1.0.0",
+                sha256=content_hash, domain_revision="rev", materialized=1, verified_at_ms=1)
         u.repository.insert_knowledge_invocation(source)
         u.repository.insert_event(
             replace(
@@ -481,6 +599,7 @@ def test_discovers_existing_package_and_atomically_binds_current_round_without_c
     monkeypatch.setattr(
         acceptance, "load_scoped_artifact_payload", lambda *a, **k: package
     )
+    monkeypatch.setattr(planning_evidence, "load_scoped_artifact_payload", lambda kind, **_: evidence_payloads[kind])
     monkeypatch.setattr(
         sideflow,
         "ensure_knowledge_child_run",

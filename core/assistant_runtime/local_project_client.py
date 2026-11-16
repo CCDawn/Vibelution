@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import re
 import secrets
 from pathlib import Path
@@ -13,6 +14,7 @@ from core.infrastructure.launcher_assistant_authority import current_launcher_au
 
 _EXTERNAL_PREFIX = "/api/v1/external-agent/"
 _LOCAL_PREFIX = "/api/local-assistant/v1/external-agent/"
+_RECOVERY_PREFIX = "/api/v1/launcher-assistant-management/subjects/recovery/"
 
 
 class LocalAssistantBackendClient(ManagedAgentBackendClient):
@@ -31,6 +33,126 @@ class LocalAssistantBackendClient(ManagedAgentBackendClient):
     async def management_agent_list(self, **parameters) -> dict[str, Any]:
         return await super().management_agent_list(**{**parameters,
             "dispatch_context": "launcher_local" if self._launcher_capability else "external"})
+
+    @property
+    def management_epoch(self) -> str:
+        return (self._state.get("management") or {}).get("recoveryEpoch", "")
+
+    async def _management_grant(self, *, require_existing: bool):
+        saved = self._state.get("management") or {}
+        if self._launcher_capability and saved.get("subjectId") and saved.get("capability"):
+            if saved.get("revoked"):
+                raise BackendClientError("Management authorization revoked.", code="SUBJECT_REVOKED")
+            # A normal read/write must never mint a subject after store loss.
+            return await self._original_management_grant(require_original=True, require_complete=True)
+        return await super()._management_grant(require_existing=require_existing)
+
+    async def _recovery_source(self):
+        from core.web.services.external_management.recovery import RecoveryIdentity
+
+        if not self._launcher_capability:
+            raise BackendClientError("Launcher authority required.", code="LAUNCHER_AUTHORITY_REQUIRED")
+        old = await self._original_management_grant(require_original=True, require_complete=True)
+        if old.get("revoked"):
+            raise BackendClientError("Management authorization revoked.", code="SUBJECT_REVOKED")
+        try:
+            return RecoveryIdentity.model_validate({"client_id": old.get("clientId"),
+                "subject_id": old["subjectId"], "expected_binding": old["binding"]}).model_dump()
+        except ValueError:
+            raise BackendClientError("Original credentials are invalid.", code="UNKNOWN_MANAGEMENT_SUBJECT") from None
+
+    def _recovery_challenge(self, payload: dict, scopes: list[str]) -> str:
+        from core.web.services.external_management.store import digest
+        return hmac.digest(self._launcher_capability.encode(), digest([payload, scopes]).encode(), "sha256").hex()
+
+    def _save_recovery_state_locked(self, management: dict) -> None:
+        previous = self._state["management"]
+        self._state["management"] = management
+        try:
+            self._save_state_locked()
+        except OSError:
+            self._state["management"] = previous
+            raise BackendClientError("Unable to persist management recovery state.", code="RECOVERY_STATE_UNAVAILABLE") from None
+
+    async def management_authorization_status(self, *, planned_scopes: list[str] | None = None):
+        pending = (self._state.get("management") or {}).get("pendingRecovery")
+        if pending:
+            await self.management_recover(**pending)
+        try:
+            return await super().management_authorization_status()
+        except BackendClientError as exc:
+            if exc.code != "SUBJECT_DENIED" or not self._launcher_capability:
+                raise
+            original = exc
+        payload = await self._recovery_source()
+        try:
+            plan = await self._request_json("POST", _RECOVERY_PREFIX + "check",
+                management_auth=("launcher-local", self._launcher_capability), json_payload=payload)
+        except BackendClientError as exc:
+            if exc.code in {"ORIGINAL_GRANT_PRESENT", "BACKEND_ERROR"}:
+                raise original from None
+            raise
+        if plan.get("available") is not True:
+            raise original
+        result = {"status": "recovery_required", "scopes": []}
+        if planned_scopes:
+            result["recovery_challenge"] = self._recovery_challenge(payload, planned_scopes)
+        return result
+
+    async def management_recover(self, *, request_id: str, scopes: list[str], challenge: str) -> dict:
+        from core.web.services.external_management.contracts import BoundSubjectResponse
+        from core.web.services.external_management.recovery import RecoverSubject, recovery_key
+
+        async with self._state_lock:
+            payload = await self._recovery_source()
+            if not secrets.compare_digest(challenge, self._recovery_challenge(payload, scopes)):
+                raise BackendClientError("Recovery approval is stale.", code="RECOVERY_CONFLICT")
+            binding = payload["expected_binding"]
+            key = recovery_key(binding, payload["client_id"], payload["subject_id"])
+            expected_client = "recovered-" + key
+            expected_subject = "ops-" + key[:32]
+            payload = RecoverSubject.model_validate({**payload, "request_id": request_id, "scopes": scopes}).model_dump()
+            scopes = payload["scopes"]
+            old = self._state["management"]
+            approved = {"request_id": request_id, "scopes": scopes, "challenge": challenge}
+            pending = old.get("pendingRecovery")
+            if pending is not None and pending != approved:
+                raise BackendClientError("An earlier recovery is unresolved.", code="RECOVERY_CONFLICT")
+            if pending is None:
+                self._save_recovery_state_locked({**old, "pendingRecovery": approved})
+            for attempt in range(2):
+                try:
+                    response = await self._request_json("POST", _RECOVERY_PREFIX + "enroll",
+                        management_auth=("launcher-local", self._launcher_capability), json_payload=payload)
+                    break
+                except BackendClientError as exc:
+                    ambiguous = exc.code in {"BACKEND_TIMEOUT", "BACKEND_UNAVAILABLE", "MANAGEMENT_UNAVAILABLE",
+                                             "MANAGEMENT_BUSY", "BACKEND_PROTOCOL_ERROR"}
+                    # An authority or control rejection covers just this
+                    # delivery. An earlier POST may already have enrolled the
+                    # subject, so retain its approved request for recovery.
+                    if exc.code in {"ORIGINAL_GRANT_PRESENT", "SUBJECT_REVOKED", "TARGET_BINDING_CHANGED",
+                                    "RECOVERY_CONFLICT", "INVALID_INPUT"}:
+                        self._save_recovery_state_locked({name: value for name, value in old.items()
+                                                          if name != "pendingRecovery"})
+                    if attempt or not ambiguous:
+                        raise
+            client_id = response.pop("client_id", None)
+            try:
+                grant = BoundSubjectResponse.model_validate(response)
+                if (client_id != expected_client or grant.subject_id != expected_subject or grant.scopes != scopes
+                        or grant.binding.model_dump() != binding
+                        or not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", grant.subject_capability)):
+                    raise ValueError("Recovery identity disagrees")
+            except ValueError:
+                raise BackendClientError("Invalid recovery response.", code="BACKEND_PROTOCOL_ERROR") from None
+            saved = {"clientId": client_id, "subjectId": grant.subject_id, "capability": grant.subject_capability,
+                     "binding": binding, "scopes": scopes, "recoveryEpoch": key}
+            current = await self._authorization_state(saved)
+            if current["scopes"] != scopes or current["grantRevision"] != 0:
+                raise BackendClientError("Recovery authorization changed.", code="RECOVERY_CONFLICT")
+            self._save_recovery_state_locked(saved)
+            return {"status": "completed", "scopes": scopes, "grantRevision": 0}
 
     def _load_state(self) -> dict[str, Any]:
         state = super()._load_state()

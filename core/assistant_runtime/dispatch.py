@@ -51,6 +51,8 @@ _BACKEND_CODE_MESSAGES = {
     "BACKEND_TIMEOUT": "项目后端未在时限内回应，操作可能已执行：请用原 request_id 查询回执确认，不要更换 ID 重发或重新发起审批。",
     "BACKEND_UNAVAILABLE": "无法连接该项目后端。请检查 Launcher 中该项目的运行状态；已有任务引用已保留。",
     "RUNTIME_IDENTITY_MISMATCH": "项目后端的版本或项目身份校验失败。" + _IDENTITY_RECOVERY_HINT + "已有任务引用已保留。",
+    "SUBJECT_DENIED": "项目端无法验证原管理身份。用 authorization_status 一次传入本次任务的所有 actions，核对能否发起恢复审批。旧管理请求保留原编号，不重新提交。",
+    "SUBJECT_REVOKED": "项目操作者已撤销该管理身份。需由操作者重新授权才能继续管理。",
 }
 
 
@@ -857,6 +859,21 @@ class DispatchService:
                     # retry can start it. A heartbeat never resubmits a prompt.
                     return self._public(record)
                 raise
+
+    async def wait_for_result(self, record: dict, seconds: float) -> dict:
+        """Wait within the caller's budget using only the original task receipt."""
+        with anyio.move_on_after(seconds):
+            while (record.get("receipt") or {}).get("status") not in {
+                *TASK_TERMINAL_STATUSES, "awaiting_approval", "stop_unconfirmed",
+            }:
+                await anyio.sleep(1)
+                try:
+                    record = await self.reconcile(record["dispatchId"])
+                except DispatchError:
+                    # The start is already acknowledged. Preserve the last
+                    # confirmed receipt so the same task can be queried again.
+                    break
+        return record
 
     async def resolve_approval(
         self,

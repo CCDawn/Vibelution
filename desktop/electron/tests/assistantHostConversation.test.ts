@@ -15,13 +15,14 @@ afterEach(async () => {
   }
 });
 
-function fixture() {
+function fixture(identity = { agentId: "a", directSessionId: "s" }) {
   const root = mkdtempSync(join(tmpdir(), "assistant-conversation-test-"));
   const python = join(root, "pythonw.exe");
   writeFileSync(python, "not launched");
   let active = true;
   const native = {
     spawn: vi.fn((input: WorkbenchJobSpawnInput) => {
+      active = true;
       const runtime = input.arguments[input.arguments.indexOf("--runtime-dir") + 1];
       const generation = input.arguments[input.arguments.indexOf("--instance-id") + 1];
       writeFileSync(join(runtime, "ready.json"), JSON.stringify({ protocolVersion: 1, role: "launcher_assistant",
@@ -36,9 +37,14 @@ function fixture() {
   const fetchImpl = vi.fn(async (...args: Parameters<typeof globalThis.fetch>): Promise<Response> => {
     const url = String(args[0]);
     if (url.endsWith("/health")) return Response.json({ status: "ok", protocolVersion: 1, role: "launcher_assistant" });
-    if (url.endsWith("/api/assistant")) return Response.json({ assistant: { agentId: "a", directSessionId: "s" }, followupQueueVersion: 1 });
+    if (url.endsWith("/api/assistant")) return Response.json({ assistant: identity, followupQueueVersion: 1 });
     if (url.endsWith("/shutdown")) { active = false; return Response.json({ stopping: true }); }
     if (url.endsWith("/send-now")) return Response.json({ queuedTurns: rows, stopRequested: true });
+    if (url.endsWith("/messages")) {
+      const payload = JSON.parse(String(args[1]?.body));
+      return Response.json({ accepted: true, sessionId: identity.directSessionId, status: "running",
+        turnId: "turn-one", clientSubmissionId: payload.requestId });
+    }
     return Response.json({ queuedTurns: rows });
   });
   const host = new AssistantHost({ profileRoot: join(root, "profile"), runtimeRoot: join(root, "runtime"),
@@ -122,5 +128,50 @@ describe("assistant fixed native queue transport", () => {
       await expect(host.request(request)).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
       expect(fetchImpl.mock.calls.length).toBe(calls + 1);
     }
+  });
+});
+
+describe("main-process assistant identity binding", () => {
+  it("fences the selected generation after admission and snapshots the original expected identity", async () => {
+    const identity = { agentId: "a", directSessionId: "s" };
+    const { host, fetchImpl } = fixture(identity);
+    await host.start();
+    const barrier = host.beginMigrationAdmission();
+    const expected = { agentId: "a", sessionId: "s" };
+    const request = host.request({ operation: "send", message: "text", requestId: "stable-id" }, expected);
+
+    await host.stop();
+    identity.agentId = "new-agent";
+    identity.directSessionId = "new-session";
+    await host.startForMigration();
+    Object.assign(expected, { agentId: identity.agentId, sessionId: identity.directSessionId });
+    barrier.release();
+    await expect(request).rejects.toThrow("ASSISTANT_IDENTITY_INVALID");
+    expect(fetchImpl.mock.calls.filter(([url]) => String(url).endsWith("/messages"))).toHaveLength(0);
+  });
+
+  it("retains exact native submission IDs and skips aborted requests waiting for admission", async () => {
+    const { host, fetchImpl } = fixture();
+    await host.start();
+    const input = { operation: "send", message: "text", requestId: "stable-id" } as const;
+    const expected = { agentId: "a", sessionId: "s" };
+    for (const stale of [{ ...expected, sessionId: "other" }, { ...expected, agentId: "other" }]) {
+      await expect(host.request(input, stale)).rejects.toThrow("ASSISTANT_IDENTITY_INVALID");
+    }
+    const barrier = host.beginMigrationAdmission();
+    const pending = new AbortController();
+    const request = host.request(input, expected, pending.signal);
+    pending.abort();
+    barrier.release();
+    await expect(request).rejects.toThrow();
+    for (let retry = 0; retry < 2; retry++) {
+      await expect(host.request(input, expected)).resolves.toMatchObject({
+        clientSubmissionId: "stable-id", sessionId: "s", turnId: "turn-one",
+      });
+    }
+    const writes = fetchImpl.mock.calls.filter(([url]) => String(url).endsWith("/messages"));
+    expect(writes.map(([, options]) => JSON.parse(String(options?.body)))).toEqual([
+      { message: "text", requestId: "stable-id" }, { message: "text", requestId: "stable-id" },
+    ]);
   });
 });

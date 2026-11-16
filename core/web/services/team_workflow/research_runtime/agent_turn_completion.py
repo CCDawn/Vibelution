@@ -818,6 +818,8 @@ def _submit_agent_turn_continuation(
     remediation messages are not necessarily literal ``继续`` requests.
     """
     from core.web.services.session.submit import submit_session_message
+    from core.web.services.session.turn_diagnostics import get_session_turn_completion_snapshot
+    from core.web.services.session_service import SessionBusyError
 
     _record_turn_continuation_scene_event(
         "agent_turn.continuation_requested",
@@ -834,9 +836,7 @@ def _submit_agent_turn_continuation(
             "taskId": str(handle.task_id or ""),
         },
     )
-    turn = submit_session_message(
-        handle.session_id,
-        str(continuation_message or "继续"),
+    submit_options = dict(
         mental_model_enabled=False,
         turn_mode="task",
         write_intent=False,
@@ -863,6 +863,33 @@ def _submit_agent_turn_continuation(
         include_started_turn_id=True,
         lightweight_response=True,
     )
+    # The terminal Journal event can precede the worker releasing its Session.
+    # Keep a short admission retry inside this continuation chain.
+    admission_deadline = time.monotonic() + 5
+    rejected = None
+    while True:
+        remaining_task_ms = remaining_challenge_task_ms()
+        if remaining_task_ms is not None and remaining_task_ms <= 0:
+            raise ChallengeTaskDeadlineExceeded(
+                challenge_deadline_problem(
+                    waited_ms=challenge_deadline_waited_ms(), turn_chain=[from_turn_id]
+                )
+            )
+        if rejected is not None and time.monotonic() >= admission_deadline:
+            raise rejected
+        try:
+            turn = submit_session_message(
+                handle.session_id, str(continuation_message or "继续"), **submit_options
+            )
+            break
+        except SessionBusyError as exc:
+            if not getattr(exc, "native_admission_rejected", False):
+                raise
+            snapshot = get_session_turn_completion_snapshot(handle.session_id, from_turn_id)
+            if not snapshot.get("terminal") or snapshot.get("activeTurnId") not in ("", None, from_turn_id):
+                raise
+            rejected = exc
+            time.sleep(0.1)
     new_turn_id = str(
         (turn or {}).get("turnId") or (turn or {}).get("startedTurnId") or ""
     ).strip()

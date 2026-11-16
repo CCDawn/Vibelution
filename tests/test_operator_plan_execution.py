@@ -1,6 +1,7 @@
 """Frozen plan to real trial receipts, without starting a GPU process."""
 
 import json
+from contextlib import nullcontext
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -9,6 +10,7 @@ import pytest
 from core.research.operator_optimization.candidate import source_hash
 from core.research.operator_optimization.evaluation import workload_hash
 from core.research.operator_optimization.measurement import OperatorMeasurement
+from core.research.workflow.contracts import ActorRef, CommandRequest, WorkflowCommandKind
 from core.research.workflow.contracts._canonical import sha256_hex
 from core.web.services.team_workflow.operator_optimization import (
     dispatch,
@@ -25,6 +27,9 @@ from core.web.services.team_workflow.research_runtime.real_domain_ports import (
 from core.web.services.team_workflow.research_runtime.artifact_readback_registry import (
     read_domain_artifact,
 )
+from core.web.services.team_workflow.research_runtime.cancel_run_cleanup import CancelRunCleanupWorker
+from core.web.services.team_workflow.research_runtime.command_service import WorkflowCommandService
+from core.web.services.team_workflow.research_runtime.operator_authorization import server_operator_scope
 from tests import test_operator_planning as fixtures
 from tests._support.workflow_ledger_helpers import (
     build_attempt_record,
@@ -74,8 +79,9 @@ def prepared(activity, proposal, handoff, monkeypatch):
     snapshot = json.loads(store.get_run(run_id).input_snapshot_json)
     calls = []
 
-    def execute(request, **kwargs):
-        calls.append(request)
+    def execute(request, *, start_fence=nullcontext, **kwargs):
+        with start_fence():
+            calls.append(request)
         return OperatorMeasurement(
             measurementId=request.measurement_id,
             optimizationCampaignId=request.campaign_id,
@@ -131,6 +137,71 @@ def test_partial_delivery_recovers_completed_trials(activity, prepared, monkeypa
     monkeypatch.setattr(execution, "dispatch_trial", real)
     assert len(execution.execute_plan(action, snapshot)) == 2
     assert len(calls) == 2
+
+
+def cancel_run(store, run_id):
+    commands = WorkflowCommandService(store=store, readiness_service=None, readiness_context=lambda: None)
+    run = store.get_run(run_id)
+    with server_operator_scope("operator", roles=("operator",)):
+        receipt = commands.submit(CommandRequest(
+            command_id="", team_id=run.team_id, run_id=run.run_id,
+            command=WorkflowCommandKind.CANCEL_RUN, node_id=None,
+            idempotency_key="cancel-during-execution", expected_run_version=run.run_version,
+            payload={}, requested_by=ActorRef("operator", "operator"), requested_at_ms=1,
+        ))
+    assert receipt.status == "accepted"
+
+
+@pytest.mark.parametrize("when", ["before_launch", "during_trial"])
+def test_accepted_cancellation_does_not_launch_another_trial(activity, prepared, monkeypatch, when):
+    action, snapshot, calls, store = prepared
+    original = dispatch.execute_cuda_trial
+
+    def launch(request, *, start_fence, **kwargs):
+        if when == "before_launch":
+            cancel_run(store, action.run_id)
+        result = original(request, start_fence=start_fence, **kwargs)
+        cancel_run(store, action.run_id)
+        return result
+
+    monkeypatch.setattr(dispatch, "execute_cuda_trial", launch)
+    with pytest.raises(CampaignConflict, match="active operator"):
+        execution.execute_plan(action, snapshot)
+    assert store.get_run(action.run_id).status == "cancelled"
+    reservations = read_campaign(*activity).gpuReservations
+    if when == "before_launch":
+        assert calls == [] and reservations == ()
+    else:
+        assert len(calls) == len(reservations) == 1
+        assert reservations[0].consumedSeconds == 2
+        assert reservations[0].measurementRef is not None
+
+
+@pytest.mark.parametrize("chat_failed", [False, True])
+def test_cancellation_cleanup_recovers_unpublished_gpu_receipt(activity, prepared, monkeypatch, chat_failed):
+    action, snapshot, calls, store = prepared
+
+    def interrupted(*args, **kwargs):
+        raise OSError("process stopped before publishing the measurement")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(dispatch.artifacts, "put_workflow_artifact", interrupted)
+        with pytest.raises(OSError, match="before publishing"):
+            execution.execute_plan(action, snapshot)
+    assert read_campaign(*activity).gpuReservations[0].consumedSeconds is None
+    cancel_run(store, action.run_id)
+
+    cleanup = CancelRunCleanupWorker(store=store)
+    if chat_failed:
+        def broken_chat(run_id):
+            raise OSError("Chat storage offline")
+
+        monkeypatch.setattr(cleanup, "_reconcile_run_turns", broken_chat)
+    assert cleanup.run_once() == 1
+    reservations = read_campaign(*activity).gpuReservations
+    assert len(reservations) == len(calls) == 1
+    assert reservations[0].consumedSeconds == 2
+    assert reservations[0].measurementRef is not None
 
 
 def test_stale_attempt_and_wrong_scope_do_not_execute(prepared):

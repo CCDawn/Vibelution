@@ -271,6 +271,21 @@ def test_finding_record_payload_enriches_missing_doi_from_title(monkeypatch):
     assert payload["sourceRef"] == _MDPI_URL
 
 
+def test_finding_keeps_versioned_arxiv_locator_without_enriching_by_title(monkeypatch):
+    def unexpected_lookup(_title):
+        raise AssertionError("The versioned arXiv locator already identifies the result")
+
+    monkeypatch.setattr(writeback_materialize_module(), "enrich_missing_doi", unexpected_lookup)
+    locator = "http://arxiv.org/abs/1805.02867v2"
+    payload = _source_collection_stage_writeback_record_payload(
+        {"title": "GPU performance study", "locator": locator},
+        team_id="team-1", run_id="run-1", task_id="task-1",
+        stage_id="finding", agent_id="agent-1", agent_role="source_finder", index=1,
+    )
+    assert payload["sourceRef"] == locator
+    assert payload["metadata"]["doi"] == ""
+
+
 def test_finding_record_payload_keeps_existing_doi_and_survives_miss(monkeypatch):
     enrich_calls: list[str] = []
 

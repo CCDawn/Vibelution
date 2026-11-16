@@ -947,10 +947,15 @@ def apply_patch_edit(patch_text: str, cwd: str = ".") -> str:
         )
 
     cwd_path = Path(cwd or ".").resolve()
+    from tools.shell_tools import _local_assistant_workspace, _task_path_allowed
+
+    task_workspace = _local_assistant_workspace()
     planned: List[Tuple[str, Path, Optional[str]]] = []
     seen_paths: set[Path] = set()
     for action, target, body in sections:
         path = _resolve_patch_path(cwd_path, target)
+        if task_workspace is not None and not _task_path_allowed(path, task_workspace):
+            return "[patch] [SECURITY] 目标路径超出本次派遣的工作区。"
         if path != cwd_path and not path.is_relative_to(cwd_path):
             return (
                 f"[patch] [SECURITY] 目标路径超出 cwd 工作区边界: "

@@ -431,6 +431,7 @@ def test_native_model_worker_keeps_default_stores_in_profile(tmp_path, developer
         config_path.write_text(config_path.read_text().replace('127.0.0.1:9', '127.0.0.1:' + str(provider.server_port)))
 
         from core.assistant_runtime import native
+        from core.chat.conversation_ledger import conversation_ledger_path
         from core.web.services import session_service as sessions
         from core.runtime_manager import constants, evolution_store, work_run_store
         from core.logging.unified_logger import logger
@@ -471,7 +472,8 @@ def test_native_model_worker_keeps_default_stores_in_profile(tmp_path, developer
             logger.transcript.shutdown(timeout=2)
             other_files = [str(path.relative_to(root.parent)) for path in (root.parent / 'projects').rglob('*') if path.is_file()]
             assert not other_files, other_files[:15]
-            assert list((root / 'logs' / 'conversations').glob('conversation_*.jsonl'))
+            ledger = conversation_ledger_path(root, sid)
+            assert ledger.is_relative_to(root) and ledger.is_file(), ledger
             assert not (root / '.vibelution' / 'project.json').exists()
         finally:
             native.shutdown()
@@ -938,6 +940,7 @@ def test_native_shutdown_lock_wait_consumes_the_original_drain_deadline(monkeypa
     from core.assistant_runtime import native
 
     clock, acquired, released, deadlines, store_timeouts = [100.0], [], [], [], []
+    shutdown_events = []
 
     class AdmissionLock:
         def acquire(self, blocking=True, timeout=-1):
@@ -956,7 +959,8 @@ def test_native_shutdown_lock_wait_consumes_the_original_drain_deadline(monkeypa
 
     expected = {"closed": closed, "pendingExecutors": [] if closed else ["owned-work"]}
     sessions = SimpleNamespace(
-        stop_session_service_admission=lambda: None,
+        record_restart_resume_pending=lambda: shutdown_events.append("record_resume"),
+        stop_session_service_admission=lambda: shutdown_events.append("stop_admission"),
         request_stop_session_turn=lambda *args, **kwargs: None,
         shutdown_session_service=lambda *, deadline: deadlines.append(deadline) or expected,
         SessionNotFoundError=type("MissingSession", (Exception,), {}),
@@ -970,6 +974,7 @@ def test_native_shutdown_lock_wait_consumes_the_original_drain_deadline(monkeypa
     monkeypatch.setattr(native, "_AGENT_ID", "fixed-agent")
     monkeypatch.setattr(native, "_services", lambda: (None, None, sessions, runtime))
     assert native.shutdown(timeout=1.0) == expected
+    assert shutdown_events == ["record_resume", "stop_admission"]
     assert acquired == [(True, pytest.approx(1.0))]
     assert deadlines == [pytest.approx(101.0)]
     assert store_timeouts == ([pytest.approx(0.6)] if closed else [])

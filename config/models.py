@@ -1438,7 +1438,10 @@ class ToolsFileConfig(BaseModel):
     )
     syntax_check_enabled: bool = Field(
         default=True,
-        description="是否启用语法检查"
+        description=(
+            "已退役兼容字段：写入路径不做自动语法检查；"
+            "语法检查由 check_python_syntax 工具显式调用"
+        )
     )
     encoding_priority: List[str] = Field(
         default_factory=lambda: ["utf-8", "utf-8-sig", "gbk", "gb2312", "latin-1"],

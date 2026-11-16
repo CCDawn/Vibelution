@@ -440,6 +440,7 @@ def _grep_via_python(
     max_results: int,
     deadline: float,
     cancel_checker: Optional[Callable[[], str]],
+    task_path_allowed: Optional[Callable[[Path], bool]] = None,
 ) -> Tuple[List[Tuple[str, int, str, List[str]]], bool, str]:
     """纯 Python 扫描引擎：os.walk 每轮目录间检查 deadline 与 cancel checker。"""
     results: List[Tuple[str, int, str, List[str]]] = []
@@ -449,7 +450,9 @@ def _grep_via_python(
 
     for root, dirs, files in os.walk(search_dir_path):
         # 过滤目录
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        root_path = Path(root)
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS
+                   and (task_path_allowed is None or task_path_allowed(root_path / d))]
 
         if callable(cancel_checker):
             try:
@@ -465,11 +468,11 @@ def _grep_via_python(
             stopped = True
             break
 
-        root_path = Path(root)
-
         for filename in files:
             file_path = root_path / filename
 
+            if task_path_allowed is not None and not task_path_allowed(file_path):
+                continue
             if not _should_process_file(file_path):
                 continue
 
@@ -711,6 +714,12 @@ def grep_search_tool(
     extensions = _resolve_extensions(include_ext)
 
     deadline = time.monotonic() + GREP_DEADLINE_SECONDS
+    from tools.shell_tools import _local_assistant_workspace, _task_path_allowed
+
+    task_workspace = _local_assistant_workspace()
+
+    def scoped_path(path: Path) -> bool:
+        return task_workspace is None or _task_path_allowed(path, task_workspace)
 
     rg_attempt = _grep_via_ripgrep(
         pattern=regex_pattern,
@@ -726,6 +735,8 @@ def grep_search_tool(
     )
     if rg_attempt is not None:
         results, incomplete, cancel_reason = rg_attempt
+        if task_workspace is not None:
+            results = [result for result in results if scoped_path(Path(result[0]))]
     else:
         results, incomplete, cancel_reason = _grep_via_python(
             pattern,
@@ -736,6 +747,7 @@ def grep_search_tool(
             max_results,
             deadline,
             _cancel_checker,
+            scoped_path if task_workspace is not None else None,
         )
 
     # 格式化输出

@@ -29,6 +29,8 @@ def contracts() -> dict:
     result = {}
     from tools import pa_provider_onboarding
     result.update(pa_provider_onboarding.contracts())
+    from . import provider_probe_actions
+    result.update(provider_probe_actions.contracts())
     for names, source in (
         (_ASSISTANT_ACTIONS, pa_assistant_actions.contracts()),
         (_CONFIG_ACTIONS, pa_config_actions.contracts()),
@@ -73,11 +75,14 @@ def contracts() -> dict:
     return result
 
 
-def execute(action: str, parameters: dict, runtime: dict, *, governed: bool = False) -> dict:
+def execute(action: str, parameters: dict, runtime: dict, *, governed: bool = False, cancel_checker=None) -> dict:
     """Reject everything outside the local allowlist before native execution."""
     contract = contracts().get(action)
     if contract is None:
         raise ValueError("未知的 Launcher 本地操作，请先 index/describe 查询。")
+    if action in {"provider_test_batch_plan", "provider_test_batch", "provider_test_batch_status"}:
+        from . import provider_probe_actions
+        return provider_probe_actions.execute(action, parameters, runtime, governed=governed, cancel_checker=cancel_checker)
     if action in {"provider_prepare", "provider_model_resolve"}:
         from tools import pa_provider_onboarding
         return pa_provider_onboarding.execute(action, parameters, runtime, governed=governed)

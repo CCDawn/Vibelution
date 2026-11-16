@@ -15,7 +15,7 @@ from .human_gate_artifacts import canonical_sha256
 from .source_extraction_evidence_cards import (
     build_source_extraction_evidence_cards,
 )
-from ..source_collection.extraction_fetch_text import task_fetched_text
+from ..source_collection.extraction_fetch_text import finding_fetched_text_for_task, task_fetched_text
 from ..source_collection.search_execution import (
     project_source_collection_search_trace,
 )
@@ -193,6 +193,7 @@ def _source_extraction_payload(task: dict[str, Any]) -> dict[str, Any]:
         "evidenceCards": build_source_extraction_evidence_cards(
             result,
             fetched_text=task_fetched_text(task_view),
+            finding_text_by_source=finding_fetched_text_for_task(task_view),
         ),
     }
 

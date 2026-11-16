@@ -966,15 +966,21 @@ def authorize_tool_execution(
             "perception_read_denied", "当前感知设置不允许此来源读取：" + perception_denial,
             runtime_agent_id, runtime_turn_id, context, tool_name=normalized_tool,
         )
+    from core.web.services.local_assistant.consent import (
+        LocalTaskScopeError, local_approval_policy, local_terminal_wait_allowed,
+    )
+
     terminal_wait_session_id = _empty_terminal_wait_session_id(normalized_tool, tool_args)
     local_terminal_wait = False
     if terminal_wait_session_id:
-        from core.web.services.local_assistant.consent import local_terminal_wait_allowed
-
         # Empty reads cannot extend command execution. A native task is already
         # bounded by its verified lease/deadline; recheck that authority on every
         # poll. Ordinary and third-party sessions keep the independent caps.
-        local_terminal_wait = local_terminal_wait_allowed(runtime)
+        try:
+            local_terminal_wait = local_terminal_wait_allowed(runtime)
+        except LocalTaskScopeError as exc:
+            return _execution_denial("local_task_scope_denied", str(exc), runtime_agent_id,
+                                     runtime_turn_id, context, tool_name=normalized_tool)
     with context.call_count_lock:
         if terminal_wait_session_id:
             if not local_terminal_wait and context.terminal_wait_count >= MAX_TERMINAL_WAITS_PER_TURN:
@@ -1051,9 +1057,15 @@ def authorize_tool_execution(
         # Collaboration may permit ordinary calls automatically; source
         # reauthorization still requires this exact native operator decision.
         approval_requirement = ("always", "destructive")
-    from core.web.services.local_assistant.consent import local_approval_policy
-    approval_requirement, approval_permission_preset = local_approval_policy(
-        runtime, normalized_tool, tool_args or {}, approval_requirement, context.permission_preset)
+    try:
+        approval_requirement, approval_permission_preset = local_approval_policy(
+            runtime, normalized_tool, tool_args or {}, approval_requirement, context.permission_preset)
+    except LocalTaskScopeError as exc:
+        if not _is_delivery_exempt_tool(normalized_tool):
+            with context.call_count_lock:
+                context.call_count = max(0, context.call_count - 1)
+        return _execution_denial("local_task_scope_denied", str(exc), runtime_agent_id,
+                                 runtime_turn_id, context, tool_name=normalized_tool)
     if approval_requirement is not None:
         from core.web.services.session.tool_approvals import (
             ToolApprovalError,
@@ -1319,7 +1331,7 @@ def _execution_denial(
         enforced=True,
         allowed=False,
         code=code,
-        message=f"[工具授权] {detail} 请刷新 Agent 工具配置后重试。",
+        message=f"[工具授权] {detail}" + ("" if code == "local_task_scope_denied" else " 请刷新 Agent 工具配置后重试。"),
         agent_id=agent_id,
         turn_id=turn_id,
         decision_fingerprint=str(getattr(context, "decision_fingerprint", "") or ""),

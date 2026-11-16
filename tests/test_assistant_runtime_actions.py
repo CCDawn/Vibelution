@@ -37,6 +37,85 @@ class Dispatch:
         return await self.dispatch(project_id, **kwargs)
 
 
+@pytest.mark.asyncio
+async def test_authorization_status_plans_all_missing_scopes_in_one_read():
+    calls = []
+
+    async def status(project_id, *, planned_scopes):
+        calls.append((project_id, planned_scopes))
+        return {"scopes": ["teams:directory:read"], "grantRevision": 2}
+
+    service = Dispatch()
+    service.management = SimpleNamespace(authorization_status=status)
+    bind_actions(service, asyncio.get_running_loop())
+    try:
+        result = await asyncio.to_thread(execute_action, "authorization_status", {
+            "project_id": "test-project",
+            "actions": ["team_list", "agent_list", "source_read", "source_search", "dispatch", "dispatch_list", "receipt"],
+        })
+        assert calls == [("test-project", ["agents:directory:read", "source:read", "teams:directory:read"])]
+        assert result["missingScopes"] == ["agents:directory:read", "source:read"]
+        assert result["blockedActions"] == {
+            "agent_list": ["agents:directory:read"], "source_read": ["source:read"], "source_search": ["source:read"],
+        }
+    finally:
+        unbind_actions(service)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operator_open", [False, True])
+async def test_recovery_plan_explains_original_references_and_respects_operator_tier(monkeypatch, operator_open):
+    from core.assistant_runtime import action_tiers
+
+    monkeypatch.setattr(action_tiers, "operator_tier_enabled", lambda: operator_open)
+    calls = []
+
+    async def status(project_id, *, planned_scopes, turn_id):
+        calls.append((project_id, planned_scopes, turn_id))
+        return {"status": "recovery_required", "scopes": [], "recoveryPlanAvailable": True}
+
+    service = Dispatch()
+    service.management = SimpleNamespace(authorization_status=status)
+    bind_actions(service, asyncio.get_running_loop())
+    try:
+        result = await asyncio.to_thread(execute_action, "authorization_status", {
+            "project_id": "test-project",
+            "actions": ["management_receipt", "management_reconcile", "agent_list", "team_archive"],
+        }, runtime={"turnId": "current"})
+        scopes = ["agents:archive", "agents:directory:read", "teams:archive"] if operator_open else ["agents:directory:read"]
+        assert calls == [("test-project", scopes, "current")]
+        assert result["missingScopes"] == result["recoveryArguments"]["scopes"] == scopes
+        assert result["originalReferenceRequiredActions"] == ["management_receipt", "management_reconcile"]
+        assert result["operatorTierRequiredActions"] == ([] if operator_open else ["team_archive"])
+        assert result["blockedActions"] == {"agent_list": ["agents:directory:read"], **(
+            {"team_archive": ["agents:archive", "teams:archive"]} if operator_open else {})}
+    finally:
+        unbind_actions(service)
+
+
+@pytest.mark.asyncio
+async def test_closed_operator_action_alone_does_not_offer_recovery_approval(monkeypatch):
+    from core.assistant_runtime import action_tiers
+
+    monkeypatch.setattr(action_tiers, "operator_tier_enabled", lambda: False)
+
+    async def status(project_id, *, turn_id):
+        return {"status": "recovery_required", "scopes": []}
+
+    service = Dispatch()
+    service.management = SimpleNamespace(authorization_status=status)
+    bind_actions(service, asyncio.get_running_loop())
+    try:
+        result = await asyncio.to_thread(execute_action, "authorization_status", {
+            "project_id": "test-project", "actions": ["runtime_command"],
+        }, runtime={"turnId": "current"})
+        assert result["operatorTierRequiredActions"] == ["runtime_command"]
+        assert result["missingScopes"] == [] and result["blockedActions"] == {}
+        assert "recoveryArguments" not in result
+    finally:
+        unbind_actions(service)
+
+
 @pytest.mark.parametrize(("action", "scope"), [("task_list", "tasks:read"), ("source_read", "source:read"), ("source_search", "source:read")])
 def test_denied_requested_query_explains_native_approval_without_granting_it(monkeypatch, action, scope):
     from core.infrastructure import native_runtime

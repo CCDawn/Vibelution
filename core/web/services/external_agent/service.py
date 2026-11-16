@@ -398,8 +398,10 @@ class ExternalAgentTaskService:
                             "hidden external task session returned no sessionId"
                         )
                     if self.dependencies.register_approval_session is not None:
+                        registration = {"launcher_local": True} if record.get("localAuthorityFingerprint") else {}
                         self.dependencies.register_approval_session(
                             task_id=record["taskId"], session_id=session_id, agent_id=resolved_agent_id,
+                            **registration,
                         )
                     # Persist the association before submission. If its result
                     # is ambiguous, reconciliation must stop rather than retry.

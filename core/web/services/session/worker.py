@@ -1505,7 +1505,8 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
         else ""
     )
     external_runtime_permission_profile = _external_agent_runtime_permission_profile(context)
-    from core.web.services.local_assistant.runtime import verified_task_runtime
+    from core.web.services.external_agent.approval_binding import registered_launcher_session
+    from core.web.services.local_assistant.runtime import task_assignment_context, verified_task_runtime
     local_assistant_task = verified_task_runtime(project_root=s.PROJECT_ROOT, session_id=session_id,
         agent_id=agent_id, metadata=context.get("message_metadata"))
     if external_runtime_permission_profile:
@@ -1517,6 +1518,13 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
         from core.web.services.local_assistant.policy import local_runtime_tool_grants, LOCAL_RUNTIME_SOURCE_PREFIX
         runtime_tool_grants = list(local_runtime_tool_grants(local_assistant_task["profile"]))
         runtime_tool_source = LOCAL_RUNTIME_SOURCE_PREFIX + local_assistant_task["profile"]
+    elif registered_launcher_session(session_id=session_id, agent_id=agent_id):
+        from core.web.services.local_assistant.policy import LOCAL_RUNTIME_SOURCE_PREFIX
+
+        # The task's identity survives a revoked lease or missing workspace.
+        # Never recover the wider third-party grant when that local check fails.
+        runtime_tool_grants = []
+        runtime_tool_source = LOCAL_RUNTIME_SOURCE_PREFIX + "inactive"
     runtime_metadata: dict[str, Any] = {}
     from core.agent_plugins.runtime_extensions import (
         agent_plugin_proactive_runtime_metadata,
@@ -2347,18 +2355,9 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                         if str(part or "").strip()
                     ).strip()
                 if local_assistant_task is not None:
-                    local_workspace_context = "\n".join([
-                        "## Authorized Local Development Workspace",
-                        f"RepositoryRoot: {local_assistant_task['workspace']}",
-                        f"ToolWorkspace: {local_assistant_task['workspace']}",
-                        "This native task is authorized for ordinary development in this worktree.",
-                        "Use absolute paths inside ToolWorkspace for every file tool and use it as CLI cwd.",
-                        "Normal file edits and local tests/builds do not need repeated confirmation.",
-                        "Preserve the original user constraints. Do not publish, delete unrelated data, change permissions or write to the integration checkout.",
-                        "Run real tests and report their command, exit code, changed files and worktree path.",
-                    ])
-                    dynamic_runtime_context_block = "\n\n".join(filter(None,
-                        (dynamic_runtime_context_block, local_workspace_context)))
+                    dynamic_runtime_context_block = "\n\n".join(filter(None, (
+                        dynamic_runtime_context_block, task_assignment_context(local_assistant_task),
+                    )))
                 runtime_context_block = "\n\n".join(
                     part
                     for part in (static_runtime_context_block, dynamic_runtime_context_block)
@@ -3404,6 +3403,12 @@ def _run_session_continuation_loop(
         )
         if not required_tool_progress_missing:
             last_visible_result = s._remember_continuation_visible_result(result, last_visible_result)
+        invocation_binding = (receipt_context or {}).get("operatorInvocationBinding") or {}
+        if invocation_binding.get("accountingKind") == "operator_knowledge" and result_status == "failed":
+            failure = result.get("llm_failure")
+            if isinstance(failure, dict) and failure.get("category") == "budget_exhausted":
+                failure["reason_code"] = "operator_knowledge_budget_exhausted"
+                return s._annotate_continuation_result(result, turn_index, reached_limit=False)
         if s._is_provider_failed_result(result):
             s._record_session_turn_circuit_breaker_event(
                 session_id,

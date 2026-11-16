@@ -62,6 +62,8 @@ export type AssistantQueuedTurnRequest =
   | { operation: "updateQueuedTurn"; sessionId: string; queuedTurnId: string; content?: string; position?: number; status?: "paused" | "queued" }
   | { operation: "removeQueuedTurn"; sessionId: string; queuedTurnId: string }
   | { operation: "sendNowQueuedTurn"; sessionId: string; queuedTurnId: string; expectedTurnId?: string };
+export type AssistantHostBinding = { agentId: string; sessionId: string };
+
 export type AssistantHostRequest =
   | AssistantQueuedTurnRequest
   | { operation: "previewTaskCleanup" | "executeTaskCleanup"; agentId: string; directSessionId: string; targets: unknown[]; fingerprint?: string }
@@ -1047,11 +1049,13 @@ export class AssistantHost {
     }, release: admission.release };
   }
 
-  async request(payload: AssistantHostRequest): Promise<unknown> {
+  async request(payload: AssistantHostRequest, binding?: AssistantHostBinding, signal?: AbortSignal): Promise<unknown> {
     // Capture the exact request before waiting. Only admission failures are
     // delayed; an uncertain native response is never automatically retried.
     const captured = structuredClone(payload);
+    const expected = binding && { ...binding };
     while (this.migrationAdmission) {
+      signal?.throwIfAborted();
       const admission = this.migrationAdmission;
       const lifecycle = this.lifecycleAdmission;
       if (lifecycle && !LIFECYCLE_READ_OPERATIONS.has(captured.operation)) {
@@ -1069,12 +1073,23 @@ export class AssistantHost {
       // counted writer in the host barrier even after admission is sealed.
       if (captured.operation === "computerConfirm" || captured.operation === "computerState"
         || (!admission.sealed && safeWhileWaiting)) break;
-      await admission.released;
+      if (!signal) {
+        await admission.released;
+      } else {
+        let abort!: () => void;
+        const cancelled = new Promise<never>((_resolve, reject) => {
+          abort = () => reject(signal.reason);
+          signal.addEventListener("abort", abort, { once: true });
+        });
+        try { await Promise.race([admission.released, cancelled]); }
+        finally { signal.removeEventListener("abort", abort); }
+      }
     }
+    signal?.throwIfAborted();
     this.rendererRequests += 1;
     const mutation = !LIFECYCLE_READ_OPERATIONS.has(captured.operation);
     if (mutation) this.rendererMutationRequests += 1;
-    try { return await this.requestNow(captured); }
+    try { return await this.requestNow(captured, expected); }
     finally {
       this.rendererRequests -= 1;
       if (mutation) this.rendererMutationRequests -= 1;
@@ -1088,10 +1103,15 @@ export class AssistantHost {
     this.rendererDrainWaiters.clear();
   }
 
-  private async requestNow(payload: AssistantHostRequest): Promise<unknown> {
+  private async requestNow(payload: AssistantHostRequest, expected?: AssistantHostBinding): Promise<unknown> {
     const generation = this.current;
     if (this.view.state !== "ready" || !generation || generation.closed || generation.abort.signal.aborted) {
       throw new HostError("ASSISTANT_NOT_READY");
+    }
+    // A main-process caller's binding is checked on the generation actually
+    // selected after lifecycle/migration admission, before any native effect.
+    if (expected && (expected.agentId !== generation.agentId || expected.sessionId !== generation.sessionId)) {
+      throw new HostError("ASSISTANT_IDENTITY_INVALID");
     }
     if (!object(payload)) throw new HostError("ASSISTANT_REQUEST_INVALID");
     switch (payload.operation) {
@@ -2111,6 +2131,9 @@ export class AssistantHost {
           // the renderer may safely retry after refreshing; the ASSISTANT_
           // prefix lets the code cross assistantBridge's renderer allowlist.
           throw new HostError("ASSISTANT_SESSION_CONFLICT");
+        }
+        if (path === "/api/assistant/messages" && response.status === 422 && failureCode === "SESSION_INVALID") {
+          throw new HostError("ASSISTANT_SESSION_INVALID");
         }
         // host.py's attachment-read 404 reports the unprefixed ATTACHMENT_NOT_
         // FOUND code. Pass it through under the same name, listed explicitly

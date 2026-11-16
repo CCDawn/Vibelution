@@ -8,7 +8,7 @@ import {
   type CloseBackoffCoalescedInfo,
   type MainLineCommandQueue
 } from "../lifecycle/mainLine/commandQueue.js";
-import { supersedePendingDeferredRestartIntents } from "../lifecycle/deferredRestartIntents.js";
+import { pruneTerminalDeferredRestartIntents, supersedePendingDeferredRestartIntents } from "../lifecycle/deferredRestartIntents.js";
 import { recordMainLineCommandSettlement } from "../lifecycle/mainLine/commandEvidence.js";
 import { writeMainLineIntent } from "../lifecycle/mainLine/commandIntent.js";
 import { writeMainLineQueueOwnerMarker } from "../lifecycle/mainLine/ownerMarker.js";
@@ -200,6 +200,10 @@ export async function runWorkbenchLifecycle(input: RunWorkbenchLifecycleInput): 
             runtimeManagerDir,
             reason: `Superseded by accepted ${input.operation} command.`
           });
+          // The same command settled the intents it superseded; drop the
+          // settled files (including ones failed/expired by earlier passes)
+          // so repeated rejections cannot accumulate intents forever.
+          pruneTerminalDeferredRestartIntents({ runtimeManagerDir });
         }
         trackMainLineBackgroundWork(command, recordMainLineCommandSettlement({
           workspaceRoot: input.workspaceRoot,

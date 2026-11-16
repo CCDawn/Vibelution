@@ -3288,7 +3288,8 @@ def test_stream_logs_prompt_cache_design_for_automatic_mode(monkeypatch):
     assert fields["cachedInputTokens"] == 80
 
 
-def test_stream_retries_without_usage_options_when_provider_rejects_them(monkeypatch):
+@pytest.mark.parametrize("disable_retries", [False, True])
+def test_stream_retries_without_usage_options_when_provider_rejects_them(monkeypatch, disable_retries):
     config = make_config(
         **{
             "llm.providers.default.kind": "local",
@@ -3310,19 +3311,24 @@ def test_stream_retries_without_usage_options_when_provider_rejects_them(monkeyp
     monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
 
     client = LLMClient(config=config, backend=backend)
-    events = list(
-        client.stream_events(
-            [{"role": "user", "content": "ping"}],
-            metadata={
-                "sessionId": "session-usage-downgrade",
-                "turnId": "turn-usage-downgrade",
-                "invocationId": "usage-downgrade",
-                "llmSlot": "dialogue",
-                "promptPurpose": "main_reply",
-                "conversationBound": True,
-            },
-        )
+    stream = client.stream_events(
+        [{"role": "user", "content": "ping"}],
+        metadata={
+            "sessionId": "session-usage-downgrade",
+            "turnId": "turn-usage-downgrade",
+            "invocationId": "usage-downgrade",
+            "llmSlot": "dialogue",
+            "promptPurpose": "main_reply",
+            "conversationBound": True,
+            "disableAutomaticRetries": disable_retries,
+        },
     )
+    if disable_retries:
+        with pytest.raises(LLMError):
+            list(stream)
+        assert len(payloads) == 1
+        return
+    events = list(stream)
 
     assert [payload.get("stream_options") for payload in payloads] == [
         {"include_usage": True},

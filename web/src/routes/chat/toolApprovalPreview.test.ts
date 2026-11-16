@@ -10,6 +10,7 @@ import {
   platformManagementPreviewIsValid,
   preferenceProposalPreviewIsValid,
   managementApprovalActionIsKnown,
+  authorizationRecoverPreviewIsValid,
   authorizationUpgradePreviewIsValid,
   browserInteractPreviewIsValid,
   dispatchWritePreviewIsValid,
@@ -498,6 +499,32 @@ describe("toolApprovalPreview", () => {
       if (summary.assistantAction !== "authorization_upgrade") continue;
       expect(toolApprovalActionPreview(summary, "personal_assistant_manage_tool", "zh")).toContain("参数无法核对");
       expect(toolApprovalActionPreview(summary, "personal_assistant_manage_tool", "en")).toContain("Arguments cannot be verified");
+    }
+  });
+  it("explains that recovery authorizes a new identity with the exact listed scopes", () => {
+    const scopes = ["source:read", "tasks:read"];
+    const summary = { assistantAction: "authorization_recover", assistantRecoveryVersion: 1,
+      assistantTargets: { project_id: "project-123" }, assistantAddedScopes: scopes };
+    expect(authorizationRecoverPreviewIsValid(summary)).toBe(true);
+    expect(toolApprovalActionPreview(summary, "personal_assistant_manage_tool", "zh").split("\n")).toEqual([
+      "恢复项目授权", "项目: project-123", "批准后会为此项目建立新的助理授权身份，仅授予下列权限。",
+      ...scopes.map(scope => `- ${scope}`),
+    ]);
+    expect(toolApprovalActionPreview(summary, "personal_assistant_manage_tool", "en").split("\n")).toEqual([
+      "Recover project authorization", "Project: project-123",
+      "Approval creates a new assistant authorization identity for this project and grants it only the permissions listed below.",
+      ...scopes.map(scope => `- ${scope}`),
+    ]);
+    for (const malformed of [
+      { ...summary, assistantRecoveryVersion: undefined }, { ...summary, assistantRecoveryVersion: 2 },
+      { ...summary, assistantDetailsOmitted: true }, { ...summary, assistantArgumentsInvalid: true },
+      { ...summary, assistantTargets: { project_id: "project-123", other: "hidden" } },
+      { ...summary, assistantTargets: { project_id: "project-123\n" } },
+      { ...summary, assistantAddedScopes: [] }, { ...summary, assistantAddedScopes: Array(1) },
+      { ...summary, assistantAddedScopes: ["source:read\u202e"] },
+    ]) {
+      expect(authorizationRecoverPreviewIsValid(malformed)).toBe(false);
+      expect(toolApprovalActionPreview(malformed, "personal_assistant_manage_tool", "en")).toContain("Arguments cannot be verified");
     }
   });
   it("explains the one-step team run and rejects an incomplete scope", () => {

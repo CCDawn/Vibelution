@@ -133,9 +133,9 @@ class NativeAgentGateway:
         return read_operations(self, query)
 
     def operation_receipts(self):
-        from vibelution_storage import resolve_project_runtime_home
         from .operation_receipts import NativeOutcomeStore
-        return NativeOutcomeStore(resolve_project_runtime_home(self.project_root) / "external_management" / "native_outcomes",
+        from .storage import management_home
+        return NativeOutcomeStore(management_home(self.project_root) / "native_outcomes",
                                   project_root=self.project_root)
 
     def read_knowledge_catalog(self, query):

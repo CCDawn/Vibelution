@@ -6,16 +6,36 @@ from core.assistant_runtime import actions
 
 
 class _Service:
-    def __init__(self, effective="read_only"):
+    def __init__(self, effective="read_only", status="running"):
         self.calls = []
         self.effective = effective
+        self.status = status
 
     def project_ids(self):
         return ("project-a",)
 
     async def dispatch_write_from_source(self, project_id, **kwargs):
         self.calls.append((project_id, kwargs))
-        return {"dispatchId": kwargs["dispatch_id"], "receipt": {"effectivePermissionProfile": self.effective}}
+        return {"dispatchId": kwargs["dispatch_id"], "nativeTaskId": "native-old",
+                "receipt": {"effectivePermissionProfile": self.effective, "status": self.status}}
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("status", ["running", "awaiting_approval", "succeeded"])
+async def test_write_dispatch_only_offers_receipt_wait_while_running(status):
+    service = _Service(effective="workspace_write", status=status)
+    runtime = {"agentId": "assistant", "sessionId": "session", "turnId": "turn"}
+    args = {"project_id": "project-a", "agent_id": "coder", "dispatch_id": "request-a", "task": "修复解析器"}
+    actions.bind_actions(service, asyncio.get_running_loop())
+    try:
+        result = await asyncio.to_thread(actions.execute_action, "dispatch_write", args, runtime=runtime, governed=True)
+        if status == "running":
+            assert result["nextAction"] == {"action": "receipt", "parameters": {
+                "dispatch_id": "request-a", "wait_for_result_seconds": 15}}
+        else:
+            assert "nextAction" not in result
+    finally:
+        actions.unbind_actions(service)
 
 
 @pytest.mark.anyio
@@ -34,6 +54,8 @@ async def test_write_action_requires_governed_tool_and_reports_target_ceiling():
         assert service.calls == [("project-a", {"agent_id": "coder", "dispatch_id": "request-a", "task": "修改文件", "title": "", "runtime": runtime})]
         assert result["receipt"]["effectivePermissionProfile"] == "read_only"
         assert "只读" in result["permissionNotice"]
+        assert result["nextAction"] == {"action": "receipt", "parameters": {
+            "dispatch_id": "request-a", "wait_for_result_seconds": 15}}
         with pytest.raises(ValueError, match="schema"):
             await asyncio.to_thread(actions.execute_action, "dispatch_write", {**args, "permission_profile": "full_access"}, runtime=runtime, governed=True)
         too_long = await asyncio.to_thread(actions.execute_action, "dispatch_write", {**args, "task": "x" * 12001}, runtime=runtime, governed=True)

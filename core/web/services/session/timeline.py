@@ -607,7 +607,11 @@ def _normalize_message_feedback_events(value: Any) -> list[dict[str, Any]]:
     return events
 
 
-def _assistant_timeline_events_by_turn(conversation_id: str) -> dict[str, list[dict[str, Any]]]:
+def _assistant_timeline_events_by_turn(
+    conversation_id: str,
+    *,
+    signature: tuple[Any, ...] | None = None,
+) -> dict[str, list[dict[str, Any]]]:
     s = _service()
     normalized_session_id = str(conversation_id or "").strip()
     if not normalized_session_id:
@@ -615,7 +619,10 @@ def _assistant_timeline_events_by_turn(conversation_id: str) -> dict[str, list[d
     # The by-turn timeline projection is a pure function of the journal events,
     # so it joins the ledger projection snapshot cache: unchanged sessions skip
     # the full-journal scan + sanitize replay on every detail window read.
-    signature = s._session_conversation_events_signature(normalized_session_id)
+    # Rebuild-bundle callers pass the bundle-captured signature so the store
+    # fills the shared snapshot skeleton instead of replacing it per step.
+    if signature is None:
+        signature = s._session_conversation_events_signature(normalized_session_id)
     from .projection import (
         _ledger_projection_cache_entry,
         _store_ledger_projection_cache_entry,

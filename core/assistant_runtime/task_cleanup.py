@@ -26,7 +26,8 @@ _REQUEST_PROOF_BUDGET = 25.0
 _TEAM_TERMINAL_STATUSES = {"completed", "failed", "stopped"}
 # A source team receipt that can never be re-confirmed: the request record is
 # gone or the management identity rotated away from this association.
-_TEAM_UNOBSERVABLE_RECEIPT_CODES = {"REQUEST_UNAVAILABLE", "MANAGEMENT_IDENTITY_ROTATED"}
+_TEAM_UNOBSERVABLE_RECEIPT_CODES = {"REQUEST_UNAVAILABLE", "MANAGEMENT_IDENTITY_ROTATED",
+                                   "ORIGINAL_MANAGEMENT_IDENTITY_UNAVAILABLE"}
 # Tombstone identity keys: the compared subset that fences replay of one
 # task's cleanup. `_marker_scope` additionally records entry metadata
 # (`agentId`, `directSessionId`, `localOnly`) per target kind; those fields

@@ -25,7 +25,7 @@ def materialize_workspace(project_root, task_id):
     from core.web.services.team.dev_task_board import _materialize_worktree
     slug = "assistant-" + task_id
     workspace = allocate_worktree_path(project_root, slug)
-    _materialize_worktree(Path(project_root), workspace, "codex/" + slug, timeout_seconds=600)
+    _materialize_worktree(Path(project_root), workspace, "codex/" + slug, base_ref="HEAD", timeout_seconds=600)
     return workspace
 
 

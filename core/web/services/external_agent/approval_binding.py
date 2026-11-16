@@ -23,7 +23,14 @@ class ApprovalBindingError(ValueError):
 
 
 _TASKS_LOCK = threading.RLock()
-_TASKS: dict[str, tuple[str, str]] = {}
+@dataclass(frozen=True)
+class _SessionTask:
+    task_id: str
+    agent_id: str
+    launcher_local: bool
+
+
+_TASKS: dict[str, _SessionTask] = {}
 
 
 def is_external_session(conversation: Any) -> bool:
@@ -83,22 +90,23 @@ def validate_external_session_submit(*, conversation: Any, session_id: str,
         raise ApprovalBindingError("external session identity unavailable")
 
 
-def register_external_session(*, task_id: str, session_id: str, agent_id: str) -> None:
+def register_external_session(*, task_id: str, session_id: str, agent_id: str, launcher_local: bool = False) -> None:
     """Register before submit starts; never overwrite a different task identity."""
     task_id, session_id, agent_id = map(_identity, (task_id, session_id, agent_id))
     with _TASKS_LOCK:
+        identity = _SessionTask(task_id, agent_id, launcher_local)
         previous = _TASKS.get(session_id)
-        if previous is not None and previous != (task_id, agent_id):
+        if previous is not None and previous != identity:
             raise ApprovalBindingError("external session identity conflict")
-        _TASKS[session_id] = (task_id, agent_id)
+        _TASKS[session_id] = identity
 
 
 def external_session_task(*, session_id: str, agent_id: str) -> str:
     with _TASKS_LOCK:
         entry = _TASKS.get(session_id)
-        if entry is None or entry[1] != agent_id:
+        if entry is None or entry.agent_id != agent_id:
             raise ApprovalBindingError("external session identity unavailable")
-        return entry[0]
+        return entry.task_id
 
 
 def registered_external_task(*, session_id: str, agent_id: str) -> str:
@@ -107,14 +115,21 @@ def registered_external_task(*, session_id: str, agent_id: str) -> str:
         entry = _TASKS.get(session_id)
         if entry is None:
             return ""
-        if entry[1] != agent_id:
+        if entry.agent_id != agent_id:
             raise ApprovalBindingError("external session agent changed")
-        return entry[0]
+        return entry.task_id
+
+
+def registered_launcher_session(*, session_id: str, agent_id: str) -> bool:
+    with _TASKS_LOCK:
+        entry = _TASKS.get(session_id)
+        return bool(entry and entry.agent_id == agent_id and entry.launcher_local)
 
 
 def unregister_external_session(*, task_id: str, session_id: str, agent_id: str) -> None:
     with _TASKS_LOCK:
-        if _TASKS.get(session_id) == (task_id, agent_id):
+        entry = _TASKS.get(session_id)
+        if entry is not None and entry.task_id == task_id and entry.agent_id == agent_id:
             del _TASKS[session_id]
 
 

@@ -157,6 +157,7 @@ EXPLICIT_ALLOW_TOOLS = {
     "computer_use_session_tool",
     "computer_use_task_tool",
     "read_file_tool",
+    "record_local_reuse_evidence_tool",
     "research_knowledge_query_tool",
     "research_agent_creation_proposal_tool",
     "research_communication_edge_proposal_tool",
@@ -243,6 +244,12 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "category": "workspace_write",
         "capabilityTags": ["file_write"],
         "riskTags": ["file_write"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
+    "record_local_reuse_evidence_tool": {
+        "category": "workspace_write",
+        "capabilityTags": ["file_write"],
+        "riskTags": ["file_write", "launcher_task_only"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
     "clean_workspace_debris_tool": {

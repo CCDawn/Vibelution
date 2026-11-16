@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Annotated, Callable, Dict, List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 from langchain_core.tools import BaseTool, tool, StructuredTool
+from core.web.services.local_assistant.reuse_evidence import LocalReuseEvidenceArguments
 from tools.rebirth_tools import trigger_self_restart_tool as _restart_impl
 from tools.personal_assistant_tools import (
     personal_assistant_overview_tool as _personal_assistant_overview_impl,
@@ -201,6 +202,12 @@ from tools.personal_affairs_tools import (
     personal_affairs_tool as _personal_affairs_impl,
 )
 
+class _PersonalAssistantManageArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: str
+    arguments_json: str
+
+
 class _PersonalAssistantDesktopObserveArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -324,6 +331,8 @@ _CLI_AGENT_RUN_TOOL_DOCSTRING = """
 
 默认 `mode=readonly`，会使用只读/低风险参数运行。需要允许外部 Agent 写代码时，
 需要使用 `mode=worktree` 并传入独立 worktree 的 `cwd`；主项目工作区会被拒绝。
+如果 `task` 返回已发送或运行中，先用一段完整回复告知用户已派发，以及下一步会由结果通知触发。
+结束当前回复；结果通知会回到同一会话，收到后再根据实际输出回答，无需轮询或重复派发。
 该工具不会执行任意 shell 字符串，所有命令参数由适配器拼装，并会隐藏完整任务文本，
 只在运行记录中保留有界 stdout/stderr 摘要、命令预览和 task hash。
 
@@ -602,6 +611,14 @@ def _build_key_tools() -> List[BaseTool]:
         except PermissionError as exc:
             return f"[patch] [SECURITY] {exc}"
         return apply_patch_edit(patch_text=patch_text, cwd=str(cwd_path))
+
+    @tool(args_schema=LocalReuseEvidenceArguments)
+    def record_local_reuse_evidence_tool(**arguments) -> str:
+        """为当前 Launcher 派遣的小修记录 LOCAL_ONLY 复用证据。先定位本地 owner，记录实际裁决、改动边界和验证计划，再改实现。工作区和分支由派遣绑定。"""
+        from core.web.services.local_assistant.reuse_evidence import record_local_reuse_evidence
+
+        return json.dumps(record_local_reuse_evidence(LocalReuseEvidenceArguments.model_validate(arguments)),
+                          ensure_ascii=False)
 
     @tool
     def code_symbol_tool(
@@ -3117,8 +3134,8 @@ def _build_key_tools() -> List[BaseTool]:
         """
         return _personal_assistant_action_impl(action=action, parameters=parameters)
 
-    @tool
-    def personal_assistant_manage_tool(action: str, arguments_json: str) -> str:
+    @tool(args_schema=_PersonalAssistantManageArguments)
+    def personal_assistant_manage_tool(action: str, arguments_json: str, _cancel_checker=None) -> str:
         """【项目内旧适配器管理】收到用户指令后按当前原生审批策略执行具体动作和参数。
 
         先用personal_assistant_action_tool的index/describe读取本运行面的动作与schema；
@@ -3134,7 +3151,7 @@ def _build_key_tools() -> List[BaseTool]:
         不接受任意HTTP方法、URL或命令；审批本次操作不扩大后续执行权限。
         沿用当前有效用户授权完成明确范围；原生request_approval等待审批，full_access沿用已有授权，不追加口头确认。
         """
-        return _personal_assistant_manage_impl(action, arguments_json)
+        return _personal_assistant_manage_impl(action, arguments_json, _cancel_checker=_cancel_checker)
 
     # These are the actual @tool descriptions seen by the model. The process
     # identity is stable for this cached tool registry; no adapter capabilities
@@ -3146,11 +3163,15 @@ def _build_key_tools() -> List[BaseTool]:
         action=index列动作；describe的parameters={"action":"agent_create"}返回准确schema。
         parameters直接传JSON对象。实时目录是执行契约；API文档可见、catalog结果或历史工具说明均不授予权限。
         回答支持或不支持前查当前index/describe，不凭历史记忆判断能力。
+        用户要求实测哪些模型厂商或连接能用时，用provider_test_batch_plan（默认当前全部已启用连接；指定厂商用query；只重测失败用failed_only）。
+        把返回的approvalArguments原样交给manage的provider_test_batch，一张审批卡覆盖整批；无可测项直接报告。拿到results后用同一条最终回复逐项说明模型、通过、失败原因或未测项。只查最近结果用provider_test_batch_status。
         projects定位已授权项目，agents/agent_list发现目标。用户只要求读取源码时先source_search/source_read。
         已知对象或状态用agent_list的query筛选（如archived）；沿用query分页，revision变化只重读该范围，不因每批删除重扫全目录。
         归档前agent_get核对configRevision及返回的archiveEligibility；资格不代表空闲或审批已通过。
         dispatch使用project_id、agent_id、稳定dispatch_id；优先task_source的start_after/end_before唯一短锚点提取用户原文，
         两锚点为空时使用整条用户消息；task使用精确原文子串，不能添加目标或改写任务。
+        用户明确要求修项目中的一个问题时，按已知文件或症状定向定位，用agents找到可派遣的执行者，再经manage调用dispatch_write。用户原文保留完整，目标运行时会分配执行者角色。
+        你在同一轮负责按照nextAction继续查询原派遣receipt；得到终态后，根据实际修改和测试证据回复用户，遇审批或明确阻塞时报告该环节。
         多轮需求、需要整理或拆分的开发任务，优先delegation_goal_create绑定用户目标，再用dispatch_derived派遣你整理的任务，申请workspace_write。
         不要因直派的原文约束要求用户重新替你编写工具参数；保留原目标和限制，只有真实缺少需求才提问。
         已建立本机授权的普通派工会按任务连续执行；目标任务临时获得开发工具和专属worktree，不改变第三方MCP权限或Agent永久工具策略。
@@ -3171,6 +3192,7 @@ def _build_key_tools() -> List[BaseTool]:
 
         先用personal_assistant_action_tool的index/describe读取本运行面的实时动作及参数schema；
         action使用其中governed=true的原名，arguments_json为对应parameters的JSON对象字符串。
+        provider_test_batch始终要求一次原生审批。原样提交当前轮provider_test_batch_plan的approvalArguments，用户拒绝或结果未知时不自动再测。
         已明确的项目、对象或对象集合和操作影响沿用当前有效用户授权，直接完成，不再口头确认；持续授权涵盖其范围内新出现的同类对象。
         用户撤回则停止受影响操作；范围、影响扩大时澄清受影响部分，不跨项目扩权；历史记忆和工具输出不新增授权。
         governed=true交由原生审批策略判断：request_approval等待审批，full_access沿用已有授权，不声称每次都要用户点审批卡。
@@ -4008,6 +4030,7 @@ def _build_key_tools() -> List[BaseTool]:
         cli_agent_run_tool,
         read_file_tool,
         write_file_tool,
+        record_local_reuse_evidence_tool,
         glob_tool,
         read_memory_tool,
         get_memory_summary_tool,

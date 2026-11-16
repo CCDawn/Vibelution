@@ -19,6 +19,8 @@ from vibelution_storage import resolve_project_workspace_home
 SCHEMA_VERSION = 1
 _LOCK = threading.RLock()
 _SHA256_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
+_CLAIM_EVIDENCE_ID_PATTERN = re.compile(r"^ce-[0-9a-f]{20}$")
+_CITATION_FIELDS = ("candidateId", "sourceId", "sourceRevision", "locator", "quote")
 _REASONING_ROLES = {"fact", "inference", "analogy", "hypothesis"}
 _EVIDENCE_KINDS = {"primary_result", "review_summary", "metadata", "counter_evidence"}
 _SUPPORT_LEVELS = {"supports", "contradicts", "insufficient", "unverified"}
@@ -52,8 +54,16 @@ class ClaimEvidenceStore:
     def __init__(self, project_root: str | os.PathLike[str]) -> None:
         self.project_root = Path(project_root).expanduser().resolve()
 
-    def register(self, team_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        normalized = _normalize_payload(payload)
+    def register(
+        self,
+        team_id: str,
+        payload: dict[str, Any],
+        *,
+        derived_from_claim_evidence_id: str = "",
+    ) -> dict[str, Any]:
+        normalized = _normalize_payload(
+            payload, derived_from_claim_evidence_id=derived_from_claim_evidence_id
+        )
         team = _safe_id(team_id, field="teamId")
         evidence_id = _evidence_id(normalized)
         path = self._path(team)
@@ -62,6 +72,22 @@ class ClaimEvidenceStore:
             existing = next((item for item in records if item.get("claimEvidenceId") == evidence_id), None)
             if existing is not None:
                 return existing
+            if derived_from_claim_evidence_id:
+                source = next(
+                    (
+                        item
+                        for item in reversed(records)
+                        if item.get("claimEvidenceId") == normalized["derivedFromClaimEvidenceId"]
+                    ),
+                    None,
+                )
+                if (
+                    source is None
+                    or not self.has_content_identity(source)
+                    or str(source.get("reviewStatus") or "").lower() in {"rejected", "stale"}
+                    or any(source.get(key) != normalized[key] for key in _CITATION_FIELDS)
+                ):
+                    raise ClaimEvidenceError("Derived evidence requires a current, canonical source citation.")
             now = _now_utc()
             record = {
                 "schemaVersion": SCHEMA_VERSION,
@@ -89,6 +115,21 @@ class ClaimEvidenceStore:
             },
         )
         return record
+
+    @staticmethod
+    def has_content_identity(record: dict[str, Any]) -> bool:
+        """Verify the content-addressed identity and quote of a stored card."""
+        try:
+            normalized = _normalize_payload(
+                record,
+                derived_from_claim_evidence_id=record.get("derivedFromClaimEvidenceId", ""),
+            )
+        except ClaimEvidenceError:
+            return False
+        return (
+            record.get("claimEvidenceId") == _evidence_id(record)
+            and record.get("quoteHash") == _sha256_text(normalized["quote"])
+        )
 
     def list(self, team_id: str, *, candidate_id: str = "", claim_id: str = "") -> list[dict[str, Any]]:
         team = _safe_id(team_id, field="teamId")
@@ -277,7 +318,10 @@ class ClaimEvidenceStore:
                     if source.get(optional_key):
                         payload[optional_key] = source.get(optional_key)
                 try:
-                    normalized = _normalize_payload(payload)
+                    normalized = _normalize_payload(
+                        payload,
+                        derived_from_claim_evidence_id=source.get("derivedFromClaimEvidenceId", ""),
+                    )
                 except ClaimEvidenceError:
                     continue
                 # Belief readers resolve a cited record's scope against the
@@ -408,7 +452,9 @@ class ClaimEvidenceStore:
         )
 
 
-def _normalize_payload(payload: dict[str, Any]) -> dict[str, Any]:
+def _normalize_payload(
+    payload: dict[str, Any], *, derived_from_claim_evidence_id: str = ""
+) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ClaimEvidenceError("Claim evidence payload must be an object.")
     locator = _locator(payload.get("locator"))
@@ -440,6 +486,11 @@ def _normalize_payload(payload: dict[str, Any]) -> dict[str, Any]:
         normalized["sourceCollectionRunId"] = source_collection_run_id
     if workflow_run_id:
         normalized["workflowRunId"] = workflow_run_id
+    if derived_from_claim_evidence_id:
+        source_evidence_id = _optional_text(derived_from_claim_evidence_id, 200)
+        if not _CLAIM_EVIDENCE_ID_PATTERN.fullmatch(source_evidence_id):
+            raise ClaimEvidenceError("derivedFromClaimEvidenceId must reference a canonical evidence ID.")
+        normalized["derivedFromClaimEvidenceId"] = source_evidence_id
     envelope = _collection_envelope(payload.get("collectionEnvelope"))
     if envelope:
         normalized["collectionEnvelope"] = envelope
@@ -523,8 +574,18 @@ def _safe_id(value: Any, *, field: str) -> str:
 def _evidence_id(payload: dict[str, Any]) -> str:
     identity = {
         key: payload[key]
-        for key in ("claimId", "candidateId", "sourceId", "sourceRevision", "locator", "quote", "reasoningRole")
+        for key in ("claimId", *_CITATION_FIELDS, "reasoningRole")
     }
+    if payload.get("derivedFromClaimEvidenceId"):
+        # A separately scoped interpretation must not collide with its source
+        # or another workflow's interpretation of the same citation.
+        identity.update({
+            key: payload.get(key, "")
+            for key in (
+                "derivedFromClaimEvidenceId", "sourceCollectionRunId", "workflowRunId",
+                "evidenceKind", "supportLevel",
+            )
+        })
     return f"ce-{_stable_hash(identity)[:20]}"
 
 

@@ -277,6 +277,68 @@ def test_matching_room_top_config_and_team_classifications_remain_readable(env):
     assert queries.read_rooms(env.root, env.directory, query())["total"] == 1
 
 
+def test_orphan_rooms_do_not_hide_the_verified_directory(env, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
+    from core.web.routes import launcher_assistant_management as route
+    from core.web.services.external_management.native import NativeAgentGateway
+    from core.web.services.external_management.service import ManagementService, TargetIdentity
+
+    orphan = {**env.room, "roomId": "room-orphan", "title": "Orphan title",
+              "config": {"source": "team", "teamId": "missing"}}
+    private = {**env.room, "roomId": "room-private", "title": "Private title", "hidden": True, "config": {}}
+    standalone = {**env.room, "roomId": "room-z", "title": "Standalone room", "config": {}}
+    env.write([env.team], [orphan, private, standalone, env.room])
+    binding = {"projectId": "target", "instanceId": "backend"}
+    native = NativeAgentGateway(env.root)
+    monkeypatch.setattr(native, "_owners", lambda: env.directory)
+    service = ManagementService(env.root / "management", identity=lambda: TargetIdentity(binding, "control"), native=native)
+    grant = service.bind({"client_id": "launcher", "expected_binding": binding, "scopes": ["rooms:read"]})
+    monkeypatch.setattr(route, "_SERVICE", service)
+    headers = {CONTROL_TOKEN_HEADER: get_control_token(), route.SUBJECT_HEADER: grant["subject_id"],
+               route.CAPABILITY_HEADER: grant["subject_capability"]}
+    app = FastAPI()
+    app.include_router(route.router)
+    url = "/v1/launcher-assistant-management/directory/rooms"
+    before = snapshot(env)
+
+    with TestClient(app) as client:
+        response = client.get(url, params={"limit": 1, "archived": "true"}, headers=headers)
+        assert response.status_code == 200, response.text
+        page = response.json()
+        assert [item["id"] for item in page["rooms"]] == ["room-a"]
+        assert page["total"] == 2 and page["nextOffset"] == 1
+        second = client.get(url, params={"limit": 1, "offset": 1}, headers=headers).json()
+        assert [item["id"] for item in second["rooms"]] == ["room-z"]
+        assert second["nextOffset"] is None
+        assert client.get(url, params={"query": "orphan"}, headers=headers).json()["rooms"] == []
+        assert client.get(f"{url}/room-a", headers=headers).json()["room"]["id"] == "room-a"
+        for room_id in ("room-orphan", "room-private"):
+            detail = client.get(f"{url}/{room_id}", headers=headers)
+            assert detail.status_code == 404 and detail.json() == {"detail": {"code": "ROOM_UNAVAILABLE"}}
+    assert snapshot(env) == before
+
+
+@pytest.mark.parametrize("fault", ["duplicate_orphan", "duplicate_visible", "conflicting_classification", "malformed_title"])
+def test_missing_room_team_does_not_mask_other_authority_damage(env, fault):
+    orphan = {**env.room, "roomId": "room-orphan", "config": {"source": "team", "teamId": "missing"}}
+    rows = [orphan, env.room]
+    if fault == "duplicate_orphan":
+        rows.append(copy.deepcopy(orphan))
+    elif fault == "duplicate_visible":
+        rows.append({**orphan, "config": {"source": "manual"}})
+    elif fault == "conflicting_classification":
+        orphan["teamKind"] = "research"
+        orphan["config"]["teamKind"] = "custom"
+    else:
+        orphan["title"] = []
+    env.write([env.team], rows)
+    with pytest.raises(ManagementError, match="ROOM_LIST_UNAVAILABLE") as rejected:
+        queries.read_rooms(env.root, env.directory, query())
+    assert rejected.value.status_code == 503
+
+
 def test_list_summary_budget_is_separate_from_detail_and_hidden_suffix_search(env):
     env.team["name"] = "N" * 32 + "NAME_SUFFIX"
     env.team["purpose"] = "P" * 64 + "PURPOSE_SUFFIX"

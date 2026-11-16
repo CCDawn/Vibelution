@@ -98,6 +98,14 @@ def test_plan_without_tools_needs_retryable_output_and_honors_stop_and_budget():
     assert plan["discardedReasoningBytes"] > 0
 
 
+def test_model_budget_rejection_does_not_recover_after_committed_tool():
+    assert plan_stream_recovery(
+        [_tool_event("call-1", "done")],
+        assistant_message_id="turn-1",
+        category="budget_exhausted",
+    ) is None
+
+
 def test_model_replay_drops_partial_only_after_stream_recovery(tmp_path):
     append_turn_event(
         tmp_path,

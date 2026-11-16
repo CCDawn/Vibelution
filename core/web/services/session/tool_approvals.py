@@ -174,6 +174,8 @@ def resolve_tool_approval_request(
     *,
     decision: str,
 ) -> dict[str, Any]:
+    from core.assistant_runtime.provider_approval import PROVIDER_APPROVAL_ACTIONS
+
     normalized_decision = str(decision or "").strip()
     if normalized_decision not in _VALID_DECISIONS:
         raise ToolApprovalError(f"unsupported tool approval decision: {normalized_decision or '<empty>'}")
@@ -186,10 +188,10 @@ def resolve_tool_approval_request(
         if request.external_task_id and normalized_decision not in {"decline", "cancel"}:
             raise ToolApprovalConflictError("external task approvals require a bound preview")
         if (request.tool_name == "personal_assistant_manage_tool"
-                and request.argument_summary.get("assistantAction") == "provider_model_resolve"
+                and request.argument_summary.get("assistantAction") in (PROVIDER_APPROVAL_ACTIONS | {"authorization_recover"})
                 and request.argument_summary.get("assistantArgumentsInvalid") is True
                 and normalized_decision not in {"decline", "cancel"}):
-            raise ToolApprovalConflictError("provider model approval arguments cannot be verified")
+            raise ToolApprovalConflictError("approval arguments cannot be verified")
         if (
             normalized_decision in {"acceptForSession", "acceptAlways"}
             and request.approval == "always"
@@ -390,13 +392,16 @@ def authorize_or_wait(
     normalized_risk = str(risk or "read").strip()
     # This native-only source reauthorization requires an actual per-call
     # operator decision. Other sessions and management actions retain policy.
-    reminder_recovery = False
-    if normalized_tool == "personal_assistant_manage_tool" and tool_args.get("action") == "reminder_handoff_recover":
+    recovery_action = tool_args.get("action")
+    exact_recovery_consent = False
+    if normalized_tool == "personal_assistant_manage_tool" and recovery_action in ("reminder_handoff_recover", "authorization_recover"):
         from core.infrastructure.native_runtime import is_launcher_assistant_process
-        reminder_recovery = is_launcher_assistant_process()
+        exact_recovery_consent = is_launcher_assistant_process()
+    reminder_recovery = exact_recovery_consent and recovery_action == "reminder_handoff_recover"
     if reminder_recovery:
         from core.assistant_runtime.actions import reset_reminder_recovery_call
         reset_reminder_recovery_call()
+    if exact_recovery_consent:
         normalized_approval = "always"
     if normalized_approval == "never":
         return ToolApprovalOutcome(True, "approval_not_required")
@@ -413,7 +418,7 @@ def authorize_or_wait(
     if normalized_config_revision < 1:
         raise ToolApprovalError("Agent configRevision is required")
     command_execution_hash = _command_execution_evidence_hash(normalized_tool, tool_args)
-    if normalized_permission_preset == "full_access" and not reminder_recovery:
+    if normalized_permission_preset == "full_access" and not exact_recovery_consent:
         # full_access 短路放行与 grant/auto_approved 同处一条 Windows 未验证
         # 沙箱链路：无一次性执行证据时沙箱门 fail-closed，短路会变成无出口
         # 死路。与既有两路径同口径签发；非沙箱受控命令在 _mint 内部无副作用。
@@ -448,7 +453,7 @@ def authorize_or_wait(
     with _LOCK:
         # Assistant manage low-risk actions with an active delegation window
         # are executed directly; the tier table stays server-owned.
-        if not reminder_recovery and not native_management and _assistant_action_window_remaining_seconds(normalized_agent, normalized_tool, tool_args) > 0:
+        if not exact_recovery_consent and not native_management and _assistant_action_window_remaining_seconds(normalized_agent, normalized_tool, tool_args) > 0:
             return ToolApprovalOutcome(True, "approved_for_action_window")
         if normalized_approval != "always":
             if grant_key in _SESSION_GRANTS:
@@ -500,7 +505,7 @@ def authorize_or_wait(
         )
         return ToolApprovalOutcome(True, grant_short_circuit)
 
-    if not reminder_recovery and _can_auto_approve(
+    if not exact_recovery_consent and _can_auto_approve(
         permission_preset=normalized_permission_preset,
         tool_name=normalized_tool,
         tool_args=tool_args,
@@ -1548,8 +1553,8 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
             if set(args) - {"action", "arguments_json", "_cancel_checker"}:
                 raise ValueError("Invalid provider management call")
             from core.web.services.local_assistant.management_approval import parse_arguments
-            from core.assistant_runtime.provider_approval import provider_model_resolve_approval_summary
-            return provider_model_resolve_approval_summary(parse_arguments(args.get("arguments_json")))
+            from core.assistant_runtime.provider_approval import provider_approval_summary
+            return provider_approval_summary(action, parse_arguments(args.get("arguments_json")))
         except (ValueError, TypeError, KeyError, RuntimeError, RecursionError):
             return {"assistantAction": action, "assistantArgumentsInvalid": True}
     from core.assistant_runtime.autonomy_approval import AUTONOMY_ACTIONS
@@ -1721,7 +1726,7 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
             return dispatch_write_approval_summary(values)
         except (ValueError, TypeError, KeyError, RuntimeError, RecursionError):
             return {"assistantAction": action, "assistantArgumentsInvalid": True}
-    if action == "authorization_upgrade":
+    if action in ("authorization_upgrade", "authorization_recover"):
         from core.infrastructure.native_runtime import is_launcher_assistant_process
         if not is_launcher_assistant_process():
             return {"assistantArgumentsInvalid": True}
@@ -1730,8 +1735,9 @@ def _assistant_management_summary(args: Mapping[str, Any]) -> dict[str, Any]:
             values = json.loads(raw) if isinstance(raw, str) and len(raw) <= 16000 else None
             if not isinstance(values, dict):
                 raise ValueError("Invalid authorization upgrade arguments")
-            from core.assistant_runtime.actions import authorization_upgrade_approval_summary
-            return authorization_upgrade_approval_summary(values)
+            from core.assistant_runtime.actions import authorization_recover_approval_summary, authorization_upgrade_approval_summary
+            summary = authorization_recover_approval_summary if action == "authorization_recover" else authorization_upgrade_approval_summary
+            return summary(values)
         except (ValueError, TypeError, KeyError, RuntimeError, RecursionError):
             return {"assistantAction": action, "assistantArgumentsInvalid": True}
     if isinstance(action, str) and action in {"history_import", "affairs_sync", "episodic_sync", "initial_migration_queue", "knowledge_sync_queue", "knowledge_sync_recover", "reminder_handoff_queue", "reminder_handoff_recover"}:
@@ -2242,7 +2248,7 @@ def grant_assistant_action_window(*, agent_id: str, action: str) -> float:
 
 def _available_decisions(request: _ApprovalRequest) -> list[str]:
     if (request.tool_name == "personal_assistant_manage_tool"
-            and request.argument_summary.get("assistantAction") == "reminder_handoff_recover"):
+            and request.argument_summary.get("assistantAction") in ("reminder_handoff_recover", "authorization_recover")):
         from core.infrastructure.native_runtime import is_launcher_assistant_process
         if is_launcher_assistant_process():
             return ["accept", "decline", "cancel"]

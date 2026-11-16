@@ -3,7 +3,9 @@ import sys
 
 import pytest
 
-from core.research.operator_optimization.cuda_worker import CudaTrialRequest
+from core.research.operator_optimization import cuda_worker
+from core.research.operator_optimization.cuda_worker import CudaMeasurementIdentity, CudaTrialRequest
+from core.research.operator_optimization.measurement import OperatorMeasurement
 from core.web.services.team_workflow.operator_optimization import executor
 
 
@@ -72,6 +74,44 @@ def test_invalid_worker_receipt_is_not_success(monkeypatch, request_data):
     result = executor.execute_cuda_trial(request_data, device_name="test device")
     assert result.status == "failed"
     assert result.failureReason
+
+
+def test_worker_publishes_its_receipt_before_supervisor_reaps_it(monkeypatch, request_data, tmp_path):
+    request_data = request_data.model_copy(update={"max_seconds": 20})
+    target = executor.TrialReceiptTarget(
+        tmp_path / "terminal-receipt.json", "f" * 64, "launch",
+        CudaMeasurementIdentity.from_request(request_data, "test device"),
+    )
+    processes = replace_worker(monkeypatch, """
+from core.research.operator_optimization import cuda_worker
+
+def measure(**fields):
+    request = cuda_worker.CudaTrialRequest(**fields)
+    identity = cuda_worker.CudaMeasurementIdentity.from_request(request, "test device")
+    return cuda_worker.OperatorMeasurement(**identity.model_dump(), status="failed",
+        failureReason="worker observation", gpuSeconds=0)
+
+cuda_worker.measure_cuda = measure
+cuda_worker.main()
+""")
+    result = executor.execute_cuda_trial(request_data, device_name="test device", receipt_target=target)
+    assert processes[0].poll() is not None
+    assert result.failureReason == "worker observation"
+    assert 0 < result.gpuSeconds < request_data.max_seconds
+    assert target.read().measurement == result
+
+
+def test_running_legacy_supervisor_can_still_read_bare_measurement(monkeypatch, request_data, tmp_path):
+    source, target = tmp_path / "request.json", tmp_path / "measurement.json"
+    source.write_text(request_data.model_dump_json(), encoding="utf-8")
+    expected = OperatorMeasurement(
+        **CudaMeasurementIdentity.from_request(request_data, "test device").model_dump(),
+        status="failed", failureReason="worker observation", gpuSeconds=0.1,
+    )
+    monkeypatch.setattr(sys, "argv", ["cuda_worker", str(source), str(target)])
+    monkeypatch.setattr(cuda_worker, "measure_cuda", lambda **_: expected)
+    cuda_worker.main()
+    assert OperatorMeasurement.model_validate_json(target.read_text(encoding="utf-8")) == expected
 
 
 def test_busy_device_does_not_spawn_worker(monkeypatch, request_data):
