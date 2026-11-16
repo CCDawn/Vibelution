@@ -228,6 +228,109 @@ def _reject_relations_writeback(setup, result: dict) -> str:
     return str(excinfo.value)
 
 
+def _direct_counter_cards() -> list[dict]:
+    return [
+        {
+            "candidateId": "cand-a",
+            "recordId": _OFFENDING_REF,
+            "claimEvidenceId": "ce-good-beta",
+            "supportLevel": "contradicts",
+            "quote": "Throughput declined on the narrow problem.",
+            "originalSourceUrl": "https://arxiv.org/abs/2307.08691v1",
+        },
+        {
+            "candidateId": "cand-a",
+            "recordId": _OFFENDING_REF,
+            "claimEvidenceId": "ce-good-alpha",
+            "supportLevel": "supports",
+            "quote": "Throughput improved on the wide problem.",
+        },
+    ]
+
+
+def test_direct_counter_alias_resolves_only_with_exact_same_source_quote(tmp_path, monkeypatch):
+    setup = _start_stage_task(tmp_path, monkeypatch, stage_id="relations", agent_role="source_relation_mapper")
+    graph = _valid_graph()
+    graph["edges"][0]["evidenceRefs"] = ["ce-good-alpha"]
+    _stub_relation_graph(monkeypatch, graph=graph)
+    _stub_writeback_acceptance_path(monkeypatch)
+    cards = _direct_counter_cards()
+    monkeypatch.setattr(registry, "load_relation_evidence_context", lambda **_: cards)
+    captured = []
+    service = stage_writeback._service()
+
+    def build_graph(_team_id, _run_id, _task, writeback, **_kwargs):
+        payload = service._source_collection_stage_writeback_agent_graph_payload(writeback["result"])
+        captured.extend(payload["counterEvidenceRefs"])
+        graph["counterEvidenceRefs"] = captured
+        return {}
+
+    monkeypatch.setattr(service, "_materialize_source_collection_stage_writeback_candidate_graph", build_graph)
+    counter = {
+        "evidenceRef": _OFFENDING_REF,
+        "claim": "Throughput improves for every shape.",
+        "disposition": " Challenges_Ontology ",
+    }
+    result = {
+        "candidateGraph": {"edges": []},
+        "candidate_graph": {"counter_evidence_refs": [counter]},
+    }
+    message = _reject_relations_writeback(setup, result)
+    assert "directCounterEvidence" in message and "ce-good-beta" in message
+    assert captured == []
+    context = _read_context(setup)
+    assert context["directCounterEvidence"] == [{
+        "evidenceRef": "ce-good-beta",
+        "candidateId": "cand-a",
+        "sourceUrl": cards[0]["originalSourceUrl"],
+        "quote": cards[0]["quote"],
+    }]
+    assert context["writebackRemediation"]["findings"][0]["path"] == "candidateGraph.counterEvidenceRefs[0].evidenceRef"
+    counter["quote"] = cards[0]["quote"]
+    service.writeback_source_collection_stage_session_task(
+        setup["teamId"], setup["task"]["taskId"], {"status": "completed", "result": result}
+    )
+    expected = [{**counter, "evidenceRef": "ce-good-beta", "disposition": "challenges_ontology"}]
+    assert captured == expected
+    assert _stored_task(setup)["result"]["candidateGraph"]["counterEvidenceRefs"] == expected
+    assert "writebackRemediationContract" not in _stored_task(setup)
+
+
+@pytest.mark.parametrize(
+    ("ref", "quote", "claim", "remove_receipt", "path"),
+    [
+        ("ce-good-alpha", "", "Some claim", False, "evidenceRef"),
+        ("ce-good-beta", "", "Some claim", True, "evidenceRef"),
+        ("ce-good-beta", "Unrelated excerpt", "Some claim", False, "evidenceRef"),
+        ("ce-good-beta", "", "  ", False, "claim"),
+        ("ce-good-beta", "", {"text": "Unstructured claim"}, False, "claim"),
+        ("dprec-another-collection", "", "Some claim", False, "evidenceRef"),
+    ],
+)
+def test_direct_counter_rejected_before_graph_storage(
+    tmp_path, monkeypatch, ref, quote, claim, remove_receipt, path
+):
+    setup = _start_stage_task(tmp_path, monkeypatch, stage_id="relations", agent_role="source_relation_mapper")
+    _stub_relation_graph(monkeypatch, graph=_valid_graph())
+    _stub_writeback_acceptance_path(monkeypatch)
+    cards = _direct_counter_cards()
+    if remove_receipt:
+        cards[0].pop("originalSourceUrl")
+    monkeypatch.setattr(registry, "load_relation_evidence_context", lambda **_: cards)
+
+    def reject_graph_write(*_args, **_kwargs):
+        pytest.fail("the graph was mutated before validating the direct reference")
+
+    monkeypatch.setattr(
+        stage_writeback._service(), "_materialize_source_collection_stage_writeback_candidate_graph", reject_graph_write
+    )
+    message = _reject_relations_writeback(setup, {"counterEvidenceRefs": [{
+        "evidenceRef": ref, "claim": claim, "disposition": "challenges_ontology", "quote": quote,
+    }]})
+    assert f"counterEvidenceRefs[0].{path}" in message
+    assert _stored_task(setup)["status"] == "running"
+
+
 def test_non_canonical_ref_rejection_inlines_allowed_refs_and_offending_values(
     tmp_path, monkeypatch
 ):

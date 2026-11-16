@@ -513,6 +513,8 @@ def load_relation_evidence_context(
     workflow_run_id: str = "",
 ) -> list[dict[str, Any]]:
     """Expose the source mapping behind the relation validator's evidence IDs."""
+    from core.research.evidence import ClaimEvidenceStore
+
     if not team_id or not authority_run_id:
         return []
     cards = _load_scoped_evidence(
@@ -522,7 +524,17 @@ def load_relation_evidence_context(
     )
     fields = ("claimEvidenceId", "claimId", "candidateId", "recordId", "sourceId", "quote", "supportLevel")
     context = [
-        {key: card.get(key, "") for key in fields}
+        {
+            **{key: card.get(key, "") for key in fields},
+            **(
+                {"originalSourceUrl": card["citationReceipt"]["sourceUrl"]}
+                if card.get("supportLevel") == "contradicts"
+                and str(card.get("reviewStatus") or "").lower() not in {"rejected", "stale"}
+                and card.get("citationReceipt")
+                and ClaimEvidenceStore.has_content_identity(card)
+                else {}
+            ),
+        }
         for card in cards or []
         if isinstance(card.get("claimEvidenceId"), str)
         and card["claimEvidenceId"].strip()

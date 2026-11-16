@@ -1677,6 +1677,8 @@ def _prepare_relation_graph_writeback_remediation(
     task: dict[str, Any],
     result_payload: dict[str, Any],
     error_text: str,
+    *,
+    direct_findings: list[dict[str, str]] | None = None,
 ) -> str:
     """Build + persist the relations-graph rejection contract; return the hint block.
 
@@ -1698,6 +1700,7 @@ def _prepare_relation_graph_writeback_remediation(
     kind = classify_relation_graph_rejection_error(error_text)
     if not kind:
         return ""
+    from ..research_runtime.evidence_relation_artifact import direct_counter_options
     from ..research_runtime.artifact_readback_registry import (
         load_allowed_evidence_refs,
         load_relation_evidence_context,
@@ -1730,6 +1733,9 @@ def _prepare_relation_graph_writeback_remediation(
         )
     else:
         findings = relation_missing_field_findings(error_text)
+    if direct_findings:
+        direct_paths = {finding["path"] for finding in direct_findings}
+        findings = [*direct_findings, *(finding for finding in findings if finding["path"] not in direct_paths)]
     attempt, exhausted = next_writeback_remediation_attempt(
         task.get("writebackRemediationContract")
         if isinstance(task.get("writebackRemediationContract"), dict)
@@ -1753,7 +1759,16 @@ def _prepare_relation_graph_writeback_remediation(
         str(card.get("claimEvidenceId") or ""): str(card.get("candidateId") or "")
         for card in evidence_cards
     }
-    return writeback_remediation_hint_block(kind, findings, allowed_refs, evidence_context)
+    hint = writeback_remediation_hint_block(kind, findings, allowed_refs, evidence_context)
+    direct_options = direct_counter_options(evidence_cards)
+    if direct_options:
+        shown_refs = [item["evidenceRef"] for item in direct_options[:8]]
+        hint += (
+            f"\n本轮已有原文可追溯的直接反证卡：{shown_refs}。"
+            "在 source_collection_context_tool 的 directCounterEvidence 核对逐字引述与来源；"
+            "引用缺失时保留其他有根据的直接反证，不要把整组 counterEvidenceRefs 清空。"
+        )
+    return hint
 
 
 def _materialize_source_collection_stage_writeback_candidate_graph(

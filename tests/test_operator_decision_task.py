@@ -188,7 +188,7 @@ def native_decision(activity, prepared, monkeypatch):
             session_service._clear_session_turn_control(sid)
 
 
-def _complete_model_turn(native_decision, handle, *, usage=True):
+def _complete_model_turn(native_decision, handle, *, usage=True, legacy_output=False):
     _, _, _, scheduled, output = native_decision
     metadata = scheduled[0]["message_metadata"]
     context = _model_invocation_receipt_context(
@@ -201,8 +201,14 @@ def _complete_model_turn(native_decision, handle, *, usage=True):
         session_id=handle.session_id,
         turn_id=handle.turn_id,
     )
-    assert schema.name == "operator_iteration_decision_proposal_v2"
-    text = output.model_dump_json()
+    assert schema.name == "operator_iteration_decision_choice_v1"
+    assert set(schema.schema["properties"]) == {"kind", "reason"}
+    if legacy_output:
+        # Qwen's original response inserted a repeated hex digit and lost the last one.
+        transcribed_hash = output.inputHash[:50] + "6" + output.inputHash[50:-1]
+        text = output.model_copy(update={"inputHash": transcribed_hash}).model_dump_json()
+    else:
+        text = output.model_dump_json(include={"kind", "reason"})
     outcomes = []
 
     def backend(payload):
@@ -256,8 +262,9 @@ def _complete_model_turn(native_decision, handle, *, usage=True):
     return receipt
 
 
+@pytest.mark.parametrize("legacy_output", [False, True], ids=["choice", "legacy"])
 def test_native_decision_is_receipted_once_and_materializes_server_identity(
-    native_decision, activity
+    native_decision, activity, legacy_output
 ):
     store, action, agent_id, scheduled, _ = native_decision
     handle = decision_task.create_decision_task(store, action, agent_id)
@@ -265,7 +272,7 @@ def test_native_decision_is_receipted_once_and_materializes_server_identity(
     assert len(scheduled) == 1
     with pytest.raises(decision_task.TurnNotReadyError):
         decision_task.execute_decision_task(store, action, handle)
-    receipt = _complete_model_turn(native_decision, handle)
+    receipt = _complete_model_turn(native_decision, handle, legacy_output=legacy_output)
     assert receipt["scope"]["accountingKind"] == "operator_decision"
     assert receipt["metadata"]["outcomeKinds"] == [
         "optimization_iteration_decision"
@@ -284,9 +291,59 @@ def test_native_decision_is_receipted_once_and_materializes_server_identity(
     payload = rows[0]["payload"]
     artifact = OperatorIterationDecisionArtifact.model_validate(payload)
     assert artifact.schemaVersion == 2
+    assert artifact.inputHash == receipt["scope"]["inputHash"]
+    assert artifact.inputHash == decision_output.decision_task_input(
+        activity[0], action.run_id
+    )["inputHash"]
     assert artifact.decision.schemaVersion == 2
     assert artifact.decision.decidedBy == agent_id
     assert len(scheduled) == 1
+
+
+def test_pending_legacy_decision_preserves_its_frozen_prompt(native_decision, monkeypatch):
+    store, action, agent_id, scheduled, _ = native_decision
+    build_prompt = decision_task._decision_prompt
+    with monkeypatch.context() as interrupted:
+        interrupted.setattr(
+            decision_task,
+            "_decision_prompt",
+            lambda inputs: build_prompt(inputs, legacy=True),
+        )
+
+        def interrupt_submission(*args, **kwargs):
+            raise RuntimeError("interrupted before Session submission")
+
+        interrupted.setattr(
+            session_service, "submit_session_message", interrupt_submission
+        )
+        with pytest.raises(RuntimeError, match="interrupted before Session submission"):
+            decision_task.create_decision_task(store, action, agent_id)
+
+    frozen = store.read(
+        lambda repo: authority.read_decision_task(repo, action.run_id, action.node_run_id)
+    )
+    assert frozen["promptHash"]
+    assert not frozen["turnId"]
+    assert decision_task.create_decision_task(store, action, agent_id).turn_id
+    assert len(scheduled) == 1
+
+
+def test_native_decision_rejects_feedback_drift_at_completion(
+    native_decision, monkeypatch
+):
+    store, action, agent_id, _, _ = native_decision
+    handle = decision_task.create_decision_task(store, action, agent_id)
+    _complete_model_turn(native_decision, handle)
+    assert ReceiptPersistenceWorker(store=store).run_once() == 1
+    original = decision_output.decision_task_input
+    monkeypatch.setattr(
+        decision_output,
+        "decision_task_input",
+        lambda *args: {**original(*args), "inputHash": "f" * 64},
+    )
+
+    with pytest.raises(CampaignConflict, match="different feedback evidence"):
+        decision_task.execute_decision_task(store, action, handle)
 
 
 def test_unknown_decision_cost_cannot_complete(native_decision):

@@ -351,7 +351,7 @@ def test_project_planner_receives_only_verified_directional_evidence(monkeypatch
              "collectionEnvelope": {"sourceUrl": "https://example.org/discovered"},
              "citationReceipt": {"sourceUrl": "https://example.org/evidence", "eventId": "fetch-receipt"}},
             card("ce-boundary", "contradicts", "Higher occupancy does not guarantee higher performance"),
-            card("ce-counter", "supports", "Registers can reduce the number of resident blocks"),
+            card("ce-counter", "contradicts", "Registers can reduce the number of resident blocks"),
             card("ce-unbound", "supports", "This card was not used by the reviewed relation graph"),
             card("ce-unapproved", "supports", "The knowledge manager did not approve this source"),
             {**card("ce-rejected", "supports", "Revoked source"), "reviewStatus": "rejected"},
@@ -426,7 +426,7 @@ def test_project_planner_receives_only_verified_directional_evidence(monkeypatch
         ("ce-counter", "refutes", "Registers can reduce the number of resident blocks"),
         ("ce-boundary", "qualifies", "Higher occupancy does not guarantee higher performance"),
     ]
-    assert projected["evidenceCards"][1]["sourceSupportLevel"] == "supports"
+    assert projected["evidenceCards"][1]["sourceSupportLevel"] == "contradicts"
     assert projected["evidenceCards"][0]["sourceUrl"] == "https://example.org/evidence"
     assert projected["evidenceCards"][0]["citationReceipt"]["eventId"] == "fetch-receipt"
     assert projected["evidenceCards"][1]["counterClaims"] == [
@@ -435,6 +435,57 @@ def test_project_planner_receives_only_verified_directional_evidence(monkeypatch
     assert [counter["disposition"] for counter in projected["evidenceCards"][2]["counterClaims"]] == [
         "limit_scope", "alternative_pathway",
     ]
+
+
+@pytest.mark.parametrize(
+    ("disposition", "support_level", "target", "approved", "directions"),
+    [
+        ("challenges_ontology", "supports", "Extra registers preserve residency", True, ["supports"]),
+        ("challenges_ontology", "contradicts", "  ", True, []),
+        (None, "contradicts", "", True, []),
+        ("alternative_interpretation", "contradicts", "Bandwidth is the only bottleneck", True, ["qualifies"]),
+        (
+            "alternative_interpretation",
+            "supports",
+            "Bandwidth is the only bottleneck",
+            True,
+            ["supports", "qualifies"],
+        ),
+        ("challenges_ontology", "contradicts", "Extra registers preserve residency", False, []),
+    ],
+)
+def test_planner_refutation_requires_explicit_target_and_contradicting_card(
+    disposition, support_level, target, approved, directions
+):
+    quote = "Increasing register use reduced the number of resident blocks."
+    card = {
+        "claimEvidenceId": "ce-registers",
+        "claimId": "claim-registers",
+        "candidateId": "candidate-registers",
+        "supportLevel": support_level,
+        "sourceId": "source-registers",
+        "sourceRevision": "sha256:" + "4" * 64,
+        "locator": {"kind": "web_section", "url": "https://example.org/evidence"},
+        "quote": quote,
+        "quoteHash": sha256_hex(quote),
+    }
+    counter = {"evidenceRef": "ce-registers", "claim": target, "disposition": disposition}
+    graph = {
+        "edges": [{"evidenceRefs": ["ce-registers"]}],
+        "counterEvidenceRefs": [counter] if disposition else [],
+    }
+
+    excerpts = planning_evidence._excerpt_cards(
+        {"evidenceCards": [card]}, graph, {"candidate-registers"} if approved else set()
+    )
+
+    assert [excerpt["direction"] for excerpt in excerpts] == directions
+    for excerpt in excerpts:
+        assert excerpt["counterClaims"] == (
+            [{"claim": target, "disposition": disposition}]
+            if excerpt["direction"] == "qualifies"
+            else []
+        )
 
 
 @pytest.mark.parametrize("gaps", [False, True])

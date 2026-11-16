@@ -9,6 +9,7 @@ from core.research.workflow.contracts._canonical import sha256_hex
 from core.research.workflow.knowledge_sideflow_definition import KNOWLEDGE_SIDEFLOW_WORKFLOW_ID
 
 from ..research_runtime.artifact_readback_registry import load_scoped_artifact_payload, parse_canonical_ref
+from ..research_runtime.evidence_relation_artifact import is_direct_counter
 from ..research_runtime.knowledge_artifact_authority import approved_package_source_candidates
 from .store import CampaignConflict
 
@@ -19,7 +20,6 @@ _EVIDENCE_NODES = {
 }
 _MAX_PER_DIRECTION = 4
 _QUOTE_LIMIT = 1000
-_REFUTING_DISPOSITIONS = {"challenges_ontology", "alternative_interpretation"}
 
 
 def _producing_run(repo, package):
@@ -92,16 +92,17 @@ def _read_evidence(ref: str, child) -> dict:
 
 
 def _excerpt_cards(evidence: dict, graph: dict, approved_sources: set[str]) -> list[dict]:
-    counters = defaultdict(lambda: defaultdict(list))
+    counters = defaultdict(list)
     for counter in graph.get("counterEvidenceRefs", []):
+        evidence_id = counter.get("evidenceRef")
         disposition = counter.get("disposition")
         claim = counter.get("claim")
-        if disposition and claim:
-            direction = "refutes" if disposition in _REFUTING_DISPOSITIONS else "qualifies"
-            counters[counter["evidenceRef"]][direction].append({
-                "claim": claim,
-                "disposition": disposition,
-            })
+        if not all(
+            isinstance(value, str) and value.strip()
+            for value in (evidence_id, disposition, claim)
+        ):
+            continue
+        counters[evidence_id].append({"claim": claim, "disposition": disposition.strip()})
     linked = {ref for edge in graph.get("edges", []) for ref in edge.get("evidenceRefs", [])}
 
     selected = defaultdict(list)
@@ -117,10 +118,16 @@ def _excerpt_cards(evidence: dict, graph: dict, approved_sources: set[str]) -> l
                 or not locator or not quote):
             continue
         evidence_id = card["claimEvidenceId"]
-        relations = dict(counters.get(evidence_id, {}))
-        if not relations and evidence_id in linked and card.get("supportLevel") == "contradicts":
-            relations["refutes"] = []
-        if evidence_id in linked and card.get("supportLevel") == "supports":
+        support_level = card.get("supportLevel")
+        relations = defaultdict(list)
+        for counter in counters.get(evidence_id, ()):
+            direction = "qualifies"
+            if is_direct_counter(counter):
+                if support_level != "contradicts":
+                    continue
+                direction = "refutes"
+            relations[direction].append(counter)
+        if evidence_id in linked and support_level == "supports":
             relations["supports"] = []
         for direction, counter_claims in relations.items():
             if len(selected[direction]) >= _MAX_PER_DIRECTION:
@@ -128,7 +135,7 @@ def _excerpt_cards(evidence: dict, graph: dict, approved_sources: set[str]) -> l
             selected[direction].append({
                 "claimEvidenceId": evidence_id,
                 "claimId": card["claimId"],
-                "sourceSupportLevel": card.get("supportLevel"),
+                "sourceSupportLevel": support_level,
                 "direction": direction,
                 "counterClaims": counter_claims[:_MAX_PER_DIRECTION],
                 "sourceId": card["sourceId"],

@@ -6,8 +6,10 @@ import json
 from collections.abc import Mapping
 
 from core.llm.semantic_messages import SemanticOutputSchema
+from core.research.operator_optimization.contracts import Contract, Text
 from core.research.operator_optimization.decision import (
     OPTIMIZATION_DECISION_ARTIFACT_KIND,
+    IterationAction,
     OperatorIterationDecision,
     OperatorIterationDecisionArtifact,
     OperatorIterationDecisionProposal,
@@ -19,6 +21,11 @@ from core.research.workflow.contracts._canonical import sha256_hex
 from .discussion import _write_readback
 from .knowledge import read_ref, round_context
 from .store import CampaignConflict
+
+
+class _DecisionChoice(Contract):
+    kind: IterationAction
+    reason: Text
 
 
 def decision_task_input(team_id: str, run_id: str) -> dict:
@@ -91,9 +98,31 @@ def parse_decision_output(value) -> OperatorIterationDecisionProposal:
 
 def decision_output_contract() -> SemanticOutputSchema:
     return SemanticOutputSchema(
-        name="operator_iteration_decision_proposal_v2",
-        schema=OperatorIterationDecisionProposal.model_json_schema(),
-        validator=lambda value: parse_decision_output(value).model_dump(mode="json"),
+        name="operator_iteration_decision_choice_v1",
+        schema=_DecisionChoice.model_json_schema(),
+        validator=lambda value: _DecisionChoice.model_validate(value).model_dump(
+            mode="json"
+        ),
+    )
+
+
+def bind_native_decision_output(
+    text: str, *, input_hash: str
+) -> OperatorIterationDecisionProposal:
+    """Bind a receipted native Session choice to its server-owned task input."""
+    value = json.loads(text)
+    if not isinstance(value, dict):
+        raise TypeError("Decision output must be a structured JSON object")
+    # Older native Sessions included an echo of the evidence hash in their output.
+    choice = (
+        parse_decision_output(value)
+        if "inputHash" in value
+        else _DecisionChoice.model_validate(value)
+    )
+    return OperatorIterationDecisionProposal(
+        inputHash=input_hash,
+        kind=choice.kind,
+        reason=choice.reason,
     )
 
 
@@ -132,6 +161,7 @@ def materialize_iteration_decision(
 
 
 __all__ = [
+    "bind_native_decision_output",
     "decision_output_contract",
     "decision_task_input",
     "materialize_iteration_decision",

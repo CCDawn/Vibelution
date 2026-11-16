@@ -93,6 +93,7 @@ def _stage_writeback_prompt_lines(stage_id: str) -> list[str]:
             "- 证据关系阶段必须在 `evidenceGaps[]` 逐条写出证据缺口；每项包含稳定 `id`、`description`、`neededEvidence` 和 `blocksConclusion`。`missingLinks[]` 只用于图结构缺失端点，不能替代 evidenceGaps。",
             "- 必须显式写 `counterEvidenceRefs[]`。每项的 `claim` 写被挑战或需要限定的命题，`evidenceRef` 引用该反例或限制的证据卡，`disposition` 写处理方式。",
             "- 直接反证使用 `disposition=challenges_ontology`，绑定 `supportLevel=contradicts` 的 canonical 证据卡，且该卡逐字 `quote` 必须直接反驳被挑战的命题。适用范围或实验条件的限制使用 `limit_scope`。支持性背景不得作为反证。",
+            "- 优先检查 `directCounterEvidence[]`：原文确实反驳本轮相关命题时，从同一条复制 `evidenceRef`，例如 `{\"evidenceRef\":\"ce-实际证据卡ID\",\"claim\":\"原文直接反驳的命题\",\"disposition\":\"challenges_ontology\"}`。候选 ID 和 dprec 资料记录 ID 都不能充当证据卡 ID；某个来源没有可用卡时，分别保留其他来源的有效反证，不要清空整组反证。",
             "- 如果没有真实反证或限制性证据，`counterEvidenceRefs=[]` 并回写 `status=blocked` 和真实原因；不得为了通过门禁伪造反证引用。",
             "- `candidateRelations[]`、`sourceThemeEdges[]`、`topicRelations[]` 的每条边都必须绑定真实 `evidenceRefs[]`，逐字使用上下文 allowedEvidenceRefs 中的 claimEvidenceId；关系图只表达候选事实，不得升级为正式结论。",
             "- 上下文 `relationEvidence[]` 是全量证据绑定图（不因分页截断）：每张卡给出 claimEvidenceId → candidateId/sourceId 的映射、可用的 recordId、原文引述与支持方向。边端点用候选或已声明的主题 ID，证据引用只用 claimEvidenceId。页外绑定仍然有效。",

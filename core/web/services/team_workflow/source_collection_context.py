@@ -308,6 +308,8 @@ def compact_source_collection_stage_task_context(context: dict[str, Any]) -> dic
         )
     if "allowedEvidenceRefs" in context:
         compact["allowedEvidenceRefs"] = list(context["allowedEvidenceRefs"])
+    if "directCounterEvidence" in context:
+        compact["directCounterEvidence"] = list(context["directCounterEvidence"])
     if "relationEvidence" in context:
         compact["relationEvidence"] = list(context["relationEvidence"])
     return compact

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..research_runtime.evidence_relation_artifact import direct_counter_options, resolve_direct_counter_refs
 from ..source_collection_common import project_source_version_families
 from .doi_enrichment import enrich_candidates_missing_doi
 from .extraction_fetch_text import finding_fetched_text_by_source, task_fetched_text
@@ -758,6 +759,32 @@ def writeback_source_collection_stage_session_task(
                 "请在对应条目补全缺失字段后重写；"
                 + " | ".join(card_contract_errors[:_EXTRACTION_CARD_CONTRACT_ERROR_LIMIT])
             )
+    if (
+        status in {"completed", "needs_review"}
+        and task.get("stageId") == "relations"
+        and task.get("workflowRunId")
+    ):
+        from ..research_runtime.artifact_readback_registry import load_relation_evidence_context
+
+        cards = load_relation_evidence_context(
+            team_id=normalized_team_id, authority_run_id=run_id, workflow_run_id=task["workflowRunId"]
+        )
+        result_payload, counter_findings = resolve_direct_counter_refs(result_payload, cards)
+        if counter_findings:
+            remediation_hint = _prepare_relation_graph_writeback_remediation(
+                team_id=normalized_team_id,
+                run_id=run_id,
+                task=task,
+                result_payload=result_payload,
+                error_text="counter-evidence references must be canonical claimEvidenceId values",
+                direct_findings=counter_findings,
+            )
+            raise s.TeamWorkflowOrchestrationError(
+                "evidence_relation_graph_invalid: direct counter-evidence must cite the current "
+                "run's original-backed contradicts card and name the challenged claim. "
+                "Read directCounterEvidence in source_collection_context_tool."
+                + remediation_hint
+            )
     writeback = {
         "status": status,
         "agentRequestedStatus": status,
@@ -1379,11 +1406,15 @@ def get_source_collection_stage_task_context(
                 workflow_run_id=s._trim_text(task.get("workflowRunId"), max_length=160),
             )
         ]
+        context["directCounterEvidence"] = direct_counter_options(context["relationEvidence"])
         context["usage"]["evidenceInstruction"] = (
             "关系 evidenceRefs[] 和 counterEvidenceRefs[].evidenceRef 必须逐字使用 "
             "allowedEvidenceRefs 中的 claimEvidenceId；relationEvidence[] 是全量证据绑定图，"
             "不因分页截断，每张卡给出 claimEvidenceId、候选 ID、原文引述和支持方向的对应关系，"
             "inCurrentPage 标注该证据的候选是否在当前分页（页外候选的绑定同样可用于构图）；"
+            "先看 directCounterEvidence 中的逐字原文与 evidenceRef。若原文直接反驳一个相关命题，"
+            "将该 evidenceRef 与被反驳的命题写入 counterEvidenceRefs，disposition=challenges_ontology；"
+            "找不到原记录对应的证据卡时，不要清空其他来源的有效反证，也不要为原记录串绑另一张卡。"
             "不要通过重复读取猜测映射。allowedEvidenceRefs 非空而 relationEvidence 缺少对应"
             "绑定卡时才报告证据绑定缺失；两个列表同时为空表示本轮没有可绑定证据。"
         )

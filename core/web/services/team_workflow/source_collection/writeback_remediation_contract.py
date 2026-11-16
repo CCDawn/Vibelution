@@ -29,6 +29,12 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from ..research_runtime.evidence_relation_artifact import (
+    COUNTER_ID_KEYS,
+    is_direct_counter,
+    iter_counter_reference_lists,
+)
+
 # Stable contract surface (a later LLM-planner layer consumes these names).
 WRITEBACK_REMEDIATION_SCHEMA_VERSION = 1
 
@@ -59,7 +65,6 @@ _RELATION_COLLECTION_KEY_GROUPS: tuple[tuple[str, ...], ...] = (
     ("sourceThemeEdges", "source_theme_edges", "sourceTopicEdges", "source_topic_edges"),
     ("topicRelations", "topic_relations", "themeRelations", "theme_relations"),
 )
-_COUNTER_REF_KEYS = ("counterEvidenceRefs", "counter_evidence_refs")
 
 # ``evidence_relation_graph missing required fields: edges, evidenceGaps``
 _MISSING_FIELDS_PATTERN = re.compile(
@@ -173,9 +178,9 @@ def collect_relation_ref_violations(
             if isinstance(alias, str) and alias:
                 refs_by_alias.setdefault(alias, set()).add(evidence_id)
 
-    def _append_invalid(path: str, ref: Any, finding: str) -> None:
+    def _append_invalid(path: str, ref: Any, finding: str, *, suggest_alias: bool = True) -> None:
         item = {"finding": finding, "path": path, "value": _clip(ref)}
-        matches = refs_by_alias.get(ref, set()) if isinstance(ref, str) else set()
+        matches = refs_by_alias.get(ref, set()) if suggest_alias and isinstance(ref, str) else set()
         if len(matches) == 1:
             item["suggestedEvidenceRef"] = next(iter(matches))
         findings.append(item)
@@ -200,13 +205,16 @@ def collect_relation_ref_violations(
     def _counter_findings(items: list[Any], path_prefix: str) -> None:
         for index, item in enumerate(items):
             field = next(
-                (key for key in ("evidenceRef", "evidence_ref", "refId") if isinstance(item, Mapping) and key in item),
+                (key for key in COUNTER_ID_KEYS if isinstance(item, Mapping) and key in item),
                 "evidenceRef",
             )
             evidence_ref = item.get(field) if isinstance(item, Mapping) else item
             if not isinstance(evidence_ref, str) or evidence_ref not in allowed_refs:
                 _append_invalid(
-                    f"{path_prefix}[{index}].{field}", evidence_ref, "non_canonical_counter_ref"
+                    f"{path_prefix}[{index}].{field}",
+                    evidence_ref,
+                    "non_canonical_counter_ref",
+                    suggest_alias=not isinstance(item, Mapping) or not is_direct_counter(item),
                 )
 
     for key in ("edges", *(key for group in _RELATION_COLLECTION_KEY_GROUPS for key in group)):
@@ -221,9 +229,8 @@ def collect_relation_ref_violations(
             continue
         if prefix and isinstance(container.get("edges"), list):
             _edge_findings(container["edges"], f"{prefix}edges")
-        for key in _COUNTER_REF_KEYS:
-            if isinstance(container.get(key), list):
-                _counter_findings(container[key], f"{prefix}{key}")
+    for prefix, key, items in iter_counter_reference_lists(result):
+        _counter_findings(items, f"{prefix}{key}")
     return findings
 
 
@@ -251,6 +258,7 @@ _RELATION_REFS_INSTRUCTION = (
     "上下文会带本契约（writebackRemediation）与 allowedEvidenceRefs；"
     "逐条修正 findings[] 指定的 path。有 suggestedEvidenceRef 时逐字使用该 ID，"
     "否则通过 relationEvidence 核对来源和支持方向，再选择匹配的 claimEvidenceId。"
+    "直接反证以 directCounterEvidence 为准，保留对其他来源已核实的直接反证。"
     "没有可绑定的 canonical "
     "证据时不得伪造引用：把对应边删掉或写 status=blocked 附真实原因。"
     "这是同类违规唯一一次系统修正机会：再次违规将按契约直接拒绝。"
