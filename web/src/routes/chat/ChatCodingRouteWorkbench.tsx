@@ -1012,6 +1012,7 @@ export function ChatCodingRouteWorkbench() {
     chatPollingVisible,
     chatStartupWarmupActive,
     secondaryChatDataEnabled,
+    runtimeStatusPollingEnabled: chatStartupDataReady,
     directSessionPanelActive,
     teamsPickerNeeded,
     projectBusActive,
@@ -1045,6 +1046,7 @@ export function ChatCodingRouteWorkbench() {
   } = useChatWorkbenchCatalogQueries({
     queryClient,
     secondaryChatDataEnabled,
+    runtimeStatusPollingEnabled: chatStartupDataReady,
     chatSecondaryPollPolicy,
     chatLiveQueryPolicy,
     sessionQueryText,

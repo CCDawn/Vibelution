@@ -43,6 +43,8 @@ const DIRECTORY_READY_WAIT_TIMEOUT_MS = 20_000;
 export type ChatWorkbenchCatalogQueriesInput = {
   queryClient: QueryClient;
   secondaryChatDataEnabled: boolean;
+  /** Running-session polling must not wait for the active session detail. */
+  runtimeStatusPollingEnabled?: boolean;
   chatSecondaryPollPolicy: ChatSecondaryPollPolicy;
   chatLiveQueryPolicy: ChatLiveQueryPolicy;
   sessionQueryText: string;
@@ -70,6 +72,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
   const {
     queryClient,
     secondaryChatDataEnabled,
+    runtimeStatusPollingEnabled = secondaryChatDataEnabled,
     chatSecondaryPollPolicy,
     chatLiveQueryPolicy,
     sessionQueryText,
@@ -96,8 +99,8 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
   const runtimeQuery = useQuery({
     queryKey: queryKeys.runtimeSummary(),
     queryFn: ({ signal }) => fetchRuntimeSummary({ signal }),
-    enabled: secondaryChatDataEnabled,
-    refetchInterval: chatSecondaryPollPolicy.runtimeRefetchInterval,
+    enabled: runtimeStatusPollingEnabled,
+    refetchInterval: chatSecondaryPollPolicy.runtimeStatusRefetchInterval,
     refetchIntervalInBackground: chatSecondaryPollPolicy.secondaryRefetchIntervalInBackground,
     structuralSharing: shareRuntimeSummaryIfOnlyVolatileChanged,
   });
