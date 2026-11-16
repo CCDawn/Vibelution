@@ -437,8 +437,21 @@ def test_bound_extraction_reuses_finding_text_before_network_fetch(setup, tmp_pa
     assert fetch.invoke({"url": _URL}) == reused
     assert requests == []
 
-    for locator in (_URL + "v2", _URL.replace("/abs/", "/pdf/"), "https://arxiv.org/abs/2401.12345"):
+    supplemented_url = "https://arxiv.org/abs/2401.12345v2"
+    supplement = append_conversation_event(
+        tmp_path, task["sessionId"], "extract-turn", "tool_result", status="done",
+        payload={"toolCall": {
+            "name": "web_fetch_tool", "status": "done", "arguments": {"url": supplemented_url},
+            "result": f"[网页内容] {supplemented_url}\n\n{_UNRELATED}",
+        }},
+    )
+    assert fetch.invoke({"url": supplemented_url}) == (
+        f"[已复用提炼原文] {supplemented_url}\n提炼抓取回执: {supplement.event_id}\n\n{_UNRELATED}"
+    )
+    assert requests == []
+
+    for locator in (_URL + "v2", _URL.replace("/abs/", "/pdf/"), "https://arxiv.org/abs/2401.12345v1"):
         assert fetch.invoke({"url": locator}) == "network result"
     runtime["agentId"] = "unrelated-agent"
     assert fetch.invoke({"url": _URL}) == "network result"
-    assert requests == [_URL + "v2", _URL.replace("/abs/", "/pdf/"), "https://arxiv.org/abs/2401.12345", _URL]
+    assert requests == [_URL + "v2", _URL.replace("/abs/", "/pdf/"), "https://arxiv.org/abs/2401.12345v1", _URL]

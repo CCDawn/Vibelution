@@ -26,6 +26,7 @@ from core.research.workflow.ledger.errors import WorkflowLedgerError
 # 即使抓取成功也必然 no_quotable_text。
 _RECEIPT_PREFIXES = ("[网页内容] ", "[PDF 文本] ")
 REUSED_FINDING_TEXT_PREFIX = "[已复用搜集原文] "
+_REUSED_EXTRACTION_TEXT_PREFIX = "[已复用提炼原文] "
 
 # 跨主机重定向停靠消息（tools/web_search_tool.web_fetch 按安全策略停止跟随）。
 # 它不是内容回执，禁止进入 _RECEIPT_PREFIXES——只作为 (原 URL → 重定向目标)
@@ -416,15 +417,14 @@ def finding_fetched_text_for_task(task: dict[str, Any]) -> dict[tuple[str, str],
     )
 
 
-def reuse_bound_finding_text(runtime: dict[str, Any], url: str, max_chars: int) -> str | None:
-    """Serve a scoped upstream body on a redundant fetch request, without minting a fetch receipt."""
+def reuse_bound_extraction_text(runtime: dict[str, Any], url: str, max_chars: int) -> str | None:
+    """Prefer the accepted finding body, then reuse any completed supplemental fetch."""
     scope = _object(_object(runtime.get("runtimeMetadata")).get("sourceCollectionExtraction"))
     if scope.get("stageId") not in {None, "", "extraction"} or not all(
         scope.get(key) for key in ("teamId", "taskId")
     ) or not all(runtime.get(key) for key in ("sessionId", "turnId", "agentId")):
         return None
 
-    from .extraction_quote_anchor_supply import _arxiv_locator, matching_source_fetch_receipts, receipt_citation_url
     from .stage_session import _read_source_collection_stage_session_task_record
 
     task = _read_source_collection_stage_session_task_record(scope["teamId"], scope["taskId"])
@@ -444,15 +444,34 @@ def reuse_bound_finding_text(runtime: dict[str, Any], url: str, max_chars: int) 
         if not s._source_collection_stage_session_task_turn_references_task(task, runtime["sessionId"], runtime["turnId"]):
             return None
 
+    finding_receipts = (
+        receipts for (kind, _), receipts in finding_fetched_text_for_task(task).items() if kind == "candidate"
+    )
+    previous = _source_fetch_replay(url, max_chars, finding_receipts)
+    if previous is not None:
+        address, event_id, body = previous
+        return f"{REUSED_FINDING_TEXT_PREFIX}{address}\n搜集抓取回执: {event_id}\n\n{body}"
+    previous = _source_fetch_replay(url, max_chars, (task_fetched_text(task),))
+    if previous is not None:
+        address, event_id, body = previous
+        return f"{_REUSED_EXTRACTION_TEXT_PREFIX}{address}\n提炼抓取回执: {event_id}\n\n{body}"
+    return None
+
+
+def _source_fetch_replay(
+    url: str, max_chars: int, scoped_receipts: Iterable[dict[str, dict[str, str]]],
+) -> tuple[str, str, str] | None:
+    from .extraction_quote_anchor_supply import _arxiv_locator, matching_source_fetch_receipts, receipt_citation_url
+
     requested = _arxiv_locator(url)
     matches = {}
-    for (kind, _), scoped in finding_fetched_text_for_task(task).items():
-        if kind != "candidate":
-            continue
+    for scoped in scoped_receipts:
         for receipt in matching_source_fetch_receipts({"sourceUrl": url}, scoped):
             citation_url = receipt_citation_url(receipt)
             actual = _arxiv_locator(citation_url)
             if requested and actual and requested[2] != "doi" and requested[2] != actual[2]:
+                continue
+            if not receipt.get("eventId"):
                 continue
             body = receipt["text"]
             if receipt.get("truncated") and len(body) < max_chars:
@@ -460,10 +479,7 @@ def reuse_bound_finding_text(runtime: dict[str, Any], url: str, max_chars: int) 
             matches[(citation_url, body)] = receipt
     if len(matches) != 1:
         # In particular, a versionless request must not choose arbitrarily
-        # between two upstream editions or two observed bodies.
+        # between two editions or two observed bodies.
         return None
     (citation_url, body), receipt = next(iter(matches.items()))
-    return (
-        f"{REUSED_FINDING_TEXT_PREFIX}{citation_url}\n搜集抓取回执: {receipt['eventId']}\n\n"
-        f"{body[:max_chars]}"
-    )
+    return citation_url, receipt["eventId"], body[:max_chars]

@@ -723,10 +723,10 @@ def _build_key_tools() -> List[BaseTool]:
         scope = (runtime.get("runtimeMetadata") or {}).get("sourceCollectionExtraction")
         is_extraction = isinstance(scope, dict) and scope.get("teamId") and scope.get("taskId")
         if is_extraction:
-            from core.web.services.team_workflow.source_collection.extraction_fetch_text import reuse_bound_finding_text
+            from core.web.services.team_workflow.source_collection.extraction_fetch_text import reuse_bound_extraction_text
 
             limit = _clamp_int(max_chars, default=8000, minimum=500, maximum=50000)
-            reused = reuse_bound_finding_text(runtime, url.strip(), limit)
+            reused = reuse_bound_extraction_text(runtime, url.strip(), limit)
             if reused is not None:
                 return reused
         result = _web_fetch(url=url, max_chars=max_chars, prompt=prompt)
