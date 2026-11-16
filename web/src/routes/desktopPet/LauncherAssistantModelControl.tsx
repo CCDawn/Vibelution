@@ -1,9 +1,97 @@
 import { SlidersHorizontal } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+
 import type { LauncherAssistantModelChoice } from "../../api/launcherAssistant";
-import styles from "./LauncherAssistantModelControl.styles";
-import { VButton, VPopover, VStringSelect } from "../../components/vui";
+import {
+  ConversationModelCandidateList,
+  type ConversationModelCandidateGroup,
+  type ConversationModelCandidateRow,
+} from "../../components/conversation/ConversationModelCandidateList";
 import { ConversationModelControlTrigger } from "../../components/conversation/ConversationModelControlTrigger";
+import { VButton, VPopover } from "../../components/vui";
+import styles from "./LauncherAssistantModelControl.styles";
+
+/** States that mean the upstream model cannot serve a turn right now. */
+const UNAVAILABLE_ASSISTANT_MODEL_STATES = new Set([
+  "missing",
+  "missing_remote",
+  "stale",
+  "unavailable",
+]);
+
+/**
+ * Localized reason for an unroutable assistant model, or "" when selectable.
+ * The Launcher menu keeps unusable rows visible so an operator learns why a
+ * model cannot be picked instead of watching a dead row with no explanation.
+ */
+export function launcherAssistantModelDisabledReason(
+  choice: LauncherAssistantModelChoice,
+  lang: "zh" | "en",
+): string {
+  if (choice.missingApiKey) {
+    return lang === "zh" ? "此服务尚未配置 API Key" : "This provider has no API key";
+  }
+  if (choice.providerHealthy === false) {
+    return lang === "zh" ? "该服务通道当前不可用" : "This provider channel is unavailable";
+  }
+  if (UNAVAILABLE_ASSISTANT_MODEL_STATES.has(String(choice.availability ?? '').trim().toLowerCase())) {
+    return lang === "zh" ? "上游模型当前不可用" : "Upstream model is unavailable";
+  }
+  return "";
+}
+
+/** Groups assistant choices by provider label, keeping catalogue order stable. */
+export function launcherAssistantModelGroups(
+  choices: readonly LauncherAssistantModelChoice[],
+  lang: "zh" | "en",
+  query: string,
+  currentModelId: string,
+  currentModelDisplay: string,
+): ConversationModelCandidateGroup[] {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const currentKnown = choices.some((choice) => choice.modelId === currentModelId);
+  const groups = new Map<string, ConversationModelCandidateGroup>();
+  if (!currentKnown && currentModelId) {
+    // The bound model can disappear from the catalogue (provider removed). Keep
+    // one honest row for it so the menu never hides what the assistant runs on.
+    groups.set("__current__", {
+      groupKey: "__current__",
+      groupLabel: lang === "zh" ? "当前模型" : "Current model",
+      items: [{
+        key: currentModelId,
+        label: currentModelDisplay || currentModelId,
+        title: currentModelId,
+        reason: lang === "zh" ? "不在当前可用模型目录中" : "Not in the available model catalogue",
+      }],
+    });
+  }
+  for (const choice of choices) {
+    const label = (choice.label || choice.modelId).trim() || choice.modelId;
+    const providerLabel = (choice.providerLabel || "").trim();
+    if (
+      normalizedQuery
+      && ![label, choice.modelId, providerLabel]
+        .some((text) => text.toLocaleLowerCase().includes(normalizedQuery))
+    ) {
+      continue;
+    }
+    const groupKey = providerLabel || "__unlabeled__";
+    const group = groups.get(groupKey) ?? {
+      groupKey,
+      groupLabel: providerLabel || (lang === "zh" ? "其他服务" : "Other providers"),
+      items: [],
+    };
+    const row: ConversationModelCandidateRow = {
+      key: choice.modelId,
+      label,
+      title: choice.modelId,
+      reason: launcherAssistantModelDisabledReason(choice, lang) || undefined,
+    };
+    group.items.push(row);
+    groups.set(groupKey, group);
+  }
+  return Array.from(groups.values());
+}
 
 /** Native Launcher model actions in the shared conversation toolbar recipe. */
 export function LauncherAssistantModelControl({
@@ -20,15 +108,18 @@ export function LauncherAssistantModelControl({
   onOpenSettings?: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const zh = lang === "zh";
   const label = choices.find(choice => choice.modelId === modelId)?.label || modelDisplay;
-  const modelOptions = [
-    ...(!choices.some(choice => choice.modelId === modelId) ? [{ value: modelId, label: modelDisplay }] : []),
-    ...choices.map(choice => ({
-      value: choice.modelId,
-      label: choice.label || choice.modelId,
-      disabled: choice.providerHealthy === false || choice.missingApiKey === true,
-    })),
+  const locked = pending || selectionDisabled;
+  const groups = useMemo(
+    () => launcherAssistantModelGroups(choices, lang, query, modelId, modelDisplay),
+    [choices, lang, modelDisplay, modelId, query],
+  );
+  const currentProviderLabel = (choices.find(choice => choice.modelId === modelId)?.providerLabel || "").trim();
+  const defaultExpandedGroupKeys = [
+    ...(choices.some(choice => choice.modelId === modelId) ? [] : ["__current__"]),
+    currentProviderLabel || "__unlabeled__",
   ];
   return <div className={styles.root} data-launcher-assistant-model-control>
     <VPopover open={open} onOpenChange={setOpen} side="top" align="end" sideOffset={6}
@@ -36,15 +127,20 @@ export function LauncherAssistantModelControl({
       trigger={<ConversationModelControlTrigger label={label} open={open} isPending={pending}
         aria-label={`${zh ? "助理模型" : "Assistant model"}: ${label}`}
       />}>
-      <p className={styles.fullName}>{label}</p>
-      {choices.length ? <VStringSelect ariaLabel={zh ? "切换助理模型" : "Change assistant model"}
-        value={modelId} isDisabled={pending || selectionDisabled} options={modelOptions}
-        onValueChange={value => { onModelChange(value); setOpen(false); }} /> : null}
-      {onOpenSettings ? <VButton variant="ghost" density="compact" isDisabled={pending}
-        icon={<SlidersHorizontal size={12} aria-hidden="true" />}
-        onClick={() => { setOpen(false); onOpenSettings(); }}>
-        {zh ? "模型设置" : "Model settings"}
-      </VButton> : null}
+      <ConversationModelCandidateList lang={lang} groups={groups} selectedKey={modelId}
+        disabled={locked} query={query} onQueryChange={setQuery}
+        defaultExpandedGroupKeys={defaultExpandedGroupKeys}
+        listLabel={zh ? "助理模型候选" : "Assistant model candidates"}
+        searchLabel={zh ? "搜索模型" : "Search models"}
+        onSelect={(nextModelId) => { onModelChange(nextModelId); setOpen(false); setQuery(""); }}
+      />
+      {onOpenSettings ? <div className={styles.actions}>
+        <VButton variant="ghost" density="compact" isDisabled={pending}
+          icon={<SlidersHorizontal size={12} aria-hidden="true" />}
+          onClick={() => { setOpen(false); setQuery(""); onOpenSettings(); }}>
+          {zh ? "模型设置" : "Model settings"}
+        </VButton>
+      </div> : null}
     </VPopover>
   </div>;
 }

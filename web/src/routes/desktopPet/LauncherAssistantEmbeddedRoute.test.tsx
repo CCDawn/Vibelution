@@ -70,8 +70,8 @@ describe("Launcher embedded assistant page", () => {
     const httpCallsBefore = vi.mocked(fetch).mock.calls.length;
     const model = container.querySelector<HTMLButtonElement>('[data-launcher-assistant-model-control] button')!;
     await act(async () => model.click());
-    const selectTrigger = document.querySelector<HTMLElement>('[role="combobox"][aria-label="切换助理模型"]')!;
-    await act(async () => selectTrigger.click());
+    const searchInput = document.querySelector<HTMLInputElement>('[data-vui=conversation-model-candidate-list] input')!;
+    await act(async () => searchInput.click());
     const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(node => node.textContent === "备用对话模型")!;
     await act(async () => option.click());
     await settle();

@@ -64,7 +64,11 @@ describe("shared host model trigger", () => {
     expect(document.querySelector('[role="combobox"]')).toBeNull();
     await act(async () => agent.click());
     await act(async () => native.click());
-    expect(document.querySelector('[role="combobox"][aria-label="切换助理模型"]')).toBeTruthy();
+    // The Launcher host now renders the shared candidate list instead of a native
+    // select, so it carries the same search box and provider-grouped options.
+    expect(document.querySelector('input[aria-label="搜索模型"]')).toBeTruthy();
+    expect(document.querySelector('[role="option"]')).toBeTruthy();
+    expect(document.querySelector('[role="combobox"]')).toBeNull();
     expect(document.querySelector('input[aria-label="思考强度"]')).toBeNull();
     expect(document.querySelector('input[aria-label="上下文大小"]')).toBeNull();
     expect(onSave).not.toHaveBeenCalled();

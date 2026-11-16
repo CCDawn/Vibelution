@@ -11,6 +11,7 @@ import {
   groupAgentModelCandidates,
   hasUsableProviderChannel,
 } from "./AgentModelPicker";
+import candidateListSource from "../components/conversation/ConversationModelCandidateList.tsx?raw";
 import pickerSource from "./AgentModelPicker.tsx?raw";
 import pickerStyles from "./AgentModelPicker.styles";
 
@@ -130,12 +131,15 @@ describe("AgentModelPicker", () => {
       .toEqual(["ai-pixel"]);
   });
 
-  it("uses accessible provider disclosure controls and visible-only keyboard candidates", () => {
-    expect(pickerSource).toContain("aria-expanded={groupExpanded}");
-    expect(pickerSource).toContain("aria-controls={groupPanelId}");
-    expect(pickerSource).toContain("hidden={!groupExpanded}");
-    expect(pickerSource).toContain(".filter((group) => expandedProviderIds.has(group.providerId))");
-    expect(pickerSource).toContain("setManuallyExpandedProviderIds(new Set())");
+  it("delegates provider disclosure to the shared candidate list", () => {
+    // Disclosure groups, hidden panels and keyboard traversal have one owner
+    // now: ConversationModelCandidateList. The picker keeps grouping, search
+    // and disable reasons, and must not fork its own list body again.
+    expect(candidateListSource).toContain("aria-expanded={groupExpanded}");
+    expect(candidateListSource).toContain("aria-controls={groupPanelId}");
+    expect(candidateListSource).toContain("hidden={!groupExpanded}");
+    expect(candidateListSource).toContain("expandedModelCandidateGroupKeys(");
+    expect(pickerSource).toContain("<ConversationModelCandidateList");
   });
 
   it("blocks promotion while either owning draft is dirty", () => {

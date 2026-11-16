@@ -1327,7 +1327,18 @@ React Virtual 限制挂载数量；当前位置变化和容器恢复时滚动到
 普通 Chat 与 Launcher 的真实模型入口。
 
 ### 使用方式
-组合 VButton；两个 host 只提供真实模型名称、打开状态和动作。普通 Agent 保留绑定模型参数弹层，Launcher 保留原生模型选择；不存在的推理参数不补造。不得新增 host 专属 trigger 样式。
+组合 VButton；两个 host 只提供真实模型名称、打开状态和动作。普通 Agent 保留绑定模型参数弹层，Launcher 展开共享模型候选列表；不存在的推理参数不补造。不得新增 host 专属 trigger 样式。
+
+## ConversationModelCandidateList
+
+### 功能
+按服务商分组的模型候选菜单本体：搜索框、可展开/收起的服务商分组、每行模型名与完整身份、禁用原因、当前选中勾，以及 ArrowUp/ArrowDown/Home/End 键盘遍历。不可选行保留在列表里并写明原因（缺 API Key、服务通道异常、上游不可用、槽位不兼容、草稿未保存），不允许出现点了没反应的空灰行。
+
+### 适用范围
+所有让操作者挑选模型的产品入口：Agent 配置的模型槽位选择器与 Launcher 个人助理的模型切换。外壳（触发器、弹出层宽度与定位）仍归各 host，列表本体只有这一份实现。
+
+### 使用方式
+host 把自家 choice DTO 映射成 `ConversationModelCandidateGroup` / `ConversationModelCandidateRow`（key、label、title、reason、action、pending），并自行持有搜索状态：输入变化后由 host 重新过滤并重新分组，再把结果传回组件。host 只处理选中动作（固定模型、切换助理模型、二次确认新增），不得在 host 内复制分组、折叠、键盘或禁用原因的渲染逻辑。`leadingOption` 只用于 Agent 槽位可留空时的“默认”行。
 
 ## ConversationComposerMetrics
 
