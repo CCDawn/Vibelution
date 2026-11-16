@@ -216,7 +216,7 @@ def _materializable_claims(
                 )
                 if quote and ref_id:
                     yield extraction, {
-                        **raw_ref,
+                        **{key: raw_ref[key] for key in ("sourceRef", "citationLocator", "locator") if key in raw_ref},
                         "fact": flat_fact,
                         "quote": quote,
                         "evidenceRef": ref_id,
