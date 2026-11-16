@@ -1004,16 +1004,16 @@ class AgentConfig(BaseModel):
     max_runtime: int = Field(
         default=0,
         ge=0,
-        description="最大运行时间（秒），0 表示无限制"
+        description="已退役兼容字段：本版没有按运行时长自动停止的实现；本字段不参与运行时决策"
     )
     auto_backup: bool = Field(
         default=False,
-        description="是否启用自动备份"
+        description="已退役兼容字段：本版没有自动备份服务，备份由 backup_project 工具手动触发；本字段不参与运行时决策"
     )
     backup_interval: int = Field(
         default=300,
         gt=0,
-        description="自动备份间隔（秒）"
+        description="已退役兼容字段：本版没有自动备份调度；本字段不参与运行时决策"
     )
     # 本版没有错误计数自动重启机制：重启只有 Agent 主动请求
     # (tools/rebirth_tools.py) 和 Launcher 控制面两条入口。
@@ -1024,7 +1024,7 @@ class AgentConfig(BaseModel):
     )
     exploration_mode: bool = Field(
         default=False,
-        description="是否启用探索模式"
+        description="已退役兼容字段：本版没有探索模式实现；本字段不参与运行时决策"
     )
     default_mode: str = Field(
         default="self_evolution",
@@ -1059,7 +1059,7 @@ class WebChatConfig(BaseModel):
     max_continuation_turns: int = Field(
         default=4,
         ge=1,
-        description="一次 Web Chat 用户消息最多连续推进多少个 single_turn",
+        description="已退役兼容字段：Web Chat 连续推进轮数不由该字段控制；本字段不参与运行时决策",
     )
     personal_assistant_max_calls_per_turn: int = Field(
         default=16,
@@ -1929,11 +1929,11 @@ class EvolutionConfig(BaseModel):
     )
     archive_dir: str = Field(
         default="workspace/archives",
-        description="归档目录"
+        description="已退役兼容字段：本版没有读取该归档路径的实现；本字段不参与运行时决策"
     )
     backup_dir: str = Field(
         default="backups",
-        description="备份目录"
+        description="已退役兼容字段：本版没有读取该备份路径的实现；本字段不参与运行时决策"
     )
     test_gate_enabled: bool = Field(
         default=True,
@@ -1959,7 +1959,7 @@ class EvolutionConfig(BaseModel):
     )
     auto_check_approved: bool = Field(
         default=True,
-        description="Agent 苏醒时是否自动检查已审批提案"
+        description="已退役兼容字段：本版苏醒流程不读取该开关；本字段不参与运行时决策"
     )
     allowed_target_dirs: List[str] = Field(
         default_factory=lambda: ["workspace/prompts/", "tests/harness_safe_modify_probe.py"],
@@ -2094,8 +2094,8 @@ class SupervisedEvolutionFeatureConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
     enabled: bool = Field(default=False, description="是否启用监督进化")
     mental_model_enabled: bool = Field(default=False, description="是否允许监督运行使用心智模型")
-    compression_enabled: bool = Field(default=False, description="是否允许监督运行使用上下文压缩")
-    memory_update_enabled: bool = Field(default=False, description="是否允许监督运行更新记忆")
+    compression_enabled: bool = Field(default=False, description="已退役兼容字段：监督运行的压缩由全局 context_compression 决定；本字段不参与运行时决策")
+    memory_update_enabled: bool = Field(default=False, description="已退役兼容字段：本版监督运行不读取该开关；本字段不参与运行时决策")
 
 
 # ============================================================================
@@ -2308,7 +2308,7 @@ class DebugConfig(BaseModel):
     )
     track_token_usage: bool = Field(
         default=True,
-        description="Token 使用统计"
+        description="已退役兼容字段：Token 统计始终由 usage ledger 记录；本字段不参与运行时决策"
     )
 
 
