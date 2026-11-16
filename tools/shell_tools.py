@@ -1424,6 +1424,40 @@ EDITABLE_EXTENSIONS = _config_defaults.get("EDITABLE_EXTENSIONS", {
     '.sh', '.sql', '.xml', '.svg'
 })
 
+
+# tools.file.* switches: edit/create gates and the encoding probe order.
+DEFAULT_ENCODING_PRIORITY = (
+    "utf-8", "utf-8-sig", "gbk", "gb2312", "latin-1", "cp1252",
+)
+
+
+def _file_tool_policy() -> dict:
+    """Resolve tools.file switches for write/edit/encoding behaviour.
+
+    A config failure keeps every capability on with the historical defaults:
+    a broken config must not silently disable writing.
+    """
+    try:
+        from config import get_config
+
+        file_cfg = get_config().tools.file
+        priority = [
+            str(item).strip()
+            for item in (getattr(file_cfg, "encoding_priority", None) or ())
+            if str(item).strip()
+        ]
+        return {
+            "edit_enabled": bool(getattr(file_cfg, "edit_enabled", True)),
+            "create_enabled": bool(getattr(file_cfg, "create_enabled", True)),
+            "encoding_priority": priority or list(DEFAULT_ENCODING_PRIORITY),
+        }
+    except Exception:
+        return {
+            "edit_enabled": True,
+            "create_enabled": True,
+            "encoding_priority": list(DEFAULT_ENCODING_PRIORITY),
+        }
+
 # 禁止删除的文件/目录模式
 FORBIDDEN_DELETE_PATTERNS = _config_defaults.get("FORBIDDEN_DELETE_PATTERNS", [
     '.env', '.password', '.secret', '.key', 'id_rsa', 'credentials.json',
@@ -1537,8 +1571,8 @@ def _is_path_safe(file_path: str) -> bool:
 
 
 def _detect_encoding(file_path: Path) -> str:
-    """自动检测文件编码"""
-    encodings = ['utf-8', 'utf-8-sig', 'gbk', 'gb2312', 'latin-1', 'cp1252']
+    """自动检测文件编码（顺序来自 tools.file.encoding_priority）"""
+    encodings = _file_tool_policy()["encoding_priority"]
     for enc in encodings:
         try:
             with open(file_path, 'r', encoding=enc) as f:
@@ -2170,6 +2204,8 @@ def create_file(
     Returns:
         操作结果
     """
+    if not _file_tool_policy()["create_enabled"]:
+        return "[创建文件] [禁用] 文件创建已在配置中关闭（tools.file.create_enabled=false）。"
     # 获取绝对路径（稳定锚定到 project/workspace，而不是当前 cwd）
     original_is_absolute = os.path.isabs(file_path)
     if use_workspace and not original_is_absolute:
@@ -2257,6 +2293,8 @@ def edit_file(
     Returns:
         操作结果
     """
+    if not _file_tool_policy()["edit_enabled"]:
+        return "[文件编辑] [禁用] 文件编辑已在配置中关闭（tools.file.edit_enabled=false）。"
     if not file_path or not search_string:
         return "[文件编辑] 错误: 文件路径和搜索字符串不能为空"
 
