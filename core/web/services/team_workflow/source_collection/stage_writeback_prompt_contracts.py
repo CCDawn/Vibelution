@@ -55,7 +55,7 @@ def _stage_writeback_prompt_lines(stage_id: str) -> list[str]:
             "- 检索计划必须同时覆盖四类视角：`mechanism`（机制/支持）、`independent_baseline`（独立基线或复现）、`limitation_or_null`（限制、失败或零结果）和 `falsification`（反例或可证伪线索）；不得只检索支持当前设想的资料。",
             "- 先从 `source_collection_context_tool` 返回的 `assignments[].assignedQueries[]` 读取服务端冻结查询。"
             "可按已分配视角调用 `paper_search_tool`：`topic` 使用原样 `query`，`parent_query_id` 填对应 `queryId`。"
-            "也可用 `batch_web_search_tool`，逐字使用已分配的 `query`。每条正式查询的 `assignmentId`、`queryId` 与 `perspective` 由服务端回执链绑定。"
+            "调用 `batch_web_search_tool` 时必须逐字使用其中的 `query`。每条正式查询的 `assignmentId`、`queryId` 与 `perspective` 由服务端回执链绑定。"
             "同一轮论文检索已有真实回执、四类视角通过服务端校验后即可写回收口，无需重复调用批量搜索。",
             "- 每条 `candidateLeads[]` 至少包含 `title`、`locator`（可验证 DOI 或 https URL）、`sourceType`、`summary`、本条资料对应的 `query`，以及上述四类之一的 `perspective`；可额外填写 `doi`、`authors`、`year`、`container`、`relevance`。",
             "- 服务端会从真实检索执行事件生成 canonical searchTrace；你可以在结果中提交查询说明，但 Agent 自报 `result.searchTrace[]` 不作为审计权威，也不能替代真实 provider 调用。",
