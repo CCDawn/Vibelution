@@ -62,6 +62,13 @@ POLL_GIT_GLOBAL_ARGS = ["--no-optional-locks"]
 # the poll interval made every poll a miss.  300s keeps the hot path at zero
 # git processes between unrelated changes and at most one poll behind.
 FRESHNESS_FAST_PATH_TTL_SECONDS = 300.0
+# Verdicts computed while the on-disk HEAD no longer matches the head the
+# running process recorded used to skip the cache write entirely, so every
+# poll during active development re-paid the full git-backed walk (7-19s per
+# request on 2026-11-16).  Such a verdict is still computed from that exact
+# observation, so replaying it is sound; the shorter window bounds how long a
+# stale disk head can be surfaced, and any new observation misses anyway.
+FRESHNESS_HEAD_DRIFT_TTL_SECONDS = 30.0
 # Dirty-tree recheck throttle.  ``status --untracked-files=all`` walks the whole
 # tree and dominates the request cost, but the restart banner only needs a
 # eventually-consistent dirty flag, so it is refreshed at most every 5 minutes
@@ -648,7 +655,8 @@ def _freshness_fast_path_hit(
         cached = _freshness_cache.get(cache_key)
         if (
             cached
-            and now - float(cached["at"]) <= FRESHNESS_FAST_PATH_TTL_SECONDS
+            and now - float(cached["at"])
+            <= float(cached.get("ttl", FRESHNESS_FAST_PATH_TTL_SECONDS))
             and cached["observation"] == observation
         ):
             return copy.deepcopy(cached["response"])
@@ -667,7 +675,6 @@ def _compute_freshness_response(
     # the inputs may have moved, and the cache write must key off the inputs
     # of the actual run so the next poll's observation can match it.
     observation = _observe_freshness_inputs(project_root)
-    now = _monotonic()
 
     dirty = _throttled_dirty_summary(
         project_root,
@@ -726,15 +733,22 @@ def _compute_freshness_response(
             "activeRelease": str(frontend.get("activeRelease") or ""),
         },
     }
-    # Only cache when the file-read HEAD agrees with rev-parse: a mismatch means
-    # the cheap observation cannot be trusted to guard this verdict (odd refs
-    # layouts, packed-refs-only states), so keep paying the full path.
+    # An empty observation means the refs layout could not be read cheaply
+    # (odd refs / packed-refs-only), so the full path stays uncached there.
+    # A readable HEAD is enough to guard the verdict: the cache entry carries
+    # the observation it was computed from and any movement misses it.
     observed_head = observation[0]
     disk_head = str((backend.get("disk") or {}).get("head") or "")
-    if observed_head and observed_head == disk_head:
+    if observed_head:
+        cache_ttl = (
+            FRESHNESS_FAST_PATH_TTL_SECONDS
+            if observed_head == disk_head
+            else FRESHNESS_HEAD_DRIFT_TTL_SECONDS
+        )
         with _freshness_cache_lock:
             _freshness_cache[cache_key] = {
-                "at": now,
+                "at": _monotonic(),
+                "ttl": cache_ttl,
                 "observation": observation,
                 "response": copy.deepcopy(response),
             }

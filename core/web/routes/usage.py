@@ -6,8 +6,8 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query
 
-from core.llm.usage_ledger import build_usage_summary
 from core.web.routes.usage_models import UsageSummaryResponse
+from core.web.services.usage_summary_cache import get_usage_summary_cached
 
 
 router = APIRouter(tags=["usage"])
@@ -38,7 +38,7 @@ def usage_summary(
         raise HTTPException(status_code=400, detail="agentId is required when scope=agent")
     if normalized_scope == "model" and not (provider_id and model_id):
         raise HTTPException(status_code=400, detail="provider and model are required when scope=model")
-    summary = build_usage_summary(
+    summary = get_usage_summary_cached(
         scope=normalized_scope,
         session_id=session_id,
         agent_id=agent_id,
