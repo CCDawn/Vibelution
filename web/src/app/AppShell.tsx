@@ -3137,7 +3137,6 @@ export function AppShell() {
         </nav>
         <div className={styles.topBarActions} data-shell-group="top-bar-actions">
           <MobilePairingTopBarEntry lang={lang} />
-          <PlatformVersionBadge />
         </div>
         <div className={styles.mobileNav} data-shell-group="mobile-navigation" aria-label={activePrimaryRouteLabel}>
           <span className={styles.mobileNavLabel}>{activePrimaryRouteLabel}</span>
@@ -3157,9 +3156,12 @@ export function AppShell() {
                 aria-label={lang === "en" ? "Update notification" : "更新通知"}
                 title={updateBannerText.title}>
                 <span className={styles.activeWorkTriggerContent}>
-                  {updatePreparationActive
-                    ? (lang === "en" ? "Preparing update" : "正在准备更新")
-                    : (lang === "en" ? "Update available" : "有更新")}
+                  <PlatformVersionBadge />
+                  <span>
+                    {updatePreparationActive
+                      ? (lang === "en" ? "Preparing update" : "正在准备更新")
+                      : (lang === "en" ? "Update available" : "有更新")}
+                  </span>
                   <ChevronDown size={12} aria-hidden="true" />
                 </span>
               </VButton>
