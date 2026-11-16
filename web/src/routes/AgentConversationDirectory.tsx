@@ -394,7 +394,7 @@ export function AgentConversationDirectory({
         countLabel={lang === "zh" ? `${count} 个 Agent` : `${count} Agents`}
         activity={unreadCount > 0
           ? <span className={styles.teamUnreadBadge} aria-label={lang === "zh" ? `${unreadCount} 条未读` : `${unreadCount} unread`}>{unreadCount}</span>
-          : sectionActivity(block.agents, expanded)}
+          : undefined}
         expanded={expanded}
         label={block.team.name || teamId}
         onToggle={() => toggleSection(sectionKey, defaultCollapsed)}

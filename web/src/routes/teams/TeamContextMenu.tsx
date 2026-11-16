@@ -45,8 +45,8 @@ export function teamContextMenuItems(props: Props): VDropdownMenuItem[] {
     { id: "mark-read", label: unread
         ? (zh ? `标记团队已读（${unread}）` : `Mark team read (${unread})`)
         : (zh ? "标记团队已读" : "Mark team read"),
-      icon: <CheckCheck size={14} />, disabled: unread === 0,
-      title: unread === 0 ? (zh ? "没有未读内容" : "Nothing unread") : undefined,
+      icon: <CheckCheck size={14} />,
+      title: zh ? "将团队内所有会话和群聊标记为已读" : "Mark every team session and chat as read",
       onSelect: () => onMarkRead(team) },
     { id: "manage", label: zh ? "管理团队" : "Manage team", icon: <Settings2 size={14} />,
       title: locked ? (zh ? "查看团队设置（只读）" : "View team settings (read-only)") : undefined,
