@@ -1304,6 +1304,7 @@ def _source_collection_stage_writeback_closure_summary(
     materialized_source_quality: dict[str, Any],
     materialized_candidate_graph: dict[str, Any],
     materialized_knowledge_ingestion: dict[str, Any],
+    finding_receipt_gate: dict[str, Any] | None = None,
     conversation_events_by_session: dict[str, list[Any]] | None = None,
 ) -> dict[str, Any]:
     s = _service()
@@ -1489,6 +1490,12 @@ def _source_collection_stage_writeback_closure_summary(
         task,
         task_checklist,
         artifact_complete=artifact_complete,
+        formal_paper_search_received=bool(
+            finding_receipt_gate
+            and finding_receipt_gate.get("passed")
+            and finding_receipt_gate.get("sameTurnPaperSearchObserved")
+            and writeback.get("recordedAt")
+        ),
         conversation_events_by_session=conversation_events_by_session,
     )
     task_checklist_complete = bool(task_tool_progress.get("complete"))
@@ -1708,25 +1715,18 @@ def _prepare_relation_graph_writeback_remediation(
     except Exception:  # noqa: BLE001 - diff degrades to violations-only
         allowed_refs = []
     try:
-        # Same authority as the allowed list: pair each inlined ref with its
-        # candidateId so the agent can bind refs without an extra context read.
-        evidence_context = {
-            str(card.get("claimEvidenceId")): str(card.get("candidateId") or "")
-            for card in load_relation_evidence_context(
-                team_id=team_id,
-                authority_run_id=run_id,
-                workflow_run_id=workflow_run_id,
-            )
-            if isinstance(card, dict)
-            and isinstance(card.get("claimEvidenceId"), str)
-            and card["claimEvidenceId"].strip()
-        }
+        evidence_cards = load_relation_evidence_context(
+            team_id=team_id,
+            authority_run_id=run_id,
+            workflow_run_id=workflow_run_id,
+        )
     except Exception:  # noqa: BLE001 - hint degrades to refs without pairing
-        evidence_context = {}
+        evidence_cards = []
     if kind == WRITEBACK_REMEDIATION_KIND_RELATION_REFS:
         findings = collect_relation_ref_violations(
             result_payload if isinstance(result_payload, dict) else {},
             set(allowed_refs),
+            evidence_context=evidence_cards,
         )
     else:
         findings = relation_missing_field_findings(error_text)
@@ -1749,6 +1749,10 @@ def _prepare_relation_graph_writeback_remediation(
         task,
         contract,
     )
+    evidence_context = {
+        str(card.get("claimEvidenceId") or ""): str(card.get("candidateId") or "")
+        for card in evidence_cards
+    }
     return writeback_remediation_hint_block(kind, findings, allowed_refs, evidence_context)
 
 
@@ -3853,11 +3857,13 @@ def _merge_source_collection_stage_writeback_result_payload(
     incoming: dict[str, Any],
 ) -> dict[str, Any]:
     s = _service()
-    if not isinstance(incoming, dict) or not incoming:
+    if not isinstance(incoming, dict):
         return {}
     stage_id = s._normalize_source_collection_stage_id(task.get("stageId"), default="")
     agent_role = s._normalize_source_collection_agent_role(task.get("agentRole"))
     merge_candidate_leads = stage_id == "finding" or agent_role == "source_finder"
+    if not incoming and not merge_candidate_leads:
+        return {}
     merged_previous: dict[str, Any] = {}
     for ancestor_result in s._source_collection_stage_retry_ancestor_results(team_id, run_id, task):
         merged_previous = s._merge_source_collection_stage_writeback_result_pair(
@@ -3940,6 +3946,7 @@ def _merge_source_collection_stage_writeback_result_pair(
             ).hexdigest(),
             valid_existing_ids=set(),
             max_items=80,
+            preserve_on_empty=True,
         )
     s._merge_source_collection_stage_writeback_array_group(
         merged,
@@ -4066,12 +4073,15 @@ def _merge_source_collection_stage_writeback_array_group(
     item_id: Any,
     valid_existing_ids: set[str],
     max_items: int,
+    preserve_on_empty: bool = False,
 ) -> None:
     s = _service()
     incoming_items = s._source_collection_stage_writeback_array_items(incoming, aliases=aliases, containers=containers)
-    if not incoming_items:
+    if not incoming_items and not preserve_on_empty:
         return
     previous_items = s._source_collection_stage_writeback_array_items(previous, aliases=aliases, containers=containers)
+    if not incoming_items and not previous_items:
+        return
     merged_items = s._merge_source_collection_stage_writeback_array_items(
         previous_items,
         incoming_items,

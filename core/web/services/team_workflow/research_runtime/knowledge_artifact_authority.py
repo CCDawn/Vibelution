@@ -194,11 +194,21 @@ def _is_materialized_scoped_draft(
     trace_team = str(trace.get("teamId") or "").strip()
     trace_authority = str(trace.get("sourceCollectionRunId") or "").strip()
     trace_workflow = str(trace.get("workflowRunId") or "").strip()
+    ingestion_status = str(ingestion.get("status") or "")
+    inbox_source_id = ingestion.get("inboxSourceId")
+    # Source review precedes knowledge approval. The source inbox receipt
+    # already proves a draft was staged for this run.
+    pending_source_review = (
+        ingestion_status == "pending_source_review"
+        and isinstance(inbox_source_id, str)
+        and bool(inbox_source_id.strip())
+        and (not workflow_run_id or trace_workflow == workflow_run_id)
+    )
     return bool(
         str(metadata.get("taskType") or "") == "steward_pack_draft"
         and output
         and validation.get("valid") is True
-        and str(ingestion.get("status") or "") in _MATERIALIZED_INGESTION_STATES
+        and (ingestion_status in _MATERIALIZED_INGESTION_STATES or pending_source_review)
         and candidate_team == team_id
         and trace_team == team_id
         and trace_authority == authority_run_id

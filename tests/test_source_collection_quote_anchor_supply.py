@@ -477,6 +477,17 @@ def test_nearest_verbatim_hint_bounded_snippet(tmp_path, monkeypatch):
     assert nearest_verbatim_hint("完全无关的中文引用", blocks)["similarity"] >= 0
 
 
+def test_quote_remediation_suggests_a_literal_run_from_the_right_receipt():
+    literal = "work partitioning between different thread blocks and warps on the GPU"
+    url = "https://arxiv.org/abs/2307.08691v1"
+    text = "The inefficiency is due to suboptimal " + literal + "."
+    hint = nearest_verbatim_hint(
+        literal + ", nominally unrelated to occupancy", [{"text": text, "citationUrl": url}]
+    )
+    assert hint["verbatimQuote"] == literal
+    assert hint["citationUrl"] == url
+
+
 # ---------------------------------------------------------------------------
 # ⑤ 抓取失败不能引用模型摘要；⑥ 无原文候选诚实跳过
 # ---------------------------------------------------------------------------

@@ -747,6 +747,11 @@ def nearest_verbatim_hint(
             "snippet": snippet[:QUOTE_SNIPPET_MAX_CHARS],
             "similarity": round(similarity, 3),
         }
+        verbatim = text[match.b:match.b + min(match.size, 140)].strip()
+        if len(verbatim) >= 32:
+            best["verbatimQuote"] = verbatim
+        if block.get("citationUrl"):
+            best["citationUrl"] = block["citationUrl"]
     return best
 
 
@@ -918,7 +923,8 @@ def build_quote_anchor_remediation(
     instruction = (
         "至少一个 quote 不是该来源 quotableSources[].blocks 原文块的逐字子串。"
         "请打开最新 source_collection_context_tool 读取 quotableSources，"
-        "把 findings[] 里每个 sourceId 的 quote 原样替换为对应 blocks[].text 中的逐字片段"
+        "先查看 findings[].nearestMatch.verbatimQuote。确认它支持事实后原样复制；"
+        "否则从该 sourceId 对应 blocks[].text 选一段支持事实的连续短引文"
         "（禁止改写、拼接、凭记忆重写或写空串），然后重新回写 completed。"
         "这是唯一一次修正机会：再次出现不匹配 quote 将按契约直接拒绝。"
         "没有 blocks 的来源跳过 quote（evidenceStatus=missing_evidence_anchor）。"

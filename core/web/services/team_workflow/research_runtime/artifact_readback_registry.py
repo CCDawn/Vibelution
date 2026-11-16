@@ -520,13 +520,35 @@ def load_relation_evidence_context(
         authority_run_id=authority_run_id,
         workflow_run_id=workflow_run_id,
     )
-    fields = ("claimEvidenceId", "claimId", "candidateId", "sourceId", "quote", "supportLevel")
-    return [
+    fields = ("claimEvidenceId", "claimId", "candidateId", "recordId", "sourceId", "quote", "supportLevel")
+    context = [
         {key: card.get(key, "") for key in fields}
         for card in cards or []
         if isinstance(card.get("claimEvidenceId"), str)
         and card["claimEvidenceId"].strip()
     ]
+    if not context:
+        return context
+
+    from ..source_collection.candidates import list_candidate_store_authority_records
+
+    try:
+        candidates = list_candidate_store_authority_records(team_id, run_id=authority_run_id)
+    except Exception:  # Candidate aliases are optional when only the evidence store is readable.
+        return context
+    source_record_ids = {}
+    for candidate in candidates:
+        metadata = candidate.get("metadata")
+        imported = metadata.get("importedFromDataRecord") if isinstance(metadata, dict) else None
+        candidate_id = candidate.get("candidateId")
+        record_id = imported.get("recordId") if isinstance(imported, dict) else None
+        if isinstance(candidate_id, str) and isinstance(record_id, str) and record_id:
+            source_record_ids[candidate_id] = record_id
+    for card in context:
+        candidate_id = card["candidateId"]
+        if not card["recordId"] and isinstance(candidate_id, str):
+            card["recordId"] = source_record_ids.get(candidate_id, "")
+    return context
 
 
 def load_allowed_evidence_refs(

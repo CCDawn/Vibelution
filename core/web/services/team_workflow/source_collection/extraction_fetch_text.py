@@ -25,6 +25,7 @@ from core.research.workflow.ledger.errors import WorkflowLedgerError
 # 必须进入 quotable 供给——只认 HTML 前缀会让纯 PDF 来源（如 arXiv /pdf/）
 # 即使抓取成功也必然 no_quotable_text。
 _RECEIPT_PREFIXES = ("[网页内容] ", "[PDF 文本] ")
+REUSED_FINDING_TEXT_PREFIX = "[已复用搜集原文] "
 
 # 跨主机重定向停靠消息（tools/web_search_tool.web_fetch 按安全策略停止跟随）。
 # 它不是内容回执，禁止进入 _RECEIPT_PREFIXES——只作为 (原 URL → 重定向目标)
@@ -109,7 +110,9 @@ def _session_fetched_text(events: list[Any], session_id: str) -> dict[str, dict[
             if not separator or not body.strip():
                 continue
             # Keep fetched text only, excluding the tool's truncation notice.
-            body = body.rsplit("\n\n... [截断，原内容 ", 1)[0].strip()
+            original, truncated, tail = body.rpartition("\n\n... [截断，原内容 ")
+            body = original if truncated else tail
+            body = body.strip()
             if not body:
                 continue
             texts[locator] = {
@@ -120,6 +123,8 @@ def _session_fetched_text(events: list[Any], session_id: str) -> dict[str, dict[
                 "sessionId": session_id,
                 "turnId": str(getattr(event, "turn_id", "")),
             }
+            if truncated:
+                texts[locator]["truncated"] = "true"
     # 第二遍扫描：跨主机重定向停靠消息携带 (原 URL → 重定向目标)。代理按提示
     # 抓到落地页后，原定位键（如 DOI 链接）也要能命中那份真实抓取的原文，
     # 否则候选的 DOI 定位键永远 quoteAvailable=false（结构性死锁）。别名条目
@@ -316,7 +321,7 @@ def finding_fetched_text_by_source(
     )
     from ..research_runtime.formal_read_runtime import FormalReadRuntimeUnavailable, get_formal_read_store
     from ..research_runtime.formal_write_runtime import WorkflowMigrationRequired
-    from .extraction_quote_anchor_supply import linked_source_record_id
+    from .extraction_quote_anchor_supply import linked_source_record_id, matching_source_fetch_receipts
     from .search_execution import (
         _source_finding_candidate_receipt_is_bound,
         _source_finding_receipt_binding_keys,
@@ -396,6 +401,7 @@ def finding_fetched_text_by_source(
         matched = {
             locator: value for locator, value in fetched.items()
             if any(fetch_keys[locator] & group for group in matching_groups)
+            and next(matching_source_fetch_receipts(projected, {locator: value}), None) is not None
         }
         if matched:
             by_source[("candidate", candidate_id)] = matched
@@ -407,4 +413,55 @@ def finding_fetched_text_for_task(task: dict[str, Any]) -> dict[tuple[str, str],
     """Resolve scoped finding receipts at an extraction evidence read point."""
     return finding_fetched_text_by_source(
         str(task.get("teamId") or ""), str(task.get("runId") or ""), task,
+    )
+
+
+def reuse_bound_finding_text(runtime: dict[str, Any], url: str, max_chars: int) -> str | None:
+    """Serve a scoped upstream body on a redundant fetch request, without minting a fetch receipt."""
+    scope = _object(_object(runtime.get("runtimeMetadata")).get("sourceCollectionExtraction"))
+    if scope.get("stageId") != "extraction" or not all(
+        scope.get(key) for key in ("teamId", "runId", "taskId")
+    ) or not all(runtime.get(key) for key in ("sessionId", "turnId", "agentId")):
+        return None
+
+    from .extraction_quote_anchor_supply import _arxiv_locator, matching_source_fetch_receipts, receipt_citation_url
+    from .stage_session import _read_source_collection_stage_session_task_record
+
+    task = _read_source_collection_stage_session_task_record(scope["teamId"], scope["taskId"])
+    if not task or any(task.get(key) != scope.get(key) for key in ("teamId", "runId", "taskId", "stageId")):
+        return None
+    if any(task.get(key) != runtime[key] for key in ("sessionId", "agentId")):
+        return None
+    if task.get("status") not in {"queued", "running", "needs_review"}:
+        return None
+    if _object(task.get("turn")).get("turnId") != runtime["turnId"]:
+        # A continuation can start before the canonical task adopts its new
+        # turn. Verify that its persisted user message references this task.
+        from core.web.services import team_workflow_orchestration_service as s
+
+        if not s._source_collection_stage_session_task_turn_references_task(task, runtime["sessionId"], runtime["turnId"]):
+            return None
+
+    requested = _arxiv_locator(url)
+    matches = {}
+    for (kind, _), scoped in finding_fetched_text_for_task(task).items():
+        if kind != "candidate":
+            continue
+        for receipt in matching_source_fetch_receipts({"sourceUrl": url}, scoped):
+            citation_url = receipt_citation_url(receipt)
+            actual = _arxiv_locator(citation_url)
+            if requested and actual and requested[2] != "doi" and requested[2] != actual[2]:
+                continue
+            body = receipt["text"]
+            if receipt.get("truncated") and len(body) < max_chars:
+                continue
+            matches[(citation_url, body)] = receipt
+    if len(matches) != 1:
+        # In particular, a versionless request must not choose arbitrarily
+        # between two upstream editions or two observed bodies.
+        return None
+    (citation_url, body), receipt = next(iter(matches.items()))
+    return (
+        f"{REUSED_FINDING_TEXT_PREFIX}{citation_url}\n搜集抓取回执: {receipt['eventId']}\n\n"
+        f"{body[:max_chars]}"
     )

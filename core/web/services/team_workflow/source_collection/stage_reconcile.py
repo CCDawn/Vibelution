@@ -1391,6 +1391,12 @@ def _reconcile_source_collection_stage_session_task_completion_gate(
         if isinstance(result.get("materializedKnowledgeIngestion"), dict)
         else {}
     )
+    from .stage_writeback import (
+        _apply_finding_receipt_gate_to_closure,
+        _source_collection_stage_finding_receipt_postcheck,
+    )
+
+    receipt_gate = _source_collection_stage_finding_receipt_postcheck(team_id, run_id, task)
     closure_summary = s._source_collection_stage_writeback_closure_summary(
         task,
         writeback,
@@ -1400,15 +1406,9 @@ def _reconcile_source_collection_stage_session_task_completion_gate(
         materialized_source_quality=materialized_source_quality,
         materialized_candidate_graph=materialized_candidate_graph,
         materialized_knowledge_ingestion=materialized_knowledge_ingestion,
+        finding_receipt_gate=receipt_gate,
         conversation_events_by_session=conversation_events_by_session,
     )
-    from .stage_writeback import (
-        _apply_finding_receipt_gate_to_closure,
-        _source_collection_stage_finding_receipt_postcheck,
-    )
-
-    receipt_gate = _source_collection_stage_finding_receipt_postcheck(team_id, run_id, task)
-    _apply_finding_receipt_gate_to_closure(closure_summary, receipt_gate)
     task_checklist = [
         item for item in list(task.get("taskChecklist") or [])
         if isinstance(item, dict)
@@ -1421,6 +1421,7 @@ def _reconcile_source_collection_stage_session_task_completion_gate(
     )
     closure_summary["completionGate"] = completion_gate
     closure_summary["completionGatePassed"] = bool(completion_gate.get("passed"))
+    _apply_finding_receipt_gate_to_closure(closure_summary, receipt_gate)
 
     requested_status = s._trim_text(
         writeback.get("agentRequestedStatus") or writeback.get("requestedStatus") or writeback.get("status") or task.get("status"),
@@ -2173,6 +2174,7 @@ def _source_collection_stage_task_tool_progress_from_trace(
     task_checklist: list[dict[str, Any]] | None,
     *,
     artifact_complete: bool = False,
+    formal_paper_search_received: bool = False,
     conversation_events_by_session: dict[str, list[Any]] | None = None,
 ) -> dict[str, Any]:
     s = _service()
@@ -2233,6 +2235,10 @@ def _source_collection_stage_task_tool_progress_from_trace(
         writeback_observed = (
             "source_collection_stage_writeback_tool" in successful_tool_names
             or persisted_writeback_after_turn
+            # This flag comes from the canonical finding writeback after
+            # materialization and receipt validation. Its tool_result is
+            # appended only after the writeback call returns.
+            or formal_paper_search_received
         )
         task_create_observed = False
         completed_ids: set[str] = set()
@@ -2245,6 +2251,7 @@ def _source_collection_stage_task_tool_progress_from_trace(
             s._normalize_int(item.get("order"), default=index, minimum=1, maximum=1000): item
             for index, item in enumerate(checklist, start=1)
         }
+        completed_by_paper_search = False
         for tool_call in tool_calls:
             name = s._source_collection_stage_tool_call_name(tool_call)
             if not s._source_collection_stage_tool_call_succeeded(tool_call):
@@ -2273,6 +2280,14 @@ def _source_collection_stage_task_tool_progress_from_trace(
                     if required_tool == "web_fetch_tool"
                     else required_tool in successful_tool_names
                 )
+                if (
+                    not item_complete
+                    and required_tool == "batch_web_search_tool"
+                    and item_id == "search_and_dedupe_sources"
+                    and formal_paper_search_received
+                ):
+                    item_complete = True
+                    completed_by_paper_search = True
                 if item_complete and "page" in item_id:
                     # finding 的 page_existing_sources 已改为单读语义：一次成功的
                     # source_collection_context_tool 调用即勾，不再要求翻页读完或等
@@ -2287,6 +2302,8 @@ def _source_collection_stage_task_tool_progress_from_trace(
             if item_complete:
                 completed_ids.add(item_id)
         progress = s._source_collection_stage_task_tool_progress(checklist, completed_ids=completed_ids)
+        if completed_by_paper_search:
+            progress["searchReceiptTool"] = "paper_search_tool"
         progress.update(
             {
                 "traceAvailable": True,
