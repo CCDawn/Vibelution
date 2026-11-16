@@ -1399,6 +1399,7 @@ export function AppShell() {
     if (pathname.startsWith("/self-evolution")) return t("navEvolution");
     if (pathname.startsWith("/evolution/workspace")) return t("navEvolution");
     if (pathname.startsWith("/teams")) return t("navTeams");
+    if (pathname.startsWith("/platform-version")) return t("navPlatformVersion");
     if (pathname.startsWith("/kernel")) return "Kernel";
     if (pathname.startsWith("/memory")) return t("navMemory");
     if (pathname.startsWith("/agents/tools") || pathname.startsWith("/tools")) return t("navTools");
@@ -3086,6 +3087,15 @@ export function AppShell() {
             onClick={(event) => handlePrimaryNavClick(event, "/teams")}
           >
             {t("navTeams")}
+          </VRouteLinkButton>
+          <VRouteLinkButton
+            chrome="shell-nav"
+            to="/platform-version"
+            className={shellPrimaryNavClass(location.pathname, "/platform-version")}
+            aria-current={isShellPrimaryNavActive(location.pathname, "/platform-version") ? "page" : undefined}
+            onClick={(event) => handlePrimaryNavClick(event, "/platform-version")}
+          >
+            {t("navPlatformVersion")}
           </VRouteLinkButton>
           {supervisedEvolutionEnabled || selfEvolutionEnabled ? (
             <VRouteLinkButton
