@@ -118,6 +118,80 @@ def _fetch_receipt_for_url(
     return {}
 
 
+def source_quote_citation(
+    fields: Mapping[str, Any],
+    item: Mapping[str, Any],
+    locator: Mapping[str, Any],
+    *,
+    quote: object,
+    receipts: Mapping[str, Mapping[str, Any]],
+    path: str,
+    required: bool = False,
+) -> tuple[str, str, Mapping[str, Any]] | None:
+    """Bind the actual original excerpt and its address from the same receipt."""
+    from ..source_collection.extraction_quote_anchor_supply import (
+        matching_source_fetch_receipts,
+        original_quote_from_text,
+        receipt_citation_url,
+    )
+
+    url = fields["source_url"]
+    declared = [
+        item.get("sourceRef"), item.get("locator"), locator.get("sourceRef"), locator.get("url"), fields.get("doi"),
+    ]
+    for key in ("locator", "citationLocator"):
+        explicit = item.get(key)
+        if isinstance(explicit, Mapping):
+            declared.extend((explicit.get("sourceRef"), explicit.get("url")))
+    refs = set()
+    for value in declared:
+        ref = _text(value)
+        if ref.startswith(("https://", "http://")):
+            refs.add(ref)
+        elif ref.lower().removeprefix("doi:").startswith("10.") and "/" in ref:
+            refs.add(f"https://doi.org/{ref.lower().removeprefix('doi:')}")
+    conflicting_url = ""
+    for receipt in matching_source_fetch_receipts({"sourceUrl": url}, receipts):
+        excerpt = original_quote_from_text(_text(quote), _text(receipt.get("text")))
+        if not excerpt:
+            continue
+        actual = receipt_citation_url(receipt)
+        if not actual.startswith("https://"):
+            continue
+        only_receipt = {actual: receipt}
+        if any(
+            not any(matching_source_fetch_receipts({"sourceUrl": ref}, only_receipt))
+            for ref in refs
+        ):
+            conflicting_url = conflicting_url or actual
+            continue
+        return actual, excerpt, receipt
+    if required and conflicting_url:
+        raise SourceExtractionEvidenceContractError(
+            f"{path} assigns the quote to a different source version; use {conflicting_url} "
+            "for source_url, sourceRef, and citation locator URLs, and omit a DOI from another edition"
+        )
+    if required:
+        raise SourceExtractionEvidenceContractError(
+            f"{path} has no matching quote in the declared source version; "
+            "copy a short quote and its citationUrl from the same quotableSources block"
+        )
+    return None
+
+
+def citation_receipts_for_source(
+    source: Mapping[str, Any],
+    fetched_text: Mapping[str, Mapping[str, Any]] | None,
+    finding_text_by_source: Mapping[tuple[str, str], Mapping[str, Mapping[str, Any]]] | None,
+) -> dict[str, Mapping[str, Any]]:
+    candidate_id = _text(source.get("candidateId"))
+    source_key = ("candidate", candidate_id) if candidate_id else ("record", _text(source.get("recordId")))
+    receipts = dict(fetched_text or {})
+    for key, receipt in (finding_text_by_source or {}).get(source_key, {}).items():
+        receipts.setdefault(key, receipt)
+    return receipts
+
+
 def derive_server_verification_status(
     declared: object,
     *,
@@ -459,6 +533,7 @@ def _v2_card(
     path: str,
     fetched_text: Mapping[str, Mapping[str, Any]] | None = None,
     finding_text_by_source: Mapping[tuple[str, str], Mapping[str, Mapping[str, Any]]] | None = None,
+    citation_blocks: Mapping[str, list[Mapping[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     fields = normalize_challenge_evidence_fields(item, parent, path=path)
     fields["verification_status"] = derive_server_verification_status(
@@ -476,6 +551,31 @@ def _v2_card(
         raise SourceExtractionEvidenceContractError(
             f"{path} requires an explicit citationLocator/evidence anchor"
         )
+    if citation_blocks is not None:
+        source_id = _text(fields.get("candidateId") or fields.get("recordId"))
+        blocks = citation_blocks.get(source_id) or []
+        receipts = {
+            str(index): block for index, block in enumerate(blocks)
+        }
+        quote = item.get("quote")
+        citation_item = item
+        if item is parent and not quote:
+            citation_item = next(
+                ({**item, **ref} for ref in item.get("evidenceRefs") or []
+                 if isinstance(ref, Mapping) and _text(ref.get("quote"))
+                 and _text(ref.get("id") or ref.get("evidenceRefId") or ref.get("refId"))),
+                item,
+            )
+            quote = citation_item.get("quote")
+        actual, original, _ = source_quote_citation(
+            fields, citation_item, locator, quote=quote, receipts=receipts, path=path, required=True,
+        )
+        fields["source_url"] = actual
+        fields["verification_status"] = _FETCH_RECEIPT_VERIFICATION
+        fields["quote"] = original
+        locator = {**locator, "url": actual}
+        if _text(locator.get("sourceRef")).startswith(("https://", "http://")):
+            locator["sourceRef"] = actual
     return {
         **fields,
         # Existing artifact quality/readiness consumers still use ``claim``;
@@ -562,6 +662,7 @@ def build_source_extraction_evidence_cards(
     mode: str = "challenge_v2",
     fetched_text: Mapping[str, Mapping[str, Any]] | None = None,
     finding_text_by_source: Mapping[tuple[str, str], Mapping[str, Mapping[str, Any]]] | None = None,
+    citation_blocks: Mapping[str, list[Mapping[str, Any]]] | None = None,
 ) -> list[dict[str, Any]]:
     """Build canonical cards; legacy projection requires an explicit mode.
 
@@ -605,6 +706,7 @@ def build_source_extraction_evidence_cards(
                         path=f"{key}[{extraction_index}].{collection_key}[{finding_index}]",
                         fetched_text=fetched_text,
                         finding_text_by_source=finding_text_by_source,
+                        citation_blocks=citation_blocks,
                     )
                     identity = json.dumps(
                         card,
@@ -625,6 +727,7 @@ def build_source_extraction_evidence_cards(
                     path=f"{key}[{extraction_index}]",
                     fetched_text=fetched_text,
                     finding_text_by_source=finding_text_by_source,
+                    citation_blocks=citation_blocks,
                 )
             )
     return cards

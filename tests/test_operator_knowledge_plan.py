@@ -347,7 +347,9 @@ def test_project_planner_receives_only_verified_directional_evidence(monkeypatch
         "evidence_card_batch": {"evidenceCards": [
             {**card("ce-support", "supports", "Rows fit in SRAM"),
              "locator": {"kind": "evidence_ref", "anchor": "source-record",
-                         "url": "https://example.org/evidence"}},
+                         "url": "https://example.org/evidence"},
+             "collectionEnvelope": {"sourceUrl": "https://example.org/discovered"},
+             "citationReceipt": {"sourceUrl": "https://example.org/evidence", "eventId": "fetch-receipt"}},
             card("ce-boundary", "contradicts", "Higher occupancy does not guarantee higher performance"),
             card("ce-counter", "supports", "Registers can reduce the number of resident blocks"),
             card("ce-unbound", "supports", "This card was not used by the reviewed relation graph"),
@@ -425,6 +427,8 @@ def test_project_planner_receives_only_verified_directional_evidence(monkeypatch
         ("ce-boundary", "qualifies", "Higher occupancy does not guarantee higher performance"),
     ]
     assert projected["evidenceCards"][1]["sourceSupportLevel"] == "supports"
+    assert projected["evidenceCards"][0]["sourceUrl"] == "https://example.org/evidence"
+    assert projected["evidenceCards"][0]["citationReceipt"]["eventId"] == "fetch-receipt"
     assert projected["evidenceCards"][1]["counterClaims"] == [
         {"claim": "Register use cannot reduce residency", "disposition": "challenges_ontology"}
     ]

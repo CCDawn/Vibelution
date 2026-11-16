@@ -60,6 +60,7 @@ class ClaimEvidenceStore:
         payload: dict[str, Any],
         *,
         derived_from_claim_evidence_id: str = "",
+        verified_citation_receipt: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         normalized = _normalize_payload(
             payload, derived_from_claim_evidence_id=derived_from_claim_evidence_id
@@ -88,6 +89,11 @@ class ClaimEvidenceStore:
                     or any(source.get(key) != normalized[key] for key in _CITATION_FIELDS)
                 ):
                     raise ClaimEvidenceError("Derived evidence requires a current, canonical source citation.")
+                verified_citation_receipt = source.get("citationReceipt")
+            if verified_citation_receipt is not None:
+                normalized["citationReceipt"] = _citation_receipt(
+                    verified_citation_receipt, normalized["locator"], normalized["sourceRevision"]
+                )
             now = _now_utc()
             record = {
                 "schemaVersion": SCHEMA_VERSION,
@@ -124,6 +130,8 @@ class ClaimEvidenceStore:
                 record,
                 derived_from_claim_evidence_id=record.get("derivedFromClaimEvidenceId", ""),
             )
+            if "citationReceipt" in record:
+                _citation_receipt(record["citationReceipt"], normalized["locator"], normalized["sourceRevision"])
         except ClaimEvidenceError:
             return False
         return (
@@ -513,6 +521,23 @@ def _collection_envelope(value: Any) -> dict[str, str]:
         if text:
             envelope[field] = text
     return envelope
+
+
+def _citation_receipt(value: Mapping[str, Any], locator: Mapping[str, Any], revision: str) -> dict[str, str]:
+    if not isinstance(value, Mapping):
+        raise ClaimEvidenceError("Citation receipt must be an object.")
+    receipt = {
+        key: _required_text(value.get(key), f"citationReceipt.{key}", limit)
+        for key, limit in (
+            ("sourceUrl", 500), ("requestedUrl", 2000), ("eventId", 300),
+            ("sessionId", 200), ("turnId", 300), ("contentHash", 71),
+        )
+    }
+    if (receipt["sourceUrl"] != locator.get("url")
+            or not receipt["sourceUrl"].startswith("https://")
+            or receipt["contentHash"] != revision):
+        raise ClaimEvidenceError("Citation receipt must match the stored citation URL and observed text hash.")
+    return receipt
 
 
 def _locator(value: Any) -> dict[str, Any]:

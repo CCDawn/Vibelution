@@ -277,6 +277,7 @@ def _source_collection_stage_writeback_extraction_card_contract_errors(
     task: dict[str, Any],
     run_id: str,
     result_payload: dict[str, Any],
+    citation_blocks: dict[str, list[dict[str, Any]]] | None = None,
 ) -> list[str]:
     """Validate the merged extraction writeback against the Challenge v2 card contract.
 
@@ -309,7 +310,7 @@ def _source_collection_stage_writeback_extraction_card_contract_errors(
     try:
         build_source_extraction_evidence_cards(
             result_payload,
-            fetched_text=task_fetched_text(task),
+            citation_blocks=citation_blocks,
         )
     except SourceExtractionEvidenceContractError as exc:
         return [s._trim_text(str(exc), max_length=400)]
@@ -693,6 +694,7 @@ def writeback_source_collection_stage_session_task(
             task,
             run_id,
             result_payload,
+            citation_blocks=quote_audit["blocks_by_id"],
         )
         if card_contract_errors:
             # Deterministic remediation contract (one-shot): the card errors
@@ -961,6 +963,8 @@ def writeback_source_collection_stage_session_task(
     task["result"]["closureSummary"] = closure_summary
     task["evidenceRefs"] = writeback["evidenceRefs"]
     task["nextActions"] = writeback["nextActions"]
+    if status == "completed" and quote_audit["blocks_by_id"]:
+        task["versionedQuoteReceipts"] = True
     task["writeback"] = writeback
     task["taskToolRequired"] = bool(task.get("taskToolRequired", True))
     if task_checklist:
@@ -1418,6 +1422,7 @@ def get_source_collection_stage_task_context(
             "有可引用原文的来源直接使用现有块，无需重复抓取；"
             "claims[].quote 与 evidenceRefs[].quote 必须逐字取自对应 sourceId 的 blocks[].text，"
             "原样复制，禁止改写、拼接、凭记忆重写或写空串；"
+            "source_url、sourceRef 和引文定位 URL 复制同一个块的 citationUrl；"
             "抓取页面不等于获取整篇论文，必须按实际文本判断主张；"
             "sourceAccess.access=no_quotable_text 的来源没有可引用原文："
             "先用 web_fetch_tool 抓取该来源 URL，再重新读取上下文；抓取失败时"

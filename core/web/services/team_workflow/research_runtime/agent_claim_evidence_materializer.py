@@ -38,9 +38,11 @@ from pathlib import Path
 from typing import Any
 
 from .source_extraction_evidence_cards import (
+    citation_receipts_for_source,
     derive_server_verification_status,
     extraction_has_materializable_evidence,
     normalize_challenge_evidence_fields,
+    source_quote_citation,
 )
 from ..source_collection.extraction_fetch_text import (
     finding_fetched_text_for_task,
@@ -214,6 +216,7 @@ def _materializable_claims(
                 )
                 if quote and ref_id:
                     yield extraction, {
+                        **raw_ref,
                         "fact": flat_fact,
                         "quote": quote,
                         "evidenceRef": ref_id,
@@ -676,6 +679,31 @@ def materialize_claim_evidence_from_task(
         locator = _claim_locator(claim, extraction)
         if not all((candidate_id, claim_text, quote, source_ref, locator)):
             continue
+        citation_receipt = None
+        bound_quote = source_quote_citation(
+            challenge_evidence,
+            claim,
+            locator,
+            quote=quote,
+            receipts=citation_receipts_for_source(challenge_evidence, fetched_text, finding_text),
+            path=claim_path,
+            required=bool(task.get("versionedQuoteReceipts")),
+        )
+        if bound_quote is not None:
+            actual_url, quote, receipt = bound_quote
+            locator = {**locator, "url": actual_url}
+            source_ref = actual_url
+            challenge_evidence["source_url"] = actual_url
+            challenge_evidence["verification_status"] = "full_text_checked"
+            if all(receipt.get(key) for key in ("eventId", "sessionId", "turnId")):
+                citation_receipt = {
+                    "sourceUrl": actual_url,
+                    "requestedUrl": receipt.get("aliasOf") or receipt["locator"],
+                    "eventId": receipt["eventId"],
+                    "sessionId": receipt["sessionId"],
+                    "turnId": receipt["turnId"],
+                    "contentHash": "sha256:" + hashlib.sha256(receipt["text"].encode()).hexdigest(),
+                }
         if (
             locator.get("kind") == "url"
             and challenge_evidence["verification_status"] != "full_text_checked"
@@ -708,7 +736,7 @@ def materialize_claim_evidence_from_task(
                 candidate_id,
                 normalized_source_run,
             )
-        source_revision = "sha256:" + _sha256(
+        source_revision = (citation_receipt or {}).get("contentHash") or "sha256:" + _sha256(
             {
                 "sourceRef": source_ref,
                 "locator": locator,
@@ -758,7 +786,7 @@ def materialize_claim_evidence_from_task(
         }
         if collection_envelope:
             evidence_payload["collectionEnvelope"] = dict(collection_envelope)
-        stored = store.register(normalized_team, evidence_payload)
+        stored = store.register(normalized_team, evidence_payload, verified_citation_receipt=citation_receipt)
         if dangling_candidate_id:
             _record_dangling_candidate_event(
                 team_id=normalized_team,

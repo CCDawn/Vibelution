@@ -42,6 +42,7 @@ from core.web.services.team_workflow.source_collection.extraction_quote_anchor_s
     has_verbatim_anchor,
     latest_failed_fetch_attempts,
     nearest_verbatim_hint,
+    original_quote_from_text,
     source_quotable_blocks,
 )
 from core.chat.conversation_ledger import append_conversation_event
@@ -751,17 +752,17 @@ def _receipt(locator: str, text: str) -> dict:
             "eventId": "evt-" + locator[-6:], "sessionId": "s", "turnId": "t"}
 
 
-def test_arxiv_version_suffix_record_matches_unversioned_receipt():
-    """现网实锤形态：record 带版本号 ↔ 回执无版本（agent 实际抓的 URL）→ 命中。"""
+@pytest.mark.parametrize("requested", [
+    "https://arxiv.org/abs/2502.01542",
+    "https://arxiv.org/abs/2502.01542v2",
+])
+def test_arxiv_versioned_record_rejects_receipt_without_resolved_edition(requested):
+    """无版本的抓取结果不能证明显式版本，包括从显式链接重定向的情况。"""
     text = "Unified predictive coding accounts for cortical and cerebellar learning."
-    fetched = {"https://arxiv.org/abs/2502.01542": _receipt("https://arxiv.org/abs/2502.01542", text)}
+    resolved = "https://arxiv.org/abs/2502.01542"
+    fetched = {requested: {**_receipt(requested, text), "resolvedUrl": resolved}}
     record = {"recordId": "r1", "sourceUrl": "https://arxiv.org/abs/2502.01542v2"}
-    blocks = source_quotable_blocks(record, {}, fetched_text_by_locator=fetched)
-    assert len(blocks) == 1
-    assert blocks[0]["text"] == text
-    # block 字段仍来自原回执，不做任何改写。
-    assert blocks[0]["locator"] == "https://arxiv.org/abs/2502.01542"
-    assert blocks[0]["resolvedUrl"] == "https://arxiv.org/abs/2502.01542"
+    assert source_quotable_blocks(record, {}, fetched_text_by_locator=fetched) == []
 
 
 def test_arxiv_unversioned_record_matches_versioned_receipt():
@@ -773,12 +774,11 @@ def test_arxiv_unversioned_record_matches_versioned_receipt():
     assert [b["text"] for b in blocks] == [text]
 
 
-@pytest.mark.parametrize("source_url", [
-    "https://doi.org/10.48550/arXiv.2410.10989",
-    "http://arxiv.org/abs/2410.10989v1",
+@pytest.mark.parametrize("source_url,locator", [
+    ("https://doi.org/10.48550/arXiv.2410.10989", "https://arxiv.org/abs/2410.10989"),
+    ("http://arxiv.org/abs/2410.10989v1", "https://arxiv.org/abs/2410.10989v1"),
 ])
-def test_arxiv_discovery_doi_and_http_bind_real_abstract_receipt(source_url):
-    locator = "https://arxiv.org/abs/2410.10989"
+def test_arxiv_discovery_doi_and_http_bind_real_abstract_receipt(source_url, locator):
     text = "A short verbatim abstract excerpt."
     fetched = {locator: _receipt(locator, text)}
     blocks = source_quotable_blocks(
@@ -792,10 +792,68 @@ def test_arxiv_discovery_doi_and_http_bind_real_abstract_receipt(source_url):
     ) == []
 
 
+@pytest.mark.parametrize("source_url", [
+    "https://arxiv.org/abs/2410.10989v2",
+    "http://export.arxiv.org/abs/2410.10989v2",
+    "https://doi.org/10.48550/arXiv.2410.10989v2",
+])
+def test_arxiv_explicit_edition_rejects_other_version_even_with_work_doi(source_url):
+    other_edition = "https://arxiv.org/abs/2410.10989v1"
+    source = {"sourceUrl": source_url, "metadata": {"doi": "10.48550/arXiv.2410.10989"}}
+    assert source_quotable_blocks(
+        source, {}, fetched_text_by_locator={other_edition: _receipt(other_edition, "Only v1 says this.")},
+    ) == []
+
+
+def test_arxiv_explicit_edition_uses_compatible_receipt_after_incompatible_family_member():
+    source = {"sourceUrl": "http://export.arxiv.org/abs/2410.10989v2"}
+    first = "https://arxiv.org/abs/2410.10989v1"
+    second = "https://arxiv.org/abs/2410.10989v2"
+    blocks = source_quotable_blocks(source, {}, fetched_text_by_locator={
+        first: _receipt(first, "First edition."),
+        second: _receipt(second, "Second edition."),
+    })
+    assert [(block["citationUrl"], block["text"]) for block in blocks] == [(second, "Second edition.")]
+
+
+def test_arxiv_receipt_uses_resolved_edition_instead_of_requested_alias():
+    requested = "https://arxiv.org/abs/2410.10989v1"
+    resolved = "https://arxiv.org/abs/2410.10989v2"
+    receipt = {**_receipt(requested, "Second edition was served."), "resolvedUrl": resolved}
+    assert source_quotable_blocks({"sourceUrl": requested}, {}, fetched_text_by_locator={requested: receipt}) == []
+    blocks = source_quotable_blocks({"sourceUrl": resolved}, {}, fetched_text_by_locator={requested: receipt})
+    assert [(block["citationUrl"], block["locator"]) for block in blocks] == [(resolved, requested)]
+
+
+def test_proceedings_doi_does_not_bind_resolved_arxiv_preprint():
+    doi_url = "https://doi.org/10.52202/079017-1999"
+    resolved = "https://arxiv.org/abs/2410.10989v2"
+    receipt = {**_receipt(doi_url, "Preprint is a different edition."), "resolvedUrl": resolved}
+    assert source_quotable_blocks(
+        {"sourceRef": doi_url, "sourceUrl": resolved}, {}, fetched_text_by_locator={doi_url: receipt},
+    ) == []
+
+
+def test_versionless_candidate_preserves_linked_original_locator_and_edition():
+    work_doi = "https://doi.org/10.48550/arXiv.2410.10989"
+    first = "https://arxiv.org/abs/2410.10989v1"
+    second = "https://arxiv.org/abs/2410.10989v2"
+    candidate = {"candidateId": "c1", "sourceRef": work_doi, "metadata": {"sourceRecordId": "r1"}}
+    record = {"recordId": "r1", "sourceUrl": second}
+    entries = extraction_quotable_sources([candidate], [record], fetched_text_by_locator={
+        first: _receipt(first, "First edition."),
+        second: _receipt(second, "Second edition."),
+    })
+    assert len(entries) == 1
+    assert entries[0]["locators"] == [work_doi, second]
+    assert [block["citationUrl"] for block in entries[0]["blocks"]] == [second]
+
+
 def test_arxiv_locator_host_case_and_www_normalization():
     """www. 前缀与 host 大小写差异归一后命中。"""
     text = "Host normalization body."
-    fetched = {"https://arxiv.org/abs/2502.01542": _receipt("https://arxiv.org/abs/2502.01542", text)}
+    locator = "https://arxiv.org/abs/2502.01542v2"
+    fetched = {locator: _receipt(locator, text)}
     record = {"recordId": "r1", "sourceUrl": "https://WWW.ARxiv.ORG/abs/2502.01542v2"}
     assert source_quotable_blocks(record, {}, fetched_text_by_locator=fetched)[0]["text"] == text
 
@@ -803,7 +861,8 @@ def test_arxiv_locator_host_case_and_www_normalization():
 def test_export_arxiv_mirror_receipt_matches_arxiv_record():
     """export.arxiv.org 镜像改道回执 ↔ arxiv.org record → 命中。"""
     text = "Mirror redirected fetch body."
-    fetched = {"https://export.arxiv.org/abs/2502.01542": _receipt("https://export.arxiv.org/abs/2502.01542", text)}
+    locator = "https://export.arxiv.org/abs/2502.01542v2"
+    fetched = {locator: _receipt(locator, text)}
     record = {"recordId": "r1", "sourceUrl": "https://arxiv.org/abs/2502.01542v2"}
     assert source_quotable_blocks(record, {}, fetched_text_by_locator=fetched)[0]["text"] == text
 
@@ -1040,6 +1099,12 @@ def test_verbatim_anchor_tolerates_lost_space_extraction_artifact():
         resolve_source_id=lambda item: item.get("candidateId", ""),
     )
     assert findings == []
+
+
+def test_original_quote_recovers_fetched_typography_and_contiguous_spacing():
+    fetched = "Prefix. The \u201cpaper\u201d spans\u00a0a\nline. Tail."
+    assert original_quote_from_text('The "paper" spans a line', fetched) == "The \u201cpaper\u201d spans\u00a0a\nline"
+    assert original_quote_from_text('The "Paper" spans a line', fetched) == ""
 
 
 def test_verbatim_anchor_matches_curly_quote_and_nbsp_variants():

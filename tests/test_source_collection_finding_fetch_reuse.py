@@ -190,6 +190,10 @@ def _entry(candidate_id="candidate-1", *, quote=_ORIGINAL):
 
 
 def test_handoff_original_text_reaches_compact_context_audit_and_evidence_card(setup):
+    from core.web.services.team_workflow.research_runtime.agent_task_artifact_builder import (
+        _source_extraction_payload,
+    )
+
     task, _, stored_candidates, _, _, event = setup
     source_receipts = finding_fetched_text_by_source(_TEAM, _RUN, task, stored_candidates)
     assert set(source_receipts) == {("candidate", "candidate-1"), ("record", "record-1")}
@@ -198,6 +202,7 @@ def test_handoff_original_text_reaches_compact_context_audit_and_evidence_card(s
     ))
     block = sources[0]["blocks"][0]
     assert block["text"] == _ORIGINAL
+    assert block["citationUrl"] == _URL
     assert block["eventId"] == event.event_id
     assert block["findingReceipt"] == {
         "nodeRunId": "node-finding", "taskId": "finding-task", "artifactReceiptId": "receipt-finding",
@@ -207,6 +212,10 @@ def test_handoff_original_text_reaches_compact_context_audit_and_evidence_card(s
     result = {"candidateExtractions": [_entry(quote=block["text"])]}
     audit = _source_collection_stage_writeback_quote_anchor_audit(_TEAM, _RUN, task, result)
     assert not audit["hard_errors"] and not audit["mismatches"]
+    artifact = _source_extraction_payload({**task, "versionedQuoteReceipts": True, "result": result})
+    card, = artifact["evidenceCards"]
+    assert card["citationLocator"]["url"] == card["source_url"] == _URL
+    assert card["quote"] == _ORIGINAL
     paraphrased = _source_collection_stage_writeback_quote_anchor_audit(
         _TEAM, _RUN, task, {"candidateExtractions": [_entry(quote=_UNRELATED)]},
     )
@@ -342,6 +351,8 @@ def test_continuation_cannot_follow_a_predecessor_from_another_node_attempt(setu
 
 
 def test_url_claim_materializes_from_reused_journal_not_the_agent_declaration(setup, tmp_path, monkeypatch):
+    import hashlib
+
     from core.research.evidence import ClaimEvidenceStore
     from core.web.services import team_service
     from core.web.services.team_workflow import claim_ledger
@@ -350,7 +361,7 @@ def test_url_claim_materializes_from_reused_journal_not_the_agent_declaration(se
     )
     from core.web.services.team_workflow.research_runtime.hypothesis_first_chain import _question_scope_envelope
 
-    task, _, _, _, _, _ = setup
+    task, _, _, _, _, event = setup
     monkeypatch.setattr(team_service, "assert_team_exists", lambda team_id: team_id)
     monkeypatch.setattr(claim_ledger, "PROJECT_ROOT", tmp_path)
     created = materialize_claim_evidence_from_task(
@@ -361,4 +372,15 @@ def test_url_claim_materializes_from_reused_journal_not_the_agent_declaration(se
     assert len(created) == 1
     assert created[0]["challengeEvidence"]["verification_status"] == "full_text_checked"
     assert created[0]["locator"] == {"kind": "url", "url": _URL}
-    assert [record["quote"] for record in ClaimEvidenceStore(tmp_path).list(_TEAM)] == [_ORIGINAL]
+    stored, = ClaimEvidenceStore(tmp_path).list(_TEAM)
+    assert stored["quote"] == _ORIGINAL
+    assert stored["sourceRevision"] == "sha256:" + hashlib.sha256(_ORIGINAL.encode()).hexdigest()
+    assert stored["citationReceipt"] == {
+        "sourceUrl": _URL,
+        "requestedUrl": _URL,
+        "eventId": event.event_id,
+        "sessionId": "finding-session",
+        "turnId": "finding-turn",
+        "contentHash": stored["sourceRevision"],
+    }
+    assert ClaimEvidenceStore.has_content_identity(stored)

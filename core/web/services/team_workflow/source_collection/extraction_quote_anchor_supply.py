@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import difflib
 import re
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 # Per-source quotable block cap (characters).  Large bodies/abstracts are
 # truncated at this bound with an explicit ``truncated`` marker; the context
@@ -55,12 +55,12 @@ def _clip_at_boundary(text: str, max_chars: int) -> tuple[str, bool]:
     return window[: cut + 1].rstrip(), True
 
 
-# arXiv /abs/ paper id with an optional trailing version suffix, e.g.
-# ``/abs/2502.01542v2`` (new style) or ``/abs/math.GT/0309136v2`` (old style).
-_ARXIV_VERSIONED_ABS_PATH = re.compile(r"^(?P<base>/abs/.+?)v\d+$")
-_ARXIV_ABS_ID = re.compile(
-    r"^/abs/(?P<id>\d{4}\.\d{4,5}|[a-z][a-z.-]*/\d{7})/?$", re.IGNORECASE
+_ARXIV_ID = re.compile(
+    r"(?P<id>\d{4}\.\d{4,5}|[a-z][a-z.-]*/\d{7})(?P<version>v\d+)?", re.IGNORECASE
 )
+_ARXIV_DOI_PREFIX = "10.48550/arxiv."
+_ARXIV_HOSTS = {"arxiv.org", "export.arxiv.org"}
+_ARXIV_PRESENTATIONS = {"abs", "pdf", "html", "format"}
 
 # DOI path segment for cross-host receipt bridging: a registrant prefix plus
 # suffix, e.g. ``/10.21656/1000-0887.390245`` on doi.org itself or
@@ -142,29 +142,61 @@ def _pmc_locator_key(host: str, path: str) -> str:
     return f"pmc:{match.group(0).upper()}"
 
 
-def _normalized_locator_keys(url: Any) -> list[str]:
-    """Candidate match keys for one source locator: raw form first, then one
-    normalized form.
+def _arxiv_locator(value: Any) -> tuple[str, str, str] | None:
+    """Return arXiv work ID, explicit edition, and presentation, if recognized."""
+    raw = _clean(value)
+    if not raw:
+        return None
+    try:
+        parsed = urlsplit(raw)
+        port = parsed.port
+    except ValueError:
+        return None
+    host = (parsed.hostname or "").lower().removeprefix("www.")
+    if not host:
+        presentation = "doi"
+        paper = raw.lower().removeprefix("doi:")
+    elif (
+        parsed.scheme not in {"http", "https"}
+        or port not in {None, 443 if parsed.scheme == "https" else 80}
+        or parsed.username is not None
+    ):
+        return None
+    elif host in {"doi.org", "dx.doi.org"}:
+        presentation = "doi"
+        paper = unquote(parsed.path).strip("/").lower()
+    elif host in _ARXIV_HOSTS:
+        presentation, _, paper = unquote(parsed.path).strip("/").partition("/")
+        if presentation not in _ARXIV_PRESENTATIONS:
+            return None
+        if presentation == "pdf":
+            paper = paper.removesuffix(".pdf")
+    else:
+        return None
+    if presentation == "doi":
+        if not paper.startswith(_ARXIV_DOI_PREFIX):
+            return None
+        paper = paper.removeprefix(_ARXIV_DOI_PREFIX)
+    match = _ARXIV_ID.fullmatch(paper)
+    if match is None:
+        return None
+    return match["id"].lower(), (match["version"] or "").lower(), presentation
 
-    Receipt locators are the exact ``web_fetch_tool`` arguments, while record
-    locators may carry a cosmetic variant of the same page.  Normalization is
-    conservative: lowercase host, drop a ``www.`` prefix, fold the
-    ``export.arxiv.org`` mirror onto ``arxiv.org``, and — only for arXiv
-    ``/abs/`` pages — strip the optional trailing ``vN`` version suffix from
-    the paper id (``/abs/2502.01542v2`` and ``/abs/2502.01542`` serve the same
-    page).  Paths on every other site are never rewritten; URLs whose path
-    carries a DOI segment (anywhere, bounded by ``/``) additionally emit a
-    scheme-free ``doi:<doi>`` bridge key so a DOI locator matches its
-    publisher-mirror fetch receipt, registered hosts whose article URL embeds
-    only the DOI suffix (nature.com) emit their implicit-prefix ``doi:`` key,
-    and URLs on the two PMC mirrors additionally emit ``pmc:<PMC id>`` so a
-    pmc.ncbi.nlm.nih.gov candidate matches an ebi.ac.uk receipt (and vice
-    versa) for the same article.
-    """
+
+def _normalized_locator_keys(url: Any, *, include_arxiv_work_alias: bool = False) -> list[str]:
+    """Ordered lookup keys, from exact URL through supported locator aliases."""
     raw = _clean(url)
     if not raw:
         return []
     keys = [raw]
+    if arxiv := _arxiv_locator(raw):
+        paper_id, edition, presentation = arxiv
+        if edition:
+            keys.append(f"arxiv:{paper_id}{edition}")
+        if (not edition or include_arxiv_work_alias) and presentation in {"abs", "doi"}:
+            # Work-level lookup retains the legacy versionless fallback.
+            # Receipt matching still checks the edition before using it.
+            keys.append(f"arxiv:{paper_id}")
     try:
         parsed = urlsplit(raw)
         port = parsed.port
@@ -178,22 +210,10 @@ def _normalized_locator_keys(url: Any) -> list[str]:
     if host == "export.arxiv.org":
         host = "arxiv.org"
     path = parsed.path
-    arxiv_doi = ""
-    if host == "arxiv.org":
-        versioned = _ARXIV_VERSIONED_ABS_PATH.match(path)
-        if versioned:
-            path = versioned.group("base")
-        paper = _ARXIV_ABS_ID.fullmatch(path)
-        if paper and port is None and parsed.scheme in {"http", "https"}:
-            # The arXiv DOI names this paper even when search reported an
-            # HTTP abstract locator and the tool fetched the HTTPS form.
-            arxiv_doi = f"doi:10.48550/arxiv.{paper['id'].lower()}"
     netloc = host if port is None else f"{host}:{port}"
     normalized = urlunsplit((parsed.scheme, netloc, path, parsed.query, parsed.fragment))
-    if normalized != raw and normalized not in keys:
-        keys.append(normalized)
-    if arxiv_doi:
-        keys.append(arxiv_doi)
+    if normalized != raw:
+        keys.insert(1, normalized)
     doi_key = _doi_locator_key(path)
     if doi_key and doi_key not in keys:
         keys.append(doi_key)
@@ -204,6 +224,88 @@ def _normalized_locator_keys(url: Any) -> list[str]:
     if pmc_key and pmc_key not in keys:
         keys.append(pmc_key)
     return keys
+
+
+def _source_locators(source: Mapping[str, Any]) -> list[str]:
+    from .doi_enrichment import source_metadata_doi
+
+    locators = [_clean(source.get(key)) for key in ("sourceUrl", "sourceRef", "rawLocation")]
+    if doi := source_metadata_doi(source):
+        locators.append(f"https://doi.org/{doi}")
+    return list(dict.fromkeys(locator for locator in locators if locator))
+
+
+def _publisher_doi_locator(locator: str) -> bool:
+    bare_candidate = locator.removeprefix("doi:")
+    return bool(
+        _DOI_PATH_SEGMENT.match(f"/{bare_candidate}", 1)
+        or any(key.startswith("doi:") for key in _normalized_locator_keys(locator))
+    )
+
+
+def receipt_citation_url(receipt: Mapping[str, Any]) -> str:
+    """The URL reported by the successful fetch, or its original request."""
+    return _clean(receipt.get("resolvedUrl") or receipt.get("aliasOf") or receipt.get("locator"))
+
+
+def matching_source_fetch_receipts(
+    source: Mapping[str, Any],
+    fetched_text_by_locator: Mapping[str, Mapping[str, str]],
+    *,
+    linked_record: Mapping[str, Any] | None = None,
+) -> Iterator[Mapping[str, str]]:
+    """Look up journal receipts without substituting a known different edition."""
+    if not fetched_text_by_locator:
+        return
+    locators = _source_locators(source)
+    if linked_record:
+        locators.extend(_source_locators(linked_record))
+    # sourceRef is the discovery identity; sourceUrl may be a presentation URL.
+    authority = next((
+        locator for locator in [_clean(source.get("sourceRef")), *locators]
+        if _arxiv_locator(locator) or _publisher_doi_locator(locator)
+    ), "")
+    expected = _arxiv_locator(authority)
+    expected_paper = ""
+    expected_edition = ""
+    if expected:
+        expected_paper, expected_edition, _ = expected
+        if not expected_edition:
+            editions = {
+                arxiv[1] for locator in locators
+                if (arxiv := _arxiv_locator(locator)) and arxiv[0] == expected_paper and arxiv[1]
+            }
+            if len(editions) > 1:
+                return
+            expected_edition = next(iter(editions), "")
+
+    by_key: dict[str, list[Mapping[str, str]]] = {}
+    for locator, receipt in fetched_text_by_locator.items():
+        actual = _arxiv_locator(receipt_citation_url(receipt) or locator)
+        if expected_paper:
+            if not actual or actual[0] != expected_paper:
+                continue
+            # An explicit source edition needs that edition on the returned
+            # URL, even when the original request named the desired version.
+            if expected_edition and actual[1] != expected_edition:
+                continue
+        elif authority and actual:
+            # A proceedings/journal DOI cannot inherit text from its preprint.
+            continue
+        receipt_keys = dict.fromkeys(
+            key for value in (locator, receipt.get("locator"), receipt_citation_url(receipt))
+            for key in _normalized_locator_keys(value, include_arxiv_work_alias=True)
+        )
+        for key in receipt_keys:
+            by_key.setdefault(key, []).append(receipt)
+
+    seen: set[int] = set()
+    for locator in locators:
+        for key in _normalized_locator_keys(locator, include_arxiv_work_alias=True):
+            for receipt in by_key.get(key, ()):
+                if id(receipt) not in seen:
+                    seen.add(id(receipt))
+                    yield receipt
 
 
 def linked_source_record_id(source: Mapping[str, Any]) -> str:
@@ -227,72 +329,35 @@ def source_quotable_blocks(
     block_max_chars: int = QUOTE_BLOCK_MAX_CHARS,
 ) -> list[dict[str, Any]]:
     """Bind the source locator to task text, then to its scoped finding text."""
-    from .doi_enrichment import source_metadata_doi
-
-    records = [source]
-    linked_id = linked_source_record_id(source)
-    if linked_id in record_by_id:
-        records.append(record_by_id[linked_id])
-    fetched = fetched_text_by_locator or {}
-    # Receipt keys are exact web_fetch_tool arguments; record locators may be
-    # a variant form of the same page (arXiv vN suffix, www./case, export
-    # mirror).  Index each receipt under every candidate key, exact form
-    # first; block fields keep pointing at the original receipt.
-    fetched_by_key: dict[str, Mapping[str, str]] = {}
-    for locator, receipt in fetched.items():
-        keys = _normalized_locator_keys(locator)
-        if isinstance(receipt, Mapping):
-            keys.extend(_normalized_locator_keys(receipt.get("locator")))
-            # Bare-URL redirect variant: the receipt header carries the final
-            # (resolved) URL of the fetch, so it joins the index under its own
-            # normalized keys — a record whose locator is the post-redirect
-            # form then binds the receipt fetched through the original URL.
-            keys.extend(_normalized_locator_keys(receipt.get("resolvedUrl")))
-        for key in keys:
-            fetched_by_key.setdefault(key, receipt)
+    linked_record = record_by_id.get(linked_source_record_id(source))
     blocks: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for record in records:
-        locator_keys = [_clean(record.get(key)) for key in ("sourceUrl", "sourceRef", "rawLocation")]
-        # SCI-021: a candidate enriched with ``metadata.doi`` must bind a
-        # receipt fetched through its ``https://doi.org/<doi>`` form — the
-        # publisher 403 hint reroutes exactly there, and the EuropePMC mirror
-        # fallback answers inside that same tool call.  The DOI locator emits
-        # the ``doi:<doi>`` bridge key on the candidate side, matching the
-        # doi.org receipt (or any publisher-mirror URL ending in the DOI).
-        record_doi = source_metadata_doi(record)
-        if record_doi:
-            doi_locator = f"https://doi.org/{record_doi}"
-            if doi_locator not in locator_keys:
-                locator_keys.append(doi_locator)
-        for key in locator_keys:
-            receipt = None
-            for candidate_key in _normalized_locator_keys(key):
-                receipt = fetched_by_key.get(candidate_key)
-                if receipt:
-                    break
-            if not receipt:
-                continue
-            text = _clean(receipt.get("text"))
-            if not text or text in seen:
-                continue
-            seen.add(text)
-            clipped, truncated = _clip_at_boundary(text, block_max_chars)
-            if clipped:
-                block = {
-                    **{k: receipt[k] for k in ("locator", "resolvedUrl", "eventId", "sessionId", "turnId") if k in receipt},
-                    "origin": "fetched_text", "text": clipped,
-                    "chars": len(clipped), "truncated": truncated,
+    for receipt in matching_source_fetch_receipts(
+        source, fetched_text_by_locator or {}, linked_record=linked_record,
+    ):
+        text = _clean(receipt.get("text"))
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        clipped, truncated = _clip_at_boundary(text, block_max_chars)
+        if clipped:
+            block = {
+                **{k: receipt[k] for k in ("locator", "resolvedUrl", "eventId", "sessionId", "turnId") if k in receipt},
+                "origin": "fetched_text", "text": clipped,
+                "chars": len(clipped), "truncated": truncated,
+            }
+            citation_url = receipt_citation_url(receipt)
+            if citation_url.startswith("https://"):
+                block["citationUrl"] = citation_url
+            if receipt.get("findingNodeRunId"):
+                block["findingReceipt"] = {
+                    "nodeRunId": receipt["findingNodeRunId"],
+                    "taskId": receipt["findingTaskId"],
+                    "artifactReceiptId": receipt["findingArtifactReceiptId"],
+                    "sessionId": receipt["sessionId"],
+                    "turnId": receipt["turnId"],
                 }
-                if receipt.get("findingNodeRunId"):
-                    block["findingReceipt"] = {
-                        "nodeRunId": receipt["findingNodeRunId"],
-                        "taskId": receipt["findingTaskId"],
-                        "artifactReceiptId": receipt["findingArtifactReceiptId"],
-                        "sessionId": receipt["sessionId"],
-                        "turnId": receipt["turnId"],
-                    }
-                blocks.append(block)
+            blocks.append(block)
     if not blocks and finding_text_by_locator:
         return source_quotable_blocks(
             source, record_by_id, fetched_text_by_locator=finding_text_by_locator,
@@ -396,6 +461,7 @@ def extraction_quotable_sources(
             blocks=blocks,
             fetch_failure=failed_fetch_by_candidate_id.get(candidate_id),
             budget_left=max(0, total_char_budget - used),
+            linked_record=record_by_id.get(linked_record_id),
         )
         used += sum(int(block.get("chars") or 0) for block in source.get("blocks") or [])
         sources.append(source)
@@ -431,6 +497,7 @@ def _quotable_source_entry(
     blocks: list[dict[str, Any]],
     fetch_failure: Mapping[str, Any] | None,
     budget_left: int,
+    linked_record: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     from .doi_enrichment import source_metadata_doi
 
@@ -454,16 +521,22 @@ def _quotable_source_entry(
     # known DOI additionally surfaces as its fetchable ``https://doi.org/``
     # form, so the agent can follow the 403 hint onto the DOI link (whose
     # EuropePMC mirror fallback answers inside the same tool call).
-    locators: list[str] = []
-    for key in ("sourceUrl", "sourceRef", "rawLocation"):
-        value = _clean(source.get(key))
-        if value.startswith(("http://", "https://")) and value not in locators:
-            locators.append(value[:1000])
+    source_locators = _source_locators(source)
     doi = source_metadata_doi(source)
-    if doi:
-        doi_link = f"https://doi.org/{doi}"[:1000]
-        if doi_link not in locators:
-            locators.append(doi_link)
+    if linked_record:
+        versions = [arxiv for locator in source_locators if (arxiv := _arxiv_locator(locator))]
+        versionless = {paper for paper, edition, _ in versions if not edition} - {
+            paper for paper, edition, _ in versions if edition
+        }
+        # A discovery alias can lose the suffix even though the linked source
+        # record knows an explicit edition. Keep that original fetch choice.
+        source_locators.extend(
+            locator for locator in _source_locators(linked_record)
+            if (arxiv := _arxiv_locator(locator)) and arxiv[0] in versionless and arxiv[1]
+        )
+    locators = list(dict.fromkeys(
+        locator[:1000] for locator in source_locators if locator.startswith(("http://", "https://"))
+    ))
     entry: dict[str, Any] = {
         "sourceId": source_id,
         "sourceKind": source_kind,
@@ -579,6 +652,25 @@ def _normalize_verbatim_text(text: str) -> str:
         " ", text.translate(_VERBATIM_TYPOGRAPHIC_ASCII)
     ).strip()
     return collapsed.replace(" ", "")
+
+
+def original_quote_from_text(quote: Any, text: Any) -> str:
+    """Recover the actual contiguous quote with its source typography and spacing."""
+    quoted = _clean(quote)
+    original = str(text or "")
+    quote_key = _normalize_verbatim_text(quoted)
+    if not quote_key:
+        return ""
+    if quoted in original:
+        return quoted
+    start = _normalize_verbatim_text(original).find(quote_key)
+    if start < 0:
+        return ""
+    indices = [
+        index for index, char in enumerate(original)
+        if not char.isspace() and char.translate(_VERBATIM_TYPOGRAPHIC_ASCII).strip()
+    ]
+    return original[indices[start]:indices[start + len(quote_key) - 1] + 1]
 
 
 def has_verbatim_anchor(entry: Mapping[str, Any], blocks: list[Mapping[str, Any]]) -> bool:

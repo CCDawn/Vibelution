@@ -185,6 +185,13 @@ def _source_extraction_payload(task: dict[str, Any]) -> dict[str, Any]:
         backfill_persisted_extraction_task_retrieved_at(task_view).get("result")
         or {}
     )
+    citation_blocks = None
+    if task_view.get("versionedQuoteReceipts"):
+        from ..source_collection.stage_writeback import _source_collection_stage_writeback_quote_anchor_blocks
+
+        citation_blocks, _ = _source_collection_stage_writeback_quote_anchor_blocks(
+            str(task_view["teamId"]), str(task_view["runId"]), task_view,
+        )
     return {
         **result,
         # The stage task's Session Journal fetch receipts are the authority for
@@ -194,6 +201,7 @@ def _source_extraction_payload(task: dict[str, Any]) -> dict[str, Any]:
             result,
             fetched_text=task_fetched_text(task_view),
             finding_text_by_source=finding_fetched_text_for_task(task_view),
+            citation_blocks=citation_blocks,
         ),
     }
 

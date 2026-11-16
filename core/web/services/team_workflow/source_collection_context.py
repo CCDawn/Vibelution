@@ -429,6 +429,7 @@ def compact_source_collection_quotable_sources(sources: Any) -> list[dict[str, A
                     "origin": trim_text(block.get("origin"), max_length=40),
                     "eventId": trim_text(block.get("eventId"), max_length=200),
                     "locator": trim_text(block.get("locator"), max_length=1000),
+                    "citationUrl": trim_text(block.get("citationUrl"), max_length=1000),
                     "text": text,
                     "chars": len(text),
                     "truncated": bool(block.get("truncated")),

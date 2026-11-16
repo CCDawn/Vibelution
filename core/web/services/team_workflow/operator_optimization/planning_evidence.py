@@ -109,7 +109,8 @@ def _excerpt_cards(evidence: dict, graph: dict, approved_sources: set[str]) -> l
         locator = card.get("locator") or {}
         quote = card.get("quote") or ""
         source = card.get("collectionEnvelope") or {}
-        source_url = source.get("sourceUrl") or locator.get("url") or ""
+        citation = card.get("citationReceipt") or {}
+        source_url = citation.get("sourceUrl") or locator.get("url") or source.get("sourceUrl") or ""
         if (card.get("candidateId") not in approved_sources
                 or card.get("reviewStatus") in {"rejected", "stale"}
                 or (locator.get("kind") == "evidence_ref" and not source_url)
@@ -134,6 +135,7 @@ def _excerpt_cards(evidence: dict, graph: dict, approved_sources: set[str]) -> l
                 "sourceRevision": card["sourceRevision"],
                 "sourceUrl": source_url,
                 "locator": locator,
+                **({"citationReceipt": citation} if citation else {}),
                 "quote": quote[:_QUOTE_LIMIT],
                 "quoteHash": card["quoteHash"],
                 "quoteTruncated": len(quote) > _QUOTE_LIMIT,

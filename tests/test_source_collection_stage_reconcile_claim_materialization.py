@@ -77,6 +77,52 @@ def _forbid_materialize(**_kwargs):
     raise AssertionError("materialize_completed_extraction_task must not be called")
 
 
+@pytest.mark.parametrize("conflict", ["source_url", "sourceRef", "locator", "doi", "arxiv_version", None])
+def test_formal_evidence_binds_quote_to_the_actual_fetched_version(conflict):
+    from core.web.services.team_workflow.research_runtime.source_extraction_evidence_cards import (
+        SourceExtractionEvidenceContractError,
+        build_source_extraction_evidence_cards,
+    )
+
+    actual = "https://arxiv.org/abs/2410.10989v2"
+    published = "https://doi.org/10.52202/068431-1189"
+    original = "Memory access is “costly” in this regime."
+    claim = {
+        "fact": "The source reports a memory-traffic limitation.",
+        "sourceRef": actual,
+        "quote": 'Memory access is "costly" in this regime.',
+        "citationLocator": {"kind": "section", "section": "Abstract", "url": actual},
+    }
+    entry = {
+        "candidateId": "candidate-1", "title": "Preprint", "source_type": "preprint",
+        "source_url": actual, "retrieved_at": "2026-11-16T00:00:00Z",
+        "relation": "supports", "verification_status": "full_text_checked", "claims": [claim],
+    }
+    if conflict == "source_url":
+        entry["source_url"] = published
+    elif conflict == "sourceRef":
+        claim["sourceRef"] = published
+    elif conflict == "locator":
+        claim["citationLocator"] = {"kind": "page", "page": 4, "url": published}
+    elif conflict == "doi":
+        claim["doi"] = "10.52202/068431-1189"
+    elif conflict == "arxiv_version":
+        claim["sourceRef"] = "https://arxiv.org/abs/2410.10989v1"
+    payload = {"candidateExtractions": [entry]}
+    blocks = {"candidate-1": [{
+        "locator": actual, "resolvedUrl": actual, "eventId": "event-1",
+        "sessionId": "session-1", "turnId": "turn-1", "text": original,
+    }]}
+    if conflict:
+        with pytest.raises(SourceExtractionEvidenceContractError, match="source version"):
+            build_source_extraction_evidence_cards(payload, citation_blocks=blocks)
+        return
+
+    card, = build_source_extraction_evidence_cards(payload, citation_blocks=blocks)
+    assert card["quote"] == original
+    assert card["source_url"] == card["citationLocator"]["url"] == actual
+
+
 def _seed_completed_extraction_task(tmp_path, monkeypatch):
     """Open one extraction stage task through the session path and complete it."""
     _use_tmp_project_root(tmp_path, monkeypatch)
