@@ -319,6 +319,8 @@ class VersionLedger:
         entries = self.read()
         if any(entry.head_sha and entry.head_sha == head_sha for entry in entries):
             return None
+        if any(entry.changelog_digest and entry.changelog_digest == unreleased.digest for entry in entries):
+            return None
         if entries:
             base = parse_version(entries[-1].version) or Cadence()
             base = Cadence(base.major, base.minor, base.patch, entries[-1].build)
