@@ -11,7 +11,12 @@ from types import SimpleNamespace
 import pytest
 
 from core.chat.conversation_branches import analyze_conversation_branches
-from core.chat.conversation_ledger import append_conversation_event, load_conversation_events
+from core.chat.conversation_ledger import (
+    append_conversation_event,
+    latest_ledger_sequence,
+    load_conversation_events,
+    rewrite_conversation_events,
+)
 from core.web.services import session_service
 from core.web.services.session import submit
 from tests.helpers.web_chat_state import _reset_seeded_session_runtime
@@ -81,6 +86,29 @@ def test_rejected_continuation_never_opens_optional_control_store(stopped_sessio
         _continue(sid, {**expected, "ledgerSeq": 1})
     assert stale.value.code == "session_snapshot_stale"
     assert not scheduled
+
+
+def test_continuation_survives_a_watermark_above_the_last_surviving_event(stopped_session, tmp_path):
+    """Rewrites keep cursors monotonic: the detail frame hands clients the
+    watermark, so a truncated journal must not read as a stale snapshot."""
+    sid, _, scheduled = stopped_session
+    # A later turn bumps the published cursor, then a rewrite drops that turn
+    # again while the watermark stays where the client already saw it.
+    append_conversation_event(tmp_path, sid, "later-turn", "turn_started", status="running")
+    append_conversation_event(tmp_path, sid, "later-turn", "user_message",
+                              payload={"content": "later request"})
+    append_conversation_event(tmp_path, sid, "later-turn", "turn_interrupted", status="stopped")
+    events = load_conversation_events(tmp_path, sid)
+    rewrite_conversation_events(tmp_path, sid, events[:-3])
+    surviving = load_conversation_events(tmp_path, sid)
+    state = session_service.load_session_chat_state(tmp_path, sid)
+    expected = {"turnId": "stopped-turn",
+                "headId": analyze_conversation_branches(surviving).active_leaf_id,
+                "ledgerSeq": latest_ledger_sequence(tmp_path, sid),
+                "agentId": state["agent_id"]}
+    assert expected["ledgerSeq"] > surviving[-1].sequence
+    _continue(sid, expected)
+    assert len(scheduled) == 1
 
 
 def _snapshot(tmp_path, sid, turn_id):

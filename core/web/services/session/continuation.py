@@ -52,7 +52,14 @@ def validate_continuation(s, session_id: str, expected: dict[str, Any]) -> None:
     s._ensure_session_mutable(session_id, conversation=conversation)
     _ensure_ordinary_owner(s, conversation, expected)
     events = journal_bridge.load_session_conversation_events_snapshot(session_id, project_root=s.PROJECT_ROOT)
-    if not events or events[-1].sequence != expected["ledgerSeq"]:
+    # ``ledgerSeq`` is the monotonic watermark the detail frame handed the
+    # client; a rewrite (edit resubmit, transcript cleanup) can truncate events
+    # below the highest issued cursor while the watermark stays. Comparing the
+    # watermark with the last surviving event rejected every continuation after
+    # such a rewrite even when the session itself never advanced. A real append
+    # still moves the watermark, so the compare-and-send guard keeps its power.
+    ledger_seq = journal_bridge.session_ledger_sequence(session_id, project_root=s.PROJECT_ROOT)
+    if not events or ledger_seq != expected["ledgerSeq"]:
         conflict()
     if (s._is_session_running(session_id) or latest_open_turn_id(events)
             or session_queued_turn_rows(conversation)
