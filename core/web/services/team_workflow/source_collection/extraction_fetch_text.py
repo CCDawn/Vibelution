@@ -419,8 +419,8 @@ def finding_fetched_text_for_task(task: dict[str, Any]) -> dict[tuple[str, str],
 def reuse_bound_finding_text(runtime: dict[str, Any], url: str, max_chars: int) -> str | None:
     """Serve a scoped upstream body on a redundant fetch request, without minting a fetch receipt."""
     scope = _object(_object(runtime.get("runtimeMetadata")).get("sourceCollectionExtraction"))
-    if scope.get("stageId") != "extraction" or not all(
-        scope.get(key) for key in ("teamId", "runId", "taskId")
+    if scope.get("stageId") not in {None, "", "extraction"} or not all(
+        scope.get(key) for key in ("teamId", "taskId")
     ) or not all(runtime.get(key) for key in ("sessionId", "turnId", "agentId")):
         return None
 
@@ -428,7 +428,9 @@ def reuse_bound_finding_text(runtime: dict[str, Any], url: str, max_chars: int) 
     from .stage_session import _read_source_collection_stage_session_task_record
 
     task = _read_source_collection_stage_session_task_record(scope["teamId"], scope["taskId"])
-    if not task or any(task.get(key) != scope.get(key) for key in ("teamId", "runId", "taskId", "stageId")):
+    if (not task or task.get("stageId") != "extraction"
+            or any(task.get(key) != scope[key] for key in ("teamId", "taskId"))
+            or (scope.get("runId") and task.get("runId") != scope["runId"])):
         return None
     if any(task.get(key) != runtime[key] for key in ("sessionId", "agentId")):
         return None

@@ -422,6 +422,21 @@ def test_bound_extraction_reuses_finding_text_before_network_fetch(setup, tmp_pa
     )
     assert not task_fetched_text(active_task)
 
+    # Native continuation messages retain the authoritative task locator,
+    # while their bound scope omits the stage and collection run.
+    runtime["turnId"] = "continued-extract-turn"
+    runtime["runtimeMetadata"]["sourceCollectionExtraction"] = {"teamId": _TEAM, "taskId": task["taskId"]}
+    _append_message(tmp_path, task["sessionId"], runtime["turnId"], "Continue", {
+        "kind": _FINDING_TASK_KIND,
+        "teamId": _TEAM,
+        "taskId": task["taskId"],
+        "sourceCollectionStageTaskId": task["taskId"],
+        "continuationOfTurnId": "extract-turn",
+        "sourceSurface": "team_workflow_agent_turn_continuation",
+    })
+    assert fetch.invoke({"url": _URL}) == reused
+    assert requests == []
+
     for locator in (_URL + "v2", _URL.replace("/abs/", "/pdf/"), "https://arxiv.org/abs/2401.12345"):
         assert fetch.invoke({"url": locator}) == "network result"
     runtime["agentId"] = "unrelated-agent"

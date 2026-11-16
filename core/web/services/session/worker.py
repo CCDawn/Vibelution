@@ -1875,7 +1875,10 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
         else {"llmModelId": llm_model_id_for_turn}
     )
     source_collection_stage_task_auto_continue = s._source_collection_stage_task_context_metadata(context)
-    if source_collection_stage_task_auto_continue.get("stageId") == "extraction":
+    # Native stage continuations carry the original task locator without the
+    # stage name. The fetch reader validates that locator against the task.
+    if (source_collection_stage_task_auto_continue
+            and source_collection_stage_task_auto_continue.get("stageId") in {"", "extraction"}):
         runtime_metadata["sourceCollectionExtraction"] = source_collection_stage_task_auto_continue
     source_collection_stage_task_required_tools = s._source_collection_stage_task_required_tool_names(context)
     source_collection_stage_task_allowed_tools = s._source_collection_stage_task_allowed_tool_names(context)
