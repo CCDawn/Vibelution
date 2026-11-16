@@ -36,6 +36,7 @@ CONTROL_TOKEN_HEADER = "X-Vibelution-Control-Token"
 TASK_CAPABILITY_HEADER = "X-Vibelution-External-Agent-Task-Capability"
 ADAPTER_CONNECTION_HEADER = "X-Vibelution-External-Agent-Connection"
 _MANAGEMENT_PREFIX = "/api/v1/launcher-assistant-management"
+_INITIAL_SESSION_CREATE_PATH = _MANAGEMENT_PREFIX + "/authorization/session-create-initial"
 # Approved management writes are durable (the server stores the receipt under
 # the request_id before acknowledging), so their POST gets a wider read window
 # than the 5s default. It must stay strictly below the assistant dispatch
@@ -284,7 +285,7 @@ class ManagedAgentBackendClient:
             return result
 
     async def management_action(self, *, action: str, request_id: str, parameters: dict[str, Any],
-                                require_existing_subject: bool = False) -> dict[str, Any]:
+                                require_existing_subject: bool = False, _initial_session_create: bool = False) -> dict[str, Any]:
         if action not in _MANAGEMENT_ACTIONS or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}", request_id):
             raise BackendClientError("Unsupported management request.", code="INVALID_MANAGEMENT_REQUEST")
         if action in {"session_pin", "session_create", "agent_archive", "agent_purge", "agent_purge_batch", "authorization_upgrade", "authorization_reduce", "authorization_revoke", *_PLATFORM_ACTIONS}:
@@ -297,8 +298,13 @@ class ManagedAgentBackendClient:
                 raise BackendClientError("Invalid management parameters.", code="INVALID_MANAGEMENT_REQUEST") from None
         grant = (await self._original_management_grant(require_original=True) if action in {"authorization_upgrade", "authorization_reduce", "authorization_revoke"}
             else await self._management_grant(require_existing=require_existing_subject))
+        path = f"{_MANAGEMENT_PREFIX}/actions/{action}"
+        if _initial_session_create:
+            if action != "authorization_upgrade" or parameters["add_scopes"] != ["sessions:create"]:
+                raise BackendClientError("Invalid initial Session authorization.", code="INVALID_MANAGEMENT_REQUEST")
+            path = _INITIAL_SESSION_CREATE_PATH
         try:
-            result = await self._request_json("POST", f"{_MANAGEMENT_PREFIX}/actions/{action}",
+            result = await self._request_json("POST", path,
                 management_auth=(grant["subjectId"], grant["capability"]), json_payload={
                     "request_id": request_id, "expected_binding": grant["binding"], "parameters": parameters},
                 timeout_seconds=_MANAGEMENT_WRITE_TIMEOUT_SECONDS)
@@ -1488,7 +1494,7 @@ class ManagedAgentBackendClient:
             headers[TASK_CAPABILITY_HEADER] = task_capability
         if management_auth is not None:
             headers["X-Vibelution-Management-Subject"], headers["X-Vibelution-Management-Capability"] = management_auth
-        if method == "POST" and path == f"{_MANAGEMENT_PREFIX}/actions/session_create":
+        if method == "POST" and path in {f"{_MANAGEMENT_PREFIX}/actions/session_create", _INITIAL_SESSION_CREATE_PATH}:
             from core.web.services.external_management.contracts import LAUNCHER_AUTHORITY_HEADER
             authority = self._session_create_launcher_authority()
             if authority:

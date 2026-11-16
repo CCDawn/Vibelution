@@ -1,7 +1,7 @@
 """Explicit additive grant CAS using the existing management intent/proof stores.
 
-The caller must enforce operator control and native approval. Possessing an old
-read scope is never approval to upgrade. An admitted request without a subject
+The caller must enforce operator control and the native consent policy. Possessing an old
+read scope is never consent to upgrade. An admitted request without a subject
 proof stays unknown forever; retrying that request cannot repeat the mutation.
 """
 from __future__ import annotations
@@ -158,7 +158,8 @@ class UpgradeOwner:
                 return self._unknown(record["requestId"], reused=reused)
         return {**receipt, "reused": reused}
 
-    def invoke(self, subject, capability, request_id, expected_binding=None, expected_scopes=None, add_scopes=None, **extra):
+    def invoke(self, subject, capability, request_id, expected_binding=None, expected_scopes=None, add_scopes=None,
+               *, initial_session_create=False, launcher_authority="", **extra):
         self._actor(subject, capability)
         self._request_id(request_id)
         try:
@@ -168,6 +169,8 @@ class UpgradeOwner:
             previous, additions = _scopes(expected_scopes), _scopes(add_scopes)
             if set(previous) & set(additions):
                 raise ValueError("Upgrade must add only missing scopes")
+            if initial_session_create and additions != ["sessions:create"]:
+                raise ValueError("Initial Session authorization cannot add other scopes")
         except (ValidationError, ValueError, TypeError):
             _error("INVALID_INPUT", 422)
         try:
@@ -175,6 +178,14 @@ class UpgradeOwner:
             key = digest([subject, _ACTION, request_id])
             with self.store.lock("requests", key), self.store.lock("subjects", subject):
                 grant = self._grant(subject, capability, expected_binding)
+                if initial_session_create:
+                    from core.infrastructure.launcher_assistant_authority import verify_launcher_authority
+
+                    if not verify_launcher_authority(launcher_authority):
+                        _error("LAUNCHER_AUTHORITY_REQUIRED", 403)
+                    if any("sessions:create" in proof["receipt"]["authorization"]["removedScopes"]
+                           for proof in grant.get("scopeReductions", {}).values()):
+                        _error("SCOPE_DENIED", 403)
                 fingerprint = _fingerprint(subject, expected_binding, grant["authority"], previous, additions)
                 path = self.store.path("requests", key)
                 record = self._read(path)

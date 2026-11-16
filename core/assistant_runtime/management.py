@@ -10,6 +10,7 @@ from pathlib import Path
 
 import anyio
 
+from core.external_agent.backend_client import BackendClientError
 from core.infrastructure.atomic_io import atomic_write_json
 
 from .dispatch import DispatchError
@@ -298,7 +299,8 @@ class ManagementAdapter:
                     # team is safe to continue. Replay the identical envelope
                     # through that same durable gate, never create a new key.
                 except DispatchError as exc:
-                    if exc.code != "REQUEST_UNAVAILABLE":
+                    creation_denied = action == "session_create" and record.get("admissionDenied") == "SCOPE_DENIED"
+                    if exc.code != "REQUEST_UNAVAILABLE" and not (creation_denied and exc.code == "SCOPE_DENIED"):
                         raise
                     if never_replay and record.get("admissionDenied") != "SCOPE_DENIED":
                         raise DispatchError("Original request receipt is unavailable; outcome remains unconfirmed.",
@@ -310,17 +312,40 @@ class ManagementAdapter:
                           "reference": {"projectId": project_id, "action": action, "requestId": request_id}}
             # A missing target receipt cannot prove that an earlier control did
             # not run. Only this attempt's authenticated, pre-admission scope
-            # denial permits the same key after its explicit scope upgrade.
+            # denial permits the same key after its scope upgrade.
             async def execute(client):
                 if retrying:
                     self._check_epoch(client, record)
                 else:
                     record["authorizationEpoch"] = getattr(client, "management_epoch", "")
-                record.pop("admissionDenied", None)
-                if never_replay or not retrying:
+
+                async def submit(*, require_existing):
+                    record.pop("admissionDenied", None)
+                    if never_replay or not retrying:
+                        atomic_write_json(path, record)
+                    return await client.management_action(action=action, request_id=request_id,
+                        parameters=parameters, require_existing_subject=require_existing)
+
+                try:
+                    return await submit(require_existing=retrying)
+                except BackendClientError as denied:
+                    initialize = getattr(client, "initialize_session_create_scope", None)
+                    if action != "session_create" or denied.code != "SCOPE_DENIED" or initialize is None:
+                        raise
+                    # A cancellation or failure during scope initialization still
+                    # leaves a definitively denied Session request safe to retry.
+                    record["admissionDenied"] = "SCOPE_DENIED"
                     atomic_write_json(path, record)
-                return await client.management_action(action=action, request_id=request_id,
-                    parameters=parameters, require_existing_subject=retrying)
+                    self._key(project_id, action, request_id)
+                    try:
+                        initialized = await initialize(request_id)
+                    except (BackendClientError, OSError) as exc:
+                        raise denied from exc
+                    if not initialized:
+                        raise
+                self._key(project_id, action, request_id)
+                self._check_epoch(client, record)
+                return await submit(require_existing=True)
             try:
                 result = await self._call(project_id, execute)
             except DispatchError as exc:

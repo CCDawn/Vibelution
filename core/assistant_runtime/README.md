@@ -748,6 +748,13 @@ associations and existing grants; new read grants do not imply archive or pin.
 The protocol remains version 1 with additive endpoints and a new closed action.
 Existing actions retain their authentication and response contracts.
 
+When the operator has selected full access for the native personal assistant,
+`session_create` can automatically add the initial `sessions:create` scope to
+its existing project subject after a pre-admission scope denial. The same
+creation request continues after the grant is confirmed. This path requires
+Launcher authority and preserves an explicit removal of that scope. Identity
+recovery and explicit requests to increase the project grant retain native consent.
+
 The existing Store owns intent and receipt persistence. A subject mutation adds
 an immutable proof and increments its grant revision atomically. After lost ACK
 or SDK restart, `management_receipt` reads the original request; it never reruns

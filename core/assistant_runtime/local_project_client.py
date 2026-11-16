@@ -33,6 +33,38 @@ class LocalAssistantBackendClient(ManagedAgentBackendClient):
     def _session_create_launcher_authority(self) -> str:
         return self._launcher_capability
 
+    def _can_initialize_session_create_scope(self) -> bool:
+        from core.infrastructure.native_runtime import is_launcher_assistant_process
+        from core.assistant_runtime import native
+        from core.web.services.local_assistant.management_permissions import ManagementPermissionError, read
+
+        if not self._launcher_capability or not is_launcher_assistant_process():
+            return False
+        try:
+            return read(native._AGENT_ID)["preset"] == "full_access"
+        except ManagementPermissionError:
+            return False
+
+    async def initialize_session_create_scope(self, request_id: str) -> bool:
+        if not self._can_initialize_session_create_scope():
+            return False
+        grant = await self._original_management_grant(require_original=True, require_complete=True)
+        current = await self._authorization_state(grant)
+        if "sessions:create" in current["scopes"]:
+            return True
+        scope_request = "session-create-scope-" + hashlib.sha256(request_id.encode("ascii")).hexdigest()
+        try:
+            receipt = await super().management_action(action="authorization_upgrade", request_id=scope_request,
+                parameters={"expected_scopes": current["scopes"], "add_scopes": ["sessions:create"]},
+                _initial_session_create=True)
+        except BackendClientError as exc:
+            if exc.code not in {"AUTHORIZATION_CONFLICT", "IDEMPOTENCY_CONFLICT", "BACKEND_TIMEOUT"}:
+                raise
+            receipt = None  # The current grant can resolve a competing or timed-out upgrade.
+        if receipt is not None and receipt["status"] == "completed":
+            return True
+        return "sessions:create" in (await self._authorization_state(grant))["scopes"]
+
     async def management_agent_list(self, **parameters) -> dict[str, Any]:
         return await super().management_agent_list(**{**parameters,
             "dispatch_context": "launcher_local" if self._launcher_capability else "external"})

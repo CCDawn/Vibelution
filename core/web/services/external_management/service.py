@@ -656,11 +656,14 @@ class ManagementService:
         except Exception:  # noqa: BLE001 -- unavailable recovery reads cannot authorize a repeat write
             return False  # An unavailable native read never authorizes another write.
 
-    def invoke(self, subject: str, capability: str, action: str, payload: dict, *, launcher_authority: str = "") -> dict:
+    def invoke(self, subject: str, capability: str, action: str, payload: dict, *, launcher_authority: str = "",
+               initial_session_create: bool = False) -> dict:
         if action not in ACTION_MODELS:
             raise ManagementError("UNKNOWN_ACTION", 404)
         session_creation = action == "session_create"
-        if session_creation:
+        if initial_session_create and action != "authorization_upgrade":
+            raise ManagementError("INVALID_INPUT", 422)
+        if session_creation or initial_session_create:
             from core.infrastructure.launcher_assistant_authority import verify_launcher_authority
             if not verify_launcher_authority(launcher_authority):
                 raise ManagementError("LAUNCHER_AUTHORITY_REQUIRED")
@@ -693,7 +696,8 @@ class ManagementService:
         key = self._request_key(subject, action, envelope.request_id)
         if action == "authorization_upgrade":
             return self._authorization_upgrades().invoke(subject, capability, envelope.request_id,
-                expected_binding=envelope.expected_binding.model_dump(), **parameters)
+                expected_binding=envelope.expected_binding.model_dump(), initial_session_create=initial_session_create,
+                launcher_authority=launcher_authority, **parameters)
         if action == "team_run":
             return self._team_intents(grant).run(envelope.request_id, parameters)
         fingerprint = digest(parameters)

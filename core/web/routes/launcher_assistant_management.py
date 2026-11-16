@@ -467,6 +467,18 @@ async def invoke(action: str, request: Request):
     return await _call(lambda: _service().invoke(*_credentials(request), action, payload))
 
 
+@router.post("/authorization/session-create-initial", response_model=ReceiptResponse, response_model_exclude_none=True)
+async def initialize_session_create_scope(request: Request):
+    _require_control(request)
+    if request.query_params:
+        raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"})
+    payload = await _body(request, unique_keys=True)
+    values = request.headers.getlist(LAUNCHER_AUTHORITY_HEADER)
+    authority = values[0] if len(values) == 1 else ""
+    return await _call(lambda: _service().invoke(*_credentials(request), "authorization_upgrade", payload,
+        launcher_authority=authority, initial_session_create=True))
+
+
 @router.get("/sessions", response_model=SessionListResponse)
 async def list_sessions(request: Request, agent_id: str = "", query: str = "", offset: int = 0, limit: int = 6):
     _require_control(request)
