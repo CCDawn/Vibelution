@@ -40,10 +40,21 @@ def test_management_mode_is_independent_of_ordinary_agent_full_access(native_mod
 @pytest.mark.parametrize("preset", ["request_approval", "auto_review", "full_access"])
 def test_scope_expansion_always_requires_a_separate_operator_decision(native_mode, preset):
     native_mode["preset"] = preset
-    assert check("authorization_upgrade", {"project_id": "project", "add_scopes": ["agents:purge"]}) == (
+    for additions in (["agents:purge"], ["sessions:create"], ["rooms:read", "sessions:create"]):
+        assert check("authorization_upgrade", {"project_id": "project", "request_id": "upgrade-1",
+            "expected_scopes": ["sessions:read"], "add_scopes": additions}) == (("always", "destructive"), "request_approval")
+    assert check("authorization_recover", {"project_id": "project", "request_id": "recover-1", "scopes": ["sessions:create"]}) == (
         ("always", "destructive"), "request_approval")
     assert check("reminder_handoff_recover", {"project_id": "project", "preview_id": "f" * 64}) == (
         ("always", "destructive"), "request_approval")
+
+
+@pytest.mark.parametrize(("preset", "requirement"), [("full_access", None), ("auto_review", None),
+    ("request_approval", ("always", "execute"))])
+def test_ordinary_session_create_uses_the_current_native_management_mode(native_mode, preset, requirement):
+    native_mode["preset"] = preset
+    assert check("session_create", {"project_id": "project", "request_id": "create-1",
+        "agent_id": "agent-a", "title": "Ordinary Session"}) == (requirement, "request_approval")
 
 
 def test_member_removal_is_routine_but_team_cascade_is_destructive(native_mode):

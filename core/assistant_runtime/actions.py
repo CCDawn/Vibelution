@@ -1298,6 +1298,8 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
                 key = json.dumps([turn_id, project_id, missing], separators=(",", ":")).encode()
                 value["recoveryArguments"] = {"project_id": project_id, "scopes": missing,
                     "request_id": "recover-" + hashlib.sha256(key).hexdigest()[:16]}
+            if "session_create" in blocked and value.get("status") != "recovery_required":
+                value["sessionCreateHint"] = "在完全访问模式下先调用 session_create。Launcher 可尝试自动补齐原主体的会话创建权限；若仍返回 SCOPE_DENIED，再申请明确授权。"
             return {**value, "missingScopes": missing,
                     "blockedActions": blocked,
                     "operatorTierRequiredActions": sorted(tier_blocked),

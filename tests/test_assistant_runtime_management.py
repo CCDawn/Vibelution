@@ -10,6 +10,50 @@ from core.external_agent.backend_client import BackendClientError
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("cancel_during", ["scope", "second-post"])
+async def test_session_scope_initialization_preserves_only_definitive_denials(tmp_path, cancel_during):
+    writes = []
+
+    class Client:
+        async def diagnostics(self):
+            return {"status": "healthy"}
+
+        async def management_action(self, **values):
+            writes.append(values["request_id"])
+            if len(writes) == 1 or cancel_during == "scope" and len(writes) == 2:
+                raise BackendClientError("Missing scope", code="SCOPE_DENIED")
+            if cancel_during == "second-post":
+                raise asyncio.CancelledError()
+            return {"status": "completed", "verified": True}
+
+        async def initialize_session_create_scope(self, request_id):
+            if cancel_during == "scope" and len(writes) == 1:
+                raise asyncio.CancelledError()
+            return True
+
+        async def management_receipt(self, **_):
+            code = "SCOPE_DENIED" if cancel_during == "scope" else "REQUEST_UNAVAILABLE"
+            raise BackendClientError("No target receipt", code=code)
+
+    profile = tmp_path / "profile"
+    projects = {"p": tmp_path / "project"}
+    service = DispatchService(profile, projects, client_factory=lambda *_args, **_options: Client())
+    request = {"action": "session_create", "request_id": "session-1",
+               "parameters": {"agent_id": "agent-a", "title": "Ordinary Session"}}
+    with pytest.raises(asyncio.CancelledError):
+        await service.management.invoke("p", **request)
+
+    restarted = DispatchService(profile, projects, client_factory=lambda *_args, **_options: Client())
+    if cancel_during == "scope":
+        assert (await restarted.management.invoke("p", **request))["verified"] is True
+    else:
+        with pytest.raises(DispatchError) as exc:
+            await restarted.management.invoke("p", **request)
+        assert exc.value.code == "OPERATION_UNCONFIRMED"
+    assert writes == ["session-1"] * (3 if cancel_during == "scope" else 2)
+
+
+@pytest.mark.anyio
 async def test_create_file_preset_requires_native_management_approval(tmp_path):
     writes = []
     def factory(root, **kwargs):

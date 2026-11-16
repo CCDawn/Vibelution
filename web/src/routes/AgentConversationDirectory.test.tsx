@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import React from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import type { AgentInstance, ConversationSummary, Team } from "../api/types";
@@ -82,10 +83,15 @@ function room(overrides: Partial<ConversationSummary> = {}): ConversationSummary
   };
 }
 
+function renderWithQuery(node: React.ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, enabled: false } } });
+  return renderToStaticMarkup(<QueryClientProvider client={client}>{node}</QueryClientProvider>);
+}
+
 describe("AgentConversationDirectory", () => {
   it("keeps Agent navigation free of session counts, including Agents with multiple sessions", () => {
     const sessions = ["s1", "s2"].map((id) => ({ id, title: id, agentId: "agent-1", status: "idle", taskSummary: "", lastActive: "", updatedAt: "", currentPhase: "" }));
-    const render = (count: number) => renderToStaticMarkup(<AgentConversationDirectory
+    const render = (count: number) => renderWithQuery(<AgentConversationDirectory
       activeAgentId="" agents={[agent({ displayName: "gpt-pix" })]} avatarInitials={() => "G"}
       filterText="" formatTime={() => "12:00"} lang="zh" resolveModelLabel={() => "GPT-5.6 Luna"}
       sessions={sessions.slice(0, count)} statusLabel={(value) => value} onContextMenu={() => undefined} onOpenAgent={() => undefined}
@@ -100,7 +106,7 @@ describe("AgentConversationDirectory", () => {
   });
 
   it("reveals searched special Agents even though their section defaults collapsed", () => {
-    const render = (filterText: string) => renderToStaticMarkup(<AgentConversationDirectory
+    const render = (filterText: string) => renderWithQuery(<AgentConversationDirectory
       activeAgentId="" agents={[agent({ displayName: "资料员", primaryMode: "research", roleKey: "source_finder" })]}
       avatarInitials={() => "R"} filterText={filterText} formatTime={() => ""} lang="zh" resolveModelLabel={() => "GPT"}
       sessions={[]} statusLabel={(value) => value} onContextMenu={() => undefined} onOpenAgent={() => undefined}
@@ -165,7 +171,7 @@ describe("AgentConversationDirectory", () => {
   });
 
   it("folds a team's past group rooms under its block and keeps the linked room separate", () => {
-    const html = renderToStaticMarkup(<AgentConversationDirectory
+    const html = renderWithQuery(<AgentConversationDirectory
       activeAgentId="" agents={[agent()]} avatarInitials={() => "A"}
       filterText="SCI-009" formatTime={() => "12:00"} lang="zh" resolveModelLabel={() => "GPT"}
       sessions={[]} statusLabel={(value) => value}

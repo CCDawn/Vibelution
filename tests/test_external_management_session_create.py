@@ -10,8 +10,9 @@ from tests.test_configured_agent_creation import configured_env  # noqa: F401 --
 from tests.test_external_management_workspace import env  # noqa: F401 -- isolated native authorities
 
 ACTION = "/v1/launcher-assistant-management/actions/session_create"
+INITIAL_SCOPE = "/v1/launcher-assistant-management/authorization/session-create-initial"
 LAUNCHER_AUTHORITY_HEADER = "X-Vibelution-Launcher-Authority"
-TOKEN = "verified-launcher-authority"
+TOKEN = "verified-launcher-authority-0123456789"
 
 
 def create(env, *, request_id="create-1", parameters=None, headers=None):
@@ -30,6 +31,21 @@ def test_session_creation_requires_scope_and_launcher_authority(env, monkeypatch
     without_scope = create(env, headers={**env.headers, LAUNCHER_AUTHORITY_HEADER: TOKEN})
     assert without_scope.status_code == 403 and without_scope.json()["detail"]["code"] == "SCOPE_DENIED"
     assert env.calls == []
+
+
+def test_initial_scope_route_requires_launcher_and_accepts_only_the_session_scope(env, monkeypatch):
+    from core.infrastructure import launcher_assistant_authority
+
+    monkeypatch.setattr(launcher_assistant_authority, "verify_launcher_authority", lambda token: token == TOKEN)
+    url = INITIAL_SCOPE
+    payload = {"request_id": "initial-scope", "expected_binding": env.identity,
+               "parameters": {"expected_scopes": env.grant["scopes"], "add_scopes": ["sessions:create"]}}
+    assert env.client.post(url, headers=env.headers, json=payload).json()["detail"]["code"] == "LAUNCHER_AUTHORITY_REQUIRED"
+    headers = _headers(env.grant)
+    mixed = {**payload, "parameters": {**payload["parameters"], "add_scopes": ["rooms:read", "sessions:create"]}}
+    assert env.client.post(url, headers=headers, json=mixed).status_code == 422
+    assert env.client.post(url + "?unexpected=1", headers=headers, json=payload).status_code == 422
+    assert env.service.authorization_status(env.grant["subject_id"], env.grant["subject_capability"])["scopes"] == env.grant["scopes"]
 
 
 def _scope(service, grant):
@@ -87,6 +103,91 @@ def native_env(configured_env, monkeypatch, request):
     return SimpleNamespace(root=root, directory=directory, sessions=sessions, store=store, native=native, service=service,
         client=TestClient(app), identity=identity, grant=grant, headers=_headers(grant), roster=roster,
         agent_id=agent["agentId"], main_id=agent["directSessionId"], selected_id=other["directSessionId"])
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(("preset", "removed", "old_target"), [
+    ("full_access", False, False), ("full_access", True, False), ("full_access", False, True),
+    ("auto_review", False, False), ("request_approval", False, False),
+])
+async def test_native_session_creation_initial_scope_uses_full_access_only(native_env, monkeypatch, preset, removed, old_target):
+    import httpx
+    from fastapi import FastAPI
+    from fastapi.responses import JSONResponse
+
+    from core.assistant_runtime.local_project_client import LocalAssistantBackendClient
+    from core.assistant_runtime.dispatch import DispatchError
+    from core.assistant_runtime.management import ManagementAdapter
+    from core.external_agent.backend_client import BackendClientError
+    from core.infrastructure import native_runtime
+    from core.web.control import get_control_token
+    from core.web.routes.launcher_assistant_management import router
+    from core.web.services.local_assistant import management_permissions
+    from core.web.services.team_workflow.research_runtime.operator_authorization import server_operator_scope
+
+    e = native_env
+    client_id = "existing-test-project-grant"
+    grant = e.service.bind({"client_id": client_id, "expected_binding": e.identity, "scopes": ["sessions:read"]})
+    subject, capability = grant["subject_id"], grant["subject_capability"]
+    if removed:
+        _scope(e.service, grant)
+        with server_operator_scope("operator-test", roles=("operator",)):
+            e.service.invoke(subject, capability, "authorization_reduce", {"request_id": "remove-session-create",
+                "expected_binding": e.identity, "parameters": {"expected_scopes": ["sessions:create", "sessions:read"],
+                    "expected_grant_revision": 1, "remove_scopes": ["sessions:create"]}})
+    before = e.service.authorization_status(subject, capability)
+    main = e.store.repository.get_session_runtime_state(e.main_id)
+    app = FastAPI()
+    app.include_router(router, prefix="/api")
+
+    async def target(scope, receive, send):
+        if old_target and scope["path"] == "/api" + INITIAL_SCOPE:
+            return await JSONResponse({"detail": "Not Found"}, status_code=404)(scope, receive, send)
+        return await app(scope, receive, send)
+
+    monkeypatch.setattr(native_runtime, "is_launcher_assistant_process", lambda: True)
+    monkeypatch.setattr(management_permissions, "read", lambda _: {"preset": preset})
+    sdk = LocalAssistantBackendClient(e.root, capability=TOKEN, state_path=e.root / "test-management-state.json",
+        transport=httpx.ASGITransport(app=target))
+    sdk._state["management"] = {"clientId": client_id, "subjectId": subject, "capability": capability,
+        "binding": e.identity, "scopes": before["scopes"], "grantRevision": before["grantRevision"]}
+
+    async def connected():
+        sdk._base_url = "http://127.0.0.1"
+        sdk._control_token = get_control_token()
+
+    monkeypatch.setattr(sdk, "_ensure_connected", connected)
+
+    async def call_target(project_id, action):
+        assert project_id == "target"
+        try:
+            return await action(sdk)
+        except BackendClientError as exc:
+            raise DispatchError(str(exc), code=exc.code) from None
+
+    adapter = ManagementAdapter(e.root / "profile", {"target": e.root}, call_target)
+    request = {"action": "session_create", "request_id": "create-with-current-mode",
+               "parameters": {"agent_id": e.agent_id, "title": "Session via the Launcher"}}
+    if preset == "full_access" and not removed and not old_target:
+        result = await adapter.invoke("target", **request)
+        assert result["verified"] is True and result["session"]["agentId"] == e.agent_id
+        assert e.store.repository.get_session(result["session"]["id"])["sessionRole"] == "workspace"
+        assert await adapter.invoke("target", **request) == {**result, "reused": True}
+        after = e.service.authorization_status(subject, capability)
+        assert after == {**before, "scopes": ["sessions:create", "sessions:read"], "grantRevision": 1}
+        assert sdk._state["management"]["scopes"] == after["scopes"]
+    else:
+        with pytest.raises(DispatchError) as denied:
+            await adapter.invoke("target", **request)
+        assert denied.value.code == "SCOPE_DENIED"
+        assert e.service.authorization_status(subject, capability) == before
+        e.service.invoke(subject, capability, "authorization_upgrade", {"request_id": "operator-approved-scope",
+            "expected_binding": e.identity, "parameters": {"expected_scopes": before["scopes"],
+                "add_scopes": ["sessions:create"]}})
+        result = await adapter.invoke("target", **request)
+        assert result["verified"] is True and result["session"]["agentId"] == e.agent_id
+    assert e.store.repository.get_session_runtime_state(e.main_id) == main
+    assert e.sessions.load_active_conversation_id(e.root) == e.selected_id
 
 
 @pytest.mark.parametrize("native_env", ["assistant_worker", ""], indirect=True)
