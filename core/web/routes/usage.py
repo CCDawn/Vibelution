@@ -9,7 +9,6 @@ from fastapi import APIRouter, HTTPException, Query
 from core.web.routes.usage_models import UsageSummaryResponse
 from core.web.services.usage_summary_cache import get_usage_summary_cached
 
-
 router = APIRouter(tags=["usage"])
 
 
