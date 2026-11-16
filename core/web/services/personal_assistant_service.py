@@ -92,6 +92,8 @@ DEV_TOOLS = (
     "dev_task_board_tool",
     "get_git_status_summary_tool",
     "get_recent_changes_tool",
+    "personal_assistant_git_tool",
+    "personal_assistant_startup_diagnosis_tool",
 )
 TOOLS = (*_PRE_ACTIONS_TOOLS, "personal_assistant_action_tool", *DEV_TOOLS)
 # Older provisioning toolsets that may still live in persisted snapshots; each

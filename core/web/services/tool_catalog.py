@@ -178,6 +178,8 @@ EXPLICIT_ALLOW_TOOLS = {
     "research_knowledge_collection_tool",
     "research_knowledge_request_tool",
     "read_chat_room_context_refs",
+    "personal_assistant_git_tool",
+    "personal_assistant_startup_diagnosis_tool",
 }
 
 
@@ -675,6 +677,18 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         # satisfy; the write-scope gate already exempts team_workflow_state_write.
         "riskTags": ["team_workflow_state_write"],
         "permissionTier": MEDIUM_PERMISSION_TIER,
+    },
+    "personal_assistant_git_tool": {
+        "category": "git_evolution",
+        "capabilityTags": ["git", "git_write", "rescue"],
+        "riskTags": ["git_write", "workspace_mutation"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
+    "personal_assistant_startup_diagnosis_tool": {
+        "category": "task_runtime",
+        "capabilityTags": ["startup", "health", "logs", "read_only"],
+        "riskTags": [],
+        "permissionTier": LOW_PERMISSION_TIER,
     },
     "knowledge_base_acl_grant_tool": {
         "category": "memory_context",
