@@ -78,6 +78,40 @@ function usageSnapshot() {
 }
 
 describe("AssistantHost", () => {
+  it("exposes the submission receipt capability only when the native host supports it", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const request = { operation: "status" as const };
+    const status = { assistant: { agentId: "a", directSessionId: "s", displayName: "Assistant" } };
+    await expect(host.request(request)).resolves.toEqual(status);
+    fetchImpl.mockResolvedValueOnce(Response.json({ ...status, nativeSubmissionReceiptVersion: 1 }));
+    await expect(host.request(request)).resolves.toMatchObject({ submissionReceiptVersion: 1 });
+    await host.stop();
+  });
+
+  it("reads only the original submission receipt for its captured session", async () => {
+    const { host, fetchImpl } = fixture({ graceful: true });
+    await host.start();
+    const request = { operation: "submissionReceipt" as const, requestId: "send:1" };
+    const receipt = { sessionId: "s", requestId: "send:1", acceptance: null };
+    fetchImpl.mockResolvedValueOnce(Response.json(receipt));
+    await expect(host.request(request)).resolves.toEqual(receipt);
+    const [url, options] = fetchImpl.mock.calls.at(-1)!;
+    expect(String(url)).toBe("http://127.0.0.1:12345/api/assistant/messages/receipt?request_id=send%3A1");
+    expect(options?.method).toBe("GET");
+    expect(options?.body).toBeUndefined();
+    const calls = fetchImpl.mock.calls.length;
+    await expect(host.request({ ...request, requestId: "other?project=1" })).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    const foreignSessionRequest = { ...request, sessionId: "foreign" };
+    await expect(host.request(foreignSessionRequest)).rejects.toThrow("ASSISTANT_REQUEST_INVALID");
+    expect(fetchImpl.mock.calls.length).toBe(calls);
+    for (const foreign of [{ requestId: "send:2" }, { sessionId: "foreign" }]) {
+      fetchImpl.mockResolvedValueOnce(Response.json({ ...receipt, ...foreign }));
+      await expect(host.request(request)).rejects.toThrow("ASSISTANT_IDENTITY_INVALID");
+    }
+    await host.stop();
+  });
+
   it("binds control continuation sends to the captured identity and preserves the exact retry body", async () => {
     const { host, fetchImpl } = fixture({ graceful: true });
     await host.start();

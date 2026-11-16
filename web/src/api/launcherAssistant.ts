@@ -31,6 +31,7 @@ export type LauncherManagementPermission = { preset: AgentPermissionPreset; revi
 
 export type LauncherAssistantStatus = {
   followupQueueVersion?: 1;
+  submissionReceiptVersion?: 1;
   teamRunsVersion?: 1;
   assistantAvatarVersion?: 1;
   assistantAvatarRevision?: string | null;
@@ -102,6 +103,7 @@ export type LauncherAssistantRequest =
   | { operation: "setBudgetParameters"; revision: number; maxCallsPerTurn: number | null }
   | { operation: "setManagementPermissionPreset"; preset: AgentPermissionPreset; expectedRevision: number }
   | { operation: "detail"; beforeMessageIndex?: number }
+  | { operation: "submissionReceipt"; requestId: string }
   | { operation: "status" | "dispatches" | "hide" | "approvals" | "openLauncher" | "assistantAvatar" }
   | { operation: "acknowledgePatrolDelivery" }
   | { operation: "resolveApproval"; requestId: string; decision: "accept" | "decline" }
@@ -391,6 +393,7 @@ export async function getLauncherAssistantStatus(): Promise<LauncherAssistantSta
   }
   if (result.attachmentVersion !== undefined && result.attachmentVersion !== 1) throw new Error("Launcher 附件版本不可用。");
   if (result.followupQueueVersion !== undefined && result.followupQueueVersion !== 1) throw new Error("Launcher 队列版本不可用。");
+  if (result.submissionReceiptVersion !== undefined && result.submissionReceiptVersion !== 1) throw new Error("Launcher 发送回执版本不可用。");
   if (result.settings !== undefined) {
     const settings = result.settings;
     if (!record(settings) || typeof settings.ok !== "boolean" || !record(settings.preferences)
@@ -484,6 +487,24 @@ export async function getLauncherAssistantDetail(sessionId: string, beforeMessag
     throw new Error("Launcher 返回的会话与个人助理身份不一致。");
   }
   return result as SessionDetail;
+}
+
+export async function getLauncherAssistantSubmissionReceipt(sessionId: string, requestId: string): Promise<(LauncherAssistantAcceptance & { turnActive?: boolean }) | null> {
+  if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(requestId)) throw new Error("ASSISTANT_REQUEST_INVALID");
+  const result = await launcherAssistantBridge().invoke({ operation: "submissionReceipt", requestId });
+  if (!exactFields(result, ["sessionId", "requestId", "acceptance"]) || result.sessionId !== sessionId || result.requestId !== requestId)
+    throw new Error("ASSISTANT_RESPONSE_INVALID");
+  const acceptance = result.acceptance;
+  if (acceptance === null) return null;
+  const fields = ["accepted", "sessionId", "clientSubmissionId"];
+  if (exactFields(acceptance, [...fields, "turnId", "turnActive"]) && acceptance.accepted === true
+    && acceptance.sessionId === sessionId && acceptance.clientSubmissionId === requestId
+    && assistantEventIdentity(acceptance.turnId) && typeof acceptance.turnActive === "boolean")
+    return { turnId: acceptance.turnId, turnActive: acceptance.turnActive };
+  if (exactFields(acceptance, [...fields, "queuedTurnId"]) && acceptance.accepted === true
+    && acceptance.sessionId === sessionId && acceptance.clientSubmissionId === requestId && assistantEventIdentity(acceptance.queuedTurnId))
+    return { turnId: "", queuedTurnId: acceptance.queuedTurnId, clientSubmissionId: requestId };
+  throw new Error("ASSISTANT_RESPONSE_INVALID");
 }
 
 /** Reference chips ride the same closed send verb; each entry keeps the chat

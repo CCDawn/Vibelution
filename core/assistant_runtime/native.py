@@ -10,6 +10,7 @@ import logging
 import re
 import threading
 import time
+from collections import OrderedDict
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -18,15 +19,19 @@ from core.infrastructure.native_runtime import assistant_native_root
 
 _LOGGER = logging.getLogger(__name__)
 _LOCK = threading.RLock()
-# One lock serializes every native adapter entry point, so a single slow
-# critical section queues every lightweight status poll behind it. Hold-time
-# observations feed the future lock split; only over-threshold sections log,
-# keeping volume bounded and free of payload or path content.
+# Serialize native commands and lifecycle transitions. Read projections sample
+# the binding under this lock and do their I/O outside it.
+# Detail hydration can repair a Session row or journal. Its separate lease
+# lets sends proceed while still fencing repairs at shutdown and migration.
+_DETAIL_LIFECYCLE_LOCK = threading.Lock()
 LOCK_HOLD_WARN_SECONDS = 1.0
 _STOP_REQUESTED = threading.Event()
 _STARTED = False
 _SESSION_ID = ""
 _AGENT_ID = ""
+_LIFECYCLE_GENERATION = 0
+_RECENT_ACCEPTED_TURN_LIMIT = 128
+_RECENT_ACCEPTED_TURNS: OrderedDict[tuple[str, str, int, str], str] = OrderedDict()
 _OFFLINE_MIGRATION = False
 _OFFLINE_DIRECTORY_CLOSE_UNCONFIRMED = False
 _QUIESCING = False
@@ -35,11 +40,14 @@ _QUIESCENCE_STATE_LOCK = threading.Lock()
 
 @contextmanager
 def _measured_lock(operation: str):
-    """Hold _LOCK while recording the critical section duration."""
+    """Measure lock holds and slow send admission waits without logging payloads."""
+    requested = time.monotonic()
+    wait_seconds = 0.0
     held_seconds = 0.0
     try:
         with _LOCK:
             entered = time.monotonic()
+            wait_seconds = entered - requested
             try:
                 yield
             finally:
@@ -48,6 +56,8 @@ def _measured_lock(operation: str):
         if held_seconds >= LOCK_HOLD_WARN_SECONDS:
             _LOGGER.warning("assistant_native_lock_hold operation=%s held_ms=%d",
                             operation, round(held_seconds * 1000))
+        if operation == "submit" and wait_seconds >= LOCK_HOLD_WARN_SECONDS:
+            _LOGGER.warning("assistant_native_lock_wait operation=submit wait_ms=%d", round(wait_seconds * 1000))
 
 
 def _close_offline_directory(runtime, *, timeout: float) -> None:
@@ -153,7 +163,7 @@ def _configure_tool_budgets() -> None:
 
 
 def _bootstrap(root: Path | str, *, offline_migration: bool) -> dict[str, Any]:
-    global _STARTED, _SESSION_ID, _AGENT_ID, _OFFLINE_MIGRATION
+    global _STARTED, _SESSION_ID, _AGENT_ID, _OFFLINE_MIGRATION, _LIFECYCLE_GENERATION
     expected = assistant_native_root()
     requested = Path(root)
     if not requested.is_absolute() or requested.resolve() != expected:
@@ -252,6 +262,8 @@ def _bootstrap(root: Path | str, *, offline_migration: bool) -> dict[str, Any]:
             result = personal.create_personal_assistant()
             _SESSION_ID = result["assistant"]["directSessionId"]
             _AGENT_ID = result["assistant"]["agentId"]
+            _LIFECYCLE_GENERATION += 1
+            _RECENT_ACCEPTED_TURNS.clear()
             _OFFLINE_MIGRATION = offline_migration
             _STARTED = True
             if not offline_migration:
@@ -286,26 +298,59 @@ def _bootstrap(root: Path | str, *, offline_migration: bool) -> dict[str, Any]:
             raise
 
 
+def _session_read_binding(*, repairing: bool = False) -> tuple[str, str, int]:
+    with _measured_lock("session_read_binding"):
+        if _STOP_REQUESTED.is_set():
+            raise AssistantSessionError("ASSISTANT_STOPPING")
+        if not _STARTED:
+            raise AssistantSessionError("ASSISTANT_NOT_READY")
+        if repairing and _QUIESCING:
+            raise AssistantSessionError("ASSISTANT_QUIESCING")
+        if not _SESSION_ID or not _AGENT_ID:
+            raise AssistantSessionError("ASSISTANT_IDENTITY_INVALID")
+        return _SESSION_ID, _AGENT_ID, _LIFECYCLE_GENERATION
+
+
+def _verify_session_read_binding(sessions, binding: tuple[str, str, int]) -> None:
+    session_id, agent_id, _ = binding
+    try:
+        assistant = _projection()["assistant"]
+    except sessions.SessionNotFoundError:
+        raise AssistantSessionError("SESSION_NOT_FOUND") from None
+    finally:
+        if _session_read_binding() != binding:
+            raise AssistantSessionError("ASSISTANT_IDENTITY_INVALID")
+    if assistant.get("directSessionId") != session_id or assistant.get("agentId") != agent_id:
+        raise AssistantSessionError("ASSISTANT_IDENTITY_INVALID")
+
+
 def get_detail(session_id: str, *, before_message_index: int | None = None) -> dict[str, Any]:
     """Only the current singleton's direct Session is visible to this adapter."""
-    with _measured_lock("get_detail"):
-        assistant = _projection()["assistant"]
+    with _DETAIL_LIFECYCLE_LOCK:
+        binding = _session_read_binding(repairing=True)
         _, _, sessions, _ = _services()
-        if session_id != assistant["directSessionId"]:
+        if session_id != binding[0]:
             raise sessions.SessionNotFoundError("Launcher assistant session not found")
-        # This endpoint is polled by the resident renderer. The native light
-        # projection retains messages and execution state without computing
-        # project inbox/governance/next-state side lists on every read, and the
-        # recent-window limit bounds history per response. The desktop bridge
-        # independently enforces its byte limit, including individual large turns.
-        detail = sessions.get_session_detail(
-            session_id,
-            include_secondary=False,
-            message_limit=LAUNCHER_ASSISTANT_DETAIL_MESSAGE_LIMIT,
-            transcript_scope="window",
-            **({"before_message_index": before_message_index} if before_message_index is not None else {}),
-        )
-        if detail is None or str(detail.get("agentId") or "") != assistant["agentId"]:
+        _verify_session_read_binding(sessions, binding)
+        # Ledger replay must not delay native admission. Publish only after
+        # verifying that the same binding still owns the projected detail.
+        projection_started = time.monotonic()
+        try:
+            detail = sessions.get_session_detail(
+                session_id,
+                include_secondary=False,
+                message_limit=LAUNCHER_ASSISTANT_DETAIL_MESSAGE_LIMIT,
+                transcript_scope="window",
+                read_only=True,
+                **({"before_message_index": before_message_index} if before_message_index is not None else {}),
+            )
+        finally:
+            elapsed = time.monotonic() - projection_started
+            if elapsed >= LOCK_HOLD_WARN_SECONDS:
+                _LOGGER.warning("assistant_native_read operation=get_detail phase=projection elapsed_ms=%d",
+                                round(elapsed * 1000))
+        _verify_session_read_binding(sessions, binding)
+        if detail is None or detail.get("id") != session_id or detail.get("agentId") != binding[1]:
             raise sessions.SessionNotFoundError("Launcher assistant session not found")
         return detail
 
@@ -550,6 +595,7 @@ def submit(message: str, request_id: str, attachment_ids: list[str] | None = Non
         raise ValueError("message must be text")  # noqa: TRY004 - preserve the existing submit contract.
     if not isinstance(request_id, str) or not request_id.strip():
         raise ValueError("request_id is required")
+    normalized_request_id = request_id.strip()
     expected = None
     if control_continuation is not None:
         from .control_continuation import CONTROL_CONTINUATION_MESSAGE, normalize_control_continuation
@@ -560,20 +606,108 @@ def submit(message: str, request_id: str, attachment_ids: list[str] | None = Non
         if (message != CONTROL_CONTINUATION_MESSAGE or attachment_ids or references
                 or re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", request_id) is None):
             raise AssistantSessionError("SESSION_INVALID")
-    with _session_command() as (sessions, session_id):
+    with _session_command(operation="submit") as (sessions, session_id):
         if expected is not None:
             if expected["sessionId"] != session_id or expected["agentId"] != _AGENT_ID:
                 raise AssistantSessionError("ASSISTANT_IDENTITY_INVALID")
             from .control_continuation import submit_control_continuation
-            return submit_control_continuation(sessions, session_id, message, request_id, expected)
-        if attachment_ids is not None:
-            from . import attachments
-            attachments.validate_ids(sessions, session_id, attachment_ids)
-        return sessions.submit_session_message_lightweight(
-            session_id, message,
-            client_submission_id=request_id.strip(), queue_if_busy=True, attachment_ids=attachment_ids,
-            references=references,
-        )
+            accepted = submit_control_continuation(sessions, session_id, message, request_id, expected)
+        else:
+            if attachment_ids is not None:
+                from . import attachments
+                attachments.validate_ids(sessions, session_id, attachment_ids)
+            accepted = sessions.submit_session_message_lightweight(
+                session_id, message,
+                client_submission_id=normalized_request_id, queue_if_busy=True, attachment_ids=attachment_ids,
+                references=references,
+            )
+        _remember_accepted_turn(session_id, normalized_request_id, accepted)
+        return accepted
+
+
+def _remember_accepted_turn(session_id: str, request_id: str, accepted: dict[str, Any]) -> None:
+    # The submission owner has already persisted acceptance. Keep this
+    # shortcut under native admission's lock, before returning the HTTP ACK.
+    if (not isinstance(accepted, dict) or accepted.get("accepted") is not True
+            or accepted.get("sessionId") != session_id or accepted.get("clientSubmissionId") != request_id
+            or accepted.get("queuedTurnId") or re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", request_id) is None):
+        return
+    turn_id = accepted.get("turnId")
+    if not isinstance(turn_id, str) or re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", turn_id) is None:
+        return
+    key = (session_id, _AGENT_ID, _LIFECYCLE_GENERATION, request_id)
+    _RECENT_ACCEPTED_TURNS[key] = turn_id
+    _RECENT_ACCEPTED_TURNS.move_to_end(key)
+    if len(_RECENT_ACCEPTED_TURNS) > _RECENT_ACCEPTED_TURN_LIMIT:
+        _RECENT_ACCEPTED_TURNS.popitem(last=False)
+
+
+def _receipt_session_state(personal, runtime, pin, binding: tuple[str, str, int]) -> dict[str, Any]:
+    session_id, agent_id, _ = binding
+    try:
+        agent = personal._profile_agent()
+        conversation = pin.store.repository.get_session_runtime_state(session_id)
+    finally:
+        if _session_read_binding() != binding:
+            raise AssistantSessionError("ASSISTANT_IDENTITY_INVALID")
+        if not runtime.directory_store_pin_is_current(pin):
+            raise AssistantSessionError("ASSISTANT_NOT_READY")
+    if (not agent or agent.get("agentId") != agent_id or agent.get("directSessionId") != session_id
+            or agent.get("status") != "active" or not personal._owns_session(agent, conversation)):
+        raise AssistantSessionError("ASSISTANT_IDENTITY_INVALID")
+    return conversation
+
+
+def _persisted_submission_proof(project_root, session_id: str, request_id: str,
+                                conversation: dict[str, Any]) -> dict[str, str] | None:
+    from core.chat.turn_journal import EVENT_USER_MESSAGE
+    from core.web.services.session.journal_bridge import (
+        load_session_conversation_events_by_correlation,
+    )
+    from core.web.services.session.queued_turns import (
+        KIND_USER,
+        session_queued_turn_rows,
+    )
+
+    # Promotion persists the user event before removing the queued row. Read
+    # the queue first so a promotion in flight can be observed on either side.
+    queued = next((row for row in session_queued_turn_rows(conversation)
+                   if row["kind"] == KIND_USER and row.get("clientSubmissionId") == request_id), None)
+    if queued is not None:
+        return {"queuedTurnId": queued["id"]}
+    events = load_session_conversation_events_by_correlation(
+        session_id, event_type=EVENT_USER_MESSAGE, correlation_id=request_id, project_root=project_root,
+    )
+    turn_ids = {event.turn_id for event in events
+                if event.session_id == session_id and event.correlation_id == request_id and event.turn_id}
+    return {"turnId": turn_ids.pop()} if len(turn_ids) == 1 else None
+
+
+def get_submission_receipt(session_id: str, request_id: str) -> dict[str, Any]:
+    """Read existing acceptance from the fixed binding's already-open store."""
+    binding = _session_read_binding()
+    if session_id != binding[0]:
+        raise AssistantSessionError("ASSISTANT_IDENTITY_INVALID")
+    _, personal, sessions, runtime = _services()
+    pin = runtime.pin_open_directory_store(sessions.PROJECT_ROOT)
+    if pin is None:
+        raise AssistantSessionError("ASSISTANT_NOT_READY")
+    conversation = _receipt_session_state(personal, runtime, pin, binding)
+    with _LOCK:
+        turn_id = _RECENT_ACCEPTED_TURNS.get((*binding, request_id))
+    proof = {"turnId": turn_id} if turn_id is not None else _persisted_submission_proof(
+        sessions.PROJECT_ROOT, session_id, request_id, conversation,
+    )
+    _receipt_session_state(personal, runtime, pin, binding)
+    if proof is not None and "turnId" in proof:
+        with sessions._RUNNING_SESSIONS_LOCK:
+            turn_active = (session_id in sessions._RUNNING_SESSION_IDS
+                           and sessions._SESSION_ACTIVE_TURN_IDS.get(session_id) == proof["turnId"])
+        proof = {**proof, "turnActive": turn_active}
+    acceptance = None if proof is None else {
+        "accepted": True, "sessionId": session_id, "clientSubmissionId": request_id, **proof,
+    }
+    return {"sessionId": session_id, "requestId": request_id, "acceptance": acceptance}
 
 
 def upload_attachment(payload: bytes, *, filename: str, content_type: str) -> dict[str, Any]:
@@ -614,10 +748,10 @@ def read_attachment(artifact_id: str) -> tuple[bytes, str]:
 
 
 @contextmanager
-def _session_command(*, fixed_identity_only: bool = False):
+def _session_command(*, fixed_identity_only: bool = False, operation: str = "session_command"):
     # Commands admitted here finish before shutdown closes native admission.
     # A command waiting for this lock observes shutdown's early stop flag.
-    with _measured_lock("session_command"):
+    with _measured_lock(operation):
         if _STOP_REQUESTED.is_set():
             raise AssistantSessionError("ASSISTANT_STOPPING")
         if not _STARTED:
@@ -687,7 +821,7 @@ def session_quiescence():
     global _QUIESCING
     from core.web.services.session.admission_lock import SessionAdmissionLock
 
-    with _measured_lock("quiescence_enter"):
+    with _DETAIL_LIFECYCLE_LOCK, _measured_lock("quiescence_enter"):
         if _STOP_REQUESTED.is_set() or not _STARTED or _OFFLINE_MIGRATION or _QUIESCING:
             raise AssistantSessionError("ASSISTANT_QUIESCENCE_UNAVAILABLE")
         assistant = _projection()["assistant"]
@@ -961,8 +1095,13 @@ def shutdown(*, timeout: float = 8.0) -> dict[str, Any]:
         if _QUIESCING:
             return {"closed": False, "code": "NATIVE_QUIESCENCE_ACTIVE"}
         _STOP_REQUESTED.set()
-    remaining = max(0.0, deadline - time.monotonic())
-    admitted = _LOCK.acquire(timeout=remaining) if remaining > 0 else _LOCK.acquire(blocking=False)
+    if not _DETAIL_LIFECYCLE_LOCK.acquire(timeout=max(0.0, deadline - time.monotonic())):
+        return {"closed": False, "code": "NATIVE_SHUTDOWN_ADMISSION_BUSY"}
+    try:
+        admitted = _LOCK.acquire(timeout=max(0.0, deadline - time.monotonic()))
+    finally:
+        # The early stop flag and native admission lock now fence new repairs.
+        _DETAIL_LIFECYCLE_LOCK.release()
     if not admitted:
         return {"closed": False, "code": "NATIVE_SHUTDOWN_ADMISSION_BUSY"}
     entered = time.monotonic()
@@ -994,6 +1133,7 @@ def shutdown(*, timeout: float = 8.0) -> dict[str, Any]:
             _OFFLINE_MIGRATION = False
             _SESSION_ID = ""
             _AGENT_ID = ""
+            _RECENT_ACCEPTED_TURNS.clear()
         return result
     finally:
         held_seconds = time.monotonic() - entered

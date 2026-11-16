@@ -53,6 +53,28 @@ class Native:
         return {"sessionId": "native-session", "requestId": request_id, "decision": decision}
 
 
+def test_submission_receipt_is_private_strict_and_advertised():
+    class ReceiptNative(Native):
+        def get_submission_receipt(self, request_id):
+            assert request_id == "request:1"
+            return {"sessionId": "native-session", "requestId": request_id, "acceptance": None}
+
+    url = "/api/assistant/messages/receipt"
+    token = "test-native-token-1234567890abcdef"
+    headers = {"Authorization": f"Bearer {token}"}
+    with TestClient(create_app(native=ReceiptNative(), token=token), base_url="http://127.0.0.1") as client:
+        assert client.get("/api/assistant", headers=headers).json()["nativeSubmissionReceiptVersion"] == 1
+        assert client.get(url + "?request_id=request:1").status_code == 401
+        assert client.get(url + "?request_id=request:1", headers={**headers, "Origin": "https://example.net"}).status_code == 403
+        for query in ("", "?request_id=", "?request_id=../foreign", "?requestId=request:1",
+                      "?request_id=request:1&request_id=request:2", "?request_id=request:1&session_id=foreign"):
+            assert client.get(url + query, headers=headers).status_code == 422
+        reply = client.get(url, params={"request_id": "request:1"}, headers=headers)
+        assert reply.status_code == 200
+        assert reply.headers["cache-control"] == "no-store"
+        assert reply.json() == {"sessionId": "native-session", "requestId": "request:1", "acceptance": None}
+
+
 class QueuedNative(Native):
     def __init__(self):
         self.calls = []
