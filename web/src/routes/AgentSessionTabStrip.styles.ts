@@ -178,15 +178,23 @@ const styles = {
   agentSessionTabGroupPeekHeading:
     "vui-routes-chatcodingroute agentSessionTabGroupPeekHeading m-0 truncate px-1.5 pb-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--fg-tertiary)]",
   agentSessionTabGroupMenuItem:
-    "vui-routes-chatcodingroute agentSessionTabGroupMenuItem inline-flex min-w-0 items-center gap-2",
+    "vui-routes-chatcodingroute agentSessionTabGroupMenuItem inline-flex min-w-0 flex-1 items-center gap-2",
+  agentSessionTabGroupMenu:
+    "vui-routes-chatcodingroute agentSessionTabGroupMenu w-[10.5rem] min-w-[10.5rem] p-1",
+  agentSessionTabGroupMenuRow:
+    "vui-routes-chatcodingroute agentSessionTabGroupMenuRow gap-1.5 px-1.5 py-1 text-[12px]",
+  agentSessionTabGroupMenuLabel:
+    "vui-routes-chatcodingroute agentSessionTabGroupMenuLabel min-w-0 flex-1 truncate",
+  agentSessionTabGroupMenuCheck:
+    "vui-routes-chatcodingroute agentSessionTabGroupMenuCheck shrink-0 text-[var(--accent-cool)]",
   agentSessionTabGroupPeek:
     "vui-routes-chatcodingroute agentSessionTabGroupPeek flex w-[16rem] flex-col gap-2 p-0.5",
   agentSessionTabGroupPalette:
     "vui-routes-chatcodingroute agentSessionTabGroupPalette flex items-center gap-1.5",
   agentSessionTabGroupSwatch:
-    "vui-routes-chatcodingroute agentSessionTabGroupSwatch h-4 min-h-4 w-4 min-w-4 shrink-0 rounded-full border border-transparent p-0 shadow-none",
+    "vui-routes-chatcodingroute agentSessionTabGroupSwatch h-3.5 min-h-3.5 w-3.5 min-w-3.5 shrink-0 rounded-full border border-[color-mix(in_srgb,var(--fg-primary)_20%,transparent)] p-0 shadow-none",
   agentSessionTabGroupSwatchActive:
-    "vui-routes-chatcodingroute agentSessionTabGroupSwatchActive ring-2 ring-[var(--fg-primary)] ring-offset-1 ring-offset-[var(--vui-surface-chat)]",
+    "vui-routes-chatcodingroute agentSessionTabGroupSwatchActive ring-2 ring-[var(--accent-cool)] ring-offset-1 ring-offset-[var(--vui-surface-chat)]",
   agentSessionTabGroupSwatchGray:
     "vui-routes-chatcodingroute agentSessionTabGroupSwatchGray !bg-[hsl(220_10%_55%)]",
   agentSessionTabGroupSwatchBlue:
