@@ -59,11 +59,6 @@ import type { SessionBulkNotice } from "./useChatSessionBulkSelection";
 import type { AgentRenameDraft } from "./useChatAgentDirectoryActions";
 import type { SessionContextMenuState } from "./useChatSessionRenameMenu";
 
-const SessionContextMenu = lazy(() =>
-  import("../SessionContextMenu").then((module) => ({
-    default: module.SessionContextMenu,
-  })),
-);
 const AgentRenameDialog = lazy(() =>
   import("../AgentRenameDialog").then((module) => ({
     default: module.AgentRenameDialog,
@@ -497,38 +492,6 @@ export function ChatConversationIndexPanel({
             <div className={styles.panelNotice} role="status">{sessionBulkNotice.text}</div>
           ) : null}
           </>}
-          {sessionContextMenu && contextMenuSession ? (
-            <Suspense fallback={null}>
-              <SessionContextMenu
-                addToReviewDisabled={contextMenuAddToReviewDisabled}
-                addToReviewPending={contextMenuAddToReviewPending}
-                pinDisabled={pinSessionMutation.isPending}
-                pinPending={
-                  pinSessionMutation.isPending
-                  && pinSessionMutation.variables?.sessionId === contextMenuSession.id
-                }
-                clearHistoryDisabled={contextMenuClearHistoryDisabled}
-                clearHistoryPending={contextMenuClearHistoryPending}
-                clearHistoryVisible={contextMenuClearHistoryVisible}
-                deleteDisabled={contextMenuDeleteDisabled}
-                lang={lang}
-                position={sessionContextMenu}
-                session={contextMenuSession}
-                t={t}
-                archiveDisabled={sessionArchiveMutation.isPendingFor?.(contextMenuSession.id) ?? (sessionArchiveMutation.isPending && sessionArchiveMutation.variables?.sessionId === contextMenuSession.id)}
-                archivePending={sessionArchiveMutation.isPendingFor?.(contextMenuSession.id) ?? (sessionArchiveMutation.isPending && sessionArchiveMutation.variables?.sessionId === contextMenuSession.id)}
-                onAddToReview={handleAddSessionToReview}
-                onArchive={handleArchiveSession}
-                onTogglePin={handleTogglePinSession}
-                onClearHistory={handleClearSessionHistory}
-                onDelete={handleDeleteSession}
-                onOpenAgentConfig={openSessionAgentConfig}
-                onOpenReportLibrary={onOpenReportLibrary}
-                onRename={beginRenameSession}
-                onDismiss={() => setSessionContextMenu(null)}
-              />
-            </Suspense>
-          ) : null}
     </ChatConversationIndexPanelContent>
     </>
   );
