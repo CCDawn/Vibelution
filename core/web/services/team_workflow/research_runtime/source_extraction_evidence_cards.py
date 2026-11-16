@@ -567,15 +567,18 @@ def _v2_card(
                 item,
             )
             quote = citation_item.get("quote")
-        actual, original, _ = source_quote_citation(
-            fields, citation_item, locator, quote=quote, receipts=receipts, path=path, required=True,
-        )
-        fields["source_url"] = actual
-        fields["verification_status"] = _FETCH_RECEIPT_VERIFICATION
-        fields["quote"] = original
-        locator = {**locator, "url": actual}
-        if _text(locator.get("sourceRef")).startswith(("https://", "http://")):
-            locator["sourceRef"] = actual
+        if _text(quote):
+            actual, original, _ = source_quote_citation(
+                fields, citation_item, locator, quote=quote, receipts=receipts, path=path, required=True,
+            )
+            fields["source_url"] = actual
+            fields["verification_status"] = _FETCH_RECEIPT_VERIFICATION
+            fields["quote"] = original
+            locator = {**locator, "url": actual}
+            if _text(locator.get("sourceRef")).startswith(("https://", "http://")):
+                locator["sourceRef"] = actual
+        else:
+            fields["verification_status"] = _UNVERIFIED_STATUS
     return {
         **fields,
         # Existing artifact quality/readiness consumers still use ``claim``;

@@ -628,6 +628,7 @@ def writeback_source_collection_stage_session_task(
         task,
         incoming_result_payload,
     )
+    citation_blocks = None
     if status == "completed":
         # Fail-closed quote-anchor contract: a completed extraction writeback
         # without verbatim quote anchors used to be accepted and then
@@ -678,6 +679,7 @@ def writeback_source_collection_stage_session_task(
         # Compliant writeback: clear any stale remediation marker so the next
         # mismatch starts a fresh one-shot cycle.
         task.pop("quoteAnchorRemediation", None)
+        citation_blocks = quote_audit["blocks_by_id"]
         # Fail-closed Challenge v2 evidence-card contract at the acceptance
         # boundary (production blocker run-882610596ddb), layered behind the
         # server-side ``retrieved_at`` backfill above: the backfill resolves
@@ -694,7 +696,7 @@ def writeback_source_collection_stage_session_task(
             task,
             run_id,
             result_payload,
-            citation_blocks=quote_audit["blocks_by_id"],
+            citation_blocks=citation_blocks,
         )
         if card_contract_errors:
             # Deterministic remediation contract (one-shot): the card errors
@@ -963,7 +965,7 @@ def writeback_source_collection_stage_session_task(
     task["result"]["closureSummary"] = closure_summary
     task["evidenceRefs"] = writeback["evidenceRefs"]
     task["nextActions"] = writeback["nextActions"]
-    if status == "completed" and quote_audit["blocks_by_id"]:
+    if status == "completed" and citation_blocks:
         task["versionedQuoteReceipts"] = True
     task["writeback"] = writeback
     task["taskToolRequired"] = bool(task.get("taskToolRequired", True))
