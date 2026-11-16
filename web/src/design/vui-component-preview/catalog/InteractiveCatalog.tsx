@@ -19,6 +19,10 @@ import {
 import { ConversationTurnModelControl } from "../../../components/conversation/ConversationTurnModelControl";
 import { ConversationModelControlTrigger } from "../../../components/conversation/ConversationModelControlTrigger";
 import { ConversationTurnNavigator } from "../../../components/conversation/ConversationTurnNavigator";
+import {
+  ConversationModelCandidateList,
+  type ConversationModelCandidateGroup,
+} from "../../../components/conversation/ConversationModelCandidateList";
 import type { SessionLlmModelOption } from "../../../api/types";
 import { VuiPreviewCard } from "../VuiPreviewCard";
 import { VuiPreviewSection } from "../VuiPreviewSection";
@@ -43,6 +47,58 @@ const turnModelChoices: SessionLlmModelOption[] = [
     reasoningEffortOptions: [], defaultReasoningEffort: "high", isDefault: false,
   },
 ];
+
+const previewModelCandidateGroups: ConversationModelCandidateGroup[] = [
+  {
+    groupKey: "dashscope",
+    groupLabel: "DashScope",
+    items: [
+      { key: "qwen3-max", label: "Qwen3 Max", title: "dashscope/qwen3-max" },
+      { key: "qwen3-turbo", label: "Qwen3 Turbo", title: "dashscope/qwen3-turbo" },
+    ],
+  },
+  {
+    groupKey: "deepseek",
+    groupLabel: "DeepSeek",
+    items: [
+      { key: "deepseek-v3.2", label: "DeepSeek V3.2", title: "deepseek/deepseek-v3.2" },
+      {
+        key: "deepseek-r1",
+        label: "DeepSeek R1",
+        title: "deepseek/deepseek-r1",
+        reason: "该服务尚未配置 API Key",
+      },
+    ],
+  },
+];
+
+function ConversationModelCandidateListPreview() {
+  const [query, setQuery] = useState("");
+  const [selectedKey, setSelectedKey] = useState("qwen3-max");
+  const needle = query.trim().toLowerCase();
+  const groups = needle
+    ? previewModelCandidateGroups
+      .map((group) => ({
+        ...group,
+        items: group.items.filter((row) => row.label.toLowerCase().includes(needle)),
+      }))
+      .filter((group) => group.items.length > 0)
+    : previewModelCandidateGroups;
+  return (
+    <ConversationModelCandidateList
+      lang="zh"
+      groups={groups}
+      selectedKey={selectedKey}
+      query={query}
+      onQueryChange={setQuery}
+      defaultExpandedGroupKeys={["dashscope"]}
+      onSelect={setSelectedKey}
+      listLabel="模型候选列表预览"
+      searchLabel="搜索模型"
+      emptyLabel="没有匹配的模型"
+    />
+  );
+}
 
 export function InteractiveCatalog() {
   const [turnIndex, setTurnIndex] = useState(3);
@@ -88,6 +144,9 @@ export function InteractiveCatalog() {
           <p>共享模型入口的展开状态；此预览不修改模型设置。</p>
         </VPopover>
       </VuiPreviewCard>
+<VuiPreviewCard name="ConversationModelCandidateList">
+<ConversationModelCandidateListPreview />
+</VuiPreviewCard>
       <VuiPreviewCard name="ConversationTurnModelControl">
         <ConversationTurnModelControl
           sessionId="preview-session"
