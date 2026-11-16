@@ -64,6 +64,25 @@ const GROUP_SWATCH_CLASS: Record<AgentSessionTabGroupColor, string> = {
   violet: styles.agentSessionTabGroupSwatchViolet,
   rose: styles.agentSessionTabGroupSwatchRose,
 };
+
+/** Group colour dot: the chip's only colour signal, so one chip keeps one accent. */
+const GROUP_TINT_CLASS: Record<AgentSessionTabGroupColor, string> = {
+  gray: styles.agentSessionTabGroupTintGray,
+  blue: styles.agentSessionTabGroupTintBlue,
+  green: styles.agentSessionTabGroupTintGreen,
+  amber: styles.agentSessionTabGroupTintAmber,
+  violet: styles.agentSessionTabGroupTintViolet,
+  rose: styles.agentSessionTabGroupTintRose,
+};
+
+const GROUP_DOT_CLASS: Record<AgentSessionTabGroupColor, string> = {
+  gray: styles.agentSessionTabGroupDotGray,
+  blue: styles.agentSessionTabGroupDotBlue,
+  green: styles.agentSessionTabGroupDotGreen,
+  amber: styles.agentSessionTabGroupDotAmber,
+  violet: styles.agentSessionTabGroupDotViolet,
+  rose: styles.agentSessionTabGroupDotRose,
+};
 import "./AgentSessionTabStrip.armed.css";
 import "./AgentSessionTabStrip.groups.css";
 import { sessionBlocksMutation } from "./sessionActivityState";
@@ -112,14 +131,7 @@ export type CliAgentRunTab = {
 export type AgentSessionStatusTone = SessionActivityTone;
 
 /** Header aggregate: approval outranks running, then error, unread, idle. */
-const GROUP_TINT_CLASS: Record<AgentSessionTabGroupColor, string> = {
-  gray: styles.agentSessionTabGroupTintGray,
-  blue: styles.agentSessionTabGroupTintBlue,
-  green: styles.agentSessionTabGroupTintGreen,
-  amber: styles.agentSessionTabGroupTintAmber,
-  violet: styles.agentSessionTabGroupTintViolet,
-  rose: styles.agentSessionTabGroupTintRose,
-};
+
 
 const GROUP_TONE_PRIORITY: Record<AgentSessionStatusTone, number> = {
   approval: 6,
@@ -842,13 +854,13 @@ export function AgentSessionTabStrip({
     const dropActive = groupDropTarget === section.groupId;
     const aggregateTone = groupAggregateTone(section);
     const activeColor = sessionTabGroupColorFor(groupState, section.groupId);
-    const groupTint = activeColor ? GROUP_TINT_CLASS[activeColor] : "";
+    const groupDot = activeColor ? GROUP_DOT_CLASS[activeColor] : "";
     const isOpen = groupIsOpen(section.groupId);
     const headerClassName = [
       styles.agentSessionTabGroupHeader,
-      // The accent ring already says "the open session is in this group";
-      // stacking the colour tint on the same chip made two signals compete.
-      containsActive ? styles.agentSessionTabGroupHeaderActive : groupTint,
+      // The accent ring says "the open session is in this group"; the group
+      // colour belongs on the dot instead of tinting the whole chip.
+      containsActive ? styles.agentSessionTabGroupHeaderActive : "",
       dropActive ? styles.agentSessionTabGroupHeaderDropTarget : "",
       isOpen ? styles.agentSessionTabGroupHeaderOpen : "",
     ].filter(Boolean).join(" ");
@@ -916,6 +928,13 @@ export function AgentSessionTabStrip({
               setGroupMenu({ groupId: section.groupId, x: event.clientX, y: event.clientY });
             }}
           >
+            {activeColor ? (
+              <span
+                className={[styles.agentSessionTabGroupDot, groupDot].filter(Boolean).join(" ")}
+                aria-hidden="true"
+                data-group-dot={activeColor}
+              />
+            ) : null}
             {renderAgentSessionStatusSlot(aggregateTone)}
             {renaming ? (
               <span onPointerDown={(event) => event.stopPropagation()}>
