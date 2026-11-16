@@ -59,6 +59,7 @@ def task(tmp_path, monkeypatch):
         (directory / ".session_deleted").write_text('{"deleted":true}', encoding="utf-8")
         return {"deleted": True}
     native.delete_chat_session_lightweight = delete
+    native._delete_chat_session_state = delete
     monkeypatch.setattr(cleanup, "_native_session_service", lambda service: native)
     monkeypatch.setattr(cleanup, "_delete_session_control_phase", lambda sid, raw: state["phase"])
     from core.web.services.session import admission_lock
@@ -108,6 +109,84 @@ def test_deletes_exclusive_files_and_record_preserves_small_guards_and_user_sour
     retained = {item["kind"]: item for item in result["retained"]}
     assert retained["request_tombstone"]["bytes"] == tombstone_path.stat().st_size
     assert retained["session_guards"]["bytes"] == sum(path.stat().st_size for path in task.directory.iterdir())
+
+
+def test_session_only_cleanup_keeps_original_task_result_main_session_and_dirty_files(task, monkeypatch):
+    task_id = task.record["taskId"]
+    patch = task.tmp / "worktree" / "draft.py"
+    patch.parent.mkdir()
+    patch.write_bytes(b"uncommitted patch")
+    main = task.root / "agent-main"
+    main.mkdir()
+    (main / "turn_journal.jsonl").write_bytes(b"main conversation")
+    task.state["agents"] = [{"agentId": "coder", "directSessionId": "agent-main"}]
+    task.service.store.transition(task_id, status="succeeded", fields={"localWorkspacePath": str(patch.parent)})
+    monkeypatch.setattr(cleanup, "_workspace_plan", lambda *args: (None, [], "workspace_has_uncommitted_or_ignored_files"))
+    snapshot = cleanup.preview_task_session_cleanup(task.service, owner_id=OWNER, task_id=task_id)
+    assert snapshot["status"] == "ready" and [item["kind"] for item in snapshot["resources"]] == ["session_files"]
+    bound = {"owner_id": OWNER, "task_id": task_id, "revision": snapshot["revision"], "fingerprint": snapshot["fingerprint"]}
+    with pytest.raises(ExternalAgentConflictError):
+        cleanup.cleanup_task(task.service, **bound)
+    with pytest.raises(ExternalAgentConflictError):
+        cleanup.cleanup_task_session(task.service, session_id="agent-main", **bound)
+    assert task.state["calls"] == []
+
+    result = cleanup.cleanup_task_session(task.service, session_id=snapshot["sessionId"], **bound)
+    assert result["status"] == "deleted" and result["sessionId"] == "session-1"
+    assert task.state["calls"] == ["session-1"]
+    assert patch.read_bytes() == b"uncommitted patch"
+    assert (main / "turn_journal.jsonl").read_bytes() == b"main conversation"
+    assert task.service.store.get_task(task_id)["resultSummary"] == "private result"
+    assert not task.service.store.tombstone_path(task_id).exists()
+    after = cleanup.preview_task_session_cleanup(task.service, owner_id=OWNER, task_id=task_id)
+    assert after["alreadyDeleted"] is True
+    repeat = cleanup.cleanup_task_session(task.service, owner_id=OWNER, task_id=task_id, session_id=after["sessionId"],
+        revision=after["revision"], fingerprint=after["fingerprint"])
+    assert repeat["alreadyDeleted"] is True and task.state["calls"] == ["session-1"]
+
+
+def test_session_only_cleanup_blocks_direct_or_active_session(task):
+    task.state["agents"] = [{"agentId": "coder", "directSessionId": "session-1"}]
+    for direct, active, reason in [(True, False, "session_direct_binding"), (False, True, "session_active")]:
+        task.state["agents"] = [{"directSessionId": "session-1"}] if direct else []
+        task.state["active"] = active
+        snapshot = cleanup.preview_task_session_cleanup(task.service, owner_id=OWNER, task_id=task.record["taskId"])
+        assert snapshot["status"] == "blocked"
+        assert any(item["reason"] == reason for item in snapshot["retained"])
+        result = cleanup.cleanup_task_session(task.service, owner_id=OWNER, task_id=task.record["taskId"],
+            session_id=snapshot["sessionId"], revision=snapshot["revision"], fingerprint=snapshot["fingerprint"])
+        assert result["status"] == "blocked" and task.state["calls"] == []
+
+
+@pytest.mark.parametrize("hazard", ["legacy_child", "nested_git", "workspace_overlap"])
+def test_session_only_cleanup_preserves_related_sessions_and_nested_worktrees(task, hazard):
+    task_id = task.record["taskId"]
+    if hazard == "legacy_child":
+        task.state["others"] = [{"conversation_id": "ordinary-child", "parentSessionId": " session-1 "}]
+    elif hazard == "nested_git":
+        (task.directory / ".git").write_text("gitdir: elsewhere", encoding="utf-8")
+    else:
+        task.service.store.transition(task_id, status="succeeded", fields={"localWorkspacePath": str(task.directory)})
+    snapshot = cleanup.preview_task_session_cleanup(task.service, owner_id=OWNER, task_id=task_id)
+    assert snapshot["status"] == "blocked" and not task.state["calls"]
+
+
+def test_session_only_cleanup_reports_partial_after_native_delete_even_with_no_unlinked_bytes(task, monkeypatch):
+    task_id = task.record["taskId"]
+    snapshot = cleanup.preview_task_session_cleanup(task.service, owner_id=OWNER, task_id=task_id)
+    original_unlink = Path.unlink
+
+    def deny_first_session_unlink(path, *args, **kwargs):
+        if path == task.directory / "turn_journal.jsonl":
+            raise PermissionError("test denial")
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", deny_first_session_unlink)
+    result = cleanup.cleanup_task_session(task.service, owner_id=OWNER, task_id=task_id,
+        session_id=snapshot["sessionId"], revision=snapshot["revision"], fingerprint=snapshot["fingerprint"])
+    assert result["status"] == "partial" and task.state["calls"] == ["session-1"]
+    assert (task.directory / "turn_journal.jsonl").is_file()
+    assert not cleanup.preview_task_session_cleanup(task.service, owner_id=OWNER, task_id=task_id)["alreadyDeleted"]
 
 
 def test_deleted_request_is_fenced_across_store_reload_without_affecting_external_store(task):
@@ -366,8 +445,8 @@ def test_unavailable_byte_accounting_reports_zero_and_failure(task, monkeypatch,
 
 def test_replaced_session_root_cannot_be_counted_as_released_space(task, monkeypatch):
     original = cleanup._delete_session_files
-    def replace(*args):
-        original(*args)
+    def replace(*args, **kwargs):
+        original(*args, **kwargs)
         task.directory.rename(task.root / "old-session-root")
         task.directory.mkdir()
         (task.directory / "unrelated.txt").write_text("preserve")
@@ -378,7 +457,8 @@ def test_replaced_session_root_cannot_be_counted_as_released_space(task, monkeyp
     assert (task.directory / "unrelated.txt").read_text() == "preserve"
 
 
-def test_native_session_lifecycle_really_removes_sqlite_runtime_payload(task, monkeypatch):
+@pytest.mark.parametrize("session_only", [False, True])
+def test_native_session_lifecycle_really_removes_sqlite_runtime_payload(task, monkeypatch, session_only):
     from core.web.services import session_service as native
     from core.web.services.session import conversation_index
     from core.web.services.session.agent_sessions import _delete_session_control_phase
@@ -398,7 +478,13 @@ def test_native_session_lifecycle_really_removes_sqlite_runtime_payload(task, mo
     save_chat_state(task.project, {"version": 1, "active_conversation_id": "session-keep", "conversations": [raw,
         {"conversation_id": "session-keep", "title": "Keep", "last_turn_status": "ready"}]})
     assert native.load_session_chat_state(task.project, "session-1") is not None
-    result = execute(task)
+    if session_only:
+        task_id = task.record["taskId"]
+        snapshot = cleanup.preview_task_session_cleanup(task.service, owner_id=OWNER, task_id=task_id)
+        result = cleanup.cleanup_task_session(task.service, owner_id=OWNER, task_id=task_id,
+            session_id=snapshot["sessionId"], revision=snapshot["revision"], fingerprint=snapshot["fingerprint"])
+    else:
+        result = execute(task)
     assert result["failures"] == []
     assert result["status"] == "deleted", result
     assert native.load_session_chat_state(task.project, "session-1") is None
@@ -456,7 +542,8 @@ def test_only_clean_merged_exact_task_worktree_is_deleted(task, state):
             assert not path.exists()
 
 
-def test_routes_require_control_launcher_and_task_owner_and_validate_fingerprint(task, monkeypatch):
+@pytest.mark.parametrize("suffix", ["cleanup", "session-cleanup"])
+def test_routes_require_control_launcher_and_task_owner_and_validate_fingerprint(task, monkeypatch, suffix):
     from core.web.routes import local_assistant_tasks
     from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
     monkeypatch.setattr(local_assistant_tasks, "verify_launcher_authority", lambda value: value == "launcher-secret")
@@ -468,7 +555,7 @@ def test_routes_require_control_launcher_and_task_owner_and_validate_fingerprint
     app = FastAPI()
     app.include_router(local_assistant_tasks.router, prefix="/api")
     client = TestClient(app)
-    path = "/api/local-assistant/v1/external-agent/tasks/" + task.record["taskId"] + "/cleanup"
+    path = f"/api/local-assistant/v1/external-agent/tasks/{task.record['taskId']}/{suffix}"
     headers = {CONTROL_TOKEN_HEADER: get_control_token(), "X-Vibelution-Management-Subject": "launcher-local",
         "X-Vibelution-Management-Capability": "launcher-secret", "X-Vibelution-External-Agent-Task-Capability": OWNER}
     assert client.post(path + "/preview").status_code == 403
@@ -479,10 +566,14 @@ def test_routes_require_control_launcher_and_task_owner_and_validate_fingerprint
     response = client.post(path + "/preview", headers=headers)
     assert response.status_code == 200 and response.headers["Cache-Control"] == "no-store"
     snapshot = response.json()
-    assert client.post(path, headers=headers, json={"revision": snapshot["revision"], "fingerprint": "x"}).status_code == 422
-    stale = {"revision": snapshot["revision"], "fingerprint": "0" * 64}
+    bind = {"sessionId": snapshot["sessionId"]} if suffix == "session-cleanup" else {}
+    assert client.post(path, headers=headers, json={**bind, "revision": snapshot["revision"], "fingerprint": "x"}).status_code == 422
+    stale = {**bind, "revision": snapshot["revision"], "fingerprint": "0" * 64}
     assert client.post(path, headers=headers, json=stale).status_code == 409
-    assert client.post(path, headers=headers, json={"revision": snapshot["revision"], "fingerprint": snapshot["fingerprint"]}).json()["status"] == "deleted"
+    body = {**bind, "revision": snapshot["revision"], "fingerprint": snapshot["fingerprint"]}
+    if suffix == "session-cleanup":
+        assert client.post(path, headers=headers, json={**body, "sessionId": "another-session"}).status_code == 409
+    assert client.post(path, headers=headers, json=body).json()["status"] == "deleted"
 
 
 @pytest.mark.parametrize("ending", ["cancel", "lease", "deadline"])

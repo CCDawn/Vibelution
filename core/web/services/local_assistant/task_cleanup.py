@@ -177,6 +177,9 @@ def _session_plan(service, record, native):
     if not session_id:
         return [], [], False, None
     raw = native.load_session_chat_state(native.PROJECT_ROOT, session_id)
+    if record.get("localCleanupSessionOnlyComplete") is True and (
+            raw is not None or not native._is_session_workspace_intentionally_deleted(session_id)):
+        raise ValueError("session_ownership_unproven")
     retry = record.get("localCleanupSessionDeleted") is True
     absent = raw is None and not retry
     if raw is not None:
@@ -200,7 +203,7 @@ def _session_plan(service, record, native):
     related_keys = ("parent_session_id", "parentSessionId", "root_session_id", "rootSessionId")
     if raw is not None and any(raw.get(key) for key in related_keys):
         raise ValueError("session_family_shared")
-    if any(isinstance(item, dict) and any(item.get(key) == session_id for key in related_keys)
+    if any(isinstance(item, dict) and any(str(item.get(key) or "").strip() == session_id for key in related_keys)
            for item in conversations):
         raise ValueError("session_family_shared")
     from core.web.services.session import directory_runtime
@@ -230,6 +233,8 @@ def _session_plan(service, record, native):
             if other.get("sessionId") == session_id and (store.root != service.store.root or other.get("taskId") != record["taskId"]):
                 raise ValueError("session_shared_by_task")
     token = native._safe_session_workspace_token(session_id)
+    raw_workspace = record.get("localWorkspacePath") or record.get("localCleanupWorkspacePath")
+    workspace = Path(raw_workspace).resolve() if raw_workspace else None
     directories = []
     files = []
     for root in native._agent_session_workspace_roots():
@@ -237,6 +242,11 @@ def _session_plan(service, record, native):
         if path.parent != Path(root).resolve() or path == service.project_root or path == Path(root):
             raise ValueError("unsafe_session_root")
         tree = _safe_tree(path)
+        if (workspace is not None and workspace != service.project_root
+                and (path.is_relative_to(workspace) or workspace.is_relative_to(path))):
+            raise ValueError("session_workspace_intersects_task")
+        if any(part.rstrip(" .").casefold() == ".git" for item in tree for part in item[0].relative_to(path).parts):
+            raise ValueError("session_workspace_intersects_task")
         directories.append(path)
         if path.exists():
             files.extend(item for item in tree if item[0].relative_to(path).as_posix() not in _SESSION_GUARDS)
@@ -302,7 +312,7 @@ def _workspace_plan(service, record):
     return {"path": path, "main": main, "branch": branch, "head": head.stdout.strip()}, files, ""
 
 
-def _plan(service, record, native):
+def _plan(service, record, native, *, session_only=False):
     retained, failures = [], []
     directories, session_files, workspace, workspace_files = [], [], None, []
     session_absent = False
@@ -314,17 +324,22 @@ def _plan(service, record, native):
                 retained.append({"kind": "session_guards", "reason": "native_recovery_and_admission_guards"})
         except (ValueError, OSError) as exc:
             failures.append({"kind": "session", "reason": str(exc) if isinstance(exc, ValueError) else type(exc).__name__})
-    try:
-        workspace, workspace_files, reason = _workspace_plan(service, record)
-        if reason:
-            # Shared resources intentionally outlive this task. An exclusive
-            # workspace we cannot safely finish cleaning must keep its task
-            # record reachable, rather than leave an orphan after deletion.
-            destination = retained if reason in {"shared_project_source", "workspace_shared_by_task", "legacy_workspace_not_owned"} else failures
-            destination.append({"kind": "workspace", "reason": reason})
-    except (ValueError, OSError, RuntimeError) as exc:
-        failures.append({"kind": "workspace", "reason": str(exc) if isinstance(exc, ValueError) else type(exc).__name__})
-    task_files = _safe_tree(service.store.task_path(record["taskId"]))
+    if session_only:
+        if not record.get("sessionId"):
+            failures.append({"kind": "session", "reason": "task_session_missing"})
+        retained.extend(({"kind": "task_record", "reason": "session_cleanup_keeps_task_receipt"},
+                         {"kind": "workspace", "reason": "session_cleanup_keeps_workspace"}))
+    else:
+        try:
+            workspace, workspace_files, reason = _workspace_plan(service, record)
+            if reason:
+                # Shared resources intentionally outlive this task. Keep a task
+                # record reachable when its exclusive workspace cannot be removed.
+                destination = retained if reason in {"shared_project_source", "workspace_shared_by_task", "legacy_workspace_not_owned"} else failures
+                destination.append({"kind": "workspace", "reason": reason})
+        except (ValueError, OSError, RuntimeError) as exc:
+            failures.append({"kind": "workspace", "reason": str(exc) if isinstance(exc, ValueError) else type(exc).__name__})
+    task_files = [] if session_only else _safe_tree(service.store.task_path(record["taskId"]))
     resources = [{"kind": kind, "count": len(files), "bytes": sum(item[1] for item in files)}
                  for kind, files in (("task_record", task_files), ("session_files", session_files), ("workspace", workspace_files)) if files]
     retained.append({"kind": "shared_runtime_storage", "reason": "shared_database_and_git_objects"})
@@ -333,7 +348,7 @@ def _plan(service, record, native):
     internal = {"directories": directories, "sessionFiles": session_files, "workspace": workspace,
                 "workspaceFiles": workspace_files, "taskFiles": task_files, "failures": failures,
                 "sessionAbsent": session_absent, "sessionDirectoryPin": directory_pin}
-    fingerprint = _digest({"record": record, "files": [[str(path), size, modified, inode] for files in
+    fingerprint = _digest({"record": record, "sessionOnly": session_only, "files": [[str(path), size, modified, inode] for files in
         (task_files, session_files, workspace_files) for path, size, modified, inode in files], "retained": retained,
         "failures": failures, "sessionAbsent": session_absent,
         "sessionDirectoryGeneration": directory_pin.generation if directory_pin else None})
@@ -373,14 +388,34 @@ def preview_task_cleanup(service, *, owner_id, task_id):
         return completed
 
 
-def _delete_session_files(native, record, directories, progress):
+def preview_task_session_cleanup(service, *, owner_id, task_id):
+    with _cleanup_scope(service, owner_id, task_id) as (record, native, _authority):
+        snapshot, _ = _plan(service, record, native, session_only=True)
+        return {**snapshot, "sessionId": record.get("sessionId", ""),
+                "alreadyDeleted": snapshot["status"] == "ready" and record.get("localCleanupSessionOnlyComplete") is True}
+
+
+def cleanup_task_session(service, *, owner_id, task_id, session_id, revision, fingerprint):
+    return _cleanup_task(service, owner_id=owner_id, task_id=task_id, revision=revision,
+                         fingerprint=fingerprint, session_only=True, expected_session_id=session_id)
+
+
+def _delete_session_files(native, record, directories, progress, *, session_only=False):
     session_id = record["sessionId"]
     if native.load_session_chat_state(native.PROJECT_ROOT, session_id) is not None:
-        native.delete_chat_session_lightweight(session_id, activate_replacement=False)
+        if session_only:
+            # The ordinary lightweight entry also deletes descendants. This
+            # grant only covers the exact proven Session.
+            from core.web.services.session import session_index_stream
+            native._delete_chat_session_state(session_id, activate_replacement=False)
+            session_index_stream.publish_session_index_change_safely(session_id, "remove")
+        else:
+            native.delete_chat_session_lightweight(session_id, activate_replacement=False)
     if (native.load_session_chat_state(native.PROJECT_ROOT, session_id) is not None
             or not native._is_session_workspace_intentionally_deleted(session_id)
             or not any((directory / ".session_deleted").is_file() for directory in directories)):
         raise ValueError("native_session_delete_unconfirmed")
+    progress["sessionDeleted"] = True
     for directory in directories:
         for path, size, _modified, _inode in _safe_tree(directory):
             if path.relative_to(directory).as_posix() in _SESSION_GUARDS:
@@ -460,16 +495,22 @@ def _accounting_bytes(surfaces):
     return sum(files.values())
 
 
-def _cleanup_task(service, *, owner_id, task_id, revision, fingerprint):
+def _cleanup_task(service, *, owner_id, task_id, revision, fingerprint, session_only=False, expected_session_id=None):
     with _cleanup_scope(service, owner_id, task_id) as (record, native, authority):
-        preview, plan = _plan(service, record, native)
-        if type(revision) is not int or revision != record["revision"] or fingerprint != preview["fingerprint"]:
+        preview, plan = _plan(service, record, native, session_only=session_only)
+        if (type(revision) is not int or revision != record["revision"] or fingerprint != preview["fingerprint"]
+                or session_only and record.get("sessionId") != expected_session_id):
             raise ExternalAgentConflictError("Cleanup preview changed", code="CLEANUP_STALE")
         retained, failures, released = list(preview["retained"]), list(plan["failures"]), 0
+        session_deleted = False
+        result_identity = {"sessionId": expected_session_id} if session_only else {}
+        if session_only and not failures and record.get("localCleanupSessionOnlyComplete") is True:
+            return {"schemaVersion": 1, "taskId": task_id, **result_identity, "status": "deleted",
+                    "alreadyDeleted": True, "releasedBytes": 0, "retained": retained, "failures": []}
         try:
             surfaces, bytes_before = _accounting_snapshot(service, record, plan)
         except (OSError, ValueError):
-            return {"schemaVersion": 1, "taskId": task_id, "status": "blocked", "releasedBytes": 0,
+            return {"schemaVersion": 1, "taskId": task_id, **result_identity, "status": "blocked", "releasedBytes": 0,
                 "retained": retained, "failures": failures + [
                     {"kind": "accounting", "reason": "cleanup_accounting_unavailable"}]}
         if plan["sessionDirectoryPin"] is not None:
@@ -477,16 +518,17 @@ def _cleanup_task(service, *, owner_id, task_id, revision, fingerprint):
             if not directory_runtime.directory_store_pin_is_current(plan["sessionDirectoryPin"]):
                 raise ExternalAgentConflictError("Native Session owner changed", code="CLEANUP_OWNER_CHANGED")
         if not failures and record.get("sessionId") and not plan["sessionAbsent"]:
-            progress = {"released": 0, "guardBytes": 0}
+            progress = {"released": 0, "guardBytes": 0, "sessionDeleted": False}
             try:
                 # Persist recovery proof before native deletion: a failed file
                 # unlink must be retryable after its runtime row has gone.
                 record = service.store.transition(task_id, status=record["status"], expected_revision=record["revision"],
                     fields={"localCleanupSessionDeleted": True})
-                _delete_session_files(native, record, plan["directories"], progress)
+                _delete_session_files(native, record, plan["directories"], progress, session_only=session_only)
             except Exception as exc:
                 failures.append({"kind": "session", "reason": type(exc).__name__})
             released += progress["released"]
+            session_deleted = progress["sessionDeleted"]
             retained.append({"kind": "session_guards", "reason": "native_recovery_and_admission_guards", "bytes": progress["guardBytes"]})
         workspace = plan["workspace"]
         if not failures and workspace:
@@ -506,7 +548,13 @@ def _cleanup_task(service, *, owner_id, task_id, revision, fingerprint):
                     retained.append({"kind": "local_branch", "reason": "branch_delete_failed"})
             except Exception as exc:
                 failures.append({"kind": "workspace", "reason": str(exc) if isinstance(exc, ValueError) else type(exc).__name__})
-        if not failures:
+        if not failures and session_only:
+            try:
+                service.store.transition(task_id, status=record["status"], expected_revision=record["revision"],
+                    fields={"localCleanupSessionOnlyComplete": True})
+            except OSError as exc:
+                failures.append({"kind": "task_record", "reason": type(exc).__name__})
+        elif not failures:
             tombstone = {"schemaVersion": 1, "taskId": task_id, "ownerSubjectHash": record["ownerSubjectHash"],
                 "requestKeyHash": _digest([record["ownerSubjectHash"], record.get("clientRequestId") or ""]),
                 "localAuthorityFingerprint": authority,
@@ -527,5 +575,6 @@ def _cleanup_task(service, *, owner_id, task_id, revision, fingerprint):
         except (OSError, ValueError):
             storage_delta = 0
             failures.append({"kind": "accounting", "reason": "cleanup_accounting_unavailable"})
-        return {"schemaVersion": 1, "taskId": task_id, "status": "partial" if failures and released else "blocked" if failures else "deleted",
+        changed = bool(released or session_only and session_deleted)
+        return {"schemaVersion": 1, "taskId": task_id, **result_identity, "status": "partial" if failures and changed else "blocked" if failures else "deleted",
                 "releasedBytes": max(0, storage_delta), "storageDeltaBytes": storage_delta, "retained": retained, "failures": failures}

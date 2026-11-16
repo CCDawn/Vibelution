@@ -51,6 +51,21 @@ async def test_legacy_cleanup_never_recovers_missing_credentials_or_bypasses_lau
     assert exc.value.code == code and calls == []
 
 
+@pytest.mark.anyio
+async def test_session_only_cleanup_never_uses_the_legacy_transport(tmp_path, monkeypatch):
+    client, calls, business = _client(tmp_path, monkeypatch)
+    client._state["tasks"] = {"eat-1": {"taskCapability": "capability-1"}}
+    with pytest.raises(sdk.BackendClientError) as exc:
+        await client.preview_task_session_cleanup("eat-1")
+    assert exc.value.code == "TASK_CLEANUP_UNAVAILABLE" and not calls
+    client._state["transportNamespaces"] = {_digest("capability-1"): "local"}
+    await client.preview_task_session_cleanup("eat-1")
+    await client.cleanup_task_session("eat-1", "session-1", 7, "a" * 64)
+    assert [request.url.path for request in business] == [
+        LOCAL + "/tasks/eat-1/session-cleanup/preview", LOCAL + "/tasks/eat-1/session-cleanup"]
+    assert json.loads(business[-1].content) == {"sessionId": "session-1", "revision": 7, "fingerprint": "a" * 64}
+
+
 @pytest.fixture(autouse=True)
 def process_authority():
     authority.install_launcher_authority(None)

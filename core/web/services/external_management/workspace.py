@@ -134,10 +134,10 @@ def _list_record_shape(record):
             _deny()
 
 
-def _agent_visibility(directory, agent):
+def _agent_visibility(directory, agent, *, allow_roleless=False):
     metadata = agent.get("metadata", {})
     if (not isinstance(metadata, dict) or agent.get("status") != "active"
-        or not isinstance(agent.get("roleKey"), str) or not agent["roleKey"]):
+        or not isinstance(agent.get("roleKey"), str) or not (agent["roleKey"] or allow_roleless)):
         _deny(known_private=agent.get("status") == "archived" and isinstance(metadata, dict))
     if (agent.get("kind") != directory.DEFAULT_AGENT_KIND or agent.get("roleKey") == "personal_assistant"
         or agent["roleKey"].startswith(("challenge_cup_", "knowledge_expansion_"))
@@ -176,7 +176,7 @@ def _binding_snapshot(project_root, agent_id, cache=None):
 
 def _validated_session_snapshot(
     project_root: Path, directory, session_id: str, *, _context=None, strict_shape=False, return_agent=False,
-    _source_reader=None, _return_store=False,
+    _source_reader=None, _return_store=False, allow_roleless_agent=False,
 ):
     from core.agent_plugins.virtual_human_life.storage import VirtualHumanLifeStore
     from core.infrastructure import developer_sandbox
@@ -219,7 +219,7 @@ def _validated_session_snapshot(
             if _source_reader is not None else _team_member_ids(project_root))
         if agent_id in team_ids:
             _deny(known_private=True)
-        metadata, agent_classification = _agent_visibility(directory, agent)
+        metadata, agent_classification = _agent_visibility(directory, agent, allow_roleless=allow_roleless_agent)
         for record in (row, runtime):
             if any(record.get(key) in directory.TEAM_PRIVATE_DIRECT_SESSION_CREATED_BY | directory.INTERNAL_RECOVERY_DIRECT_SESSION_CREATED_BY
                    for key in ("source", "created_by", "createdBy")):
@@ -242,23 +242,29 @@ def _validated_session_snapshot(
         raise
     except (OSError, ValueError, TypeError, KeyError, RuntimeError):
         _deny()
+    metadata = runtime.get("metadata")
     result = store.repository, deepcopy(row), {
-        "last_turn_status": runtime.get("last_turn_status"), "lastTurnStatus": runtime.get("lastTurnStatus")}
+        "last_turn_status": runtime.get("last_turn_status"), "lastTurnStatus": runtime.get("lastTurnStatus"),
+        "source": metadata.get("source") if isinstance(metadata, dict) else None}
     if return_agent:
         result = (*result, deepcopy(agent))
     return (*result, store) if _return_store else result
 
 
-def read_session(project_root: Path, directory, session_id: str) -> dict:
+def _public_session(row, runtime):
     from tools.pa_workspace_actions import _session_public
 
-    _repository, row, runtime = _validated_session_snapshot(project_root, directory, session_id)
     # Frozen directory title/pin and runtime phase only. No messages, previews,
     # paths, config snapshots, worker objects or active operator selection.
     public = _session_public({**row, "phase": runtime.get("last_turn_status") or runtime.get("lastTurnStatus") or row.get("status")})
     pinned_at = row.get("pinnedAtMs")
     public["pinnedAtMs"] = pinned_at if type(pinned_at) is int and pinned_at > 0 else None
-    return {"session": public, "untrustedContent": True}
+    return public
+
+
+def read_session(project_root: Path, directory, session_id: str) -> dict:
+    _, row, runtime = _validated_session_snapshot(project_root, directory, session_id)
+    return {"session": _public_session(row, runtime), "untrustedContent": True}
 
 
 def pin_session(project_root: Path, directory, parameters: dict) -> None:

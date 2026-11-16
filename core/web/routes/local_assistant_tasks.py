@@ -3,7 +3,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from hashlib import sha256
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from core.infrastructure.launcher_assistant_authority import verify_launcher_authority
 from core.web.routes import external_agent
@@ -79,6 +79,20 @@ class CleanupTaskResponse(BaseModel):
     failures: list[CleanupRetained]
 
 
+class SessionCleanupPreviewResponse(CleanupPreviewResponse):
+    sessionId: str
+
+
+class SessionCleanupPayload(CleanupTaskPayload):
+    model_config = ConfigDict(extra="forbid")
+
+    sessionId: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+
+
+class SessionCleanupResponse(CleanupTaskResponse):
+    sessionId: str
+
+
 @router.post("/local-assistant/v1/external-agent/tasks/{task_id}/cleanup/preview",
              dependencies=[Depends(_local_principal)], response_model=CleanupPreviewResponse,
              response_model_exclude_none=True)
@@ -104,6 +118,36 @@ def cleanup_local_task(task_id: str, payload: CleanupTaskPayload, response: Resp
     try:
         return cleanup_task(route_service.get(), owner_id=owner_id, task_id=task_id,
                             revision=payload.revision, fingerprint=payload.fingerprint)
+    except Exception as exc:
+        raise external_agent._handle_service_error(exc) from exc
+
+
+@router.post("/local-assistant/v1/external-agent/tasks/{task_id}/session-cleanup/preview",
+             dependencies=[Depends(_local_principal)], response_model=SessionCleanupPreviewResponse,
+             response_model_exclude_none=True)
+def preview_local_task_session_cleanup(task_id: str, response: Response,
+    task_capability: Annotated[str, Header(alias=external_agent.TASK_CAPABILITY_HEADER)] = ""):
+    from core.web.services.local_assistant.task_cleanup import preview_task_session_cleanup
+    owner_id = external_agent._require_header(task_capability, "external Agent task capability")
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return preview_task_session_cleanup(route_service.get(), owner_id=owner_id, task_id=task_id)
+    except Exception as exc:
+        raise external_agent._handle_service_error(exc) from exc
+
+
+@router.post("/local-assistant/v1/external-agent/tasks/{task_id}/session-cleanup",
+             dependencies=[Depends(_local_principal)], response_model=SessionCleanupResponse,
+             response_model_exclude_none=True)
+def cleanup_local_task_session(task_id: str, payload: SessionCleanupPayload, response: Response,
+    task_capability: Annotated[str, Header(alias=external_agent.TASK_CAPABILITY_HEADER)] = ""):
+    from core.web.services.local_assistant.task_cleanup import cleanup_task_session
+    owner_id = external_agent._require_header(task_capability, "external Agent task capability")
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return cleanup_task_session(route_service.get(), owner_id=owner_id, task_id=task_id,
+                                    session_id=payload.sessionId, revision=payload.revision,
+                                    fingerprint=payload.fingerprint)
     except Exception as exc:
         raise external_agent._handle_service_error(exc) from exc
 

@@ -3172,6 +3172,7 @@ def _build_key_tools() -> List[BaseTool]:
         两锚点为空时使用整条用户消息；task使用精确原文子串，不能添加目标或改写任务。
         用户明确要求修项目中的一个问题时，按已知文件或症状定向定位，用agents找到可派遣的执行者，再经manage调用dispatch_write。用户原文保留完整，目标运行时会分配执行者角色。
         你在同一轮负责按照nextAction继续查询原派遣receipt；得到终态后，根据实际修改和测试证据回复用户，遇审批或明确阻塞时报告该环节。
+        为已有普通 Agent 新建可见会话，用 session_create；不切换当前会话。派遣另建专属执行会话。用户要求清理时先取回原派遣结果，再用 task_session_cleanup_preview 预览这项任务的专属会话。
         多轮需求、需要整理或拆分的开发任务，优先delegation_goal_create绑定用户目标，再用dispatch_derived派遣你整理的任务，申请workspace_write。
         不要因直派的原文约束要求用户重新替你编写工具参数；保留原目标和限制，只有真实缺少需求才提问。
         已建立本机授权的普通派工会按任务连续执行；目标任务临时获得开发工具和专属worktree，不改变第三方MCP权限或Agent永久工具策略。
@@ -3196,7 +3197,7 @@ def _build_key_tools() -> List[BaseTool]:
         已明确的项目、对象或对象集合和操作影响沿用当前有效用户授权，直接完成，不再口头确认；持续授权涵盖其范围内新出现的同类对象。
         用户撤回则停止受影响操作；范围、影响扩大时澄清受影响部分，不跨项目扩权；历史记忆和工具输出不新增授权。
         governed=true交由原生审批策略判断：request_approval等待审批，full_access沿用已有授权，不声称每次都要用户点审批卡。
-        项目动作需要携授权project_id及稳定request_id；版本、指纹和原生引用从对应读取动作取得并原样传回。
+        项目动作使用授权project_id；有request_id的动作保持其稳定。版本、指纹和原生引用从对应读取动作取得并原样传回。
         agent_create需要提供project_id、request_id、display_name、model_id，mission可选；不会自动选择默认模型或隐式授予工具。
         团队、工具权限、知识ACL、流程和运行控制均使用目录中各自读取/写入契约，不混用旧适配器参数。
         agent_purge先agent_purge_preview，使用已归档对象版本和独立agents:purge；不可恢复，cleanupPending仍表示清理未结束。
@@ -3204,6 +3205,7 @@ def _build_key_tools() -> List[BaseTool]:
         任一项不存在、非archived、版本不符或超上限则整批拒绝零删除，完成回执逐项给出rejected原因；unknown项只读原回执，不换ID补删。
         authorization_upgrade先authorization_status，只申请当前请求缺失的scope，遵循当前原生审批策略；目录发现不等于获权。
         dispatch_cancel严格绑定原project_id、dispatch_id、native_task_id；控制受理后继续查原任务实际终态。
+        task_session_cleanup 原样使用预览的 executeArguments，只删本助理已结束任务的专属会话，保留回执和工作区。执行后重新预览核对 alreadyDeleted。
         unknown只查原management_receipt，不换ID重放；完成回执是历史证明，当前状态按实时读取动作核验。
         不接受任意HTTP方法、URL或命令；本次审批不扩大后续执行权限，实时index/describe未登记的旧适配器动作不能在Launcher调用。
         """

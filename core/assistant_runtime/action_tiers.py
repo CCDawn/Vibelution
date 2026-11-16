@@ -37,6 +37,7 @@ OPERATOR_TIER_ACTIONS: frozenset[str] = frozenset({
     "reminder_handoff_queue", "reminder_handoff_recover",
     # Cleanup execution.
     "branch_cleanup_execute",
+    "task_session_cleanup",
 })
 
 # The config key this module reads. Only the operator may flip it by editing

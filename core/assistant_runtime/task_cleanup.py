@@ -132,6 +132,7 @@ def _failure_reason(error):
         "TASK_NOT_FOUND": "源任务、访问凭据或权限不可用，无法确认清理范围，已保留任务关联。",
         "BACKEND_TIMEOUT": "源项目未及时响应，清理结果尚未确认，请稍后重试。",
         "BACKEND_UNAVAILABLE": "源项目当前无法连接，已保留任务关联，请恢复连接后重试。",
+        "RUNTIME_IDENTITY_MISMATCH": "源项目运行版本与仓库不一致，或运行实例身份无法核对。已保留任务、会话和工作区，请通过 Launcher 更新运行时后重新预览。",
         "cleanup_reference_changed": "任务关联或项目绑定已变化，请刷新后重试。",
         "cleanup_source_moved": "源项目已换到别的路径，无法核验源资源，已保留任务关联。",
         "cleanup_run_changed": "团队任务身份与所选关联不一致，请刷新后重试。",
@@ -170,6 +171,10 @@ def _retained(rows):
         "session_direct_binding": "会话是 Agent 的主会话，不能随这项任务删除。",
         "session_active": "会话仍有活动，请结束后重试。",
         "session_ownership_unproven": "尚不能确认会话由这项任务独占。",
+        "task_session_missing": "没有可核实的任务专属会话。",
+        "session_cleanup_keeps_task_receipt": "保留原派遣回执和结果。",
+        "session_cleanup_keeps_workspace": "保留任务工作区、分支和补丁。",
+        "session_workspace_intersects_task": "会话文件范围与 Git 工作区重叠，已保留相关文件。",
         "unsafe_resource_link": "资源路径包含链接，未执行删除。",
     }
     return [{"kind": str(row.get("kind", "resource"))[:100],

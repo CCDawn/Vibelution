@@ -339,7 +339,7 @@ class AgentRead(Project):
 
 
 class ManagementReceipt(Project):
-    action: str = Field(pattern=r"^(?:agent_(create|update|avatar|archive|purge|purge_batch|tool_policy_update|dispatch_access_set|parameters_update|prompt_update)|team_(run|update)|session_pin|authorization_upgrade|runtime_command|team_recovery_confirm_deployment|knowledge_acl_(grant|revoke)|flow_(save|start))$")
+    action: str = Field(pattern=r"^(?:agent_(create|update|avatar|archive|purge|purge_batch|tool_policy_update|dispatch_access_set|parameters_update|prompt_update)|team_(run|update)|session_(create|pin)|authorization_upgrade|runtime_command|team_recovery_confirm_deployment|knowledge_acl_(grant|revoke)|flow_(save|start))$")
     request_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$")
 
 
@@ -404,6 +404,16 @@ def _management_contracts():
         "description": "停止本助理已派遣的原生任务。先用 dispatch_list/receipt 读取原 projectId、dispatchId、nativeTaskId；必须原样绑定三项，经当前原生管理审批请求取消。stop_unconfirmed/cancelling 只证明停止请求未确认，继续查询原 receipt 到终态，不换 ID 重派任务。",
         "parameters": DispatchCancel.model_json_schema(), "scope": "original_task_owner",
     })
+    from .task_session_cleanup import TaskSessionCleanup, TaskSessionCleanupPreview
+    for name, schema, description in (
+        ("task_session_cleanup_preview", TaskSessionCleanupPreview,
+         "只读预览已结束的本助理派遣任务会话。沿用 receipt 的 project_id 和 dispatch_id；普通会话、主会话和共享会话均不可清理。预览返回 executeArguments 时才能执行。"),
+        ("task_session_cleanup", TaskSessionCleanup,
+         "清理一个已结束派遣任务的独占会话内容和附件。按当前原生审批策略执行，将 task_session_cleanup_preview 返回的 executeArguments 原样传给管理工具。保留原派遣回执、工作区、分支和补丁。若结果未知，重新预览原派遣并查询 alreadyDeleted。"),
+    ):
+        result[name] = (schema, {"action": name, "description": description,
+            "parameters": schema.model_json_schema(), "governed": name == "task_session_cleanup",
+            "scope": "original_task_owner"})
     from .delegation import contracts as delegation_contracts, GoalCreate, GoalQuery, GoalList, DerivedDispatch
     delegation_models = {"delegation_goal_create": GoalCreate, "delegation_goal_get": GoalQuery,
                          "delegation_goal_revoke": GoalQuery, "delegation_goal_list": GoalList,
@@ -1140,6 +1150,14 @@ def execute_action(action: str, parameters: dict, *, runtime: dict | None = None
         if not runtime:
             raise ValueError("Launcher native tool identity is required")
         coroutine = service.cancel(args["dispatch_id"], project_id=args["project_id"], expected_task_id=args["native_task_id"])
+    elif action in {"task_session_cleanup_preview", "task_session_cleanup"}:
+        execute = action == "task_session_cleanup"
+        if execute and governed is not True:
+            return {"ok": False, "status": "approval_required", "action": action, "tool": "personal_assistant_manage_tool"}
+        if not runtime:
+            raise ValueError("Launcher native tool identity is required")
+        from .task_session_cleanup import task_session_cleanup
+        coroutine = task_session_cleanup(service, args, execute=execute)
     elif action in _pa_managed_write_actions():
         # Launcher-canonical PA managed writes: after the same schema/project
         # authorization gate, they run in this process on the single closed

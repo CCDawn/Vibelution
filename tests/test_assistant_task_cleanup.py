@@ -102,6 +102,49 @@ async def test_only_confirmed_exact_preview_can_physically_delete(scene):
 
 
 @pytest.mark.anyio
+async def test_terminal_preview_reports_runtime_revision_mismatch_without_cleaning(scene, monkeypatch):
+    async def unavailable(*args):
+        raise DispatchError("runtime_revision_mismatch", code="RUNTIME_IDENTITY_MISMATCH")
+
+    monkeypatch.setattr(scene.service.dispatch, "_call", unavailable)
+    result = (await scene.service.preview(scene.payload))["items"][0]
+    assert result["status"] == "blocked"
+    assert "运行版本与仓库不一致" in result["reason"]
+    assert scene.path.is_file() and scene.client.calls == 0
+
+
+@pytest.mark.anyio
+async def test_model_previews_then_cleans_only_original_terminal_task_session(scene, monkeypatch):
+    from core.assistant_runtime.task_session_cleanup import task_session_cleanup
+
+    args = {"project_id": "project-1", "dispatch_id": "dispatch-1"}
+    calls = []
+
+    async def preview_session(**arguments):
+        calls.append(("preview", arguments))
+        return {"taskId": "eat-1", "sessionId": "session-task", "revision": 3,
+                "status": "ready", "fingerprint": "a" * 64}
+
+    async def execute_session(**arguments):
+        calls.append(("execute", arguments))
+        return {"taskId": "eat-1", "sessionId": "session-task", "status": "deleted"}
+
+    monkeypatch.setattr(scene.client, "preview_task_session_cleanup", preview_session, raising=False)
+    monkeypatch.setattr(scene.client, "cleanup_task_session", execute_session, raising=False)
+    preview = await task_session_cleanup(scene.service.dispatch, args, execute=False)
+    binding = preview["executeArguments"]
+    assert binding == {**args, "native_task_id": "eat-1", "session_id": "session-task",
+                       "expected_revision": 3, "fingerprint": "a" * 64}
+    with pytest.raises(DispatchError, match="不一致"):
+        await task_session_cleanup(scene.service.dispatch, {**binding, "native_task_id": "eat-other"}, execute=True)
+    result = await task_session_cleanup(scene.service.dispatch, binding, execute=True)
+    assert result["status"] == "deleted" and result["sessionId"] == "session-task"
+    assert calls == [("preview", {"task_id": "eat-1"}), ("execute", {
+        "task_id": "eat-1", "session_id": "session-task", "revision": 3, "fingerprint": "a" * 64})]
+    assert scene.path.is_file()  # The parent retains the original receipt.
+
+
+@pytest.mark.anyio
 async def test_changed_target_or_assistant_cannot_use_an_old_preview(scene):
     preview = await scene.service.preview(scene.payload)
     changed = scene.payload.model_dump()

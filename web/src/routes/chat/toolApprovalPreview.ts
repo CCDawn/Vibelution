@@ -7,7 +7,8 @@ export { providerModelApprovalPreviewIsValid } from "./providerApprovalPreview";
 export { autonomyActionIsKnown, autonomyApprovalPreviewIsValid } from "./autonomyApprovalPreview";
 
 const PLATFORM_MANAGE_ACTIONS = new Set(["dispatch_cancel", "runtime_command", "team_update", "agent_tool_policy_update",
-  "knowledge_acl_grant", "knowledge_acl_revoke", "flow_save", "flow_start", "agent_dispatch_access_set"]);
+  "knowledge_acl_grant", "knowledge_acl_revoke", "flow_save", "flow_start", "agent_dispatch_access_set",
+  "session_create", "task_session_cleanup"]);
 type PreviewRule = (value: unknown) => boolean;
 const previewRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const previewText = (value: unknown, max = 160, empty = false) => typeof value === "string"
@@ -25,6 +26,7 @@ const previewMap = (keyRule: PreviewRule, valueRule: PreviewRule): PreviewRule =
   && Object.keys(value).length <= 512 && Object.entries(value).every(([key, entry]) => keyRule(key) && valueRule(entry));
 const previewInputId = (value: unknown) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}(?![\s\S])/.test(value);
 const previewRequestId = (value: unknown) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,95}(?![\s\S])/.test(value);
+const previewDispatchId = (value: unknown) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}(?![\s\S])/.test(value);
 const previewTool = (value: unknown) => typeof value === "string" && /^[a-z][a-z0-9_.:-]{1,127}(?![\s\S])/.test(value);
 const previewCount = (value: unknown) => previewDecimal(value) && (value as string).length <= 5 && BigInt(value as string) <= 10000n;
 
@@ -50,7 +52,7 @@ export function platformManagementPreviewIsValid(summary: Record<string, unknown
     || !fields.every(value => typeof value === "string") || new Set(fields).size !== fields.length
     || fields.join("\n") !== [...fields].sort().join("\n")) return false;
   const targetRules: Record<string, PreviewRule> = { project_id: previewId };
-  if (action !== "dispatch_cancel") targetRules.request_id = previewRequestId;
+  if (action !== "dispatch_cancel" && action !== "task_session_cleanup") targetRules.request_id = previewRequestId;
   const sameFields = (...expected: string[]) => fields.join("\n") === expected.sort().join("\n");
   if (action === "agent_dispatch_access_set") {
     Object.assign(targetRules, { agent_id: (value: unknown) => previewId(value, 128),
@@ -59,10 +61,25 @@ export function platformManagementPreviewIsValid(summary: Record<string, unknown
       && previewExact(delta, { enabled: value => typeof value === "boolean" }) && summary.assistantContentOmitted === false;
   }
   if (action === "dispatch_cancel") {
-    targetRules.dispatch_id = value => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}(?![\s\S])/.test(value);
+    targetRules.dispatch_id = previewDispatchId;
     targetRules.native_task_id = previewId;
     return previewExact(targets, targetRules) && sameFields("stopRequested")
       && previewExact(delta, { operation: previewOneOf("request_stop") }) && summary.assistantContentOmitted === false;
+  }
+  if (action === "session_create") {
+    targetRules.agent_id = previewId;
+    return previewExact(targets, targetRules) && sameFields("session") && summary.assistantContentOmitted === false
+      && previewExact(delta, {
+        title: value => typeof value === "string" && previewText(value, 120) && value.trim() === value && !/[\p{Zl}\p{Zp}]/u.test(value),
+        activate: previewOneOf(false),
+      });
+  }
+  if (action === "task_session_cleanup") {
+    Object.assign(targetRules, { dispatch_id: previewDispatchId, native_task_id: previewId, session_id: previewId,
+      expected_revision: (value: unknown) => previewDecimal(value) && value !== "0" });
+    return previewExact(targets, targetRules) && sameFields("session") && summary.assistantContentOmitted === false
+      && previewExact(delta, { operation: previewOneOf("delete_task_session"),
+        preserveTaskReceipt: previewOneOf(true), preserveWorkspace: previewOneOf(true) });
   }
   if (action === "runtime_command") {
     targetRules.kind = previewOneOf("session_turn", "runtime_task", "external_task", "team_run", "supervised_run", "self_evolution_run", "research_run");
@@ -381,6 +398,8 @@ export function toolApprovalActionPreview(
       const quote = (value: unknown) => JSON.stringify(value, null, 2).replace(/[\p{Cf}\p{Cs}\p{Zl}\p{Zp}]/gu,
         char => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`);
       const deltaLabels: Record<string, [string, string]> = { operation: ["操作", "Operation"], command: ["控制命令", "Control command"],
+        title: ["会话标题", "Session title"], activate: ["切换到新会话", "Switch to the new session"],
+        preserveTaskReceipt: ["保留任务回执", "Keep task receipt"], preserveWorkspace: ["保留工作区", "Keep workspace"],
         enabled: ["允许所示 Agent 接单", "Allow this agent to receive tasks"],
         allowedTools: ["允许工具", "Allowed tools"], preferredTools: ["优先工具", "Preferred tools"], blockedTools: ["禁用工具", "Blocked tools"],
         readScopes: ["读取范围", "Read scopes"], writeScopes: ["写入范围", "Write scopes"], allowedCommandKinds: ["允许命令类别", "Allowed command kinds"],
@@ -398,8 +417,13 @@ export function toolApprovalActionPreview(
         instructionNodeIds: ["含指令节点", "Nodes with instructions"], definitionDigest: ["定义摘要", "Definition digest"], recoveryPolicyDigest: ["恢复策略摘要", "Recovery policy digest"],
         inputIds: ["本次输入 ID", "Submitted input IDs"], inputValueLengths: ["输入字符数", "Input character counts"], inputsDigest: ["输入摘要", "Inputs digest"],
         localIntegration: ["本地合入", "Local integration"] };
-      return [title, lang === "zh" ? "对象、版本和权限变化绑定本次原生请求；控制受理不代表任务完成。"
-        : "Targets, revisions and permission changes bind this native request; acceptance does not prove completion.",
+      let scopeText = lang === "zh" ? "对象、版本和权限变化绑定本次原生请求；控制受理不代表任务完成。"
+        : "Targets, revisions and permission changes bind this native request; acceptance does not prove completion.";
+      if (action === "session_create") scopeText = lang === "zh" ? "为所示 Agent 创建会话，保持当前会话。"
+        : "Create a session for this agent and keep the current session active.";
+      if (action === "task_session_cleanup") scopeText = lang === "zh" ? "仅删除所示任务的会话，保留任务回执和工作区。"
+        : "Delete only this task's session and keep the task receipt and workspace.";
+      return [title, scopeText,
         ...Object.entries(targets as Record<string, string>).map(([key, value]) => `${targetLabels[key]?.[lang === "zh" ? 0 : 1] ?? key}: ${value}`),
         `${lang === "zh" ? "修改字段" : "Changed fields"}: ${(summary.assistantChangedFields as string[]).join(", ")}`,
         `${lang === "zh" ? "范围与权限变化" : "Scope and permission changes"}:`,

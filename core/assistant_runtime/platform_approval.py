@@ -9,7 +9,7 @@ import unicodedata
 from pydantic import ValidationError
 from .team_management_approval import TEAM_MANAGEMENT_ACTIONS, team_management_approval_summary
 
-PLATFORM_MANAGEMENT_ACTIONS = frozenset({"dispatch_cancel", "runtime_command", "team_update", "team_recovery_confirm_deployment",
+PLATFORM_MANAGEMENT_ACTIONS = frozenset({"dispatch_cancel", "session_create", "task_session_cleanup", "runtime_command", "team_update", "team_recovery_confirm_deployment",
     "agent_parameters_update", "agent_prompt_update",
     "agent_tool_policy_update", "knowledge_acl_grant", "knowledge_acl_revoke", "flow_save", "flow_start", "agent_dispatch_access_set", *TEAM_MANAGEMENT_ACTIONS})
 
@@ -74,6 +74,10 @@ def platform_management_approval_summary(action, parameters):
     delta, content_omitted, details_omitted = {}, False, False
     if action == "dispatch_cancel":
         changed, delta = ["stopRequested"], {"operation": "request_stop"}
+    elif action == "session_create":
+        changed, delta = ["session"], {"title": values["title"], "activate": False}
+    elif action == "task_session_cleanup":
+        changed, delta = ["session"], {"operation": "delete_task_session", "preserveTaskReceipt": True, "preserveWorkspace": True}
     elif action == "runtime_command":
         changed, delta = ["command"], {"command": values["command"]}
     elif action == "team_recovery_confirm_deployment":

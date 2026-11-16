@@ -52,7 +52,11 @@ async def test_launcher_actual_tool_descriptions_agree_with_native_describe(tool
         assert {"name", "description", "purpose", "members"} <= set(team_create["parameters"]["properties"])
         assert not any(name in action.description or name in manage.description
                        for name in ("templateId", "inboxSourceId", "ownerType"))
-        for name in ("workspace_list", "session_create", "session_delete", "room_update", "workflow_recovery_bind"):
+        session_create = execute_action("describe", {"action": "session_create"})
+        assert session_create["governed"] is True and session_create["scope"] == "sessions:create"
+        assert set(session_create["parameters"]["required"]) == {"project_id", "request_id", "agent_id", "title"}
+        assert execute_action("describe", {"action": "task_session_cleanup_preview"})["governed"] is False
+        for name in ("workspace_list", "session_delete", "room_update", "workflow_recovery_bind"):
             assert name not in action.description and name not in manage.description
             with pytest.raises(ValueError, match="Unknown Launcher action"):
                 execute_action("describe", {"action": name})

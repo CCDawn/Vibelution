@@ -147,6 +147,10 @@ Launcher 个人助理平台动作目录（`personal_assistant_action_tool` / `pe
 
 ## 6. Canonical Governed Tools 与剩余缺口
 
+Launcher 助理的 `session_create` 为已有的活跃普通 Agent 创建可见会话，使用独立 `sessions:create` 项目授权和稳定请求 ID。创建后保留当前选中会话和 Agent 的直属会话。派遣仍由任务服务创建专属执行会话。
+
+Launcher 助理通过 `task_session_cleanup_preview` 查看原派遣的清理范围，随后可按操作者管理策略执行 `task_session_cleanup`。清理要求源任务已结束、会话确由该派遣独占，并绑定原任务、会话、版本和预览。任务回执、工作区和分支保留。任务卡上的整项清理仍有自己的范围和规则。
+
 Phase 2 已实现以下 canonical governed tools（`tools/project_operation_tools.py`）：
 
 | 工具 | 语义 | 治理类 |

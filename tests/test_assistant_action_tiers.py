@@ -36,6 +36,7 @@ _APPROVED_OPERATOR_ACTIONS = frozenset({
     "reminder_handoff_queue", "reminder_handoff_recover",
     # 清理执行
     "branch_cleanup_execute",
+    "task_session_cleanup",
 })
 
 
@@ -81,11 +82,11 @@ def closed_gate(monkeypatch):
 
 
 def test_operator_tier_set_is_exactly_the_approved_catalog():
-    assert len(action_tiers.OPERATOR_TIER_ACTIONS) == 33
+    assert len(action_tiers.OPERATOR_TIER_ACTIONS) == 34
     assert action_tiers.OPERATOR_TIER_ACTIONS == _APPROVED_OPERATOR_ACTIONS
     # 只读对账/预览的对应动作必须留在默认档。
     assert not action_tiers.OPERATOR_TIER_ACTIONS & {
-        "branch_cleanup_plan", "agent_purge_preview", "team_archive_preview",
+        "branch_cleanup_plan", "agent_purge_preview", "team_archive_preview", "task_session_cleanup_preview",
         "history_import_receipt", "affairs_sync_receipt", "episodic_sync_receipt",
         "initial_migration_receipt", "knowledge_sync_receipt", "reminder_handoff_receipt",
         "project_lifecycle_receipt", "management_receipt",
@@ -107,7 +108,7 @@ async def test_closed_gate_hides_every_operator_action_from_index(closed_gate):
         assert page["total"] == len(expected_default)
         assert len(page["names"]) == len(set(page["names"])) and page["names"] == sorted(page["names"])
         assert set(page["names"]) == expected_default
-        # 33 个 operator 档动作在装配出的目录中全部不可见。
+        # operator 档动作在装配出的目录中全部不可见。
         assert hidden and not set(page["names"]) & hidden
         assert page["total"] == len(full) - len(hidden)
     finally:

@@ -30,6 +30,9 @@ class LocalAssistantBackendClient(ManagedAgentBackendClient):
         self._launcher_capability = credential or ""
         super().__init__(project_root, **kwargs)
 
+    def _session_create_launcher_authority(self) -> str:
+        return self._launcher_capability
+
     async def management_agent_list(self, **parameters) -> dict[str, Any]:
         return await super().management_agent_list(**{**parameters,
             "dispatch_context": "launcher_local" if self._launcher_capability else "external"})
@@ -237,6 +240,8 @@ class LocalAssistantBackendClient(ManagedAgentBackendClient):
 
     async def _request_cleanup(self, task_id: str, suffix: str, payload: dict[str, Any]) -> dict[str, Any]:
         capability, namespace = await self._cleanup_capability(task_id)
+        if suffix.startswith("session-cleanup") and namespace != "local":
+            raise BackendClientError("Task session cleanup requires a Launcher-owned task.", code="TASK_CLEANUP_UNAVAILABLE")
         # Old capabilities keep their original external transport for every
         # ordinary task operation. Only operator cleanup uses this explicit,
         # authenticated compatibility endpoint; no namespace migration occurs.
@@ -248,8 +253,15 @@ class LocalAssistantBackendClient(ManagedAgentBackendClient):
     async def preview_task_cleanup(self, task_id: str) -> dict[str, Any]:
         return await self._request_cleanup(task_id, "cleanup/preview", {})
 
-    async def cleanup_task(self, task_id: str, revision: str, fingerprint: str) -> dict[str, Any]:
+    async def cleanup_task(self, task_id: str, revision: int, fingerprint: str) -> dict[str, Any]:
         return await self._request_cleanup(task_id, "cleanup", {"revision": revision, "fingerprint": fingerprint})
+
+    async def preview_task_session_cleanup(self, task_id: str) -> dict[str, Any]:
+        return await self._request_cleanup(task_id, "session-cleanup/preview", {})
+
+    async def cleanup_task_session(self, task_id: str, session_id: str, revision: int, fingerprint: str) -> dict[str, Any]:
+        return await self._request_cleanup(task_id, "session-cleanup",
+            {"sessionId": session_id, "revision": revision, "fingerprint": fingerprint})
 
     async def _request_json(
         self,

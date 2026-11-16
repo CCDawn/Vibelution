@@ -74,6 +74,14 @@ class NativeAgentGateway:
         from .workspace import pin_session
         return pin_session(self.project_root, self._owners(), parameters)
 
+    def create_session(self, parameters: dict, marker: dict):
+        from .session_create import create_session
+        return create_session(self, parameters, marker)
+
+    def confirm_session_creation(self, parameters: dict, marker: dict):
+        from .session_create import confirm_session_creation
+        return confirm_session_creation(self, parameters, marker)
+
     def read_sessions(self, query):
         from .workspace import read_sessions
         return read_sessions(self.project_root, self._owners(), query)
@@ -422,7 +430,7 @@ class NativeAgentGateway:
                 metadata={**agent.get("metadata", {}), "externalManagementMutation": marker},
                 expected_updated_at=agent["updatedAt"])
 
-    def _archive_identity_reason(self, state, raw, directory):
+    def _ordinary_agent_identity_reason(self, state, raw, directory):
         """One read-only identity check shared by discovery and admission."""
         metadata = raw.get("metadata", {})
         role = raw.get("roleKey")
@@ -476,7 +484,7 @@ class NativeAgentGateway:
             # writers acquire Team -> Agent locks in the opposite order.
             if not isinstance(raw, dict) or raw.get("status") != "active":
                 return {"eligible": False, "reason": "agent_inactive"}
-            reason = self._archive_identity_reason(state, raw, directory)
+            reason = self._ordinary_agent_identity_reason(state, raw, directory)
             return {"eligible": reason is None, "reason": reason or "ordinary_agent"}
         except (OSError, ValueError, TypeError, KeyError):
             return {"eligible": False, "reason": "authority_unavailable"}
@@ -504,7 +512,7 @@ class NativeAgentGateway:
                     if not isinstance(raw, dict) or raw.get("status") != "active":
                         raise ManagementError("AGENT_UNAVAILABLE", 404)
                     try:
-                        if self._archive_identity_reason(state, raw, directory) is not None:
+                        if self._ordinary_agent_identity_reason(state, raw, directory) is not None:
                             raise ValueError("Private or damaged Agent identity")
                     except (ManagementError, OSError, ValueError, TypeError, KeyError):
                         raise ManagementError("AGENT_PROTECTED", 403) from None

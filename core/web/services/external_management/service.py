@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 import secrets
 from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
@@ -499,6 +500,15 @@ class ManagementService:
             raise ManagementError("INVALID_INPUT", 422)
         return digest([subject, action, request_id])
 
+    @staticmethod
+    def _verify_request_identity(record, *, binding, action, request_id, subject, key):
+        if (record.get("binding") != binding or record.get("action") != action
+                or record.get("requestId") != request_id or not isinstance(record.get("parameters"), dict)
+                or not isinstance(record.get("marker"), dict) or record["marker"].get("subjectId") != subject
+                or record["marker"].get("requestKey") != key
+                or record["marker"].get("requestFingerprint") != digest(record["parameters"])):
+            raise ManagementError("TARGET_BINDING_CHANGED", 409)
+
     def _receipt(self, record: dict, *, reused: bool) -> dict:
         if record.get("receipt"):
             return {**record["receipt"], "reused": reused}
@@ -619,6 +629,15 @@ class ManagementService:
                 return True
             except Exception:  # noqa: BLE001 -- unavailable metadata never authorizes a repeat write
                 return False
+        if record["action"] == "session_create":
+            try:
+                from .contracts import SessionView
+                session = SessionView.model_validate(self.native.confirm_session_creation(record["parameters"], record["marker"]))
+                record["receipt"] = {"status": "completed", "action": "session_create", "requestId": record["requestId"],
+                                     "verified": True, "session": session.model_dump()}
+                return True
+            except Exception:  # noqa: BLE001 -- only canonical readback can confirm this admission
+                return False
         try:
             if record["action"] == "agent_create":
                 candidates = self.native.find_created(record["marker"]["requestKey"])
@@ -637,9 +656,14 @@ class ManagementService:
         except Exception:  # noqa: BLE001 -- unavailable recovery reads cannot authorize a repeat write
             return False  # An unavailable native read never authorizes another write.
 
-    def invoke(self, subject: str, capability: str, action: str, payload: dict) -> dict:
+    def invoke(self, subject: str, capability: str, action: str, payload: dict, *, launcher_authority: str = "") -> dict:
         if action not in ACTION_MODELS:
             raise ManagementError("UNKNOWN_ACTION", 404)
+        session_creation = action == "session_create"
+        if session_creation:
+            from core.infrastructure.launcher_assistant_authority import verify_launcher_authority
+            if not verify_launcher_authority(launcher_authority):
+                raise ManagementError("LAUNCHER_AUTHORITY_REQUIRED")
         try:
             envelope = Envelope.model_validate(payload)
         except ValidationError:
@@ -674,11 +698,19 @@ class ManagementService:
             return self._team_intents(grant).run(envelope.request_id, parameters)
         fingerprint = digest(parameters)
         path = self.store.path("requests", key)
-        with self.store.lock("requests", key):
+        subject_lock = self.store.lock("subjects", subject) if session_creation else nullcontext()
+        with self.store.lock("requests", key), subject_lock:
+            if session_creation:
+                grant = self._authorize(subject, capability, ACTION_SCOPES[action], envelope.expected_binding.model_dump())
+                if not verify_launcher_authority(launcher_authority):
+                    raise ManagementError("LAUNCHER_AUTHORITY_REQUIRED")
             record = self.store.read(path)
             if record is not None:
                 if record.get("fingerprint") != fingerprint or record.get("binding") != grant["binding"]:
                     raise ManagementError("IDEMPOTENCY_CONFLICT", 409)
+                if session_creation:
+                    self._verify_request_identity(record, binding=grant["binding"], action=action,
+                                                  request_id=envelope.request_id, subject=subject, key=key)
                 if record.get("failure"):
                     raise ManagementError(record["failure"]["code"], record["failure"]["status_code"])
                 if not record.get("receipt") and self._confirm(record):
@@ -693,6 +725,8 @@ class ManagementService:
             try:
                 if action == "session_pin":
                     self.native.pin_session(parameters)
+                elif session_creation:
+                    self.native.create_session(parameters, marker)
                 elif action == "agent_purge":
                     from .contracts import AgentPurgeResult
                     result = AgentPurgeResult.model_validate(self.native.purge(parameters, marker))
@@ -730,7 +764,7 @@ class ManagementService:
                 raise
             except Exception:  # noqa: BLE001 -- lost native acknowledgement remains an unknown durable intent
                 return self._receipt(record, reused=False)
-            if action not in {"session_pin", "agent_purge", "agent_purge_batch", *PLATFORM_ACTIONS}:
+            if action not in {"session_pin", "session_create", "agent_purge", "agent_purge_batch", *PLATFORM_ACTIONS}:
                 record["agentId"] = agent.get("agentId", "")
             self.store.write(path, record)
             self._confirm(record)
@@ -746,7 +780,7 @@ class ManagementService:
             return self._authorization_reductions().receipt(subject, capability, action, request_id)
         if action == "team_run":
             return self.team_receipt(subject, capability, request_id)
-        self._authorize(subject, capability, ACTION_SCOPES[action])
+        grant = self._authorize(subject, capability, ACTION_SCOPES[action])
         key = self._request_key(subject, action, request_id)
         path = self.store.path("requests", key)
 
@@ -754,6 +788,9 @@ class ManagementService:
             record = self.store.read(path)
             if record is None:
                 raise ManagementError("REQUEST_UNAVAILABLE", 404)
+            if action == "session_create":
+                self._verify_request_identity(record, binding=grant["binding"], action=action,
+                                              request_id=request_id, subject=subject, key=key)
             if action == "agent_create" and (record.get("parameters") or {}).get("capability_preset") is not None:
                 self._authorize(subject, capability, "agents:create:files")
             if record.get("failure"):
@@ -795,12 +832,8 @@ class ManagementService:
             record = self.store.read(path)
             if record is None:
                 raise ManagementError("REQUEST_UNAVAILABLE", 404)
-            if (record.get("binding") != grant["binding"] or record.get("action") != action
-                    or record.get("requestId") != request_id or not isinstance(record.get("parameters"), dict)
-                    or not isinstance(record.get("marker"), dict) or record["marker"].get("subjectId") != subject
-                    or record["marker"].get("requestKey") != key
-                    or record["marker"].get("requestFingerprint") != digest(record["parameters"])):
-                raise ManagementError("TARGET_BINDING_CHANGED", 409)
+            self._verify_request_identity(record, binding=grant["binding"], action=action,
+                                          request_id=request_id, subject=subject, key=key)
             if record.get("failure"):
                 raise ManagementError(record["failure"]["code"], record["failure"]["status_code"])
             if action == "agent_create" and record.get("parameters", {}).get("capability_preset"):

@@ -144,6 +144,7 @@ const ASSISTANT_ACTION_DETAILS: Record<string, readonly [string, string, Assista
   agent_purge: ["永久删除 Agent", "Permanently delete agent", "change"],
   agent_archive: ["归档 Agent", "Archive agent", "change"], agent_dispatch_access_set: ["调整 Agent 接单资格", "Set agent dispatch access", "change"],
   session_create: ["创建会话", "Create session", "change"],
+  task_session_cleanup: ["删除派遣任务会话", "Delete dispatched task session", "change"],
   session_update: ["修改会话", "Update session", "change"], session_stop: ["停止会话任务", "Stop session turn", "change"],
   session_delete: ["删除会话", "Delete session", "change"], knowledge_acl_grant: ["变更知识访问权限", "Change knowledge access", "change"],
   restart: ["重启平台", "Restart platform", "execute"], workflow_recovery_bind: ["绑定失败恢复流程", "Bind failure recovery", "change"],

@@ -42,7 +42,7 @@ _MANAGEMENT_PREFIX = "/api/v1/launcher-assistant-management"
 # layer's 30s outer bound so a timeout is raised here - where the request_id
 # is known and the receipt can be reconciled read-only - not by the outer layer.
 _MANAGEMENT_WRITE_TIMEOUT_SECONDS = 25.0
-_MANAGEMENT_ACTIONS = frozenset({"agent_create", "agent_update", "agent_avatar", "agent_archive", "agent_purge", "agent_purge_batch", "team_run", "session_pin", "authorization_upgrade", "authorization_reduce", "authorization_revoke"}) | _PLATFORM_ACTIONS
+_MANAGEMENT_ACTIONS = frozenset({"agent_create", "agent_update", "agent_avatar", "agent_archive", "agent_purge", "agent_purge_batch", "team_run", "session_pin", "session_create", "authorization_upgrade", "authorization_reduce", "authorization_revoke"}) | _PLATFORM_ACTIONS
 _MANAGEMENT_SCOPES = ["agents:archive", "agents:avatar", "agents:create", "agents:read", "agents:update", "legacy:receipts:read", "platform:describe", "rooms:read", "sessions:parameters:read", "sessions:pin", "sessions:read", "teams:directory:read", "teams:read", "teams:run"]
 # Historical grants without persisted scopes predate pin and archive. Freeze
 # their actual eight scopes; deriving this list from fresh scopes expands power.
@@ -287,7 +287,7 @@ class ManagedAgentBackendClient:
                                 require_existing_subject: bool = False) -> dict[str, Any]:
         if action not in _MANAGEMENT_ACTIONS or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}", request_id):
             raise BackendClientError("Unsupported management request.", code="INVALID_MANAGEMENT_REQUEST")
-        if action in {"session_pin", "agent_archive", "agent_purge", "agent_purge_batch", "authorization_upgrade", "authorization_reduce", "authorization_revoke", *_PLATFORM_ACTIONS}:
+        if action in {"session_pin", "session_create", "agent_archive", "agent_purge", "agent_purge_batch", "authorization_upgrade", "authorization_reduce", "authorization_revoke", *_PLATFORM_ACTIONS}:
             from pydantic import ValidationError
             from core.web.services.external_management.contracts import ACTION_MODELS
             try:
@@ -338,6 +338,10 @@ class ManagedAgentBackendClient:
             public["session"]["id"] != parameters["session_id"] or public["session"]["pinned"] is not parameters["pinned"]
         ):
             raise BackendClientError("Mismatched Session pin receipt.", code="BACKEND_PROTOCOL_ERROR")
+        if action == "session_create" and public["status"] == "completed" and (
+            public["session"]["agentId"] != parameters["agent_id"] or public["session"]["title"] != parameters["title"]
+        ):
+            raise BackendClientError("Mismatched Session creation receipt.", code="BACKEND_PROTOCOL_ERROR")
         return public
 
     async def management_receipt(self, *, action: str, request_id: str) -> dict[str, Any]:
@@ -1096,15 +1100,26 @@ class ManagedAgentBackendClient:
                 return receipt.model_dump(exclude_none=True)
             except (ValidationError, ValueError) as exc:
                 raise BackendClientError("Invalid Agent archive receipt.", code="BACKEND_PROTOCOL_ERROR") from exc
-        if action == "session_pin":
+        if action in {"session_pin", "session_create"}:
             from pydantic import ValidationError
             from core.web.services.external_management.contracts import ReceiptResponse
             try:
+                if action == "session_create" and isinstance(payload.get("session"), dict):
+                    # The receipt route omits null fields, including an unset pin timestamp.
+                    payload = {**payload, "session": {"pinnedAtMs": None, **payload["session"]}}
                 receipt = ReceiptResponse.model_validate(payload)
                 if (receipt.status == "completed" and (receipt.session is None or receipt.verified is not True)
                     or receipt.status == "unknown" and (receipt.session is not None or receipt.verified is not False)
                     or any(getattr(receipt, key) is not None for key in ("agent", "authorization", "teamRun", "phase", "resumeAllowed"))):
                     raise ValueError("Invalid Session receipt state")
+                if action == "session_create" and (receipt.purgeBatch is not None
+                    or receipt.status == "unknown" and receipt.code != "OPERATION_UNCONFIRMED"
+                    or receipt.status == "completed" and (
+                        receipt.code is not None or receipt.session.archived
+                        or receipt.session.pinned is not (receipt.session.pinnedAtMs is not None)
+                        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}", receipt.session.id)
+                        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}", receipt.session.agentId))):
+                    raise ValueError("Invalid Session creation receipt")
                 return receipt.model_dump(exclude_none=True)
             except (ValidationError, ValueError) as exc:
                 raise BackendClientError("Invalid Session receipt.", code="BACKEND_PROTOCOL_ERROR") from exc
@@ -1449,6 +1464,10 @@ class ManagedAgentBackendClient:
             self._base_url = ""
             return await attempt()
 
+    def _session_create_launcher_authority(self) -> str:
+        """Only a Launcher-hosted adapter supplies this extra write credential."""
+        return ""
+
     async def _request_json_attempt(
         self,
         method: str,
@@ -1469,6 +1488,11 @@ class ManagedAgentBackendClient:
             headers[TASK_CAPABILITY_HEADER] = task_capability
         if management_auth is not None:
             headers["X-Vibelution-Management-Subject"], headers["X-Vibelution-Management-Capability"] = management_auth
+        if method == "POST" and path == f"{_MANAGEMENT_PREFIX}/actions/session_create":
+            from core.web.services.external_management.contracts import LAUNCHER_AUTHORITY_HEADER
+            authority = self._session_create_launcher_authority()
+            if authority:
+                headers[LAUNCHER_AUTHORITY_HEADER] = authority
         async with self._http_client(timeout_seconds=timeout_seconds) as client:
             try:
                 if max_response_bytes is None:

@@ -105,6 +105,21 @@ def test_launcher_development_discovery_redirects_to_scoped_tools_without_approv
     assert consent.local_approval_policy({}, tool, args, original, "request_approval") == (original, "request_approval")
 
 
+def test_task_session_cleanup_uses_destructive_approval_without_changing_other_operations(monkeypatch):
+    from core.web.services.local_assistant import management_approval, management_permissions
+
+    target = {"project_id": "project-1", "dispatch_id": "dispatch-1"}
+    arguments = {**target, "native_task_id": "eat-1", "session_id": "session-1",
+                 "expected_revision": 2, "fingerprint": "a" * 64}
+    preview = {"action": "task_session_cleanup_preview", "arguments_json": json.dumps(target)}
+    cleanup = {"action": "task_session_cleanup", "arguments_json": json.dumps(arguments)}
+    for preset in ("request_approval", "auto_review", "full_access"):
+        monkeypatch.setattr(management_permissions, "read", lambda _, preset=preset: {"preset": preset})
+        assert management_approval.approval_requirement({}, preview) is None
+        assert management_approval.approval_requirement({}, cleanup) == (
+            None if preset == "full_access" else ("always", "destructive"))
+
+
 @pytest.mark.parametrize("command", [
     "python -m pytest --basetemp=C:/outside",
     "npm run test --prefix=C:/outside",

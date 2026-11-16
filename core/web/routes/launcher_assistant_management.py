@@ -18,6 +18,7 @@ from core.web.services.external_management.contracts import (
     BoundSubjectResponse,
     DocumentationCatalogQuery,
     DocumentationResponse,
+    LAUNCHER_AUTHORITY_HEADER,
     ReceiptResponse,
     SessionReadResponse,
     SessionListQuery,
@@ -454,9 +455,13 @@ async def read_room(room_id: str, request: Request):
 async def invoke(action: str, request: Request):
     _require_control(request)
     operator_actions = {"authorization_reduce", "authorization_revoke", *PLATFORM_ACTIONS}
-    if action in operator_actions and request.query_params:
+    if action in {"session_create", *operator_actions} and request.query_params:
         raise HTTPException(status_code=422, detail={"code": "INVALID_INPUT"})
-    payload = await _body(request, unique_keys=action in {"authorization_upgrade", *operator_actions})
+    payload = await _body(request, unique_keys=action in {"authorization_upgrade", "session_create", *operator_actions})
+    if action == "session_create":
+        values = request.headers.getlist(LAUNCHER_AUTHORITY_HEADER)
+        authority = values[0] if len(values) == 1 else ""
+        return await _call(lambda: _service().invoke(*_credentials(request), action, payload, launcher_authority=authority))
     if action in operator_actions:
         return await _operator_call(request, lambda: _service().invoke(*_credentials(request), action, payload))
     return await _call(lambda: _service().invoke(*_credentials(request), action, payload))

@@ -17,20 +17,22 @@ from .configuration_actions import CONFIGURATION_ACTION_MODELS, CONFIGURATION_AC
 from .team_lifecycle_contracts import TEAM_LIFECYCLE_ACTION_MODELS, TEAM_LIFECYCLE_ACTION_SCOPES, TEAM_LIFECYCLE_ACTION_HELP
 from .flow_contracts import FLOW_ACTION_MODELS, FLOW_ACTION_SCOPES, FLOW_ACTION_HELP, FLOW_SCOPES, FlowMutationResponse
 
-Scope = Literal["agents:read", "agents:create", "agents:create:files", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:results:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read", "agents:directory:read", "agents:purge", "operations:read", "operations:control", "teams:manage:read", "teams:write", "agents:tool-policy:read", "agents:tool-policy:write", "knowledge:acl:read", "knowledge:acl:write", "teams:flows:read", "teams:flows:write", "teams:flows:run", "agents:dispatch-access:read", "agents:dispatch-access:write", "teams:create", "teams:archive", "agents:configuration:read", "agents:configuration:write"]
+Scope = Literal["agents:read", "agents:create", "agents:create:files", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:results:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read", "agents:directory:read", "agents:purge", "operations:read", "operations:control", "teams:manage:read", "teams:write", "agents:tool-policy:read", "agents:tool-policy:write", "knowledge:acl:read", "knowledge:acl:write", "teams:flows:read", "teams:flows:write", "teams:flows:run", "agents:dispatch-access:read", "agents:dispatch-access:write", "teams:create", "teams:archive", "agents:configuration:read", "agents:configuration:write", "sessions:create"]
 # Add scopes at the end so legacy bootstrap prefixes keep their meaning.
 SCOPES = ("agents:read", "agents:create", "agents:update", "agents:avatar", "agents:archive", "teams:run", "teams:read", "teams:directory:read", "rooms:read", "platform:describe", "sessions:read", "sessions:pin", "sessions:parameters:read", "legacy:receipts:read", "tasks:read", "source:read", "knowledge:catalog:read", "agents:create:files", "teams:results:read", "agents:directory:read", "agents:purge", "operations:read", "operations:control")
 SCOPES += ("teams:manage:read", "teams:write", "agents:tool-policy:read", "agents:tool-policy:write", "knowledge:acl:read", "knowledge:acl:write")
 SCOPES += FLOW_SCOPES
 SCOPES += ("agents:dispatch-access:read", "agents:dispatch-access:write", "teams:create", "teams:archive")
 SCOPES += ("agents:configuration:read", "agents:configuration:write")
+SCOPES += ("sessions:create",)
 # Keep historical bind semantics and SDK defaults. New platform powers require
 # the existing explicit upgrade of the same authenticated operator subject.
 EXPLICIT_UPGRADE_SCOPES = frozenset({"agents:create:files", "teams:results:read", "agents:directory:read", "agents:purge",
     "operations:read", "operations:control", "teams:manage:read", "teams:write", "agents:tool-policy:read",
     "agents:tool-policy:write", "knowledge:acl:read", "knowledge:acl:write", *FLOW_SCOPES,
     "agents:dispatch-access:read", "agents:dispatch-access:write", "teams:create", "teams:archive",
-    "agents:configuration:read", "agents:configuration:write"})
+    "agents:configuration:read", "agents:configuration:write", "sessions:create"})
+LAUNCHER_AUTHORITY_HEADER = "X-Vibelution-Launcher-Authority"
 _AVATAR_EXTENSION = r"(?:[pP][nN][gG]|[jJ][pP][gG]|[jJ][pP][eE][gG]|[wW][eE][bB][pP]|svg)"
 _AVATAR_PATH_PATTERN = r"^workspace/avatars/[A-Za-z0-9_.-]+\." + _AVATAR_EXTENSION + "$"
 
@@ -269,6 +271,18 @@ class SessionPin(Closed):
     pinned: bool
 
 
+class SessionCreate(Closed):
+    agent_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+    title: str = Field(min_length=1, max_length=120)
+
+    @field_validator("title")
+    @classmethod
+    def single_line_title(cls, value):
+        if not value.strip() or any(unicodedata.category(char) in {"Cc", "Cf", "Cs", "Zl", "Zp"} for char in value):
+            raise ValueError("A nonblank single-line title is required")
+        return value.strip()
+
+
 class KnowledgeIngest(Closed):
     inboxSourceId: str = Field(min_length=1, max_length=160)
     ownerType: str = Field(min_length=1, max_length=64)
@@ -285,6 +299,8 @@ class ConfigUpdate(Closed):
 
 ACTION_MODELS = {"agent_create": AgentCreate, "agent_update": AgentUpdate, "agent_avatar": AgentAvatar, "agent_archive": AgentArchive, "agent_purge": AgentPurge, "agent_purge_batch": AgentPurgeBatch, "team_run": TeamRun, "session_pin": SessionPin, "authorization_upgrade": AuthorizationUpgrade, "runtime_command": RuntimeCommand}
 ACTION_SCOPES = {"agent_create": "agents:create", "agent_update": "agents:update", "agent_avatar": "agents:avatar", "agent_archive": "agents:archive", "agent_purge": "agents:purge", "agent_purge_batch": "agents:purge", "team_run": "teams:run", "session_pin": "sessions:pin", "authorization_upgrade": None, "runtime_command": "operations:control"}
+ACTION_MODELS["session_create"] = SessionCreate
+ACTION_SCOPES["session_create"] = "sessions:create"
 ACTION_MODELS.update(ASSET_ACTION_MODELS)
 ACTION_SCOPES.update(ASSET_ACTION_SCOPES)
 ACTION_MODELS.update(CONFIGURATION_ACTION_MODELS)
@@ -314,6 +330,7 @@ def contracts() -> dict:
         "agent_purge_batch": "agent_purge_batch（批量永久删除）：一次提交显式 purges 清单（≤50 项，禁止通配或全选），每项先用 agent_purge_preview 读取 agentId 与 configRevision 原样回传；一次审批覆盖整批，删除语义与 agent_purge 完全相同，需同一独立 agents:purge。先全检后执行：任一项不存在、非 archived、版本不符或超上限，整批拒绝、零删除，完成回执逐项给出 rejected 及原因（其余项 code=BATCH_REJECTED），不部分执行。执行阶段逐项回执：purged 附 cleanupPending、rejected 附拒绝码、unknown 表示原生结果未确认；unknown 项与整批 unknown 一样只读原回执，不得换 ID 重放或补删。同 request_id 重放不重复删除；部分失败不影响已成功项回执。",
         "team_run": "创建内置 dev-team 并受理原生工作流运行；稳定 request_id，未知结果查询原回执，只有 resumeAllowed 才可用原参数续接。",
         "session_pin": "经原生审批置顶或取消置顶普通可见 Session；不改变当前选择。verified 表示首次确认时原生元数据符合目标状态，不证明某次调用的因果；完成回执保留历史状态，当前状态用 session_get 查询。未知结果查询原 action/request_id，不能换 ID 重放。",
+        "session_create": "经 Launcher 权限验证，为现有活跃的普通个人 Agent 创建独立可见会话。传入精确 agent_id、标题和稳定的 request_id。沿用明确授予的 sessions:create 权限，保留 Agent 主会话和当前选择。未知结果仅用原 action/request_id 查询回执。",
         "authorization_upgrade": "通过 personal_assistant_manage_tool 按助理当前原生权限策略显式增加当前Launcher原主体的指定缺失权限；full_access 可能自动批准。先authorization_status读取当前scopes，expected_scopes和add_scopes必须分别排序、唯一、不重叠。不能默认升级到全部权限，查询只选所需读取权；写权另行明确选择。保留client/subject/capability和任务关联，不支持撤销或换主体。unknown或异常保持同一request_id查询management_receipt(action=authorization_upgrade)，不更换ID重试。需要operator control，旧读取scope本身不授予升级权。完成回执为历史证明，当前状态另查。",
     }
     descriptions["team_recovery_confirm_deployment"] = "使用team_recovery_get的原团队、流程、运行、revision和明确部署证据安排独立复验；沿用operations:control和原生审批，受理不等于复验通过。unknown只查原action/request_id回执，不换ID重放。"
@@ -324,7 +341,7 @@ def contracts() -> dict:
     descriptions.update(AUTHORIZATION_REDUCTION_HELP)
     descriptions["research_command"] = "使用research_get返回的精确run/team/flow/node/task/checkpoint引用与revision推进研究任务；支持失败节点重试、人工任务裁决及运行对账。沿用真实operator、operations:control和原生CAS/稳定request_id；unknown只读原management_receipt，不换ID重放。人工裁决须有明确依据，受理不等于业务完成。"
     return {name: {"action": name, "description": descriptions[name], "parameters": model.model_json_schema(),
-                   "governed": name in {"team_run", "session_pin", "agent_archive", "agent_purge", "agent_purge_batch", "authorization_upgrade", "runtime_command", "research_command", "team_recovery_confirm_deployment", *ASSET_ACTION_MODELS, *CONFIGURATION_ACTION_MODELS, *TEAM_LIFECYCLE_ACTION_MODELS, *FLOW_ACTION_MODELS, *AUTHORIZATION_REDUCTION_MODELS}, "scope": ACTION_SCOPES[name] or "operator:control"} for name, model in ACTION_MODELS.items()}
+                   "governed": name in {"team_run", "session_pin", "session_create", "agent_archive", "agent_purge", "agent_purge_batch", "authorization_upgrade", "runtime_command", "research_command", "team_recovery_confirm_deployment", *ASSET_ACTION_MODELS, *CONFIGURATION_ACTION_MODELS, *TEAM_LIFECYCLE_ACTION_MODELS, *FLOW_ACTION_MODELS, *AUTHORIZATION_REDUCTION_MODELS}, "scope": ACTION_SCOPES[name] or "operator:control"} for name, model in ACTION_MODELS.items()}
 
 
 # --- Launcher-canonical PA managed writes ------------------------------------
@@ -1194,7 +1211,7 @@ class AuthorizationStateResponse(Closed):
 
 class ReceiptResponse(Closed):
     status: Literal["completed", "unknown"]
-    action: Literal["agent_create", "agent_update", "agent_avatar", "agent_archive", "agent_purge", "agent_purge_batch", "team_run", "session_pin", "authorization_upgrade", "runtime_command", "team_recovery_confirm_deployment", "team_update", "agent_tool_policy_update", "knowledge_acl_grant", "knowledge_acl_revoke", "flow_save", "flow_start", "research_command", "authorization_reduce", "authorization_revoke", "agent_dispatch_access_set", "team_create", "team_member_add", "team_member_remove", "team_archive", "agent_parameters_update", "agent_prompt_update"]
+    action: Literal["agent_create", "agent_update", "agent_avatar", "agent_archive", "agent_purge", "agent_purge_batch", "team_run", "session_pin", "session_create", "authorization_upgrade", "runtime_command", "team_recovery_confirm_deployment", "team_update", "agent_tool_policy_update", "knowledge_acl_grant", "knowledge_acl_revoke", "flow_save", "flow_start", "research_command", "authorization_reduce", "authorization_revoke", "agent_dispatch_access_set", "team_create", "team_member_add", "team_member_remove", "team_archive", "agent_parameters_update", "agent_prompt_update"]
     requestId: str
     verified: bool
     reused: bool

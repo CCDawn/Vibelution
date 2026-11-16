@@ -13,13 +13,13 @@ _ROUTINE = frozenset({
     "flow_start", "knowledge_ingest", "knowledge_acl_revoke", "dispatch_write",
     "dispatch_cancel", "dispatch_derived", "delegation_goal_create", "delegation_goal_revoke",
     "authorization_reduce", "authorization_revoke",
-    "agent_parameters_update", "agent_prompt_update",
+    "agent_parameters_update", "agent_prompt_update", "session_create",
 })
 _DESTRUCTIVE = frozenset({"agent_archive", "agent_purge", "agent_purge_batch", "team_archive", "project_lifecycle",
-                          "branch_cleanup_execute"})
+                          "branch_cleanup_execute", "task_session_cleanup"})
 _EXPLICIT = frozenset({"authorization_upgrade", "authorization_recover", "agent_tool_policy_update", "knowledge_acl_grant",
                        "config_update", "reminder_handoff_recover"})
-_READS = frozenset({"delegation_goal_get", "delegation_goal_list", "branch_cleanup_plan"})
+_READS = frozenset({"delegation_goal_get", "delegation_goal_list", "branch_cleanup_plan", "task_session_cleanup_preview"})
 
 
 def parse_arguments(raw: str) -> dict:

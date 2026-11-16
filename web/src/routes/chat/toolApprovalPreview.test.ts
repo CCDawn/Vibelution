@@ -142,6 +142,69 @@ describe("Launcher platform approval metadata", () => {
     assistantPlatformPreviewVersion: 1, assistantAction: action, assistantTargets: { project_id: "project-a", request_id: "request-a", ...targets },
     assistantParametersDigest: "a".repeat(64), assistantChangedFields: [...fields].sort(), assistantDelta: delta,
     assistantContentOmitted: content, assistantDetailsOmitted: false });
+  const sessionCreate = platform("session_create", { agent_id: "agent-a" }, { title: "验收会话", activate: false }, ["session"]);
+  const sessionCleanup = { ...summary, assistantAction: "task_session_cleanup",
+    assistantTargets: { ...summary.assistantTargets, session_id: "session-a", expected_revision: "9007199254740993" },
+    assistantChangedFields: ["session"],
+    assistantDelta: { operation: "delete_task_session", preserveTaskReceipt: true, preserveWorkspace: true } };
+
+  it("displays the title and non-activating scope of the new session", () => {
+    expect(platformManagementActionIsKnown("session_create")).toBe(true);
+    expect(platformManagementPreviewIsValid(sessionCreate)).toBe(true);
+    for (const [lang, title, scope] of [
+      ["zh", "创建会话", "保持当前会话"],
+      ["en", "Create session", "keep the current session active"],
+    ] as const) {
+      const preview = toolApprovalActionPreview(sessionCreate, "personal_assistant_manage_tool", lang);
+      for (const value of [title, scope, "project-a", "request-a", "agent-a", "验收会话", "(activate): false"]) {
+        expect(preview).toContain(value);
+      }
+    }
+    expect(platformManagementPreviewIsValid({ ...sessionCreate, assistantDelta: { title: "😀".repeat(120), activate: false } })).toBe(true);
+    for (const title of ["", " ", " 业务标题", "😀".repeat(121), "a\nb", "a\u2028b", "a\u2029b", "a\u202eb", "a\ud800b"]) {
+      expect(platformManagementPreviewIsValid({ ...sessionCreate, assistantDelta: { title, activate: false } })).toBe(false);
+    }
+  });
+
+  it("displays the dispatched task session and what cleanup preserves", () => {
+    expect(platformManagementActionIsKnown("task_session_cleanup")).toBe(true);
+    expect(platformManagementPreviewIsValid(sessionCleanup)).toBe(true);
+    for (const [lang, title, scope] of [
+      ["zh", "删除派遣任务会话", "仅删除所示任务的会话，保留任务回执和工作区。"],
+      ["en", "Delete dispatched task session", "Delete only this task's session and keep the task receipt and workspace."],
+    ] as const) {
+      const preview = toolApprovalActionPreview(sessionCleanup, "personal_assistant_manage_tool", lang);
+      for (const value of [title, scope, ...Object.values(sessionCleanup.assistantTargets), "delete_task_session",
+        "(preserveTaskReceipt): true", "(preserveWorkspace): true"]) expect(preview).toContain(value);
+    }
+  });
+
+  it("declines missing or altered native session targets and scopes", () => {
+    for (const value of [sessionCreate, sessionCleanup]) {
+      for (const patch of [{ assistantPlatformPreviewVersion: undefined }, { assistantContentOmitted: true },
+        { assistantContentOmitted: undefined }, { assistantDetailsOmitted: true }, { assistantChangedFields: ["session", "workspace"] },
+        { assistantDelta: { ...value.assistantDelta, approved: true } }]) {
+        const invalid = { ...value, ...patch };
+        expect(platformManagementPreviewIsValid(invalid)).toBe(false);
+        expect(toolApprovalActionPreview(invalid, "personal_assistant_manage_tool", "en")).toContain("Arguments cannot be verified");
+      }
+    }
+    for (const targets of [{ ...sessionCreate.assistantTargets, request_id: undefined },
+      { ...sessionCreate.assistantTargets, session_id: "session-a" }, { ...sessionCreate.assistantTargets, agent_id: "other/agent" }]) {
+      expect(platformManagementPreviewIsValid({ ...sessionCreate, assistantTargets: targets })).toBe(false);
+    }
+    for (const delta of [{ title: "验收会话" }, { title: "验收会话", activate: true }, { title: "验收会话", activate: "false" }]) {
+      expect(platformManagementPreviewIsValid({ ...sessionCreate, assistantDelta: delta })).toBe(false);
+    }
+    for (const targetPatch of [{ session_id: undefined }, { native_task_id: undefined }, { request_id: "request-a" },
+      { dispatch_id: "a.b" }, { expected_revision: "0" }, { expected_revision: "01" }, { expected_revision: 1 }]) {
+      const invalid = { ...sessionCleanup, assistantTargets: { ...sessionCleanup.assistantTargets, ...targetPatch } };
+      expect(platformManagementPreviewIsValid(invalid)).toBe(false);
+    }
+    for (const deltaPatch of [{ operation: "delete_task" }, { preserveTaskReceipt: false }, { preserveWorkspace: undefined }]) {
+      expect(platformManagementPreviewIsValid({ ...sessionCleanup, assistantDelta: { ...sessionCleanup.assistantDelta, ...deltaPatch } })).toBe(false);
+    }
+  });
   const policyDelta = { allowedTools: ["read_file_tool", "write_file_tool"], preferredTools: ["read_file_tool"], blockedTools: ["exec_command"],
     readScopes: ["private", "shared"], writeScopes: ["private"], allowedCommandKinds: ["read"], networkAccess: "restricted",
     mutationAccess: "workspace", delegationAccess: "assigned_only", approvalOverrides: { write_file_tool: "always" },
@@ -540,12 +603,14 @@ describe("toolApprovalPreview", () => {
     expect(toolApprovalActionPreview({ ...summary, assistantPlan: undefined }, "personal_assistant_manage_tool", "zh"))
       .toContain("运行范围无法核对");
   });
-  it("shows the assistant operation and concrete target in both languages", () => {
+  it("declines legacy session creation metadata without the frozen platform preview", () => {
     const summary = { assistantAction: "session_create", assistantTargets: { agent_id: "agent-a", title: "Acceptance" } };
     expect(toolApprovalActionPreview(summary, "personal_assistant_manage_tool", "zh"))
-      .toBe("创建会话\nagent_id: agent-a\ntitle: Acceptance");
+      .toContain("参数无法核对");
     expect(toolApprovalActionPreview(summary, "personal_assistant_manage_tool", "en"))
-      .toContain("Create session");
+      .toContain("Arguments cannot be verified");
+  });
+  it("explains invalid or omitted legacy management arguments", () => {
     expect(toolApprovalActionPreview({ assistantAction: "session_delete", assistantArgumentsInvalid: true }, "personal_assistant_manage_tool", "zh"))
       .toContain("参数无法核对");
     expect(toolApprovalActionPreview({ assistantAction: "agent_update", assistantChangedFields: ["tool_policy_json"], assistantDetailsOmitted: true }, "personal_assistant_manage_tool", "en"))
