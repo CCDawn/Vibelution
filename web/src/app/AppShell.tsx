@@ -165,6 +165,7 @@ import { VIconButton } from "../components/vui/primitives/VIconButton";
 import { VPopover } from "../components/vui/primitives/VPopover";
 import { VRouteLinkButton } from "../components/vui/primitives/VRouteLinkButton";
 import { MobilePairingTopBarEntry } from "../routes/mobile/MobilePairingTopBarEntry";
+import { PlatformVersionBadge } from "./PlatformVersionBadge";
 import { getPageInstanceId } from "./pageInstance";
 import { useShellStore } from "../store/shellStore";
 import styles from "./AppShell.styles";
@@ -3088,15 +3089,6 @@ export function AppShell() {
           >
             {t("navTeams")}
           </VRouteLinkButton>
-          <VRouteLinkButton
-            chrome="shell-nav"
-            to="/platform-version"
-            className={shellPrimaryNavClass(location.pathname, "/platform-version")}
-            aria-current={isShellPrimaryNavActive(location.pathname, "/platform-version") ? "page" : undefined}
-            onClick={(event) => handlePrimaryNavClick(event, "/platform-version")}
-          >
-            {t("navPlatformVersion")}
-          </VRouteLinkButton>
           {supervisedEvolutionEnabled || selfEvolutionEnabled ? (
             <VRouteLinkButton
               chrome="shell-nav"
@@ -3145,6 +3137,7 @@ export function AppShell() {
         </nav>
         <div className={styles.topBarActions} data-shell-group="top-bar-actions">
           <MobilePairingTopBarEntry lang={lang} />
+          <PlatformVersionBadge />
         </div>
         <div className={styles.mobileNav} data-shell-group="mobile-navigation" aria-label={activePrimaryRouteLabel}>
           <span className={styles.mobileNavLabel}>{activePrimaryRouteLabel}</span>
