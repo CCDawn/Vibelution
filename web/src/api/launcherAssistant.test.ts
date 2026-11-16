@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  getLauncherAssistantDetail, getLauncherAssistantDispatches, getLauncherAssistantStatus, getLauncherAssistantTeamRuns,
+  getLauncherAssistantDetail, getLauncherAssistantDispatches, getLauncherAssistantStatus, getLauncherAssistantSubmissionReceipt, getLauncherAssistantTeamRuns,
   acknowledgeLauncherPatrolDelivery,
   hideLauncherAssistant, launcherAssistantBridge, launcherConversationApi,
   sendLauncherAssistantMessage, setLauncherAssistantExpanded, setLauncherAssistantModel,
@@ -20,6 +20,26 @@ import {
 import type { SessionToolApprovalRequest } from "./types";
 
 afterEach(() => vi.unstubAllGlobals());
+
+it("normalizes only a native receipt bound to the same request and session", async () => {
+  const invoke = vi.fn();
+  vi.stubGlobal("vibelutionLauncherAssistant", { invoke });
+  const receipt = { sessionId: "s", requestId: "original", acceptance: null };
+  const binding = { accepted: true, sessionId: "s", clientSubmissionId: "original" };
+  invoke.mockResolvedValueOnce(receipt);
+  await expect(getLauncherAssistantSubmissionReceipt("s", "original")).resolves.toBeNull();
+  expect(invoke).toHaveBeenLastCalledWith({ operation: "submissionReceipt", requestId: "original" });
+  invoke.mockResolvedValueOnce({ ...receipt, acceptance: { ...binding, turnId: "t", turnActive: true } });
+  await expect(getLauncherAssistantSubmissionReceipt("s", "original")).resolves.toEqual({ turnId: "t", turnActive: true });
+  invoke.mockResolvedValueOnce({ ...receipt, acceptance: { ...binding, queuedTurnId: "q" } });
+  await expect(getLauncherAssistantSubmissionReceipt("s", "original")).resolves.toEqual({ turnId: "", queuedTurnId: "q", clientSubmissionId: "original" });
+  for (const invalid of [{ ...receipt, requestId: "other" }, { ...receipt, sessionId: "other" },
+    { ...receipt, acceptance: { ...binding, clientSubmissionId: "other", turnId: "t" } },
+    { ...receipt, acceptance: { ...binding, turnId: "t", queuedTurnId: "q" } }]) {
+    invoke.mockResolvedValueOnce(invalid);
+    await expect(getLauncherAssistantSubmissionReceipt("s", "original")).rejects.toThrow("ASSISTANT_RESPONSE_INVALID");
+  }
+});
 
 describe("operator continuation send", () => {
   it.each(["ASSISTANT_IDENTITY_INVALID", "Error invoking remote method 'assistant:request': Error: ASSISTANT_IDENTITY_INVALID"])("treats %s as pre-admission only for a bound continuation", async message => {

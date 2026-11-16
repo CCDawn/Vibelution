@@ -74,6 +74,7 @@ export type AssistantHostRequest =
   | { operation: "setBudgetParameters"; revision: number; maxCallsPerTurn: number | null }
   | { operation: "setManagementPermissionPreset"; preset: "request_approval" | "auto_review" | "full_access"; expectedRevision: number }
   | { operation: "detail"; beforeMessageIndex?: number }
+  | { operation: "submissionReceipt"; requestId: string }
   | { operation: "status" | "dispatches" | "config" | "approvals" | "assistantAvatar" }
   | { operation: "acknowledgePatrolDelivery" }
   | { operation: "resolveApproval"; requestId: string; decision: "accept" | "decline" }
@@ -1199,6 +1200,15 @@ export class AssistantHost {
         if (!object(result) || result.id !== generation.sessionId) throw new HostError("ASSISTANT_IDENTITY_INVALID");
         return result;
       }
+      case "submissionReceipt": {
+        if (!ownKeys(payload, ["operation", "requestId"]) || typeof payload.requestId !== "string"
+          || !/^[A-Za-z0-9_.:-]{1,128}$/.test(payload.requestId)) throw new HostError("ASSISTANT_REQUEST_INVALID");
+        const result = await this.rpc(generation,
+          `/api/assistant/messages/receipt?request_id=${encodeURIComponent(payload.requestId)}`, "GET", undefined, READ_MS, false, 8192);
+        if (!object(result) || result.sessionId !== generation.sessionId || result.requestId !== payload.requestId)
+          throw new HostError("ASSISTANT_IDENTITY_INVALID");
+        return result;
+      }
       case "status":
       case "dispatches":
       case "approvals":
@@ -1215,6 +1225,9 @@ export class AssistantHost {
             || typeof permission.preset !== "string" || !["request_approval", "auto_review", "full_access"].includes(permission.preset)
             || !Number.isSafeInteger(permission.revision) || (permission.revision as number) < 0)
             throw new HostError("ASSISTANT_RESPONSE_INVALID");
+        }
+        if (payload.operation === "status" && object(result) && result.nativeSubmissionReceiptVersion === 1) {
+          return { ...result, submissionReceiptVersion: 1 };
         }
         return result;
       }

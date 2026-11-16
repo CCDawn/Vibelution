@@ -1,5 +1,5 @@
 /** @vitest-environment happy-dom */
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -48,18 +48,20 @@ let client: QueryClient;
 let invoke: ReturnType<typeof vi.fn>;
 let failing: Set<string>;
 let readGates: Map<string, Promise<void>>;
-let currentStatus: typeof STATUS;
+let currentStatus: typeof STATUS & { submissionReceiptVersion?: 1 };
 
 async function settle() {
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
 }
 
-async function mount({ initiallyFail = [], withTaskOwner = false }: { initiallyFail?: string[]; withTaskOwner?: boolean } = {}) {
+async function mount({ initiallyFail = [], withTaskOwner = false, submissionReceipts = false }:
+  { initiallyFail?: string[]; withTaskOwner?: boolean; submissionReceipts?: boolean } = {}) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("fetch", vi.fn(() => { throw new Error("HTTP is forbidden in this window"); }));
   failing = new Set(initiallyFail);
   readGates = new Map();
   currentStatus = structuredClone(STATUS);
+  if (submissionReceipts) currentStatus.submissionReceiptVersion = 1;
   invoke = vi.fn(async (request: Record<string, unknown>) => {
     const operation = String(request.operation);
     if (failing.has(operation)) throw new Error(`${operation} response unavailable`);
@@ -145,6 +147,7 @@ afterEach(async () => {
   await act(async () => root?.unmount());
   root = undefined;
   client?.clear(); container?.remove(); conversation = undefined;
+  onlineManager.setOnline(true);
   window.localStorage.clear();
   delete document.documentElement.dataset.theme;
   vi.unstubAllGlobals(); vi.restoreAllMocks();
@@ -401,5 +404,56 @@ describe("Launcher assistant hosted notifications", () => {
     await click(trigger());
     expect(panel().textContent).toContain("当前没有异常");
     expect(panel().textContent).not.toContain("尚未确认消息是否收到");
+  });
+
+  it.each(["automatic", "retry", "rejected-retry"])("reconciles the original receipt after %s recovery", async mode => {
+    await mount({ submissionReceipts: true });
+    const baseInvoke = invoke.getMockImplementation()!;
+    let accepted = false;
+    let originalId: string;
+    const writes: Array<Record<string, unknown>> = [];
+    invoke.mockImplementation(async request => {
+      if (request.operation === "send") {
+        writes.push(request);
+        originalId ??= request.requestId;
+        throw new Error(writes.length === 1 ? "ASSISTANT_REQUEST_TIMEOUT" : "ASSISTANT_STOPPING");
+      }
+      if (request.operation === "submissionReceipt") {
+        expect(request.requestId).toBe(originalId);
+        return { sessionId: "s", requestId: originalId, acceptance: accepted
+          ? { accepted: true, sessionId: "s", clientSubmissionId: originalId, turnId: "accepted-turn", turnActive: mode !== "retry" } : null };
+      }
+      return baseInvoke(request);
+    });
+    await act(async () => conversation!.onComposerChange("核对晚到的回执"));
+    await act(async () => conversation!.onSubmit());
+    await settle();
+    const recovery = () => body().querySelector('[data-vui="state-surface"][data-tone="error"]');
+    expect(recovery()?.textContent).toContain("尚未确认消息是否收到");
+    expect(body().querySelector("textarea")?.value).toBe("核对晚到的回执");
+    expect(operations().filter(operation => operation === "submissionReceipt")).toHaveLength(1);
+
+    if (mode === "retry") {
+      accepted = true;
+      // The query reads a local IPC endpoint even when the renderer is offline.
+      onlineManager.setOnline(false);
+      await click(recovery()!.querySelector("button")!);
+    } else {
+      if (mode === "rejected-retry") {
+        await click(recovery()!.querySelector("button")!);
+        expect(writes).toHaveLength(2);
+        expect(writes[1]).toEqual(writes[0]);
+        expect(recovery()?.textContent).toContain("尚未确认消息是否收到");
+      }
+      accepted = true;
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 2_100)); });
+      await settle();
+    }
+    expect(recovery()).toBeNull();
+    expect(conversation?.composerError).toBeFalsy();
+    expect(body().querySelector("textarea")?.value).toBe("");
+    if (mode === "retry") expect(client.getQueryData(["launcher-assistant", "composer", "s"])).toMatchObject({ acceptedTurnId: "" });
+    expect(operations().filter(operation => operation === "submissionReceipt").length).toBeGreaterThanOrEqual(2);
+    expect(writes).toHaveLength(mode === "rejected-retry" ? 2 : 1);
   });
 });

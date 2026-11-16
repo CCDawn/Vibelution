@@ -484,6 +484,7 @@ def test_native_model_worker_keeps_default_stores_in_profile(tmp_path, developer
 
 
 def test_private_detail_uses_native_light_projection_and_keeps_identity_gate(monkeypatch):
+    import threading
     from types import SimpleNamespace
 
     from core.assistant_runtime import native
@@ -493,6 +494,10 @@ def test_private_detail_uses_native_light_projection_and_keeps_identity_gate(mon
     def detail(session_id, **kwargs):
         calls.append((session_id, kwargs))
         return {"id": session_id, "agentId": "assistant-1", "messages": []}
+    monkeypatch.setattr(native, "_STARTED", True)
+    monkeypatch.setattr(native, "_SESSION_ID", "session-1")
+    monkeypatch.setattr(native, "_AGENT_ID", "assistant-1")
+    monkeypatch.setattr(native, "_STOP_REQUESTED", threading.Event())
     monkeypatch.setattr(native, "_projection", lambda: {"assistant": {"agentId": "assistant-1", "directSessionId": "session-1"}})
     monkeypatch.setattr(native, "_services", lambda: (None, None, SimpleNamespace(
         get_session_detail=detail, SessionNotFoundError=MissingSession), None))
@@ -504,6 +509,7 @@ def test_private_detail_uses_native_light_projection_and_keeps_identity_gate(mon
         "include_secondary": False,
         "message_limit": native.LAUNCHER_ASSISTANT_DETAIL_MESSAGE_LIMIT,
         "transcript_scope": "window",
+        "read_only": True,
     })]
     assert 100 <= native.LAUNCHER_ASSISTANT_DETAIL_MESSAGE_LIMIT <= 200
     with pytest.raises(MissingSession):
@@ -571,6 +577,214 @@ def assistant_command_session(tmp_path, monkeypatch):
     monkeypatch.setattr(sessions, "_schedule_session_turn", lambda context: scheduled.append(context))
     yield native, sessions, sid, expected, scheduled, identity
     _reset_seeded_session_runtime(sid)
+
+
+def test_slow_detail_projection_does_not_block_message_acceptance(assistant_command_session, monkeypatch):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    native, sessions, sid, _, scheduled, identity = assistant_command_session
+    entered = threading.Event()
+    release = threading.Event()
+
+    def slow_detail(session_id, **_):
+        entered.set()
+        assert release.wait(10)
+        return {"id": session_id, "agentId": identity["agentId"], "messages": []}
+
+    monkeypatch.setattr(sessions, "get_session_detail", slow_detail)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        detail = executor.submit(native.get_detail, sid)
+        try:
+            assert entered.wait(3)
+            accepted = executor.submit(native.submit, "isolated test message", "send-while-reading").result(timeout=5)
+            assert accepted["accepted"] is True
+            assert len(scheduled) == 1
+            assert not detail.done()
+        finally:
+            release.set()
+        assert detail.result(timeout=3)["id"] == sid
+
+
+def test_launcher_detail_only_projects_existing_state(assistant_command_session, monkeypatch):
+    native, sessions, sid, _, _, _ = assistant_command_session
+    for operation in ("_ensure_session_conversation_record", "_ensure_session_workspace",
+                      "reconcile_stale_chat_turn_work_runs", "_release_stale_chat_turn_work_run",
+                      "_active_chat_turn_work_run_for_session", "save_session_chat_state"):
+        monkeypatch.setattr(sessions, operation, lambda *_a, **_k: pytest.fail("read entered a repair path"))
+
+    def reconcile(*_args, **_kwargs):
+        raise RuntimeError("ordinary detail still reconciles")
+
+    monkeypatch.setattr(sessions, "_reconcile_stale_session_ledger", reconcile)
+    assert sessions.get_session_detail("missing-session", read_only=True) is None
+    assert native.get_detail(sid)["id"] == sid
+    with pytest.raises(RuntimeError, match="ordinary detail still reconciles"):
+        sessions.get_session_detail(sid, include_secondary=False)
+
+
+def test_detail_repairs_respect_shutdown_deadline(assistant_command_session, monkeypatch):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    native, sessions, sid, _, _, identity = assistant_command_session
+    entered = threading.Event()
+    release = threading.Event()
+
+    def slow_detail(session_id, **_):
+        entered.set()
+        assert release.wait(10)
+        return {"id": session_id, "agentId": identity["agentId"], "messages": []}
+
+    monkeypatch.setattr(sessions, "get_session_detail", slow_detail)
+    monkeypatch.setattr(sessions, "record_restart_resume_pending", lambda: pytest.fail("shutdown raced a detail repair"))
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        detail = executor.submit(native.get_detail, sid)
+        try:
+            assert entered.wait(3)
+            assert native.shutdown(timeout=0) == {"closed": False, "code": "NATIVE_SHUTDOWN_ADMISSION_BUSY"}
+        finally:
+            release.set()
+        with pytest.raises(native.AssistantSessionError, match="ASSISTANT_STOPPING"):
+            detail.result(timeout=3)
+
+
+def test_detail_repairs_wait_for_migration_quiescence_to_end(assistant_receipt_session, monkeypatch):
+    native, sessions, sid, _, _, identity = assistant_receipt_session
+    projected = []
+
+    def detail(session_id, **_):
+        projected.append(session_id)
+        return {"id": session_id, "agentId": identity["agentId"], "messages": []}
+
+    monkeypatch.setattr(sessions, "get_session_detail", detail)
+    with native.session_quiescence():
+        with pytest.raises(native.AssistantSessionError, match="ASSISTANT_QUIESCING"):
+            native.get_detail(sid)
+        assert not projected
+        assert native.get_submission_receipt(sid, "unknown-submission")["acceptance"] is None
+    assert native.get_detail(sid)["id"] == sid
+    assert projected == [sid]
+
+
+@pytest.mark.parametrize(("change", "code"), [
+    ("agentId", "ASSISTANT_IDENTITY_INVALID"),
+    ("directSessionId", "ASSISTANT_IDENTITY_INVALID"),
+    ("shutdown", "ASSISTANT_STOPPING"),
+    ("restart", "ASSISTANT_IDENTITY_INVALID"),
+])
+def test_slow_detail_discarded_when_binding_changes(assistant_command_session, monkeypatch, change, code):
+    native, sessions, sid, _, _, identity = assistant_command_session
+    agent_id = identity["agentId"]
+
+    def detail(session_id, **_):
+        if change == "shutdown":
+            native._STOP_REQUESTED.set()
+        elif change == "restart":
+            monkeypatch.setattr(native, "_LIFECYCLE_GENERATION", native._LIFECYCLE_GENERATION + 1)
+        else:
+            identity[change] = "replacement"
+        return {"id": session_id, "agentId": agent_id, "messages": []}
+
+    monkeypatch.setattr(sessions, "get_session_detail", detail)
+    with pytest.raises(native.AssistantSessionError) as error:
+        native.get_detail(sid)
+    assert error.value.code == code
+
+
+@pytest.fixture
+def assistant_receipt_session(assistant_command_session, tmp_path, monkeypatch):
+    from collections import OrderedDict
+
+    from core.web.services import personal_assistant_service
+    from core.web.services.session import directory_runtime
+
+    native, _, _, _, _, identity = assistant_command_session
+    monkeypatch.setattr(native, "_RECENT_ACCEPTED_TURNS", OrderedDict())
+    monkeypatch.setattr(personal_assistant_service, "_profile_agent", lambda: {**identity, "status": "active"})
+    directory_runtime.initialize_session_directory_runtime(project_root=tmp_path, migrate_legacy_chat_state=False)
+    assert directory_runtime.pin_open_directory_store(tmp_path) is not None
+    try:
+        yield assistant_command_session
+    finally:
+        directory_runtime.shutdown_session_directory_runtime()
+
+
+def test_submission_receipt_requires_durable_exact_user_event(assistant_receipt_session, tmp_path, monkeypatch):
+    from core.chat.conversation_ledger import (
+        append_conversation_event,
+        load_conversation_events,
+    )
+
+    native, sessions, sid, _, scheduled, _ = assistant_receipt_session
+    request_id = "exact-submission"
+    unresolved = {"sessionId": sid, "requestId": request_id, "acceptance": None}
+    monkeypatch.setattr(sessions, "get_session_detail", lambda *_a, **_kw: pytest.fail("read projected the transcript"))
+    assert native.get_submission_receipt(sid, request_id) == unresolved
+    append_conversation_event(tmp_path, sid, "not-a-receipt", "turn_started", correlation_id=request_id)
+    append_conversation_event(tmp_path, sid, "not-a-receipt", "user_message", correlation_id="other-submission",
+                              payload={"content": "isolated test message"})
+    assert native.get_submission_receipt(sid, request_id) == unresolved
+
+    accepted = native.submit("isolated test message", request_id)
+    native._RECENT_ACCEPTED_TURNS.clear()
+    count = len(load_conversation_events(tmp_path, sid))
+    assert native.get_submission_receipt(sid, request_id) == {
+        "sessionId": sid, "requestId": request_id,
+        "acceptance": {"accepted": True, "sessionId": sid, "clientSubmissionId": request_id,
+                       "turnId": accepted["turnId"], "turnActive": True},
+    }
+    assert len(scheduled) == 1
+    assert len(load_conversation_events(tmp_path, sid)) == count
+    with pytest.raises(native.AssistantSessionError) as error:
+        native.get_submission_receipt("another-session", request_id)
+    assert error.value.code == "ASSISTANT_IDENTITY_INVALID"
+
+
+def test_recent_turn_receipt_does_not_wait_on_journal_projection(assistant_receipt_session, monkeypatch):
+    from core.web.services.session import journal_bridge
+
+    native, sessions, sid, _, _, _ = assistant_receipt_session
+    accepted = native.submit("isolated test message", "mirror-proof")
+    monkeypatch.setattr(journal_bridge, "load_session_conversation_events_by_correlation",
+                        lambda *_a, **_k: pytest.fail("warm receipt entered journal single-flight"))
+    monkeypatch.setattr(sessions, "load_session_chat_state",
+                        lambda *_a, **_k: pytest.fail("receipt reopened chat-state store"))
+    receipt = native.get_submission_receipt(sid, "mirror-proof")
+    assert receipt == {"sessionId": sid, "requestId": "mirror-proof", "acceptance": {
+        "accepted": True, "sessionId": sid, "clientSubmissionId": "mirror-proof",
+        "turnId": accepted["turnId"], "turnActive": True,
+    }}
+    with sessions._RUNNING_SESSIONS_LOCK:
+        sessions._RUNNING_SESSION_IDS.discard(sid)
+        sessions._SESSION_ACTIVE_TURN_IDS.pop(sid, None)
+    assert native.get_submission_receipt(sid, "mirror-proof")["acceptance"]["turnActive"] is False
+
+
+def test_submission_receipt_follows_persisted_queue_promotion(assistant_receipt_session, tmp_path):
+    from core.chat.conversation_ledger import append_conversation_event
+
+    native, sessions, sid, _, scheduled, _ = assistant_receipt_session
+    native.submit("isolated active message", "active-submission")
+    queued = native.submit("isolated queued message", "queued-submission")
+    assert native.get_submission_receipt(sid, "queued-submission") == {
+        "sessionId": sid, "requestId": "queued-submission",
+        "acceptance": {"accepted": True, "sessionId": sid, "clientSubmissionId": "queued-submission",
+                       "queuedTurnId": queued["queuedTurnId"]},
+    }
+
+    # Queue promotion journals the user's message before removing its row.
+    append_conversation_event(tmp_path, sid, "promoted-turn", "user_message", correlation_id="queued-submission",
+                              payload={"content": "isolated queued message"})
+    conversation = sessions.load_session_chat_state(tmp_path, sid)
+    conversation.pop("queued_turns")
+    sessions.save_session_chat_state(tmp_path, sid, conversation)
+    assert native.get_submission_receipt(sid, "queued-submission") == {
+        "sessionId": sid, "requestId": "queued-submission",
+        "acceptance": {"accepted": True, "sessionId": sid, "clientSubmissionId": "queued-submission",
+                       "turnId": "promoted-turn", "turnActive": False},
+    }
+    assert len(scheduled) == 1
 
 
 def test_fixed_session_continue_uses_real_snapshot_admission_and_same_request_replay(assistant_command_session, tmp_path, monkeypatch):

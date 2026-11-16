@@ -10,7 +10,7 @@ import type { AssistantHostRequest } from "../src/assistant/assistantHost.js";
  */
 const HOST_REQUEST_OPERATIONS: readonly AssistantHostRequest["operation"][] = [
   "previewTaskCleanup", "executeTaskCleanup", "teamRuns", "setModel", "setManagementPermissionPreset", "budgetParameters", "setBudgetParameters", "usageSummary",
-  "detail", "status", "dispatches", "config", "approvals", "assistantAvatar",
+  "detail", "submissionReceipt", "status", "dispatches", "config", "approvals", "assistantAvatar",
   "resolveApproval", "previewDispatchApproval", "declineDispatchApproval", "decideDispatchApproval",
   "send", "uploadAttachment", "upload_attachment", "readAttachment", "stop", "updateQueuedTurn", "removeQueuedTurn", "sendNowQueuedTurn", "continue", "switchHead", "regenerate", "guidance",
   "curation", "curate", "operatorAsset",

@@ -24,12 +24,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .budget_parameters import AssistantBudgetParameters
 from .cache_usage import AssistantUsageSummary
 
-# The renderer polls /api/assistant at a multi-second cadence while chat detail
-# and submit hold native._LOCK for their own reads. Serving the lock-bound
+# The renderer polls /api/assistant at a multi-second cadence while native
+# commands can hold native._LOCK. Serving the lock-bound
 # identity reads from this snapshot bounds every status response without
 # holding the native lock; only background refreshes touch it, at most one
 # outstanding refresh per facade.
 IDENTITY_SNAPSHOT_TTL_SECONDS = 2.0
+_SUBMISSION_REQUEST_ID_PATTERN = r"^[A-Za-z0-9_.:-]+$"
 
 
 _INITIAL_PREPARE_CODES = frozenset({
@@ -184,7 +185,7 @@ class ControlContinuation(BaseModel):
 class Message(BaseModel):
     model_config = ConfigDict(extra="forbid")
     message: str = Field(max_length=64000)
-    requestId: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.:-]+$")
+    requestId: str = Field(min_length=1, max_length=128, pattern=_SUBMISSION_REQUEST_ID_PATTERN)
     attachmentIds: list[str] = Field(default_factory=list, max_length=8)
     references: list[dict] = Field(default_factory=list, max_length=8)
     controlContinuation: ControlContinuation | None = None
@@ -513,8 +514,8 @@ class NativeFacade:
         self.root = root
         self.assistant = None
         # The three native reads below all serialize on native._LOCK. The
-        # renderer's lightweight status poll used to queue behind chat detail
-        # and submit holds (observed >15s). The snapshot is served stale while
+        # renderer's lightweight status poll can queue behind command holds.
+        # The snapshot is served stale while
         # one background refresh recomputes it, so status reads never wait on
         # the native lock. Identity is immutable after bootstrap; settings
         # setters invalidate their mutable projection. Lock-free reads
@@ -660,6 +661,10 @@ class NativeFacade:
             return native.submit(message, request_id, attachment_ids, references,
                                  control_continuation=control_continuation)
         return native.submit(message, request_id, attachment_ids, references)
+
+    def get_submission_receipt(self, request_id):
+        from . import native
+        return native.get_submission_receipt(self.assistant["directSessionId"], request_id)
 
     def upload_attachment(self, payload, filename, content_type):
         from . import native
@@ -1570,8 +1575,10 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
             supported = callable(getattr(getattr(dispatch, "management", None), "list_requests", None))
             queue_supported = all(callable(getattr(native, operation, None)) for operation in (
                 "update_queued_turn", "remove_queued_turn", "send_now_queued_turn"))
+            receipt_supported = callable(getattr(native, "get_submission_receipt", None))
             return {**result, **({"teamRunsVersion": 1} if supported else {}),
                     **({"followupQueueVersion": 1} if queue_supported else {}),
+                    **({"nativeSubmissionReceiptVersion": 1} if receipt_supported else {}),
                     **({"patrol": patrol_status} if patrol_status is not None else {})}
         return result
 
@@ -1757,6 +1764,17 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
             return native.submit(payload.message, payload.requestId)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/api/assistant/messages/receipt")
+    def submission_receipt(request: Request, response: Response,
+                           request_id: str = Query(min_length=1, max_length=128, pattern=_SUBMISSION_REQUEST_ID_PATTERN)):
+        if len(request.query_params.multi_items()) != 1:
+            raise HTTPException(422, detail="Invalid submission receipt request")
+        reader = getattr(native, "get_submission_receipt", None)
+        if not callable(reader):
+            raise HTTPException(404, detail="Submission receipts unavailable")
+        response.headers["Cache-Control"] = "no-store"
+        return reader(request_id)
 
     @app.post("/api/assistant/attachments/upload")
     async def upload_attachment(request: Request):

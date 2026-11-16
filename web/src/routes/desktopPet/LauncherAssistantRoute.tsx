@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MessageCircle, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import {
-  getLauncherAssistantDetail, getLauncherAssistantDispatches, setLauncherAssistantModel,
+  getLauncherAssistantDetail, getLauncherAssistantDispatches, getLauncherAssistantSubmissionReceipt, setLauncherAssistantModel,
   hideLauncherAssistant, sendLauncherAssistantMessage, setLauncherAssistantExpanded,
   launcherConversationApi,
   acknowledgeLauncherPatrolDelivery,
@@ -362,6 +362,16 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   }, [client]);
   const composerKey = ["launcher-assistant", "composer", sessionId];
   const detailKey = ["launcher-assistant", "detail", sessionId];
+  const supportsSubmissionReceipt = status.data?.submissionReceiptVersion === 1;
+  function submissionReceiptOptions(requestId: string) {
+    return {
+      queryKey: ["launcher-assistant", "submission-receipt", sessionId, requestId],
+      queryFn: () => getLauncherAssistantSubmissionReceipt(sessionId, requestId),
+      networkMode: "always" as const,
+      retry: false as const,
+      staleTime: 0,
+    };
+  }
   const submitReadbackRuntime = {
     detailQueryKey: (id: string) => ["launcher-assistant", "detail", id],
     readDetail: async (id: string, signal: AbortSignal) => {
@@ -483,7 +493,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     enabled: observingOwnSession || sendPending || sendUnconfirmed, retry: false,
     refetchInterval: query => {
       const continuation = client.getQueryData<ComposerSnapshot>(composerKey)?.continuation;
-      const requests = [outstanding.current?.requestId, continuation && !continuation.accepted ? continuation.requestId : ""]
+      const requests = [supportsSubmissionReceipt && sendUnconfirmed ? "" : outstanding.current?.requestId,
+        continuation && !continuation.accepted ? continuation.requestId : ""]
         .filter((id): id is string => Boolean(id));
       // The enabled query supplies one recovery read. Missing data alone is
       // not a reason for an idle/error loop without known outstanding work.
@@ -494,6 +505,13 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     // Interval refetches pause in the background by default; an outstanding
     // send opts in so the hidden-window fallback poll (the 10s readback) runs.
     refetchIntervalInBackground: sendPending || sendUnconfirmed,
+  });
+  const receiptRequestId = supportsSubmissionReceipt && sendUnconfirmed ? outstanding.current?.requestId || "" : "";
+  const submissionReceipt = useQuery({
+    ...submissionReceiptOptions(receiptRequestId),
+    enabled: Boolean(sessionId && receiptRequestId),
+    refetchInterval: query => query.state.data ? false : 2_000,
+    refetchIntervalInBackground: true,
   });
   const sessionStream = useMemo(() => createLauncherAssistantStream(sessionId), [sessionId]);
   const [activeLayer, setActiveLayer] = useState<ActiveTurnLayerState>();
@@ -554,13 +572,21 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
   }, [detail.data, detail.dataUpdatedAt, sessionStream]);
   useEffect(() => {
     const submission = outstanding.current;
-    const recovered = submission && launcherAssistantRequestReadback(detail.data, submission.requestId);
-    if (!submission || !recovered) return;
+    if (!submission) return;
+    const receipt = submission.requestId === receiptRequestId ? submissionReceipt.data : null;
+    const queuedReceipt = receipt?.queuedTurnId
+      ? { id: receipt.queuedTurnId, clientSubmissionId: submission.requestId, observed: false } : null;
+    const recovered = launcherAssistantRequestReadback(detail.data, submission.requestId)
+      ?? (receipt ? { turnId: receipt.turnId, queuedAcceptance: queuedReceipt } : null);
+    if (!recovered) return;
+    const turnInactive = receipt?.turnActive === false && receipt.turnId === recovered.turnId;
+    const awaitingTurnId = turnInactive ? "" : recovered.turnId;
     appendStoredPromptHistoryEntry(submission.message);
     client.setQueryData<SessionDetail>(detailKey, previous => acceptSessionSubmit(previous, submissionPaint(submission), {
       turnId: recovered.turnId, queuedTurnId: recovered.queuedAcceptance?.id,
     }));
-    setActiveLayer(sessionStream.acceptSubmission(submission.requestId, recovered.turnId, Boolean(recovered.queuedAcceptance)));
+    setActiveLayer(turnInactive ? sessionStream.rejectSubmission(submission.requestId)
+      : sessionStream.acceptSubmission(submission.requestId, recovered.turnId, Boolean(recovered.queuedAcceptance)));
     // A collapse may invalidate the transport ACK epoch. Only exact native
     // submission evidence may retire that original request, preserving new B.
     outstanding.current = null;
@@ -572,13 +598,15 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     clearAcceptedReferences(submission);
     const remainingDraft = !submission.preserveDraft && draftRef.current === (submission.draftSnapshot ?? submission.message) ? "" : draftRef.current;
     draftRef.current = remainingDraft;
-    saveComposer({ draft: remainingDraft, outstanding: null, acceptedTurnId: recovered.turnId,
+    saveComposer({ draft: remainingDraft, outstanding: null, acceptedTurnId: awaitingTurnId,
       queuedAcceptance: recovered.queuedAcceptance, ...acceptQuestionAnswer(submission) });
     setDraft(remainingDraft);
-    setAcceptedTurnId(recovered.turnId);
+    setAcceptedTurnId(awaitingTurnId);
     setQueuedAcceptance(recovered.queuedAcceptance);
     setSendUnconfirmed(false);
-  }, [client, detail.data, sessionId]);
+    setSendUnknownDetail("");
+    if (receipt) void detail.refetch({ cancelRefetch: false });
+  }, [client, detail.data, receiptRequestId, sessionId, submissionReceipt.data]);
   const terminalTurnId = detail.data?.lastTurnTerminalTurnId?.trim() || "";
   const terminalOutcome = detail.data ? resolveSessionActivity(detail.data).outcome : "";
   useEffect(() => {
@@ -1044,9 +1072,16 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
     if (priorSubmission) {
       requestReadbackGate.current = true;
       try {
-        const readback = await readbackSubmitAcceptance(client, sessionId, priorSubmission.requestId, submitReadbackRuntime);
+        if (supportsSubmissionReceipt) {
+          if (await client.fetchQuery(submissionReceiptOptions(priorSubmission.requestId))) return true;
+        } else {
+          const readback = await readbackSubmitAcceptance(client, sessionId, priorSubmission.requestId, submitReadbackRuntime);
+          if (readback.status === "readback_failed") return false;
+        }
         if (!mounted.current || sessionIdRef.current !== sessionId || outstanding.current !== priorSubmission) return true;
-        if (readback.status === "readback_failed" || launcherAssistantRequestReadback(client.getQueryData<SessionDetail>(detailKey), priorSubmission.requestId)) return false;
+        if (launcherAssistantRequestReadback(client.getQueryData<SessionDetail>(detailKey), priorSubmission.requestId)) return true;
+      } catch {
+        return false;
       } finally { requestReadbackGate.current = false; }
     }
     const snapshot = attachmentsRef.current;
@@ -1098,7 +1133,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       void approvals.refetch();
     } catch (error) {
       if (mounted.current && requestEpoch === epochRef.current && sending.current === flight && outstanding.current === submission) {
-        if (launcherAssistantSendDefinitelyRejected(error)) {
+        if (!priorSubmission && launcherAssistantSendDefinitelyRejected(error)) {
           removeSessionSubmitPaint(client, detailKey, paint, { previous: beforeSubmitDetail, optimistic: paintedDetail });
           setActiveLayer(sessionStream.rejectSubmission(submission.requestId));
           // A provable pre-admission refusal left nothing queued, so the
@@ -1108,7 +1143,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
           saveComposer({ outstanding: null });
           setSendUnconfirmed(false);
           setFeedback(copy.sendRejected);
-        } else if (launcherAssistantSendRetryableBusy(error)) {
+        } else if (!priorSubmission && launcherAssistantSendRetryableBusy(error)) {
           removeSessionSubmitPaint(client, detailKey, paint, { previous: beforeSubmitDetail, optimistic: paintedDetail });
           setActiveLayer(sessionStream.rejectSubmission(submission.requestId));
           // These host codes are pre-admission quiescence gates (the native
@@ -1123,11 +1158,13 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
           const code = launcherAssistantSendBusyCode(error);
           setFeedback(code ? `${copy.sendBusy} (${code})` : copy.sendBusy);
         } else {
+          // A rejection of a retry cannot settle the earlier attempt. Keep its
+          // original request and draft until native acceptance can be read.
           setSendUnconfirmed(true);
           setSendUnknownDetail(boundedErrorDetail(error));
           // Confirm the original request through this surface's IPC reader;
           // shared evidence rules never mistake local paint for admission.
-          await readbackSubmitAcceptance(client, sessionId, submission.requestId, submitReadbackRuntime);
+          if (!supportsSubmissionReceipt) await readbackSubmitAcceptance(client, sessionId, submission.requestId, submitReadbackRuntime);
         }
       }
     } finally {

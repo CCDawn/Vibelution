@@ -684,6 +684,7 @@ def get_session_detail(
     transcript_scope: Any = "all",
     include_secondary: Any = True,
     requester: Any = None,
+    read_only: bool = False,
 ) -> dict | None:
     """Return a session detail payload by persisted conversation id.
 
@@ -694,6 +695,9 @@ def get_session_detail(
     ``requester`` optionally declares who is reading (candidate read gate).
     ``None`` keeps the operator-channel default; only candidate hypothesis
     child sessions are gated, so normal sessions are unchanged.
+
+    ``read_only`` projects an existing row without session, work-run, or
+    directory repair. The Launcher uses it while a new send can be admitted.
     """
     s = _service()
     detail_started_at = time.perf_counter()
@@ -702,7 +706,7 @@ def get_session_detail(
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
         return None
-    include_secondary_lists = _coerce_include_secondary(include_secondary)
+    include_secondary_lists = not read_only and _coerce_include_secondary(include_secondary)
     window_requested = s._session_detail_window_requested(
         message_limit=message_limit,
         before_message_index=before_message_index,
@@ -715,6 +719,8 @@ def get_session_detail(
     row_read_started_at = time.perf_counter()
     conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
     if conversation is None:
+        if read_only:
+            return None
         s._ensure_session_conversation_record(
             normalized_session_id,
             source="session.detail",
@@ -764,24 +770,24 @@ def get_session_detail(
     # directory write and follow-up persisted-state reload for that path while
     # preserving idle recovery and full-detail behavior.
     light_running_poll = not include_secondary_lists and session_running
-    reconcile_started_at = time.perf_counter()
-    # The hydration path only *notices* the abandoned ledger entry; the
-    # interruption cause is a process restart. Keeping the cause inside the
-    # restart whitelist is what lets startup recovery resume this turn.
-    s._reconcile_stale_session_ledger(
-        normalized_session_id,
-        active_turn_id=active_turn_id if session_running else "",
-        reason="process_restarted",
-        trigger="detail_loaded_after_restart",
-    )
-    if not light_running_poll:
-        conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id) or conversation
-    _accumulate_session_detail_stage_ms(timings, "reconcileMs", reconcile_started_at)
+    if not read_only:
+        reconcile_started_at = time.perf_counter()
+        # Hydration only notices the abandoned entry. The restart cause lets
+        # startup recovery resume the interrupted turn.
+        s._reconcile_stale_session_ledger(
+            normalized_session_id,
+            active_turn_id=active_turn_id if session_running else "",
+            reason="process_restarted",
+            trigger="detail_loaded_after_restart",
+        )
+        if not light_running_poll:
+            conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id) or conversation
+        _accumulate_session_detail_stage_ms(timings, "reconcileMs", reconcile_started_at)
     target = s._load_conversation_detail_target(
         normalized_session_id,
         payload={"conversations": [conversation]},
-        repair=not light_running_poll,
-        persist_session_row=True,
+        repair=not read_only and not light_running_poll,
+        persist_session_row=not read_only,
         agent_by_id=agent_by_id,
         agent_lookup_is_partial=bool(bound_agent_ids),
         lightweight=window_requested,
@@ -803,6 +809,7 @@ def get_session_detail(
             before_message_index=before_message_index,
             transcript_scope=transcript_scope,
             include_secondary=include_secondary_lists,
+            reconcile_work_runs=not read_only,
         )
         _accumulate_session_detail_stage_ms(timings, "projectionMs", projection_started_at)
         _record_session_detail_timing(
@@ -1052,9 +1059,10 @@ def _build_session_detail(
     before_message_index: Any = None,
     transcript_scope: Any = "all",
     include_secondary: bool = True,
+    reconcile_work_runs: bool = True,
 ) -> dict[str, Any]:
     s = _service()
-    summary = s._build_session_summary(conversation)
+    summary = s._build_session_summary(conversation, reconcile_work_runs=reconcile_work_runs)
     return s._build_session_detail_from_summary(
         conversation,
         summary,
@@ -1063,6 +1071,7 @@ def _build_session_detail(
         before_message_index=before_message_index,
         transcript_scope=transcript_scope,
         include_secondary=include_secondary,
+        reconcile_work_runs=reconcile_work_runs,
     )
 
 
@@ -1133,6 +1142,7 @@ def _build_session_detail_from_summary(
     before_message_index: Any = None,
     transcript_scope: Any = "all",
     include_secondary: bool = True,
+    reconcile_work_runs: bool = True,
 ) -> dict[str, Any]:
     s = _service()
     # ``ledgerSeq`` on this detail doubles as the SSE ``id:`` cursor and the
@@ -1156,7 +1166,15 @@ def _build_session_detail_from_summary(
     )
     if not s._is_task_tool_backed_active_task(active_task):
         active_task = None
-    live_work_run = s._active_chat_turn_work_run_for_session(conversation["id"])
+    if reconcile_work_runs:
+        live_work_run = s._active_chat_turn_work_run_for_session(conversation["id"])
+    else:
+        # Active-index reads can prune stale entries. The resident Launcher
+        # owns the worker, so use its exact locally active turn instead.
+        active_turn_id = s._current_session_turn_id(conversation["id"])
+        live_work_run = s._WORK_RUN_STORE.load_snapshot("chat_turn", active_turn_id) if active_turn_id else None
+        if live_work_run is not None and live_work_run.get("sessionId") != conversation["id"]:
+            live_work_run = None
     active_task = s._active_task_with_live_work_run(active_task, live_work_run)
     changed_files = list(active_task.get("changed_files") or []) if active_task else []
     read_files = list(active_task.get("read_files") or []) if active_task else []
@@ -1339,9 +1357,10 @@ def _build_session_summary(
     phase_timings: dict[str, int] | None = None,
     agent_inbox_pending_count_cache: dict[str, int] | None = None,
     include_runtime_metrics: bool = False,
+    reconcile_work_runs: bool = True,
 ) -> dict[str, Any]:
     s = _service()
-    status = s._conversation_phase(conversation["id"], conversation)
+    status = s._conversation_phase(conversation["id"], conversation, reconcile_work_runs=reconcile_work_runs)
     summary_messages = list(conversation.get("messages") or [])
     if bool(conversation.get("_messagesNormalized")) or bool(conversation.get("_messagesPreview")):
         normalized_summary_messages = summary_messages
@@ -5527,12 +5546,14 @@ def _conversation_phase(
     *,
     active_work_run_status: str = "",
     persistent_work_runs_reconciled: bool = False,
+    reconcile_work_runs: bool = True,
 ) -> str:
     s = _service()
     if s._is_session_stop_requested(conversation_id):
         return "stopping"
     normalized = str(conversation.get("last_turn_status") or conversation.get("lastTurnStatus") or "").strip().lower()
     normalized_active_work_run_status = str(active_work_run_status or "").strip().lower()
+    should_reconcile_work_runs = reconcile_work_runs and not persistent_work_runs_reconciled
     if s._is_session_running(conversation_id) or normalized_active_work_run_status in {
         "queued",
         "running",
@@ -5540,7 +5561,7 @@ def _conversation_phase(
         "paused",
     }:
         # C1: worker may still claim a hung turn after tool timeout — settle if hang criteria hit.
-        if not persistent_work_runs_reconciled:
+        if should_reconcile_work_runs:
             try:
                 s.reconcile_stale_chat_turn_work_runs()
             except Exception:
@@ -5556,7 +5577,7 @@ def _conversation_phase(
         # Hang settlement may have cleared in-memory running; fall through to ready path.
     # Process-local worker is gone. If a chat_turn work-run is still marked
     # active for this session, release it so shell/top-bar stop showing "running".
-    if not persistent_work_runs_reconciled:
+    if should_reconcile_work_runs:
         stale_work_run = s._active_chat_turn_work_run_for_session(conversation_id)
         if isinstance(stale_work_run, dict):
             finished_at = str(stale_work_run.get("updatedAt") or s._now_timestamp()).strip() or s._now_timestamp()
