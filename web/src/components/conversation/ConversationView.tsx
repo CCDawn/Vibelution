@@ -383,6 +383,17 @@ export const ConversationView = React.memo(function ConversationView({
     () => draftStore.getSnapshot(),
     [draftStore],
   );
+
+  // Inline message editing reports through the upstream callback, but the
+  // draft store only accepts upstream resets, so the controlled value would
+  // never move. Write the store first, then mirror to the upstream draft.
+  const handleComposerValueChange = useCallback(
+    (next: string) => {
+      draftStore.set(next);
+      onComposerChange(next);
+    },
+    [draftStore, onComposerChange],
+  );
   // Model labels for the turn-envelope switch dividers. Uses the lightweight
   // configuration bootstrap summary (modelLabels id→label map) instead of the full
   // /api/config/workspace payload: this mount only needs labels, and the heavy
@@ -1488,7 +1499,7 @@ export const ConversationView = React.memo(function ConversationView({
     onOpenComposerContextDetail,
     onCancelComposerMode,
     composerValue,
-    onComposerChange,
+    onComposerChange: handleComposerValueChange,
     composerDisabled,
     composerError,
     submitLabel,
