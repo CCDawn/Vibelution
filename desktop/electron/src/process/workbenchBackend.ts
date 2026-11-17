@@ -62,7 +62,8 @@ import {
   blockLifecycleIfActiveWork,
   finalizeWorkRunsForStoppedBackend,
   listActiveWorkRuns,
-  type ActiveWorkRun
+  type ActiveWorkRun,
+  type RecoverableChatTurnOwner
 } from "./activeWorkGuard.js";
 import type { WorkbenchLifecycleOperation, WorkbenchLifecycleResult } from "./workbenchLifecycle.js";
 import { trackMainLineBackgroundWork, type MainLineQueuedCommand } from "../lifecycle/mainLine/commandQueue.js";
@@ -70,6 +71,10 @@ import { trackMainLineBackgroundWork, type MainLineQueuedCommand } from "../life
 export const DEFAULT_WORKBENCH_HOST = "127.0.0.1";
 export const DEFAULT_WORKBENCH_PORT = 8000;
 export const WEB_WORKBENCH_SCRIPT = ["scripts", "web_workbench.py"] as const;
+export type WorkbenchActiveWork = {
+  activeWorkRuns: ActiveWorkRun[];
+  recoverableChatTurnOwners: RecoverableChatTurnOwner[];
+};
 // Pre-governance checkout-relative fingerprint location. Reads fall back to it
 // during the storage migration; the governed write side lives in Python
 // (code_freshness.running_code_fingerprint_path), Electron only ever reads.
@@ -159,11 +164,11 @@ export type ExecuteMainLineWorkbenchInput = {
   fileExists?: (path: string) => boolean;
   readState?: () => WorkbenchBackendState;
   writeState?: (state: WorkbenchBackendState) => void | Promise<void>;
-  listActiveWork?: () => ActiveWorkRun[];
+  listActiveWork?: (signal?: AbortSignal) => ActiveWorkRun[] | WorkbenchActiveWork | Promise<ActiveWorkRun[] | WorkbenchActiveWork>;
   /** Test seam. Production settles the workspace's active work_runs snapshots
    * at every verified backend stop so a refused lifecycle command's reason
    * cannot outlive the process that would have finished the work. */
-  settleActiveWorkOnStop?: (workspaceRoot: string) => void;
+  settleActiveWorkOnStop?: (workspaceRoot: string, recoverableChatTurnOwners?: RecoverableChatTurnOwner[]) => void;
   ensureFrontend?: (input: { force: boolean; signal?: AbortSignal; env?: NodeJS.ProcessEnv }) => Promise<void>;
   now?: () => string;
   connect?: (port: number, host: string) => Promise<boolean>;
@@ -2088,6 +2093,21 @@ export async function executeMainLineWorkbench(
   const operation = input.operation;
   const commandId = input.command.commandId;
   const trackCommandBackground = (work: Promise<unknown>) => trackMainLineBackgroundWork(input.command, work);
+  let recoverableChatTurnOwners: RecoverableChatTurnOwner[] | undefined;
+  const observeActiveWork = async (): Promise<ActiveWorkRun[]> => {
+    const observed = await (input.listActiveWork ?? (() => listActiveWorkRuns(input.workspaceRoot)))(input.signal);
+    input.signal?.throwIfAborted();
+    if (Array.isArray(observed)) return observed;
+    recoverableChatTurnOwners = observed.recoverableChatTurnOwners;
+    return observed.activeWorkRuns;
+  };
+  const observeRecoverableOwnersBeforeApprovedStop = async (): Promise<void> => {
+    if (!input.listActiveWork) return;
+    // The proof must precede retirement so a newly stopped live turn never
+    // looks like an abandoned turn. A failed read cannot veto an approved stop.
+    try { await observeActiveWork(); }
+    catch { input.signal?.throwIfAborted(); }
+  };
   // A verified backend stop is the deterministic terminal signal for this
   // workspace's active work_runs snapshots. Without it an indexed activeRunId
   // keeps every later restart refused forever (its stale grace is
@@ -2095,11 +2115,12 @@ export async function executeMainLineWorkbench(
   // bookkeeping must never fail the lifecycle command itself.
   const settleActiveWorkOnStop = (root: string): void => {
     if (input.settleActiveWorkOnStop) {
-      input.settleActiveWorkOnStop(root);
+      if (recoverableChatTurnOwners) input.settleActiveWorkOnStop(root, recoverableChatTurnOwners);
+      else input.settleActiveWorkOnStop(root);
       return;
     }
     try {
-      const settled = finalizeWorkRunsForStoppedBackend({ workspaceRoot: root });
+      const settled = finalizeWorkRunsForStoppedBackend({ workspaceRoot: root, recoverableChatTurnOwners });
       if (settled.settledRunIds.length > 0) {
         console.warn(`WORK_RUNS_SETTLED_ON_STOP count=${settled.settledRunIds.length} `
           + `kinds=${JSON.stringify(settled.clearedIndexKinds)}`);
@@ -2144,10 +2165,7 @@ export async function executeMainLineWorkbench(
   if (operation === "stop" || operation === "force-stop" || operation === "shutdown") {
     const stopStartedAt = Date.now();
     if ((operation === "stop" || operation === "shutdown") && !input.interruptActiveWork) {
-      const blocked = blockLifecycleIfActiveWork(
-        "stop",
-        (input.listActiveWork ?? (() => listActiveWorkRuns(input.workspaceRoot)))()
-      );
+      const blocked = blockLifecycleIfActiveWork("stop", await observeActiveWork());
       if (blocked) {
         return {
           schemaVersion: 1,
@@ -2159,6 +2177,8 @@ export async function executeMainLineWorkbench(
           activeWorkRuns: blocked.activeWorkRuns
         };
       }
+    } else if (input.interruptActiveWork) {
+      await observeRecoverableOwnersBeforeApprovedStop();
     }
     const previous = input.fastCloseTiming?.background
       ? (input.readState ? input.readState() : readLauncherStateFile(statePath, { required: true })) : readState();
@@ -2599,13 +2619,8 @@ export async function executeMainLineWorkbench(
     return accepted(operation, commandId, lifecycleWarning ? { message: lifecycleWarning } : {});
   }
 
-  if (operation === "restart") {
-    const blocked = input.interruptActiveWork
-      ? null
-      : blockLifecycleIfActiveWork(
-          "restart",
-          (input.listActiveWork ?? (() => listActiveWorkRuns(input.workspaceRoot)))()
-        );
+  if (operation === "restart" && !input.interruptActiveWork) {
+    const blocked = blockLifecycleIfActiveWork("restart", await observeActiveWork());
     if (blocked) {
       const intent = queueDeferredRestartIntent(input.workspaceRoot, {
         reason: blocked.message,
@@ -2625,6 +2640,8 @@ export async function executeMainLineWorkbench(
         ...(intent ? { restartIntentId: intent.intentId } : {})
       };
     }
+  } else if (operation === "restart" || operation === "rebuild-and-start") {
+    await observeRecoverableOwnersBeforeApprovedStop();
   }
 
   let previous = readState();

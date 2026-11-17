@@ -165,7 +165,7 @@ describe("session archive UI wiring", () => {
     expect(workbenchSource).toContain("handleArchiveSession");
     expect(workbenchSource).toContain("includeArchivedSessions: showArchivedSessions");
     expect(workbenchSource).toContain("rawSessionsWithArchived");
-    expect(indexPanelSource).toContain("onArchive={handleArchiveSession}");
+    expect(workbenchSource).toContain("onArchive={handleArchiveSession}");
     expect(workbenchSource).toContain('queryKey: queryKeys.sessionArchive()');
     expect(indexPanelSource).not.toContain("<ArchivedSessionRail");
     expect(indexPanelSource).toContain("showArchivedSessions ? null : <>");

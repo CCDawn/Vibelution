@@ -39,12 +39,17 @@ export async function acquireAssistantLifecycleLease(input: {
   reopen(): boolean;
   releaseOwner(): void;
   signal?: AbortSignal;
+  /** Retrying callers need proof that the failed lease released native admission. */
+  waitForFailedRelease?: boolean;
   /** Test seam; production uses ASSISTANT_LIFECYCLE_RELEASE_WAIT_BUDGET_MS. */
   releaseWaitBudgetMs?: number;
 }): Promise<AssistantLifecycleLease> {
   let admission: ReturnType<Host["beginLifecycleAdmission"]> | undefined;
   let registry: ReturnType<typeof input.projects.beginMigrationTransition> | undefined;
   let remindersDrained = false, barrierAttempted = false;
+  let nativeReleaseConfirmed = false;
+  let localReleaseConfirmed = false;
+  let stage = "reminder_drain";
   let releasing: Promise<void> | undefined;
   const pause = () => new Promise<void>(resolve => { const timer = setTimeout(resolve, 100); timer.unref?.(); });
   const release = (): Promise<void> => releasing ??= (async () => {
@@ -56,7 +61,12 @@ export async function acquireAssistantLifecycleLease(input: {
         const budget = input.releaseWaitBudgetMs ?? ASSISTANT_LIFECYCLE_RELEASE_WAIT_BUDGET_MS;
         const deadline = Date.now() + budget;
         while (input.host.snapshot().state !== "stopped") {
-          try { if (await input.host.migrationBarrier("release") === "idle") break; }
+          try {
+            if (await input.host.migrationBarrier("release") === "idle") {
+              nativeReleaseConfirmed = true;
+              break;
+            }
+          }
           catch { /* Reconcile the same barrier; never replay a business action. */ }
           if (Date.now() >= deadline) {
             console.warn(`ASSISTANT_LIFECYCLE_RELEASE_WAIT_TIMEOUT `
@@ -65,15 +75,18 @@ export async function acquireAssistantLifecycleLease(input: {
           }
           await pause();
         }
+        nativeReleaseConfirmed ||= input.host.snapshot().state === "stopped";
       }
       if (!input.reopen()) return; // Shutdown owns the retained gates until exit.
       registry?.release(); admission?.release();
       if (remindersDrained) input.reminders.resumeAfterMigration();
+      localReleaseConfirmed = true;
     } finally {
       // The owner latch must reset on every releasable path, including a
       // fencing failure inside the handoff above; otherwise the shell refuses
       // every later lifecycle command forever.
       if (input.reopen()) input.releaseOwner();
+      else localReleaseConfirmed = false;
     }
   })();
   try {
@@ -84,16 +97,20 @@ export async function acquireAssistantLifecycleLease(input: {
     await reminders;
     remindersDrained = true;
     input.signal?.throwIfAborted();
+    stage = "host_admission";
     admission = input.host.beginLifecycleAdmission();
     registry = input.projects.beginMigrationTransition();
     await Promise.all([admission.drained, registry.drained]);
     input.signal?.throwIfAborted();
+    stage = "queue_drain";
     await input.drainQueues();
     input.signal?.throwIfAborted();
+    stage = "host_admission";
     await admission.seal();
     input.signal?.throwIfAborted();
     admission.check();
     if (!input.current()) throw new Error("ASSISTANT_LIFECYCLE_UNAVAILABLE");
+    stage = "native_barrier";
     barrierAttempted = true;
     // Cancellation stops the next phase, never an RPC already owning native
     // admission. A delayed prepare must settle before its release is sent.
@@ -108,6 +125,7 @@ export async function acquireAssistantLifecycleLease(input: {
       input.signal?.throwIfAborted();
     }
     if (state !== "ready" || !input.current()) throw new Error("ASSISTANT_LIFECYCLE_BUSY");
+    stage = "host_admission";
     admission.check();
     return { release, commit: () => {
       input.signal?.throwIfAborted();
@@ -119,7 +137,16 @@ export async function acquireAssistantLifecycleLease(input: {
     // Do not make a stalled release look like idle or start another owner.
     // Cancellable callers use rejection as the handoff to ordinary stop, so
     // they must not observe it until this same barrier confirms release.
-    if (input.signal) await release();
+    if (input.waitForFailedRelease && error instanceof Error && error.message === "ASSISTANT_LIFECYCLE_BUSY") {
+      console.warn(`ASSISTANT_LIFECYCLE_BUSY stage=${stage}`);
+    }
+    if (input.waitForFailedRelease) {
+      try { await release(); }
+      catch (cause) { throw new Error("ASSISTANT_LIFECYCLE_RELEASE_UNCONFIRMED", { cause }); }
+      if (!localReleaseConfirmed || (barrierAttempted && !nativeReleaseConfirmed)) {
+        throw new Error("ASSISTANT_LIFECYCLE_RELEASE_UNCONFIRMED", { cause: error });
+      }
+    } else if (input.signal) await release();
     else void release().catch(() => undefined);
     throw error;
   }

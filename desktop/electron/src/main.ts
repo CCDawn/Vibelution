@@ -164,7 +164,8 @@ import {
   mainLineBackendIsReachable,
   mainLineBackendIsReusable,
   readLauncherStateFile,
-  spawnWorkbenchBackend
+  spawnWorkbenchBackend,
+  type WorkbenchActiveWork
 } from "./process/workbenchBackend.js";
 import { captureTrackedWorkbenchJobRetirement, captureTrackedWorkbenchJobNaturalRetirement, getTrackedWorkbenchJobPid,
   type WorkbenchNaturalJobRetirement } from "./process/workbenchJob.js";
@@ -640,7 +641,7 @@ const themeAuthority = new ThemeAuthority(join(app.getPath("userData"), "appeara
 let launcherAssistantExitReady = false;
 let launcherAssistantStarting: Promise<void> | null = null;
 let launcherAssistantStopping: Promise<void> | null = null;
-let acquireResidentAssistantLifecycleLease: ((signal?: AbortSignal) => Promise<AssistantLifecycleLease>) | null = null;
+let acquireResidentAssistantLifecycleLease: ((signal?: AbortSignal, waitForFailedRelease?: boolean) => Promise<AssistantLifecycleLease>) | null = null;
 let initialMigrationReceiptFence: Promise<void> | null = null;
 /** Replaceable generation signal: the exit path aborts the current controller,
  * and a cancelled exit rebuilds it before resuming the assistant. A one-way
@@ -1597,12 +1598,12 @@ function startLauncherAssistant(paths: DesktopPaths): Promise<void> {
         scheduleInitialMigration();
       }
     };
-    acquireResidentAssistantLifecycleLease = async (signal) => {
+    acquireResidentAssistantLifecycleLease = async (signal, waitForFailedRelease) => {
       const host = launcherAssistantHost, reminders = stopLauncherAssistantReminders;
       if (!host || !reminders || shutdownApproved || migrationRunning || assistantMigrationPending)
         throw new Error("ASSISTANT_LIFECYCLE_UNAVAILABLE");
       migrationRunning = true;
-      return acquireAssistantLifecycleLease({ host, projects: projectConnection, reminders, signal,
+      return acquireAssistantLifecycleLease({ host, projects: projectConnection, reminders, signal, waitForFailedRelease,
         current: () => !shutdownApproved && !launcherAssistantStartupAbort.signal.aborted
           && launcherAssistantHost === host && stopLauncherAssistantReminders === reminders,
         reopen: () => !shutdownApproved && !launcherAssistantStartupAbort.signal.aborted && launcherAssistantHost === host,
@@ -1967,13 +1968,13 @@ async function residentAssistantActiveWork(): Promise<ActiveWorkStatus> {
   return residentAssistantStatus(launcherAssistantStarting ? "unknown" : "idle");
 }
 
-async function acquireResidentAssistantShutdownGuard(signal?: AbortSignal): Promise<AssistantLifecycleLease> {
+async function acquireResidentAssistantShutdownGuard(signal?: AbortSignal, waitForFailedRelease?: boolean): Promise<AssistantLifecycleLease> {
   signal?.throwIfAborted();
   if (launcherAssistantExitReady && (!launcherAssistantHost || launcherAssistantHost.snapshot().state === "stopped"))
     return { release: async () => undefined, commit: () => undefined };
   if (!launcherAssistantHost && !launcherAssistantStarting) return { release: async () => undefined, commit: () => undefined };
   if (!acquireResidentAssistantLifecycleLease) throw new Error("ASSISTANT_LIFECYCLE_UNAVAILABLE");
-  return acquireResidentAssistantLifecycleLease(signal);
+  return acquireResidentAssistantLifecycleLease(signal, waitForFailedRelease);
 }
 
 ipcMain.handle(IPC_CHANNELS.assistantThemeResult, (event,payload:unknown) => {
@@ -4286,9 +4287,12 @@ function trustedIpcOrigins(event?: IpcMainInvokeEvent): string[] {
 
 async function stopMainRuntimeForApprovedShutdown(
   interruptActiveWork = false,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  activeWorkSource: "local" | "launcher" = "local"
 ): Promise<void> {
   return await runJoinedMainRuntimeShutdown(async () => {
+    const provenance = interruptActiveWork ? "operator-restart"
+      : activeWorkSource === "launcher" ? "guarded-shell-update" : "operator";
     const result = await orchestrateLauncherLifecycle("shutdown", {
       schemaVersion: 1,
       path: "desktop-shell-shutdown",
@@ -4296,7 +4300,7 @@ async function stopMainRuntimeForApprovedShutdown(
         method: "POST",
         body: { operatorIntent: "desktop_shell_shutdown" }
       }
-    }, interruptActiveWork ? "operator-restart" : "operator", signal);
+    }, provenance, signal);
     if (!result.accepted) {
       throw new Error(result.message || result.code || "Launcher shutdown was not accepted.");
     }
@@ -4915,13 +4919,17 @@ async function performLauncherUpdate(
   options: { shellKind?: "packaged" | "unpackaged"; forceRefresh?: boolean; launchRequest?: MainLineLaunchRequest }
 ): Promise<OrchestratedLifecycleResult> {
   try {
+    const retryBusyAdmission = !interruptActiveWork && options.launchRequest !== undefined;
     const result = await executeLauncherUpdate({
       interruptActiveWork,
       onPhase: (phase) => {
         if (launcherUpdateProgress) launcherUpdateProgress = { ...launcherUpdateProgress, phase };
       },
       activeWork: () => resolveLauncherUpdateActiveWork(true),
-      ...(!interruptActiveWork ? { acquireShutdownGuard: acquireResidentAssistantShutdownGuard } : {}),
+      ...(!interruptActiveWork ? {
+        acquireShutdownGuard: () => acquireResidentAssistantShutdownGuard(undefined, retryBusyAdmission),
+        retryBusyAdmission
+      } : {}),
       prepare: () => ensureLatestLauncher({
         workspaceRoot: createDesktopPathsForApp().workspaceRoot,
         pythonPath: desktopPythonPath(),
@@ -4932,7 +4940,7 @@ async function performLauncherUpdate(
       }),
       stopWorkspaces: async () => {
         // Each task owner must confirm saved state before replacement.
-        await stopMainRuntimeForApprovedShutdown(interruptActiveWork);
+        await stopMainRuntimeForApprovedShutdown(interruptActiveWork, undefined, "launcher");
         await stopIsolatedInstancesForApprovedShutdown(interruptActiveWork);
       },
       scheduleReplacement: async () => {
@@ -4976,15 +4984,43 @@ async function resolveLauncherUpdateActiveWork(refreshBranches = false): Promise
     // The canonical active-work projection is enough for admission. Full
     // status also walks every residual process, which adds seconds without
     // changing the answer.
-    const payload = await orchestrateLauncherApi("active-work", { schemaVersion: 1, path: "active-work" });
-    const main = activeWorkStatusFromLauncherStatus(
-      typeof payload === "object" && payload !== null ? payload as Record<string, unknown> : {}
-    );
+    const { status: main } = await readMainWorkbenchActiveWork();
     return combineAssistantActiveWork(combineLauncherActiveWorkStatus(main, launcherStateStore.projectBranchInstances()),
       await residentAssistantActiveWork());
   } catch {
     return { state: "unknown", message: "Launcher task status is unavailable." };
   }
+}
+
+async function readMainWorkbenchActiveWork(signal?: AbortSignal): Promise<{ status: ActiveWorkStatus; payload: Record<string, unknown> }> {
+  const raw = await orchestrateLauncherApi("active-work", { schemaVersion: 1, path: "active-work" }, signal);
+  const payload = typeof raw === "object" && raw !== null ? raw as Record<string, unknown> : {};
+  return { status: activeWorkStatusFromLauncherStatus(payload), payload };
+}
+
+async function listMainWorkbenchActiveWork(signal?: AbortSignal): Promise<WorkbenchActiveWork> {
+  const { status, payload } = await readMainWorkbenchActiveWork(signal);
+  const items = status.items ?? [];
+  if (status.state !== "idle" && (status.state !== "active" || !items.length)) {
+    throw new Error("暂时无法确认是否有进行中的任务，已取消操作。");
+  }
+  const owners = (payload.lifecycleProof as { recoverableChatTurnOwners?: unknown } | undefined)?.recoverableChatTurnOwners;
+  return {
+    activeWorkRuns: status.state === "idle" ? [] : items.map(item => ({
+      kind: String(item.kind ?? ""),
+      runId: String(item.runId ?? ""),
+      status: String(item.status ?? ""),
+      sessionId: String(item.sessionId ?? "")
+    })),
+    recoverableChatTurnOwners: Array.isArray(owners) ? owners.flatMap((item: unknown) => {
+      if (typeof item !== "object" || item === null) return [];
+      const { runId, ownerPid, ownerCreateTime } = item as Record<string, unknown>;
+      return typeof runId === "string" && runId.length > 0
+        && typeof ownerPid === "number" && Number.isSafeInteger(ownerPid) && ownerPid > 0
+        && typeof ownerCreateTime === "number" && Number.isFinite(ownerCreateTime) && ownerCreateTime > 0
+        ? [{ runId, ownerPid, ownerCreateTime }] : [];
+    }) : []
+  };
 }
 
 // Update admission rechecks active work right after preparation. Preparation
@@ -6179,6 +6215,11 @@ async function orchestrateLauncherLifecycleImpl(
       ...(launchRequest ? { onCommand: (commandId: string) => launchRequest.receipt.dispatched(commandId) } : {}),
       ...(admission ? { beforeExecute: () => admission.check(), beforeSpawn: () => admission.check() } : {}),
       interruptActiveWork: provenance === "operator-restart" || (operation === "restart" && provenance === "operator"),
+      // Match the update's canonical work projection at the actual queue boundary.
+      ...((provenance === "guarded-shell-update" || provenance === "operator-restart"
+        || lifecycleOperation === "restart" || lifecycleOperation === "rebuild-and-start") ? {
+        listActiveWork: listMainWorkbenchActiveWork
+      } : {}),
       ...(fastCloseTiming && preconfirmedCloseAuthorization("main", payload)
         ? { fastCloseTiming, controlToken: desktopActionContext?.controlToken } : {}),
       // Never cache the earlier reuse probe: queueing can overlap source
@@ -6345,7 +6386,7 @@ function supersededLifecycleResult(operation: string, commandId = ""): Orchestra
  * in-flight restart (2026-08-29: a forwarded stop kept superseding a CLI
  * restart 1-5s in, so the restart never settled and the backend stayed down).
  */
-type LauncherLifecycleProvenance = "operator" | "operator-restart" | "window-close" | "forwarded" | "assistant";
+type LauncherLifecycleProvenance = "operator" | "operator-restart" | "guarded-shell-update" | "window-close" | "forwarded" | "assistant";
 
 type LauncherLifecycleStopJoinDecision = {
   /**
@@ -7380,7 +7421,7 @@ async function runDeferredRestartFulfillmentOnce(): Promise<void> {
       workspaceRoot: paths.workspaceRoot,
       runtimeManagerDir: resolveRuntimeManagerDir(paths.workspaceRoot),
       notBefore: projectControlPlaneRecoveryNotBefore,
-      listActiveWork: () => listActiveWorkRuns(paths.workspaceRoot),
+      listActiveWork: async () => (await listMainWorkbenchActiveWork()).activeWorkRuns,
       submitRestart: async () =>
         await orchestrateLauncherLifecycle("restart", { schemaVersion: 1, path: "restart" }, "forwarded")
     });

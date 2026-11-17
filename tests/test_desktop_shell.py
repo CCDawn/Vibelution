@@ -3710,6 +3710,61 @@ def test_package_process_timeout_keeps_live_and_staged_shells(tmp_path, monkeypa
     assert not desktop_shell._refresh_lock_path(tmp_path, desktop_shell.PREBUILD_LOCK_RELATIVE).is_file()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows live directory sharing retry")
+def test_staged_shell_retries_transient_live_directory_access_denied(tmp_path, monkeypatch):
+    tree = "a" * 40
+    live = _write_live_win_unpacked(tmp_path)
+    _write_staged_shell(tmp_path, tree_hash=tree)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    events = []
+    attempts = []
+    monkeypatch.setattr(desktop_shell, "_append_refresh_log", lambda _root, event, **_fields: events.append(event))
+    monkeypatch.setattr(desktop_shell.time, "sleep", lambda _seconds: None)
+    real_rename = desktop_shell._rename_dir
+
+    def temporarily_locked(source, target):
+        if source == live:
+            attempts.append(source)
+            if len(attempts) == 1:
+                assert (live / "main.js").read_text(encoding="utf-8") == "old"
+                error = PermissionError(13, "temporarily locked", str(source))
+                error.winerror = 5
+                raise error
+        real_rename(source, target)
+
+    monkeypatch.setattr(desktop_shell, "_rename_dir", temporarily_locked)
+
+    assert desktop_shell._try_promote_staged_desktop_shell(tmp_path) is True
+    assert len(attempts) == 2
+    assert events == ["rebuild.retrying_live_package_rename"]
+    assert (live / "main.js").read_text(encoding="utf-8") == "new"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows live directory sharing retry")
+def test_rebuild_does_not_repackage_when_valid_stage_hits_a_persistent_live_lock(tmp_path, monkeypatch):
+    tree = "a" * 40
+    live = _write_live_win_unpacked(tmp_path)
+    staged = _write_staged_shell(tmp_path, tree_hash=tree)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    monkeypatch.setattr(desktop_shell, "PACKAGED_SHELL_RENAME_RETRY_SECONDS", 0.0)
+    monkeypatch.setattr(
+        desktop_shell, "ensure_frontend_build", lambda *_args: pytest.fail("a new build cannot unlock the package"),
+    )
+
+    def denied(_source, _target):
+        error = PermissionError(13, "package directory locked")
+        error.winerror = 5
+        raise error
+
+    monkeypatch.setattr(desktop_shell, "_rename_dir", denied)
+
+    with pytest.raises(desktop_shell.LivePackageRenameBusy):
+        desktop_shell.rebuild_desktop_shell(tmp_path)
+
+    assert (live / "main.js").read_text(encoding="utf-8") == "old"
+    assert (staged / "main.js").read_text(encoding="utf-8") == "new"
+
+
 def test_rebuild_desktop_shell_refuses_to_promote_over_live_owner(tmp_path, monkeypatch):
     """A live owner maps the packaged exe; promoting would fail at the rename."""
     tree = "a" * 40
@@ -4162,6 +4217,38 @@ def test_refresh_reports_live_owner_block_when_owner_appears_during_rebuild(tmp_
     assert "fallbackLaunch" not in result
     marker = desktop_shell.recent_desktop_shell_refresh_failure(tmp_path)
     assert marker is not None and marker["reason"] == "live_owner_holding_lock"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows shared package fallback")
+def test_refresh_locked_package_opens_current_checkout_instead_of_retrying_old_shell(tmp_path, monkeypatch):
+    _write_live_win_unpacked(tmp_path)
+    _patch_owner_reader(monkeypatch, [None])
+    monkeypatch.setattr(desktop_shell, "_pin_prepared_frontend_release", lambda _root: None)
+    launches = []
+
+    def fail_rebuild(**_kwargs):
+        raise desktop_shell.LivePackageRenameBusy("package directory locked")
+
+    monkeypatch.setattr(desktop_shell, "rebuild_desktop_shell", fail_rebuild)
+    monkeypatch.setattr(
+        desktop_shell, "launch_desktop_shell",
+        lambda **kwargs: launches.append(kwargs) or {"launched": True, "ownerPid": 31, "kind": "unpackaged"},
+    )
+    monkeypatch.setattr(
+        desktop_shell, "launch_packaged_desktop_shell", lambda **_kwargs: pytest.fail("old shell would retry the lock"),
+    )
+
+    result = desktop_shell.run_desktop_shell_refresh(
+        wait_pid=0, project_root=tmp_path, then_lifecycle="rebuild-and-start",
+    )
+
+    assert not result["refreshed"]
+    assert result["reason"] == "rebuild_failed"
+    assert result["fallbackLaunch"]["ownerPid"] == 31
+    assert launches == [{
+        "project_root": tmp_path, "then_lifecycle": "open", "open_workbench": True,
+        "prefer": "unpackaged", "expect_primary": True,
+    }]
 
 
 def test_refresh_unpackaged_direct_launch_refuses_when_owner_appeared(tmp_path, monkeypatch):

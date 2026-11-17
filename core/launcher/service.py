@@ -38,7 +38,7 @@ from core.runtime_manager.constants import (
     STATE_PATH,
 )
 from core.runtime_manager.evolution_store import load_active_run_snapshot
-from core.runtime_manager.process_identity import is_runtime_manager_process
+from core.runtime_manager.process_identity import is_runtime_manager_process, recorded_process_owner_is_gone
 from core.runtime_manager.scene_logging import (
     append_runtime_manager_file_event,
     record_runtime_manager_scene_event,
@@ -438,12 +438,15 @@ def migrate_launcher_branch_workspaces() -> dict[str, Any]:
 
 def get_launcher_active_work_status() -> dict[str, Any]:
     """Read the canonical work guard without scanning diagnostic history."""
-    runs = launcher_active_work_runs()
-    return {"lifecycleProof": {"activeWorkRuns": {
-        "count": len(runs),
-        "kinds": sorted({item["kind"] for item in runs if item.get("kind")}),
-        "items": runs[:8],
-    }}}
+    runs, recoverable_chat_owners = _read_launcher_work_run_activity()
+    return {"lifecycleProof": {
+        "activeWorkRuns": {
+            "count": len(runs),
+            "kinds": sorted({item["kind"] for item in runs if item.get("kind")}),
+            "items": runs[:8],
+        },
+        "recoverableChatTurnOwners": recoverable_chat_owners,
+    }}
 
 
 
@@ -1265,21 +1268,39 @@ def _read_workbench_window_mode_env_override() -> WorkbenchWindowMode | None:
 
 def launcher_active_work_runs() -> list[dict[str, str]]:
     """Return active project work from runtime-manager-owned files only."""
+    items, _ = _read_launcher_work_run_activity()
+    return items
 
+
+class _RecoverableChatTurnOwner(TypedDict):
+    runId: str
+    ownerPid: int
+    ownerCreateTime: float
+
+
+def _read_launcher_work_run_activity() -> tuple[list[dict[str, str]], list[_RecoverableChatTurnOwner]]:
     items: list[dict[str, str]] = []
+    recoverable_chat_owners: list[_RecoverableChatTurnOwner] = []
     seen: set[tuple[str, str]] = set()
     store = WorkRunStore(root=work_run_store.WORK_RUNS_DIR)
     # Only active, indexed-recent, and grace-window snapshots can still block a
     # lifecycle action; parsing the full history costs seconds once it grows.
     for kind in ("chat_turn", "chat_room_round", "source_collection_run"):
-        active_run_id = str(store.load_run_index(kind).get("activeRunId") or "").strip()
+        index = store.load_run_index(kind)
+        active_run_id = str(index.get("activeRunId") or "").strip()
+        active_chat_ids = (
+            set(work_run_store._bounded_active_run_ids(work_run_store._index_active_run_ids(index)))
+            if kind == "chat_turn" else set()
+        )
         for payload in store.list_lifecycle_candidate_snapshots(kind):
+            run_id = work_run_store.snapshot_run_id(payload)
             _append_active_work_run(
                 items,
                 seen,
                 kind=kind,
                 payload=payload,
-                force_current=str(payload.get("runId") or "").strip() == active_run_id,
+                force_current=run_id == active_run_id or run_id in active_chat_ids,
+                recoverable_chat_owners=recoverable_chat_owners if run_id in active_chat_ids else None,
             )
 
     for payload in store.list_lifecycle_candidate_snapshots("formal_run"):
@@ -1309,7 +1330,7 @@ def launcher_active_work_runs() -> list[dict[str, str]]:
             payload = None
         _append_active_work_run(items, seen, kind=kind, payload=payload)
 
-    return items
+    return items, recoverable_chat_owners
 
 
 
@@ -2704,6 +2725,7 @@ def _append_active_work_run(
     kind: str,
     payload: dict[str, Any] | None,
     force_current: bool = False,
+    recoverable_chat_owners: list[_RecoverableChatTurnOwner] | None = None,
 ) -> None:
     if not isinstance(payload, dict):
         return
@@ -2715,6 +2737,19 @@ def _append_active_work_run(
     if not work_run_store.active_work_payload_blocks_lifecycle(payload):
         return
     if not force_current and work_run_store.snapshot_is_stale(payload):
+        return
+    # A hard backend exit can leave the active chat slot stamped as running.
+    # Exclude the dead owner from admission and give teardown an identity to
+    # protect until the next backend can recover the open journal turn.
+    owner_pid = payload.get("ownerPid")
+    owner_create_time = payload.get("ownerCreateTime")
+    if kind == "chat_turn" and recorded_process_owner_is_gone(owner_pid, owner_create_time):
+        if recoverable_chat_owners is not None:
+            recoverable_chat_owners.append({
+                "runId": item["runId"],
+                "ownerPid": int(owner_pid),
+                "ownerCreateTime": float(owner_create_time),
+            })
         return
     key = (item["kind"], item["runId"] or item["sessionId"])
     if key in seen:

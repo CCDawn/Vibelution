@@ -2744,6 +2744,8 @@ describe("runWorkbenchLifecycle", () => {
 
   it("blocks shutdown before retiring handles when work is active", async () => {
     const killed: number[] = [];
+    const { signal } = new AbortController();
+    const listActiveWork = vi.fn(async () => [{ kind: "chat_turn", runId: "run-1", status: "running", sessionId: "s1" }]);
     const result = await executeMainLineWorkbench({
       workspaceRoot: "C:/repo",
       pythonPath: "C:/repo/.venv/Scripts/python.exe",
@@ -2751,7 +2753,7 @@ describe("runWorkbenchLifecycle", () => {
       command: { commandId: "cmd_shutdown", type: "close", operation: "shutdown", noBrowser: true },
       readState: () => ({ backendPid: 51, backendPort: 8000 }),
       writeState: () => undefined,
-      listActiveWork: () => [{ kind: "chat_turn", runId: "run-1", status: "running", sessionId: "s1" }],
+      listActiveWork, signal,
       pidAlive: () => true,
       killPid: (pid) => killed.push(pid),
     });
@@ -2761,6 +2763,43 @@ describe("runWorkbenchLifecycle", () => {
       message: ACTIVE_WORK_BLOCK_MESSAGE_STOP
     });
     expect(killed).toEqual([]);
+    expect(listActiveWork).toHaveBeenCalledExactlyOnceWith(signal);
+  });
+
+  it.each([
+    { operation: "shutdown", interruptActiveWork: false },
+    { operation: "restart", interruptActiveWork: false },
+    { operation: "restart", interruptActiveWork: true },
+    { operation: "rebuild-and-start", interruptActiveWork: false }
+  ] as const)("carries the recoverable owner proof to the $operation finalizer (interrupt=$interruptActiveWork)", async ({ operation, interruptActiveWork }) => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "vibelution-recoverable-owner-"));
+    try {
+      const { input, spawnImpl } = harness();
+      const settle = vi.fn();
+      const proof = [{ runId: "recover-on-startup", ownerPid: 1234, ownerCreateTime: 456.78 }];
+      const observe = vi.fn(async () => ({ activeWorkRuns: [], recoverableChatTurnOwners: proof }));
+      const readState = vi.fn(input.readState);
+      const result = await executeMainLineWorkbench({
+        ...input,
+        workspaceRoot,
+        operation,
+        interruptActiveWork,
+        command: { commandId: "cmd_owner_proof", type: operation === "shutdown" ? "close" : "restart", operation, noBrowser: true },
+        listActiveWork: observe,
+        readState,
+        fetchHealth: async () => ({ status: 200, json: async () => ({ status: "ok", routesReady: true, pid: 4242, workspaceRoot }) }),
+        settleActiveWorkOnStop: settle
+      });
+
+      expect(result).toMatchObject({ accepted: true });
+      expect(settle).toHaveBeenCalledExactlyOnceWith(workspaceRoot, proof);
+      expect(observe.mock.invocationCallOrder[0]).toBeLessThan(readState.mock.invocationCallOrder[0]);
+      if (operation !== "shutdown") {
+        expect(settle.mock.invocationCallOrder[0]).toBeLessThan(spawnImpl.mock.invocationCallOrder[0]);
+      } else expect(spawnImpl).not.toHaveBeenCalled();
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
   });
 
   it("keeps registered backend handles when HTTP shutdown reports active work", async () => {
@@ -2949,17 +2988,22 @@ describe("runWorkbenchLifecycle", () => {
     expect(terminateProcessTree).toHaveBeenCalledWith(77, expect.objectContaining({ pid: 77 }));
   });
 
-  it("does not defer an explicitly authorized restart when work is active and forwards the flag", async () => {
+  it.each(["active", "unavailable"])("does not defer an authorized restart when the recovery observer reports %s", async state => {
     const { spawnImpl, input } = harness();
+    const listActiveWork = vi.fn(async () => {
+      if (state === "unavailable") throw new Error("TEST_PROJECTION_UNAVAILABLE");
+      return [{ kind: "chat_turn", runId: "run-user-restart", status: "running", sessionId: "s1" }];
+    });
     const result = await runWorkbenchLifecycle({
       ...input,
       operation: "restart",
       interruptActiveWork: true,
-      listActiveWork: () => [{ kind: "chat_turn", runId: "run-user-restart", status: "running", sessionId: "s1" }]
+      listActiveWork
     });
 
     expect(result).toMatchObject({ accepted: true, operation: "restart" });
     expect(result.code).not.toBe("restart_queued");
+    expect(listActiveWork).toHaveBeenCalledOnce();
     expect(spawnImpl).toHaveBeenCalledOnce();
   });
 
@@ -2972,7 +3016,7 @@ describe("runWorkbenchLifecycle", () => {
         workspaceRoot: root,
         operation: "restart",
         queue: createMainLineCommandQueue(),
-        listActiveWork: () => [{ kind: "chat_turn", runId: "run-forwarded-restart", status: "running", sessionId: "s1" }]
+        listActiveWork: async () => [{ kind: "chat_turn", runId: "run-forwarded-restart", status: "running", sessionId: "s1" }]
       });
 
       expect(result).toMatchObject({ accepted: true, code: "restart_queued" });

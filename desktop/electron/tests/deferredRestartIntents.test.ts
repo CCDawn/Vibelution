@@ -117,13 +117,38 @@ describe("fulfillDeferredRestartIntentOnce", () => {
       const outcome = await fulfillDeferredRestartIntentOnce({
         workspaceRoot: root,
         runtimeManagerDir,
-        listActiveWork: () => [{ kind: "chat_turn", runId: "run-1" }],
+        listActiveWork: async () => [{ kind: "chat_turn", runId: "run-1" }],
         submitRestart,
         now: () => NOW_MS
       });
       expect(outcome).toEqual({ status: "blocked", activeWorkCount: 1 });
       expect(submitRestart).not.toHaveBeenCalled();
       expect(readIntent(intentsDir, "intent_20260916T015900Z_aaaaaaaa").status).toBe("pending");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([false, true])("does not claim a superseded intent after the work probe settles (pruned=%s)", async prune => {
+    const { root, runtimeManagerDir, intentsDir } = makeWorkspace();
+    try {
+      const path = writeIntent(intentsDir, intentPayload({ intentId: "old" }));
+      const submitRestart = vi.fn();
+      let confirmIdle!: (items: readonly unknown[]) => void;
+      const listActiveWork = vi.fn(() => new Promise<readonly unknown[]>(resolve => { confirmIdle = resolve; }));
+      const outcome = fulfillDeferredRestartIntentOnce({ workspaceRoot: root, runtimeManagerDir,
+        listActiveWork, submitRestart, now: () => NOW_MS });
+      await vi.waitFor(() => expect(listActiveWork).toHaveBeenCalledOnce());
+      supersedePendingDeferredRestartIntents({ workspaceRoot: root, runtimeManagerDir, reason: "Explicit stop completed." });
+      if (prune) pruneTerminalDeferredRestartIntents({ runtimeManagerDir });
+      writeIntent(intentsDir, intentPayload({ intentId: "new" }));
+      confirmIdle([]);
+
+      await expect(outcome).resolves.toEqual({ status: "none" });
+      expect(submitRestart).not.toHaveBeenCalled();
+      if (prune) expect(existsSync(path)).toBe(false);
+      else expect(readIntent(intentsDir, "old").status).toBe("superseded");
+      expect(readIntent(intentsDir, "new").status).toBe("pending");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

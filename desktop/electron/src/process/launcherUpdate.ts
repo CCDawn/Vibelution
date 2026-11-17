@@ -1,4 +1,5 @@
 import type { OrchestratedLifecycleResult } from "../protocol/launcherIpcHost.js";
+import { setTimeout as delay } from "node:timers/promises";
 import type { ActiveWorkStatus } from "../shutdown/shutdownCoordinator.js";
 import { ACTIVE_WORK_BLOCK_MESSAGE_RESTART } from "./activeWorkGuard.js";
 import type { DesktopShellStatus } from "./desktopShellFreshness.js";
@@ -6,6 +7,9 @@ import { parseLauncherBuild, type LauncherBuild } from "./launcherBuildIdentity.
 
 export type LauncherUpdatePhase = "checking" | "preparing" | "desktop" | "frontend" | "package" | "saving" | "replacing";
 export type LauncherUpdateProgress = { phase: LauncherUpdatePhase; startedAt: number };
+
+const CLI_UPDATE_ADMISSION_ATTEMPTS = 3;
+const CLI_UPDATE_ADMISSION_RETRY_MS = 250;
 
 /**
  * The ensure step found another refresh helper already staging the package.
@@ -29,6 +33,8 @@ export async function executeLauncherUpdate(input: {
   scheduleReplacement: () => Promise<void>;
   /** Hold native assistant admission from the final idle proof through exit. */
   acquireShutdownGuard?: () => Promise<{ release(): Promise<void>; commit?(): void }>;
+  /** The caller's guard must finish failed acquisition cleanup before rejecting. */
+  retryBusyAdmission?: boolean;
   onPhase?: (phase: LauncherUpdatePhase) => void;
 }): Promise<OrchestratedLifecycleResult> {
   const phase = (value: LauncherUpdatePhase) => {
@@ -75,9 +81,29 @@ export async function executeLauncherUpdate(input: {
       activeWorkRuns: [],
     };
   }
-  const after = await check();
-  if (after) return after;
-  const guard = await input.acquireShutdownGuard?.();
+  let guard: Awaited<ReturnType<NonNullable<typeof input.acquireShutdownGuard>>> | undefined;
+  for (let attempt = 1; ; attempt += 1) {
+    const after = await check();
+    if (after) return after;
+    try {
+      guard = await input.acquireShutdownGuard?.();
+      break;
+    } catch (error: unknown) {
+      if (!input.retryBusyAdmission || !(error instanceof Error) || error.message !== "ASSISTANT_LIFECYCLE_BUSY") {
+        throw error;
+      }
+      if (attempt >= CLI_UPDATE_ADMISSION_ATTEMPTS) {
+        return {
+          schemaVersion: 1,
+          accepted: false,
+          operation: "restart-latest-shell",
+          code: "assistant_lifecycle_busy",
+          message: "无法确认个人助理已空闲，未重启。请稍后再试。"
+        };
+      }
+      await delay(CLI_UPDATE_ADMISSION_RETRY_MS);
+    }
+  }
   try {
     phase("saving");
     await input.stopWorkspaces();

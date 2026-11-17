@@ -72,16 +72,17 @@ def test_active_work_projection_uses_canonical_guard_without_full_status(monkeyp
     from core.launcher import service
 
     monkeypatch.setattr(launcher_routes.launcher_service, "get_launcher_status", no_full_scan)
-    monkeypatch.setattr(service, "launcher_active_work_runs", lambda: [
+    active = [
         {"kind": "chat_turn", "runId": "one", "status": "running", "sessionId": "s"},
         {"kind": "formal_run", "runId": "two", "status": "running", "sessionId": ""},
-    ])
+    ]
+    monkeypatch.setattr(service, "_read_launcher_work_run_activity", lambda: (active, []))
     response = client.get("/api/launcher/status?projection=active-work")
     assert response.status_code == 200
-    assert response.json() == {"lifecycleProof": {"activeWorkRuns": {
-        "count": 2, "kinds": ["chat_turn", "formal_run"],
-        "items": service.launcher_active_work_runs(),
-    }}}
+    assert response.json() == {"lifecycleProof": {
+        "activeWorkRuns": {"count": 2, "kinds": ["chat_turn", "formal_run"], "items": active},
+        "recoverableChatTurnOwners": [],
+    }}
 
 
 def test_active_work_projection_requires_control_token_and_valid_projection():

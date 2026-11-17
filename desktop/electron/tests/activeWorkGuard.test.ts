@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,6 +7,7 @@ import workRunCases from "../../../tests/fixtures/work_run_activity_cases.json";
 import {
   ACTIVE_WORK_STALE_SNAPSHOT_GRACE_MS,
   activeWorkPayloadBlocks,
+  finalizeWorkRunsForStoppedBackend,
   listActiveWorkRuns
 } from "../src/process/activeWorkGuard.js";
 
@@ -89,5 +90,25 @@ describe("activeWorkGuard", () => {
     expect(listActiveWorkRuns(workspaceRoot)).toEqual([
       { kind, runId: "current-run", status: "running", sessionId: "" }
     ]);
+  });
+
+  it("leaves the crashed chat turn and its active index available to startup recovery", () => {
+    const workspaceRoot = makeWorkspaceRoot();
+    const kindDir = join(workspaceRoot, ".runtime", "runtime-manager", "work_runs", "chat_turn");
+    const recoverable = { runId: "crashed-turn", ownerPid: 1234, ownerCreateTime: 321.5 };
+    writeRun(workspaceRoot, "other-turn", { ownerPid: 1234, ownerCreateTime: 999.5 }, recoverable.runId);
+    writeRun(workspaceRoot, recoverable.runId, recoverable, recoverable.runId);
+    const indexPath = join(kindDir, "index.json");
+    const runPath = join(kindDir, "runs", `${recoverable.runId}.json`);
+    const indexBefore = readFileSync(indexPath, "utf8");
+    const runBefore = readFileSync(runPath, "utf8");
+
+    expect(finalizeWorkRunsForStoppedBackend({
+      workspaceRoot,
+      recoverableChatTurnOwners: [recoverable, { ...recoverable, runId: "other-turn" }]
+    })).toEqual({ settledRunIds: ["other-turn"], clearedIndexKinds: [] });
+
+    expect(readFileSync(indexPath, "utf8")).toBe(indexBefore);
+    expect(readFileSync(runPath, "utf8")).toBe(runBefore);
   });
 });
