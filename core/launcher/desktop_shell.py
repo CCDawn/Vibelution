@@ -80,6 +80,7 @@ DESKTOP_SHELL_BUILD_LOCK_POLL_SECONDS = 0.1
 DESKTOP_SHELL_BUILD_CLOSE_RETRIES = 3
 PACKAGED_SHELL_EXIT_TIMEOUT_SECONDS = 10.0
 PACKAGED_SHELL_EXIT_POLL_SECONDS = 0.25
+PACKAGED_SHELL_RENAME_RETRY_SECONDS = 6.0
 # Launch confirmation: Electron is single-instance per shared userData, so a
 # spawned shell that finds a live owner forwards its argv and exits 0 within a
 # second. ``launched`` is therefore only true once the child is observed holding
@@ -118,6 +119,10 @@ class LiveOwnerHoldingLockError(RuntimeError):
             "desktop shell is held by a live owner process "
             f"(pid={int(self.holder.get('pid') or 0)}); the live package cannot be replaced"
         )
+
+
+class LivePackageRenameBusy(OSError):
+    """The installed package still denies rename after a bounded wait."""
 
 
 @dataclass
@@ -1535,14 +1540,27 @@ def run_desktop_shell_refresh(
             detail = str(exc)
             record_desktop_shell_refresh_failure(root, reason="rebuild_failed", detail=detail)
             _append_refresh_log(root, "refresh.aborted", wait_pid=int(wait_pid), detail=detail[-800:])
-            # The old shell has already exited, so a failed rebuild must not
-            # leave the workspace without one: relaunch whatever packaged exe
-            # still exists (even a stale package). Only a missing exe aborts.
-            # The launch still demands a primary: a shell that came up during
-            # the build must not receive a bow-out instance.
+            # The old shell has already exited. On a persistent package lock,
+            # start the checkout shell so opening the workbench doesn't loop
+            # back into the same blocked package refresh.
             fallback: dict[str, Any] | None = None
             fallback_error = ""
-            if packaged_desktop_exe(root).is_file():
+            if isinstance(exc, LivePackageRenameBusy):
+                try:
+                    _pin_prepared_frontend_release(root)
+                    fallback = launch_desktop_shell(
+                        project_root=root,
+                        then_lifecycle="open" if then_lifecycle == "rebuild-and-start" else then_lifecycle,
+                        open_workbench=True,
+                        prefer="unpackaged",
+                        expect_primary=True,
+                        **request_options,
+                    )
+                except Exception as launch_exc:
+                    fallback_error = str(launch_exc)
+            # Other failures keep the previous packaged shell. Both paths
+            # demand a primary rather than forwarding to a concurrent owner.
+            if fallback is None and packaged_desktop_exe(root).is_file():
                 try:
                     _pin_prepared_frontend_release(root)
                     fallback = launch_packaged_desktop_shell(
@@ -1560,6 +1578,7 @@ def run_desktop_shell_refresh(
                     "refresh.fallback_launch",
                     wait_pid=int(wait_pid),
                     detail=detail[-800:],
+                    shell_kind=str(fallback.get("kind") or "packaged"),
                     **_launch_log_fields(fallback),
                 )
                 return {
@@ -2127,7 +2146,10 @@ def build_desktop_shell_package(
             previous = root / STAGING_OUTPUT_DIR_RELATIVE / ".win-unpacked-previous" if mode == "staging" else root / PREVIOUS_WIN_UNPACKED_RELATIVE
             if mode == "dir":
                 _wait_for_live_package_processes(root, deadline=deadline)
-            _publish_built_shell_tree(built, published_output, previous=previous)
+            _publish_built_shell_tree(
+                built, published_output, previous=previous,
+                live_package_root=root if mode == "dir" else None, deadline=deadline,
+            )
         return {"built": True, "mode": mode, "output": str(published_output)}
     finally:
         if session is not None and not _pending_build_retirement_for(root, cleanup_path=session):
@@ -2205,7 +2227,12 @@ def _try_promote_staged_desktop_shell_locked(root: Path, *, deadline: float | No
     previous = root / PREVIOUS_WIN_UNPACKED_RELATIVE
     _wait_for_live_package_processes(root, deadline=deadline)
     try:
-        _publish_built_shell_tree(staging_unpacked, live, previous=previous)
+        _publish_built_shell_tree(
+            staging_unpacked, live, previous=previous, live_package_root=root, deadline=deadline,
+        )
+    except LivePackageRenameBusy:
+        # Rebuilding a valid staged package cannot unlock its destination.
+        raise
     except OSError:
         # A sharing violation here means something still holds the live tree
         # open; leave staging and the old package untouched for a later retry.
@@ -2266,7 +2293,35 @@ def gc_desktop_shell_build_dirs(
     return {"removed": removed, "skipped": skipped}
 
 
-def _publish_built_shell_tree(source: Path, destination: Path, *, previous: Path) -> None:
+def _rename_live_package_dir(root: Path, source: Path, target: Path, *, deadline: float | None) -> None:
+    # Windows can keep a delete-denying handle briefly after all executable
+    # owners under the package disappear. Retry the first move, before any
+    # publish state has changed, and keep the registered owner guard in force.
+    retry_until = time.monotonic() + PACKAGED_SHELL_RENAME_RETRY_SECONDS
+    if deadline is not None:
+        retry_until = min(retry_until, deadline)
+    logged = False
+    while True:
+        try:
+            _rename_dir(source, target)
+            return
+        except OSError as exc:
+            remaining = retry_until - time.monotonic()
+            if os.name != "nt" or not _sharing_violation(exc):
+                raise
+            _raise_if_live_owner_holds_shell(root)
+            if remaining <= 0:
+                raise LivePackageRenameBusy(str(exc)) from exc
+            if not logged:
+                _append_refresh_log(root, "rebuild.retrying_live_package_rename", winerror=getattr(exc, "winerror", None))
+                logged = True
+            time.sleep(min(remaining, PACKAGED_SHELL_EXIT_POLL_SECONDS))
+
+
+def _publish_built_shell_tree(
+    source: Path, destination: Path, *, previous: Path,
+    live_package_root: Path | None = None, deadline: float | None = None,
+) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     previous.parent.mkdir(parents=True, exist_ok=True)
     moved_previous = False
@@ -2274,7 +2329,10 @@ def _publish_built_shell_tree(source: Path, destination: Path, *, previous: Path
         if previous.exists():
             _remove_owned_shell_tree(previous, within=destination.parent)
         if destination.exists():
-            _rename_dir(destination, previous)
+            if live_package_root is None:
+                _rename_dir(destination, previous)
+            else:
+                _rename_live_package_dir(live_package_root, destination, previous, deadline=deadline)
             moved_previous = True
         _rename_dir(source, destination)
     except OSError:
@@ -2381,6 +2439,8 @@ def rebuild_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, 
                 built,
                 root / PACKAGED_EXE_RELATIVE.parent,
                 previous=root / PREVIOUS_WIN_UNPACKED_RELATIVE,
+                live_package_root=root,
+                deadline=deadline,
             )
         finally:
             if not _pending_build_retirement_for(root, cleanup_path=session):
