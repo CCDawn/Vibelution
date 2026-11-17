@@ -344,6 +344,11 @@ def _filter_active_work_for_lifecycle_command(
     if command_type != "hot_restart_workbench":
         return [], active_work_runs
     requester = _hot_restart_requester_fields(args)
+    if not requester.get("sessionId") and not requester.get("runId"):
+        # Without a requester nobody owns the scoped wake. Treat the restart like
+        # a planned one: settle writes the restart-resume marker so startup
+        # recovery resumes every interrupted turn instead of leaving them idle.
+        return [], active_work_runs
     blocked: list[dict[str, str]] = []
     allowed: list[dict[str, str]] = []
     for item in active_work_runs:
@@ -3279,11 +3284,22 @@ class RuntimeManagerDaemon:
                 event_name = (
                     "allowed_requester_active_work"
                     if command_type == "hot_restart_workbench"
+                    and _hot_restart_requester_fields(args).get("sessionId")
                     else "interrupting_active_work"
+                )
+                # A scoped hot restart wakes exactly the requester's turn. When
+                # no requester owns that wake -- tray, desktop shell, or a hot
+                # update with no session -- nothing would resume the interrupted
+                # turns, so they get the restart-resume marker a planned restart
+                # writes. With a requester the wake owns recovery and the marker
+                # stays off to avoid a second resume of the same turn.
+                unowned_hot_restart = (
+                    command_type == "hot_restart_workbench"
+                    and not _hot_restart_requester_fields(args).get("sessionId")
                 )
                 settle = (
                     _settle_active_work_for_lifecycle_stop()
-                    if command_type != "hot_restart_workbench"
+                    if command_type != "hot_restart_workbench" or unowned_hot_restart
                     else {}
                 )
                 _append_event(
