@@ -48,6 +48,8 @@ export type AgentConversationDirectoryProps = {
   resolveModelLabel: (modelId: string) => string | undefined;
   /** Session ids with an active runtime chat_turn (green spinner). */
   runtimeRunningSessionIds?: readonly string[];
+  /** Fresh local optimistic turns; outranks a summary stuck on ``ready``. */
+  optimisticRunningSessionIds?: readonly string[];
   sessions: SessionSummary[];
   /** Session ids waiting on tool/permission approval (yellow spinner). */
   sessionIdsNeedingApproval?: readonly string[];
@@ -157,6 +159,7 @@ export function AgentConversationDirectory({
   lang,
   resolveModelLabel,
   runtimeRunningSessionIds = [],
+  optimisticRunningSessionIds = [],
   sessions,
   sessionIdsNeedingApproval = [],
   statusLabel,
@@ -220,6 +223,9 @@ export function AgentConversationDirectory({
   const runtimeSessionIds = new Set(
     runtimeRunningSessionIds.map((id) => String(id || "").trim()).filter(Boolean),
   );
+  const optimisticSessionIds = new Set(
+    optimisticRunningSessionIds.map((id) => String(id || "").trim()).filter(Boolean),
+  );
   const sessionsByAgentId = new Map<string, SessionSummary[]>();
   const latestSessionByAgentId = new Map<string, SessionSummary>();
   for (const session of sessions) {
@@ -258,6 +264,7 @@ export function AgentConversationDirectory({
     const tones = (sessionsByAgentId.get(agent.agentId) || []).map((session) => resolveSessionActivityTone(session, {
       needsApproval: approvalSessionIds.has(session.id),
       isRuntimeRunning: runtimeSessionIds.has(session.id),
+      isOptimisticRunning: optimisticSessionIds.has(session.id),
       isActive: session.id === activeSessionId,
     }));
     activityByAgentId.set(agent.agentId, resolveAgentActivityTone(tones));

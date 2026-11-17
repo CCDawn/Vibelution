@@ -218,4 +218,12 @@ describe("DirectSessionIndexList render stability", () => {
 
     expect(payloads).toEqual(["s-1"]);
   });
+
+  it("forwards the fresh optimistic running marker to the row", () => {
+    renderList(listProps({
+      conversations: [conversation("s-1")],
+      optimisticRunningSessionIds: ["s-1"],
+    }));
+    expect(counters.itemProps.at(-1)?.isOptimisticRunning).toBe(true);
+  });
 });

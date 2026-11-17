@@ -22,6 +22,8 @@ export type DirectSessionIndexListProps = {
   resolveModelLabel?: ModelLabelResolver;
   /** Session ids with an active runtime chat_turn. */
   runtimeRunningSessionIds?: readonly string[];
+  /** Fresh local optimistic turns; outranks a summary stuck on ``ready``. */
+  optimisticRunningSessionIds?: readonly string[];
   sessionComposerErrors: Record<string, string>;
   /** Session ids waiting on tool/permission approval. */
   sessionIdsNeedingApproval?: readonly string[];
@@ -154,6 +156,7 @@ export function DirectSessionIndexList({
   renamePending,
   resolveModelLabel,
   runtimeRunningSessionIds = [],
+  optimisticRunningSessionIds = [],
   sessionComposerErrors,
   sessionIdsNeedingApproval = [],
   sessionsById,
@@ -191,6 +194,13 @@ export function DirectSessionIndexList({
         runtimeRunningSessionIds.map((id) => String(id || "").trim()).filter(Boolean),
       ),
     [runtimeRunningSessionIds],
+  );
+  const optimisticSessionIds = useMemo(
+    () =>
+      new Set(
+        optimisticRunningSessionIds.map((id) => String(id || "").trim()).filter(Boolean),
+      ),
+    [optimisticRunningSessionIds],
   );
   const preparedItems = useMemo(
     () =>
@@ -257,6 +267,7 @@ export function DirectSessionIndexList({
             missingAgentMessage={sessionView.missingAgentMessage}
             needsApproval={approvalSessionIds.has(session.id)}
             isRuntimeRunning={runtimeSessionIds.has(session.id)}
+            isOptimisticRunning={optimisticSessionIds.has(session.id)}
             renamePending={sessionRenamePending}
             session={session}
             sessionAvatarFallback={sessionAvatarFallback}

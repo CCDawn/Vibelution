@@ -161,6 +161,8 @@ export type ChatConversationIndexPanelProps = {
   renameSessionMutation: PendingSessionMutation;
   resolveModelLabel: ModelLabelResolver;
   runtimeRunningSessionIds: readonly string[];
+  /** Fresh local optimistic turns; outranks a summary stuck on ``ready``. */
+  optimisticRunningSessionIds?: readonly string[];
   searchHasTerm: boolean;
   selectVisibleBulkSessions: () => void;
   selectedBulkSessionIds: ReadonlySet<string>;
@@ -272,6 +274,7 @@ export function ChatConversationIndexPanel({
   renameSessionMutation,
   resolveModelLabel,
   runtimeRunningSessionIds,
+  optimisticRunningSessionIds = [],
   searchHasTerm,
   selectVisibleBulkSessions,
   selectedBulkSessionIds,
@@ -363,6 +366,7 @@ export function ChatConversationIndexPanel({
         renameSessionId={renameSessionMutation.variables?.sessionId ?? ""}
         resolveModelLabel={resolveModelLabel}
         runtimeRunningSessionIds={runtimeRunningSessionIds}
+        optimisticRunningSessionIds={optimisticRunningSessionIds}
         sessionComposerErrors={sessionComposerErrors}
         sessionIdsNeedingApproval={sessionIdsNeedingApproval}
         sessionsById={listSessionsById}
@@ -446,6 +450,7 @@ export function ChatConversationIndexPanel({
             lang={lang}
             resolveModelLabel={resolveModelLabel}
             runtimeRunningSessionIds={runtimeRunningSessionIds}
+        optimisticRunningSessionIds={optimisticRunningSessionIds}
             sessions={allVisibleSessions}
             sessionIdsNeedingApproval={sessionIdsNeedingApproval}
             statusLabel={statusLabel}

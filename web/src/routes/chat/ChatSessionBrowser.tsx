@@ -26,6 +26,8 @@ export type ChatSessionBrowserProps = {
   lang: "zh" | "en";
   resolveModelLabel: (modelId: string) => string | undefined;
   runtimeRunningSessionIds?: readonly string[];
+  /** Fresh local optimistic turns; outranks a summary stuck on ``ready``. */
+  optimisticRunningSessionIds?: readonly string[];
   sessionIdsNeedingApproval?: readonly string[];
   loading?: boolean;
   error?: string;
@@ -132,6 +134,7 @@ export function ChatSessionBrowser({
   lang,
   resolveModelLabel,
   runtimeRunningSessionIds = [],
+  optimisticRunningSessionIds = [],
   sessionIdsNeedingApproval = [],
   loading = false,
   error,
@@ -147,6 +150,7 @@ export function ChatSessionBrowser({
   const locale = lang === "zh" ? "zh-CN" : "en-US";
   const nowMs = Date.now();
   const runtimeIds = useMemo(() => new Set(runtimeRunningSessionIds), [runtimeRunningSessionIds]);
+  const optimisticIds = useMemo(() => new Set(optimisticRunningSessionIds), [optimisticRunningSessionIds]);
   const approvalIds = useMemo(() => new Set(sessionIdsNeedingApproval), [sessionIdsNeedingApproval]);
 
   const rows = useMemo(() => sessions.map((session) => {
@@ -155,6 +159,7 @@ export function ChatSessionBrowser({
     const tone = resolveSessionActivityTone(session, {
       needsApproval: approvalIds.has(session.id),
       isRuntimeRunning: runtimeIds.has(session.id),
+    isOptimisticRunning: optimisticIds.has(session.id),
       isActive: session.id === activeSessionId,
     });
     const timestamp = timestampFor(session);

@@ -3057,6 +3057,7 @@ export function ChatCodingRouteWorkbench() {
       renameSessionMutation={renameSessionMutation}
       resolveModelLabel={resolveModelLabel}
       runtimeRunningSessionIds={runtimeRunningSessionIds}
+      optimisticRunningSessionIds={optimisticRunningSessionIds}
       searchHasTerm={searchHasTerm}
       selectVisibleBulkSessions={selectVisibleBulkSessions}
       selectedBulkSessionIds={selectedBulkSessionIds}
@@ -3612,6 +3613,7 @@ export function ChatCodingRouteWorkbench() {
                   lang={lang}
                   resolveModelLabel={resolveModelLabel}
                   runtimeRunningSessionIds={runtimeRunningSessionIds}
+                  optimisticRunningSessionIds={optimisticRunningSessionIds}
                   sessionIdsNeedingApproval={sessionIdsNeedingApproval}
                   loading={conversationIndexLoading || (!agentsQuery.data && agentsQuery.isPending)}
                   error={sessionsErrorMessage || (agentsQuery.isError ? describeError(agentsQuery.error, t("loadFailed")) : "")}

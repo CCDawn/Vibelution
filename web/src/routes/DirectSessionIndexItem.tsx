@@ -249,6 +249,8 @@ type DirectSessionIndexItemProps = {
   needsApproval?: boolean;
   /** True when runtime reports an active chat_turn for this session. */
   isRuntimeRunning?: boolean;
+  /** True when a fresh local optimistic turn is running. */
+  isOptimisticRunning?: boolean;
   renamePending: boolean;
   session: SessionSummary;
   sessionAvatarFallback: string;
@@ -294,6 +296,7 @@ export const DirectSessionIndexItem = memo(function DirectSessionIndexItem({
   missingAgentMessage,
   needsApproval = false,
   isRuntimeRunning = false,
+  isOptimisticRunning = false,
   renamePending,
   session,
   sessionAvatarFallback,
@@ -330,6 +333,7 @@ export const DirectSessionIndexItem = memo(function DirectSessionIndexItem({
   const activityTone = resolveSessionActivityTone(session, {
     needsApproval,
     isRuntimeRunning,
+    isOptimisticRunning,
     isActive: active,
   });
   const activityLabel = sessionActivityLabel(activityTone, lang);
