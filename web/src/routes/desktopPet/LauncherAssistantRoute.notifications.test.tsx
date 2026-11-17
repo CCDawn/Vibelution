@@ -399,7 +399,9 @@ describe("Launcher assistant hosted notifications", () => {
     const error = body().querySelector('[data-vui="state-surface"][data-tone="error"]');
     expect(error?.textContent).toContain("尚未确认消息是否收到");
     expect(body().querySelector("textarea")?.value).toBe("核对这条消息");
-    expect(conversation?.composerError).toContain("尚未确认消息是否收到");
+    // One notice only, in the composer-preceding slot: the composer must not
+    // repeat the same sentence as a second inline error.
+    expect(conversation?.composerError ?? "").not.toContain("尚未确认消息是否收到");
     expect(trigger().getAttribute("aria-label")).toContain("0 项提醒");
     await click(trigger());
     expect(panel().textContent).toContain("当前没有异常");

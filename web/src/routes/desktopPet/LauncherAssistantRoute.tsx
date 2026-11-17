@@ -1759,8 +1759,7 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       onRemoveComposerReference={removeComposerReference}
       onAddComposerAttachments={addAttachments} onRemoveComposerAttachment={removeAttachment}
       onRetryComposerAttachment={id => void uploadAttachments(id)} onRetryComposerAttachmentUploads={() => void uploadAttachments()}
-      composerError={sendUnconfirmed ? copy.unknownSend
-        : attachments.some(item => item.kind === "image") && status.data?.settings?.supportsImageInput === false ? copy.imageUnsupported
+      composerError={attachments.some(item => item.kind === "image") && status.data?.settings?.supportsImageInput === false ? copy.imageUnsupported
         : attachments.some(item => item.uploadStatus === "failed") ? (lang === "zh" ? "附件上传失败，请重试。" : "Attachment upload failed; retry.") : followupQueue.error}
       submitLabel={sendUnconfirmed ? copy.retry : copy.send} submitPendingLabel={copy.sending}
       composerActionDisabled={sendPending || controlPending || (attachments.length > 0 && status.data?.attachmentVersion !== 1) || (actionMode === "stop" ? stopping || !resolveSessionStopTurnId(detail.data, acceptedTurnId) : actionMode === "send" && !sendUnconfirmed && !draft.trim() && !attachments.length)}
@@ -1797,6 +1796,8 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
         onModelChange={modelId => void changeModel(modelId)}
         onOpenSettings={embedded ? () => void openModelConnection() : undefined} /> : undefined}
       composerPrecedingContent={<>
+      {sendUnconfirmed && !outstanding.current?.answerQuestion ? <VStateSurface density="compact" tone="error" title={copy.unknownSend}
+        actions={<VButton onClick={() => void submit()} isDisabled={sendPending || controlPending || stopping}>{copy.retry}</VButton>}>{sendUnknownDetail}</VStateSurface> : null}
       {pendingQuestion ? <LauncherAssistantQuestionCard key={sessionId + ":" + pendingQuestion.id}
         questionId={pendingQuestion.id} questionText={pendingQuestion.questionText} value={answerValue}
         onChange={changeQuestionAnswer} onSubmit={submitQuestionAnswer} lang={lang}
@@ -1850,8 +1851,6 @@ export function LauncherAssistantRoute({ embedded = false, navigationOwned = fal
       {!queueEnabled ? detail.data?.queuedTurns?.map(row => <p key={row.id} role="status">{launcherAssistantQueueLabel(row.status, lang)}{row.lastError ? ` · ${row.lastError}` : ""}</p>) : null}
       {queueReadback.removed ? <p role="status">{removedQueueText}</p> : null}
     </section> : null}
-    {sendUnconfirmed && !outstanding.current?.answerQuestion ? <VStateSurface tone="error" title={copy.unknownSend}
-      actions={<VButton onClick={() => void submit()} isDisabled={sendPending || controlPending || stopping}>{copy.retry}</VButton>}>{sendUnknownDetail}</VStateSurface> : null}
     {continuationUnconfirmed ? <VStateSurface tone="unavailable" title={lang === "zh" ? "尚未确认继续请求是否收到，将先核对原请求。" : "Continuation is unconfirmed; the original request will be checked first."}
       actions={<VButton onClick={() => void continueTurn()} isDisabled={controlPending || sendPending || stopping}>{copy.retry}</VButton>} /> : null}
     {recoverySaveFailed ? <VStateSurface tone="error" title={lang === "zh" ? "恢复记录未能保存，请保留当前页面并重试。" : "Recovery could not be saved; keep this page open and retry."} /> : null}
