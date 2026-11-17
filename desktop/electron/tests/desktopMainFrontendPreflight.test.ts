@@ -89,6 +89,7 @@ function harness(options: { live?: boolean; releaseChanged?: boolean; packaged?:
     launcherStateStore: { beginMainLifecycle },
     readLauncherStateFile: () => ({}),
     launcherStatePath: () => "unused",
+    listMainWorkbenchActiveWork: async () => [],
     runWorkbenchLifecycle: lifecycle,
     scheduleLauncherStatusCliRefresh: () => undefined,
     refreshLiveWorkbenchUrl: async () => "http://127.0.0.1:8000",

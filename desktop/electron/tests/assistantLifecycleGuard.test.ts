@@ -83,6 +83,49 @@ describe("resident assistant lifecycle admission", () => {
     expect(admission.release).toHaveBeenCalledOnce();
   });
 
+  it("reports a retryable busy result only after the same native barrier releases", async () => {
+    const { input, admission, registry } = fixture();
+    const released = deferred<"idle">();
+    input.host.migrationBarrier.mockImplementation(async operation =>
+      operation === "prepare" ? "probing" : operation === "status" ? "busy" : released.promise);
+    const outcome = acquireAssistantLifecycleLease({ ...input, waitForFailedRelease: true });
+    let settled = false;
+    void outcome.catch(() => { settled = true; });
+
+    await vi.waitFor(() => expect(input.host.migrationBarrier).toHaveBeenCalledWith("release"));
+    expect(settled).toBe(false);
+    expect(admission.release).not.toHaveBeenCalled();
+    expect(registry.release).not.toHaveBeenCalled();
+    released.resolve("idle");
+    await expect(outcome).rejects.toThrow("ASSISTANT_LIFECYCLE_BUSY");
+    expect(admission.release).toHaveBeenCalledOnce();
+    expect(registry.release).toHaveBeenCalledOnce();
+    expect(input.releaseOwner).toHaveBeenCalledOnce();
+  });
+
+  it("does not signal a retry when the attempted native barrier cannot confirm release", async () => {
+    const { input } = fixture();
+    input.host.migrationBarrier.mockImplementation(async operation =>
+      operation === "prepare" ? "probing" : "busy");
+    await expect(acquireAssistantLifecycleLease({ ...input, waitForFailedRelease: true, releaseWaitBudgetMs: 0 }))
+      .rejects.toThrow("ASSISTANT_LIFECYCLE_RELEASE_UNCONFIRMED");
+    expect(input.releaseOwner).toHaveBeenCalledOnce();
+  });
+
+  it("does not signal a retry when shutdown owns the local producer fences", async () => {
+    const { input, admission, registry } = fixture();
+    input.reopen = () => false;
+    input.host.migrationBarrier.mockImplementation(async operation =>
+      operation === "prepare" ? "probing" : operation === "status" ? "busy" : "idle");
+
+    await expect(acquireAssistantLifecycleLease({ ...input, waitForFailedRelease: true }))
+      .rejects.toThrow("ASSISTANT_LIFECYCLE_RELEASE_UNCONFIRMED");
+    expect(input.host.migrationBarrier).toHaveBeenCalledWith("release");
+    expect(admission.release).not.toHaveBeenCalled();
+    expect(registry.release).not.toHaveBeenCalled();
+    expect(input.releaseOwner).not.toHaveBeenCalled();
+  });
+
   it("retains gates on an ambiguous release until the same native barrier confirms idle", async () => {
     vi.useFakeTimers();
     try {

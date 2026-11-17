@@ -33,6 +33,7 @@ from core.runtime_manager.evolution_store import (
     load_active_run_snapshot as load_evolution_active_run_snapshot,
     load_latest_run_snapshot as load_evolution_latest_run_snapshot,
 )
+from core.runtime_manager.process_identity import recorded_process_owner_is_gone
 from core.runtime_manager.state_store import load_state as load_runtime_manager_state
 from core.runtime_manager.window_provider_state import window_provider_projection
 from core.runtime_manager.work_run_leases import leases_for_snapshot
@@ -1251,7 +1252,7 @@ def _restart_guard_active_work_runs() -> list[dict[str, str]]:
     """Return active work that should block an unconfirmed destructive restart."""
 
     try:
-        active = _active_work_runs(_work_run_summary())
+        active = _active_work_runs(_work_run_summary(), ignore_exited_chat_owners=True)
     except Exception:
         active = []
     if active:
@@ -1267,14 +1268,9 @@ def _restart_guard_active_work_runs() -> list[dict[str, str]]:
     for run in chat_runs:
         if not isinstance(run, dict):
             continue
-        if not _active_work_payload_blocks_lifecycle(run):
+        item = _active_work_run_item("chat_turn", run, ignore_exited_chat_owners=True)
+        if not item:
             continue
-        item = {
-            "kind": "chat_turn",
-            "runId": str(run.get("runId") or "").strip(),
-            "status": str(run.get("status") or run.get("currentPhase") or "").strip(),
-            "sessionId": str(run.get("sessionId") or "").strip(),
-        }
         key = (item["kind"], item["runId"] or item["sessionId"])
         if key not in seen:
             seen.add(key)
@@ -2673,7 +2669,7 @@ def _same_project_root(left: str, right: str) -> bool:
         return os.path.normcase(os.path.abspath(left)) == os.path.normcase(os.path.abspath(right))
 
 
-def _active_work_runs(work_runs: dict) -> list[dict[str, str]]:
+def _active_work_runs(work_runs: dict, *, ignore_exited_chat_owners: bool = False) -> list[dict[str, str]]:
     items: list[dict[str, str]] = []
     seen: set[tuple[str, str]] = set()
     active_items = work_runs.get("activeItems") if isinstance(work_runs, dict) else {}
@@ -2684,7 +2680,7 @@ def _active_work_runs(work_runs: dict) -> list[dict[str, str]]:
             for payload in payloads:
                 if not isinstance(payload, dict):
                     continue
-                item = _active_work_run_item(str(kind or ""), payload)
+                item = _active_work_run_item(str(kind or ""), payload, ignore_exited_chat_owners=ignore_exited_chat_owners)
                 key = (item.get("kind") or "", item.get("runId") or "")
                 if item and key not in seen:
                     seen.add(key)
@@ -2696,7 +2692,7 @@ def _active_work_runs(work_runs: dict) -> list[dict[str, str]]:
     for kind, payload in active.items():
         if not isinstance(payload, dict):
             continue
-        item = _active_work_run_item(str(kind or ""), payload)
+        item = _active_work_run_item(str(kind or ""), payload, ignore_exited_chat_owners=ignore_exited_chat_owners)
         key = (item.get("kind") or "", item.get("runId") or "")
         if item and key not in seen:
             seen.add(key)
@@ -2704,8 +2700,12 @@ def _active_work_runs(work_runs: dict) -> list[dict[str, str]]:
     return items
 
 
-def _active_work_run_item(kind: str, payload: dict) -> dict[str, str]:
+def _active_work_run_item(kind: str, payload: dict, *, ignore_exited_chat_owners: bool = False) -> dict[str, str]:
     if not _active_work_payload_blocks_lifecycle(payload):
+        return {}
+    if ignore_exited_chat_owners and kind == "chat_turn" and recorded_process_owner_is_gone(
+        payload.get("ownerPid"), payload.get("ownerCreateTime")
+    ):
         return {}
     run_id = str(payload.get("runId") or payload.get("sessionId") or "").strip()
     status = str(payload.get("status") or payload.get("currentPhase") or "").strip()

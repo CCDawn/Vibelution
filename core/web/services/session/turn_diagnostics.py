@@ -1494,6 +1494,11 @@ def list_active_session_work_runs(*, reconcile: bool = True) -> list[dict[str, A
             "currentPhase": "queued",
             "leases": list(queued_snapshot.get("leases") or ["readonly_chat"]),
         }
+        # Only the persisted fallback carries the recorded owner. The rows
+        # above come from this backend's live scheduler and running set.
+        if queued_snapshot.get("ownerPid") and queued_snapshot.get("ownerCreateTime"):
+            item["ownerPid"] = queued_snapshot["ownerPid"]
+            item["ownerCreateTime"] = queued_snapshot["ownerCreateTime"]
         user_message = str(queued_snapshot.get("userMessage") or "").strip()
         summary = str(queued_snapshot.get("summary") or "").strip()
         if user_message:

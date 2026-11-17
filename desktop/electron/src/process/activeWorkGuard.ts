@@ -209,6 +209,12 @@ export type FinalizeWorkRunsForStoppedBackendResult = {
   clearedIndexKinds: string[];
 };
 
+export type RecoverableChatTurnOwner = {
+  runId: string;
+  ownerPid: number;
+  ownerCreateTime: number;
+};
+
 /**
  * Settle every still-active work_runs snapshot once the backend tree is
  * verifiably stopped. A verified backend stop is a deterministic terminal
@@ -227,11 +233,13 @@ export type FinalizeWorkRunsForStoppedBackendResult = {
 export function finalizeWorkRunsForStoppedBackend(input: {
   workspaceRoot: string;
   now?: () => string;
+  recoverableChatTurnOwners?: readonly RecoverableChatTurnOwner[];
 }): FinalizeWorkRunsForStoppedBackendResult {
   const runtimeManagerDir = resolveRuntimeManagerDir(input.workspaceRoot);
   const nowIso = input.now ?? (() => new Date().toISOString());
   const settledRunIds: string[] = [];
   const clearedIndexKinds: string[] = [];
+  const recoverableChatTurns = new Map(input.recoverableChatTurnOwners?.map(owner => [owner.runId, owner]));
   const workRunsRoot = join(runtimeManagerDir, "work_runs");
   for (const kind of WORK_RUN_KIND_DIRS) {
     const kindDir = join(workRunsRoot, kind);
@@ -246,6 +254,14 @@ export function finalizeWorkRunsForStoppedBackend(input: {
         continue;
       }
       const runId = String(payload.runId || payload.roundId || payload.sessionId || payload.id || "").trim();
+      // A cold-start recovery needs this active index and snapshot to match
+      // the journal's open turn. The main Launcher verified the old owner
+      // independently of the backend tree being retired here.
+      const recoverableOwner = kind === "chat_turn" ? recoverableChatTurns.get(runId) : undefined;
+      if (recoverableOwner && payload.ownerPid === recoverableOwner.ownerPid
+        && Number(payload.ownerCreateTime) === recoverableOwner.ownerCreateTime) {
+        continue;
+      }
       const settled: Record<string, unknown> = {
         ...payload,
         finishedAt: nowIso(),

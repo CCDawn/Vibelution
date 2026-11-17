@@ -2252,11 +2252,31 @@ def test_launcher_chat_guard_checks_recorded_process_identity(tmp_path, monkeypa
     monkeypatch.setattr(psutil, "Process", Process)
     before = store.load_snapshot("chat_turn", run_id)
 
-    result = launcher_service.get_launcher_active_work_status()["lifecycleProof"]["activeWorkRuns"]
+    proof = launcher_service.get_launcher_active_work_status()["lifecycleProof"]
 
-    assert [item["runId"] for item in result["items"]] == ([run_id] if blocks else [])
+    assert [item["runId"] for item in proof["activeWorkRuns"]["items"]] == ([run_id] if blocks else [])
+    assert proof["recoverableChatTurnOwners"] == (
+        [] if blocks else [{"runId": run_id, "ownerPid": 1234, "ownerCreateTime": 123.5}]
+    )
     assert store.load_snapshot("chat_turn", run_id) == before
     assert store.load_run_index("chat_turn")["activeRunId"] == run_id
+
+
+def test_launcher_chat_guard_protects_parallel_live_owner_alongside_crashed_turn(tmp_path, monkeypatch):
+    store = WorkRunStore(root=tmp_path / "work_runs")
+    old_timestamp = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    for run_id, owner_pid in (("live", 1234), ("crashed", 2345)):
+        store.persist_snapshot("chat_turn", {
+            "runId": run_id, "status": "running", "ownerPid": owner_pid,
+            "ownerCreateTime": 321.5, "updatedAt": old_timestamp,
+        }, active_run_id=run_id)
+    monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", store.root)
+    monkeypatch.setattr(launcher_service, "recorded_process_owner_is_gone", lambda pid, _created: pid == 2345)
+
+    proof = launcher_service.get_launcher_active_work_status()["lifecycleProof"]
+
+    assert [item["runId"] for item in proof["activeWorkRuns"]["items"]] == ["live"]
+    assert [owner["runId"] for owner in proof["recoverableChatTurnOwners"]] == ["crashed"]
 
 
 def test_launcher_active_work_guard_skips_historical_snapshot_files(tmp_path, monkeypatch):

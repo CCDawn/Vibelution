@@ -5,6 +5,22 @@ import pytest
 from core.web.services import runtime_service
 
 
+def test_restart_guard_excludes_dead_chat_snapshot_and_keeps_current_work(monkeypatch):
+    stale_chat = {"runId": "crashed", "status": "running", "ownerPid": 1234, "ownerCreateTime": 321.5}
+    persisted_queue_item = {**stale_chat, "runId": "queued-before-crash", "status": "queued"}
+    work_runs = {"active": {"chat_turn": stale_chat}, "activeItems": {"chat_turn": [persisted_queue_item]}}
+    monkeypatch.setattr(runtime_service, "_work_run_summary", lambda: work_runs)
+    monkeypatch.setattr(runtime_service, "list_active_session_work_runs", lambda: [persisted_queue_item])
+    monkeypatch.setattr(runtime_service, "recorded_process_owner_is_gone", lambda pid, created: (pid, created) == (1234, 321.5))
+
+    assert runtime_service._restart_guard_active_work_runs() == []
+    assert work_runs["active"]["chat_turn"] is stale_chat
+
+    work_runs["activeItems"]["chat_turn"].append({"runId": "live", "status": "running", "sessionId": "s"})
+
+    assert [item["runId"] for item in runtime_service._restart_guard_active_work_runs()] == ["live"]
+
+
 @pytest.fixture
 def operator_retire_owners(monkeypatch):
     calls = []

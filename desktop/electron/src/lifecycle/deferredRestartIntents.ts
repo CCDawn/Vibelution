@@ -33,7 +33,7 @@ export type DeferredRestartFulfillmentOutcome =
 export type FulfillDeferredRestartIntentInput = {
   workspaceRoot: string;
   runtimeManagerDir: string;
-  listActiveWork: () => readonly unknown[];
+  listActiveWork: () => readonly unknown[] | Promise<readonly unknown[]>;
   submitRestart: () => Promise<{ accepted: boolean; code?: string; message?: string }>;
   now?: () => number;
   /** Management-only attachment may fulfil new requests without replaying old ones. */
@@ -205,14 +205,20 @@ export async function fulfillDeferredRestartIntentOnce(
     }
     fresh.push(intent);
   }
-  if (fresh.length === 0) {
-    return expiredIds.length > 0 ? { status: "expired", intentIds: expiredIds } : { status: "none" };
-  }
-  const activeWorkCount = input.listActiveWork().length;
+  const noFreshIntent: DeferredRestartFulfillmentOutcome = expiredIds.length > 0
+    ? { status: "expired", intentIds: expiredIds } : { status: "none" };
+  const candidate = fresh[0];
+  if (!candidate) return noFreshIntent;
+  const activeWorkCount = (await input.listActiveWork()).length;
   if (activeWorkCount > 0) {
     return { status: "blocked", activeWorkCount };
   }
-  const intent = fresh[0]!;
+  // A newer lifecycle command can supersede or prune the selected request
+  // during the asynchronous work read. Never claim a replacement by accident.
+  const intent = listDeferredRestartIntents(input.runtimeManagerDir).find(item => item.intentId === candidate.intentId);
+  if (!intent || JSON.stringify(intent) !== JSON.stringify(candidate) || pendingIntentIsExpired(intent, now())) {
+    return noFreshIntent;
+  }
   const claimed = settleDeferredRestartIntent({
     workspaceRoot: input.workspaceRoot,
     runtimeManagerDir: input.runtimeManagerDir,

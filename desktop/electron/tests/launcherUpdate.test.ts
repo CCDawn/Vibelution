@@ -220,6 +220,58 @@ describe("guarded local Launcher update", () => {
     expect(input.app.exit).not.toHaveBeenCalled();
   });
 
+  it("rechecks current work and retries an idle CLI shell update after a transient admission collision", async () => {
+    const input = automaticRefreshHarness();
+    const commit = vi.fn();
+    const receipt = { handoff: vi.fn() };
+    input.acquireResidentAssistantShutdownGuard.mockRejectedValueOnce(new Error("ASSISTANT_LIFECYCLE_BUSY"))
+      .mockResolvedValueOnce({ release: vi.fn().mockResolvedValue(undefined), commit });
+
+    expect(await input.restartLatest(false, "restart", { launchRequest: {
+      launchRequestId: "launch_cli_restart", launchRequestOperation: "restart", receipt
+    } })).toMatchObject({ accepted: true });
+    expect(input.ensureLatestLauncher).toHaveBeenCalledOnce();
+    expect(input.resolveLauncherUpdateActiveWork).toHaveBeenCalledTimes(3);
+    expect(input.acquireResidentAssistantShutdownGuard).toHaveBeenCalledTimes(2);
+    expect(input.acquireResidentAssistantShutdownGuard).toHaveBeenLastCalledWith(undefined, true);
+    expect(input.resolveLauncherUpdateActiveWork.mock.invocationCallOrder[2])
+      .toBeLessThan(input.acquireResidentAssistantShutdownGuard.mock.invocationCallOrder[1]);
+    expect(input.stopMainRuntimeForApprovedShutdown).toHaveBeenCalledExactlyOnceWith(false, undefined, "launcher");
+    expect(input.stopIsolatedInstancesForApprovedShutdown).toHaveBeenCalledExactlyOnceWith(false);
+    expect(commit).toHaveBeenCalledOnce();
+    expect(receipt.handoff).toHaveBeenCalledExactlyOnceWith("restart");
+    expect(input.scheduleCurrentDesktopShellRefresh).toHaveBeenCalledOnce();
+  });
+
+  it("leaves a CLI shell restart blocked when new work appears after the admission collision", async () => {
+    const input = automaticRefreshHarness();
+    const receipt = { handoff: vi.fn() };
+    input.acquireResidentAssistantShutdownGuard.mockRejectedValueOnce(new Error("ASSISTANT_LIFECYCLE_BUSY"));
+    input.resolveLauncherUpdateActiveWork.mockResolvedValueOnce({ state: "idle", message: "" })
+      .mockResolvedValueOnce({ state: "idle", message: "" })
+      .mockResolvedValueOnce({ state: "active", message: "", count: 1 });
+
+    expect(await input.restartLatest(false, "restart", { launchRequest: {
+      launchRequestId: "launch_cli_restart", launchRequestOperation: "restart", receipt
+    } })).toMatchObject({ accepted: false, code: "active_work_blocked" });
+    expect(input.acquireResidentAssistantShutdownGuard).toHaveBeenCalledOnce();
+    expect(input.stopMainRuntimeForApprovedShutdown).not.toHaveBeenCalled();
+    expect(input.scheduleCurrentDesktopShellRefresh).not.toHaveBeenCalled();
+  });
+
+  it("ends a CLI shell restart after bounded persistent assistant admission collisions", async () => {
+    const input = automaticRefreshHarness();
+    const receipt = { handoff: vi.fn() };
+    input.acquireResidentAssistantShutdownGuard.mockRejectedValue(new Error("ASSISTANT_LIFECYCLE_BUSY"));
+
+    expect(await input.restartLatest(false, "restart", { launchRequest: {
+      launchRequestId: "launch_cli_restart", launchRequestOperation: "restart", receipt
+    } })).toMatchObject({ accepted: false, code: "assistant_lifecycle_busy" });
+    expect(input.acquireResidentAssistantShutdownGuard).toHaveBeenCalledTimes(3);
+    expect(input.stopMainRuntimeForApprovedShutdown).not.toHaveBeenCalled();
+    expect(input.scheduleCurrentDesktopShellRefresh).not.toHaveBeenCalled();
+  });
+
   it("releases the captured native guard when a workspace stop fails", async () => {
     const input = automaticRefreshHarness();
     const release = vi.fn().mockResolvedValue(undefined);
@@ -270,7 +322,7 @@ describe("guarded local Launcher update", () => {
       .toBeLessThan(input.inspectCurrentDesktopShell.mock.invocationCallOrder[0]);
     expect(input.inspectCurrentDesktopShell.mock.invocationCallOrder[0])
       .toBeLessThan(input.ensureLatestLauncher.mock.invocationCallOrder[0]);
-    expect(input.stopMainRuntimeForApprovedShutdown).toHaveBeenCalledWith(false);
+    expect(input.stopMainRuntimeForApprovedShutdown).toHaveBeenCalledWith(false, undefined, "launcher");
     expect(input.stopIsolatedInstancesForApprovedShutdown).toHaveBeenCalledWith(false);
     expect(input.stopIsolatedInstancesForApprovedShutdown.mock.invocationCallOrder[0])
       .toBeLessThan(input.scheduleCurrentDesktopShellRefresh.mock.invocationCallOrder[0]);
@@ -316,7 +368,7 @@ describe("guarded local Launcher update", () => {
     // restart-latest-shell is the user-clicked update entry: it still forces
     // so the Python scheduler clears any cooldown marker before scheduling.
     expect(input.scheduleCurrentDesktopShellRefresh).toHaveBeenCalledWith("open", { force: true, shellKind: "packaged" });
-    expect(input.stopMainRuntimeForApprovedShutdown).toHaveBeenCalledWith(true);
+    expect(input.stopMainRuntimeForApprovedShutdown).toHaveBeenCalledWith(true, undefined, "launcher");
     expect(input.stopLauncherAssistant).toHaveBeenCalledOnce();
     await vi.waitFor(() => expect(input.app.exit).toHaveBeenCalledOnce());
   });

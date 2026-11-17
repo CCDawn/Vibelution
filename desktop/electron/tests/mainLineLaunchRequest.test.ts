@@ -8,12 +8,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { beginLaunchRequestReceipt, type LaunchRequestReceipt } from "../src/lifecycle/launchRequestReceipt.js";
 import { normalizeInstanceKey } from "../src/lifecycle/projectStoragePaths.js";
 import { executeMainLineWorkbench } from "../src/process/workbenchBackend.js";
+import type { RunWorkbenchLifecycleInput } from "../src/process/workbenchLifecycle.js";
 import { LauncherLifecycleSupervisor } from "../src/lifecycle/launcherLifecycleSupervisor.js";
+import { activeWorkStatusFromLauncherStatus } from "../src/shutdown/shutdownCoordinator.js";
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 const source = createSourceFile("main.ts", readFileSync(new URL("../src/main.ts", import.meta.url), "utf8"), ScriptTarget.ES2022, true);
-const names = ["handleMainLineLaunchRequest", "orchestrateLauncherLifecycleImpl", "openWorkbenchAfterLifecycleReady"];
+const names = ["handleMainLineLaunchRequest", "orchestrateLauncherLifecycleImpl", "openWorkbenchAfterLifecycleReady",
+  "readMainWorkbenchActiveWork", "listMainWorkbenchActiveWork"];
 const code = transpileModule(source.statements.filter(statement => isFunctionDeclaration(statement)
   && names.includes(statement.name?.text || "")).map(statement => statement.getText(source)).join("\n")
   + "\nglobalThis.handleRequest = handleMainLineLaunchRequest; globalThis.lifecycle = orchestrateLauncherLifecycleImpl;", {
@@ -34,7 +37,7 @@ function harness() {
     claimReady: vi.fn(() => true), completeReady: vi.fn(() => true), releaseReadyClaim: vi.fn()
   };
   const sandbox = {
-    beginLaunchRequestReceipt: vi.fn(beginLaunchRequestReceipt), AbortSignal, console, normalizeInstanceKey, realpathSync,
+    beginLaunchRequestReceipt: vi.fn(beginLaunchRequestReceipt), AbortSignal, Error, console, normalizeInstanceKey, realpathSync,
     // The queued-restart bound arms a host timer in production, so the vm sandbox
     // must expose the same host API; without it that arm becomes a preparation error.
     setTimeout, clearTimeout,
@@ -51,6 +54,10 @@ function harness() {
     app: { isPackaged: false }, inspectUnpackagedShell: vi.fn(async () => ({ stale: false })),
     mainLineBackendIsReachable: vi.fn(async () => false),
     shouldRefreshBeforeLifecycle: vi.fn(() => false), shouldInspectDesktopShellBeforeLifecycle: () => false,
+    activeWorkStatusFromLauncherStatus,
+    orchestrateLauncherApi: vi.fn<(...args: unknown[]) => Promise<unknown>>().mockResolvedValue({ lifecycleProof: {
+      activeWorkRuns: { count: 0, items: [] }
+    } }),
     readLauncherStateFile: () => ({ backendPid: 123, backendCreateTime: 45 }), launcherStatePath: () => "state.json",
     WORKBENCH_START_READY_WAIT_MS: 180000, WORKBENCH_REBUILD_READY_WAIT_MS: 180000,
     verifyRestartedServingVersion: vi.fn(async () => ({ ok: true, inspection: { port: 8123 } })),
@@ -124,6 +131,37 @@ describe("main-line launch request settlement", () => {
     expect(input.verifyRestartedServingVersion).not.toHaveBeenCalled();
     expect(input.openWorkbenchAtCurrentLauncherUrl).not.toHaveBeenCalled();
     expect(input.launcherLifecycleSupervisor.completeReady).not.toHaveBeenCalled();
+  });
+
+  it.each(["idle", "active", "unknown"] as const)("uses the canonical main-work projection at the forwarded restart queue's execution boundary (%s)", async state => {
+    const input = harness();
+    const item = { kind: "formal_run", runId: "formal-1", status: "running", sessionId: "" };
+    const owner = { runId: "turn-for-startup-recovery", ownerPid: 123, ownerCreateTime: 456.78 };
+    input.orchestrateLauncherApi.mockResolvedValue({ lifecycleProof: {
+      activeWorkRuns: { count: 0, items: [] }, recoverableChatTurnOwners: [owner, { ...owner, ownerPid: "123" }]
+    } });
+    if (state !== "idle") input.orchestrateLauncherApi.mockResolvedValue(state === "active"
+      ? { lifecycleProof: { activeWorkRuns: { count: 1, items: [item] } } } : {});
+    const followRestart = vi.fn();
+    const runWorkbenchLifecycle = vi.fn(async (command: RunWorkbenchLifecycleInput) => {
+      const result = await command.listActiveWork?.(command.signal);
+      followRestart(result);
+      throw new Error("TEST_RESTART_BOUNDARY");
+    });
+    Object.assign(input.context, { launcherLifecycleSupervisor: new LauncherLifecycleSupervisor(), runWorkbenchLifecycle });
+
+    await input.handleRequest("restart", "forwarded", input.metadata);
+
+    expect(runWorkbenchLifecycle).toHaveBeenCalledWith(expect.objectContaining({ operation: "restart", interruptActiveWork: false }));
+    expect(input.orchestrateLauncherApi).toHaveBeenCalledWith("active-work", expect.objectContaining({ path: "active-work" }), expect.any(AbortSignal));
+    if (state === "unknown") {
+      expect(followRestart).not.toHaveBeenCalled();
+      expect(input.read()).toMatchObject({ code: "launch_preparation_failed", message: "暂时无法确认是否有进行中的任务，已取消操作。" });
+    } else {
+      expect(followRestart).toHaveBeenCalledExactlyOnceWith(state === "active"
+        ? { activeWorkRuns: [item], recoverableChatTurnOwners: [] }
+        : { activeWorkRuns: [], recoverableChatTurnOwners: [owner] });
+    }
   });
 
   it("releases a settled pending restart's intent phase so a later stop can begin", async () => {
