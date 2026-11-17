@@ -461,6 +461,42 @@ def resolve_turn_authorization(
         return None
 
 
+EXECUTION_DENY_HINT_PREFIX = "\n\n[本回合不可执行] "
+
+
+def _execution_deny_hints(decision: Any) -> Dict[str, str]:
+    """Name -> reason for tools the model can see but the turn grant cannot execute."""
+    hints: Dict[str, str] = {}
+    for entry in getattr(decision, "denied", ()) or ():
+        try:
+            name, reason = entry
+        except (TypeError, ValueError):
+            continue
+        if _coerce_text(getattr(reason, "phase", "")).strip() != "execution":
+            continue
+        tool_name = _coerce_text(name).strip()
+        message = _coerce_text(getattr(reason, "message", "")).strip()
+        if tool_name and message:
+            hints[tool_name] = message
+    return hints
+
+
+def _with_execution_deny_hint(tool: Any, hint: str) -> Any:
+    """Copy the tool with one trailing line so selection stops retrying a denied call."""
+    description = _coerce_text(getattr(tool, "description", ""))
+    marker = EXECUTION_DENY_HINT_PREFIX.strip()
+    if not description.strip() or marker in description:
+        return tool
+    annotated = f"{description}{EXECUTION_DENY_HINT_PREFIX}{hint}"
+    copier = getattr(tool, "model_copy", None)
+    if not callable(copier):
+        return tool
+    try:
+        return copier(update={"description": annotated})
+    except Exception:
+        return tool
+
+
 def materialize_authorized_tools(
     registered_tools: Iterable[Any] | None,
     authorization_report: Any,
@@ -475,11 +511,15 @@ def materialize_authorized_tools(
         tools = list(registered_tools or [])
     except TypeError:
         return []
-    return [
-        tool
-        for tool in tools
-        if _coerce_text(getattr(tool, "name", "")).strip() in visible_names
-    ]
+    hints = _execution_deny_hints(decision)
+    materialized: List[Any] = []
+    for tool in tools:
+        name = _coerce_text(getattr(tool, "name", "")).strip()
+        if name not in visible_names:
+            continue
+        hint = hints.get(name)
+        materialized.append(_with_execution_deny_hint(tool, hint) if hint else tool)
+    return materialized
 
 
 def is_tool_visible_to_agent(tool_name: str, visible_tool_names: Iterable[Any] | None) -> bool:

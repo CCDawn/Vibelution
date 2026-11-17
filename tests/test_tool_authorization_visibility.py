@@ -320,3 +320,34 @@ def test_binding_unwraps_runtime_and_visible_tool_envelopes():
     ) is False
     assert guard_restart_focus_tool("apply_diff_edit_tool", restart_focus={"enabled": False}) is None
     assert guard_restart_focus_tool("apply_diff_edit_tool", restart_focus={"enabled": True})
+
+
+def test_materialize_annotates_execution_denied_tools_only():
+    class _FakeTool:
+        def __init__(self, name: str, description: str) -> None:
+            self.name = name
+            self.description = description
+
+        def model_copy(self, *, update=None):
+            clone = _FakeTool(self.name, self.description)
+            for key, value in (update or {}).items():
+                setattr(clone, key, value)
+            return clone
+
+    decision = SimpleNamespace(
+        visible_tools=("read_file_tool", "write_file_tool"),
+        denied=(
+            ("write_file_tool", SimpleNamespace(phase="execution", message="需要写权限审批")),
+            ("hidden_tool", SimpleNamespace(phase="visibility", message="未暴露给当前 Agent")),
+        ),
+    )
+    report = SimpleNamespace(decision=decision)
+    tools = [_FakeTool("read_file_tool", "读文件"), _FakeTool("write_file_tool", "写文件")]
+
+    materialized = materialize_authorized_tools(tools, report)
+
+    assert [tool.name for tool in materialized] == ["read_file_tool", "write_file_tool"]
+    assert materialized[0].description == "读文件"
+    assert "本回合不可执行" in materialized[1].description
+    assert "需要写权限审批" in materialized[1].description
+    assert tools[1].description == "写文件"
