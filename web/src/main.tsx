@@ -4,6 +4,7 @@ import ReactDOM from "react-dom/client";
 import { App } from "./app/App";
 import { redirectToCanonicalWorkbenchHost } from "./app/canonicalWorkbenchHost";
 import { setBrowserTelemetryStartupPending } from "./app/browserTelemetry";
+import { startFrontendBuildProbe } from "./app/frontendBuildProbe";
 import { VuiProvider } from "./components/vui/VuiProvider";
 import "./design/tokens.css";
 import "./design/base.css";
@@ -19,6 +20,8 @@ if (!redirectToCanonicalWorkbenchHost()) {
   if (!/^\/(?:launcher|launcher-assistant)(?:\/|$)/.test(window.location.pathname)) {
     setBrowserTelemetryStartupPending(true);
   }
+  // Follow a frontend release published after this window booted.
+  startFrontendBuildProbe();
   ReactDOM.createRoot(document.getElementById("root")!).render(
     <React.StrictMode>
       <VuiProvider>
