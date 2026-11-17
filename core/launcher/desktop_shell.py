@@ -78,6 +78,8 @@ DESKTOP_SHELL_BUILD_DIR_RETENTION_SECONDS = 6 * 60 * 60
 DESKTOP_SHELL_BUILD_CLEANUP_RESERVE_SECONDS = 5.0
 DESKTOP_SHELL_BUILD_LOCK_POLL_SECONDS = 0.1
 DESKTOP_SHELL_BUILD_CLOSE_RETRIES = 3
+PACKAGED_SHELL_EXIT_TIMEOUT_SECONDS = 10.0
+PACKAGED_SHELL_EXIT_POLL_SECONDS = 0.25
 # Launch confirmation: Electron is single-instance per shared userData, so a
 # spawned shell that finds a live owner forwards its argv and exits 0 within a
 # second. ``launched`` is therefore only true once the child is observed holding
@@ -2123,6 +2125,8 @@ def build_desktop_shell_package(
                 else root / PACKAGED_EXE_RELATIVE.parent
             )
             previous = root / STAGING_OUTPUT_DIR_RELATIVE / ".win-unpacked-previous" if mode == "staging" else root / PREVIOUS_WIN_UNPACKED_RELATIVE
+            if mode == "dir":
+                _wait_for_live_package_processes(root, deadline=deadline)
             _publish_built_shell_tree(built, published_output, previous=previous)
         return {"built": True, "mode": mode, "output": str(published_output)}
     finally:
@@ -2199,6 +2203,7 @@ def _try_promote_staged_desktop_shell_locked(root: Path, *, deadline: float | No
         return False
     live = root / "dist" / "desktop" / "win-unpacked"
     previous = root / PREVIOUS_WIN_UNPACKED_RELATIVE
+    _wait_for_live_package_processes(root, deadline=deadline)
     try:
         _publish_built_shell_tree(staging_unpacked, live, previous=previous)
     except OSError:
@@ -2296,6 +2301,38 @@ def _raise_if_live_owner_holds_shell(root: Path) -> None:
         raise LiveOwnerHoldingLockError(holder)
 
 
+def _live_package_process_ids(root: Path) -> tuple[int, ...]:
+    if os.name != "nt":
+        return ()
+    import psutil
+
+    package = (root / PACKAGED_EXE_RELATIVE.parent).resolve()
+    process_ids = []
+    for process in psutil.process_iter(("exe",)):
+        executable = process.info["exe"]
+        if executable and Path(executable).is_relative_to(package):
+            process_ids.append(process.pid)
+    return tuple(sorted(process_ids))
+
+
+def _wait_for_live_package_processes(root: Path, *, deadline: float | None) -> None:
+    # Electron renderers and utility processes can outlive the registered
+    # owner and still map files in win-unpacked on Windows.
+    pids = _live_package_process_ids(root)
+    if not pids:
+        return
+    _append_refresh_log(root, "rebuild.waiting_for_package_processes", pids=pids)
+    exit_deadline = time.monotonic() + PACKAGED_SHELL_EXIT_TIMEOUT_SECONDS
+    if deadline is not None:
+        exit_deadline = min(exit_deadline, deadline)
+    while pids:
+        remaining = exit_deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(f"desktop package is still in use by processes {', '.join(map(str, pids))}")
+        time.sleep(min(remaining, PACKAGED_SHELL_EXIT_POLL_SECONDS))
+        pids = _live_package_process_ids(root)
+
+
 def rebuild_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, Any]:
     """Rebuild ``win-unpacked`` from the current ``desktop/electron`` checkout."""
 
@@ -2339,6 +2376,7 @@ def rebuild_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, 
             # The owner can appear while the package builds; publishing then
             # only wastes the rename and records a filesystem error.
             _raise_if_live_owner_holds_shell(root)
+            _wait_for_live_package_processes(root, deadline=deadline)
             _publish_built_shell_tree(
                 built,
                 root / PACKAGED_EXE_RELATIVE.parent,
