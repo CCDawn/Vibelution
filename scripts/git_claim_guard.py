@@ -637,7 +637,33 @@ def _read_permit(root: Path) -> dict[str, object]:
     return payload
 
 
+def _permit_claim_is_live(root: Path, claim_id: str) -> bool:
+    """A main-update permit only holds while its integration claim is live.
+
+    ``issue_main_permit`` records the claim that authorised the merge, but the
+    reference-transaction check used to validate only the SHA pair and the TTL,
+    so a released or expired claim kept moving main for the rest of the permit
+    window. Coordination outages fail open: the SHA, TTL and attribution checks
+    still run, so a missing shared skill cannot block integration entirely.
+    """
+    if not claim_id:
+        return True
+    try:
+        snapshot = coordination_call(root, "status")
+    except ClaimGuardError:
+        return True
+    claims = snapshot.get("claims")
+    if not isinstance(claims, list):
+        return True
+    for claim in claims:
+        if not isinstance(claim, dict) or str(claim.get("id") or "") != claim_id:
+            continue
+        return str(claim.get("status") or "") in {"active", "ready"}
+    return True
+
+
 def check_reference_transaction(
+
     root: Path | str,
     phase: str,
     lines: TextIO,
@@ -667,6 +693,10 @@ def check_reference_transaction(
             raise ClaimGuardError("main_update_permit_invalid") from error
         if (now or _utc_now()) > expires_at:
             raise ClaimGuardError("main_update_permit_expired")
+        if not _permit_claim_is_live(
+            root_path, str(payload.get("integrationClaimId") or "")
+        ):
+            raise ClaimGuardError("main_update_permit_claim_released")
         # Older task worktrees may issue permits without the attribution check.
         # The integration checkout independently verifies the actual ref move.
         check_incoming_attribution(root_path, *update)
