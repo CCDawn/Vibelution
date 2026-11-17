@@ -896,6 +896,21 @@ def _format_http_fetch_error(status_code: int, url: str) -> str:
     return base
 
 
+def _arxiv_article_https_url(url: str) -> str:
+    """Keep the article and edition while upgrading legacy arXiv search URLs."""
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    if (
+        parsed.scheme == "http"
+        and host in (*_ARXIV_MIRROR_HOSTS, _ARXIV_EXPORT_HOST)
+        and parsed.port in {None, 80}
+        and parsed.username is None
+        and parsed.path.startswith(("/abs/", "/pdf/"))
+    ):
+        return parsed._replace(scheme="https", netloc=host).geturl()
+    return url
+
+
 def _arxiv_export_mirror_url(url: str) -> str:
     """Map arxiv.org /abs/ and /pdf/ GET fetches to the official export mirror.
 
@@ -1141,7 +1156,8 @@ def web_fetch(url: str, max_chars: int = 8000, prompt: str = "", *,
     if validation_error:
         return f"[错误] {validation_error}: {url}"
 
-    fetch_url = _arxiv_export_mirror_url(url)
+    citation_origin = _arxiv_article_https_url(url)
+    fetch_url = _arxiv_export_mirror_url(citation_origin)
     # Internal consumers may narrow outbound reads without changing the public
     # tool's existing URL policy. Validate every hop before any client request.
     final_url_or_error, response = (_fetch_with_same_site_redirects(fetch_url, url_validator=url_validator)
@@ -1179,11 +1195,9 @@ def web_fetch(url: str, max_chars: int = 8000, prompt: str = "", *,
         return f"[网页抓取] URL 内容为空: {final_url_or_error}"
 
     focus = f"\n关注点: {prompt.strip()[:240]}" if prompt and prompt.strip() else ""
-    # 回执 URL 策略：arXiv 改道与 EuropePMC 备援成功时，回执行仍报告原始请求 URL——下游
-    # extraction（task_fetched_text → source_quotable_blocks）以 web_fetch_tool
-    # 的调用参数（原始 URL）为 locator 做精确串匹配，报镜像 URL 会让
-    # 「源 URL=原站」的回执永不命中。
-    receipt_url = url if (fetch_url != url or mirror_fallback) else final_url_or_error
+    # Keep the citation on the original article when an official mirror
+    # supplies its text. The Journal separately retains the requested URL.
+    receipt_url = citation_origin if (fetch_url != citation_origin or mirror_fallback) else final_url_or_error
     prefix = f"[PDF 文本] {receipt_url}" if is_pdf else f"[网页内容] {receipt_url}"
     return f"{prefix}{focus}\n\n{text}"
 

@@ -511,7 +511,8 @@ def test_web_fetch_reroutes_arxiv_abs_to_export_mirror(monkeypatch):
     assert "export.arxiv.org" not in result
 
 
-def test_web_fetch_reroutes_arxiv_pdf_to_export_mirror(monkeypatch):
+@pytest.mark.parametrize("scheme", ["https", "http"])
+def test_web_fetch_reroutes_arxiv_pdf_to_export_mirror(monkeypatch, scheme):
     pdf_bytes = _build_pdf_bytes("Mirror pdf page marker")
 
     def fake_get(method, url, **kwargs):
@@ -525,7 +526,7 @@ def test_web_fetch_reroutes_arxiv_pdf_to_export_mirror(monkeypatch):
 
     install_fake_client(monkeypatch, fake_get)
 
-    result = web_search_tool.web_fetch("https://arxiv.org/pdf/2401.12345v2")
+    result = web_search_tool.web_fetch(f"{scheme}://arxiv.org/pdf/2401.12345v2")
 
     assert result.startswith("[PDF 文本] https://arxiv.org/pdf/2401.12345v2\n")
     assert "Mirror pdf page marker" in result
