@@ -4,7 +4,7 @@ const quietButton = "!border-0 !bg-transparent !bg-none !shadow-none";
 
 const styles = {
   shell: "vui-routes-chatrightrail shell flex h-full min-h-0 min-w-0 flex-col !overflow-hidden !pt-0 [&.overlayPane]:!h-auto [&.overlayPane]:!bottom-0",
-  panel: `vui-routes-chatrightrail panel flex min-h-0 flex-1 flex-col overflow-hidden !rounded-[12px] ${vuiChatFillClass}`,
+  panel: `vui-routes-chatrightrail panel flex min-h-0 flex-1 flex-col overflow-hidden !rounded-none ${vuiChatFillClass} [.overlayPane_&]:!rounded-[12px]`,
   toolbar: "vui-routes-chatrightrail toolbar flex h-[44px] shrink-0 items-center gap-0.5 bg-[var(--vui-surface-row)] px-1",
   title: "vui-routes-chatrightrail title pl-2 [font-size:var(--vui-font-xs)] font-medium text-[var(--fg-secondary)]",
   tabs: "vui-routes-chatrightrail tabs flex min-w-0 flex-1 items-center gap-1 overflow-auto",
