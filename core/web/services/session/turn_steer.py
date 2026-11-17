@@ -32,6 +32,14 @@ DISPOSITION_DISPLAY_ITEM_STARTED = "display_item_started"
 DISPOSITION_DISPLAY_CONTENT_REBASED = "display_content_rebased"
 _GUIDANCE_KINDS = frozenset({"user_guidance", "user_interrupt_guidance"})
 
+# Model-facing wrapper for a mid-turn steer. UI keeps the raw journal content;
+# only the injected copy carries the "not a new turn" framing.
+_GUIDE_MODEL_PREAMBLE = (
+    "[User steer during the running turn]\n"
+    "The user sent this while you were working. Address it as you continue the "
+    "current turn; it is not a new conversation turn.\n\n"
+)
+
 
 def _service():
     from core.web.services import session_service
@@ -453,8 +461,76 @@ def drain_guidance_events(
                 # The journal bridge records the write failure. This auxiliary
                 # fact must not turn a working guidance path into dropped input.
                 pass
-        pending.append(content)
+        pending.append(f"{_GUIDE_MODEL_PREAMBLE}{content}")
     return pending
+
+
+def fallback_pending_guides_to_queue(
+    session_id: str,
+    turn_id: str,
+    events: Any,
+    *,
+    lang: str = "",
+) -> int:
+    """Move guides the settled turn never drained onto the next-turn queue.
+
+    A guide is drained at an agent iteration boundary. When the turn settles
+    before that boundary (plain-text answer, early stop, provider failure) the
+    text would otherwise only live in the transcript, where the model never
+    saw it. Queue it as a real next turn so the input is not lost.
+
+    Only ``unconfirmed`` state (the turn is terminal and no drain receipt
+    exists) is moved; ``pending`` turns are still running and their worker
+    owns the next drain. Failures are swallowed so settlement never breaks.
+    """
+    s = _service()
+    event_list = list(events or [])
+    state = guidance_metadata_from_events(event_list)
+    queued = 0
+    for event in event_list:
+        if str(getattr(event, "event_type", "") or "") != EVENT_USER_MESSAGE:
+            continue
+        if str(getattr(event, "turn_id", "") or "").strip() != turn_id:
+            continue
+        payload = dict(getattr(event, "payload", None) or {})
+        metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+        if str(metadata.get("kind") or "").strip() not in _GUIDANCE_KINDS:
+            continue
+        event_id = str(getattr(event, "event_id", "") or "").strip()
+        if not event_id:
+            continue
+        if str((state.get(event_id) or {}).get("guidanceState") or "") != "unconfirmed":
+            continue
+        content = str(payload.get("content") or "").strip()
+        if not content:
+            continue
+        steer_id = str(metadata.get("steerId") or event_id).strip()
+        try:
+            record_delivery_changed(
+                session_id,
+                steer_id=steer_id,
+                turn_id=turn_id,
+                target_turn_id=turn_id,
+                content=content,
+            )
+            s.enqueue_session_queued_turn(
+                session_id,
+                content=content,
+                attachments=[],
+                references=[],
+                mental_model_enabled=None,
+                runtime_status_enabled=None,
+                turn_mode="",
+                write_intent=None,
+                client_submission_id=f"steer:{steer_id}",
+                steer_id=steer_id,
+                record_steer_admission=False,
+                lang=lang,
+            )
+            queued += 1
+        except Exception:
+            pass
+    return queued
 
 
 def retarget_unjournaled_guide(

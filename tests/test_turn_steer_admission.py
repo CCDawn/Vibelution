@@ -45,6 +45,8 @@ def test_open_turn_guide_stays_one_model_visible_message(tmp_path: Path, monkeyp
     )
 
     class _OpenTurnControl:
+        turn_id = "turn-open"
+
         def snapshot(self) -> dict:
             return {
                 "turnId": turn_id,
@@ -168,3 +170,119 @@ def test_busy_queue_admission_and_promotion_share_one_steer_id(tmp_path: Path, m
         if event.event_type == EVENT_TURN_STEER and event.payload.get("disposition") == "promoted"
     ]
     assert len(repeated) == 1
+
+def test_guide_message_carries_delivery_metadata_and_model_preamble(tmp_path: Path, monkeypatch) -> None:
+    from core.chat.conversation_ledger import EVENT_TURN_STARTED, append_conversation_event
+    from core.web.services.session import turn_steer
+
+    session_id = "session-guidance-delivery"
+    turn_id = "turn-delivery"
+    guidance = "carry the delivery marker"
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_schedule_session_queued_turn_drain", lambda _session_id: None)
+    _seed_submittable_sessions(tmp_path, [session_id])
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        turn_id,
+        EVENT_TURN_STARTED,
+        status="running",
+        visible_in_model=False,
+    )
+
+    class _OpenTurnControl:
+        turn_id = "turn-delivery"
+
+        def snapshot(self) -> dict:
+            return {
+                "turnId": turn_id,
+                "releasedToUser": False,
+                "stopRequested": False,
+                "stopRequestedAt": "",
+                "stopReason": "",
+            }
+
+    monkeypatch.setattr(session_service, "_get_session_turn_control", lambda _session_id: _OpenTurnControl())
+    monkeypatch.setattr(session_service, "_is_session_running", lambda _session_id: True)
+    submit.submit_session_guidance(session_id, guidance, mode="safe")
+
+    events = load_conversation_events(tmp_path, session_id)
+    user_copies = [
+        event
+        for event in events
+        if event.event_type == EVENT_USER_MESSAGE and event.payload.get("content") == guidance
+    ]
+    assert len(user_copies) == 1
+    assert user_copies[0].payload["metadata"]["turnSteerDelivery"] == "guide"
+
+    drained = turn_steer.drain_guidance_events(session_id, turn_id, events, set())
+    assert len(drained) == 1
+    assert drained[0].startswith("[User steer during the running turn]")
+    assert guidance in drained[0]
+
+
+def test_settled_turn_falls_back_undrained_guide_to_queue(tmp_path: Path, monkeypatch) -> None:
+    from core.chat.conversation_ledger import (
+        EVENT_TURN_COMPLETED,
+        EVENT_TURN_STARTED,
+        append_conversation_event,
+    )
+    from core.web.services.session import turn_steer
+
+    session_id = "session-guidance-fallback"
+    turn_id = "turn-fallback"
+    guidance = "do not lose this steer"
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_schedule_session_queued_turn_drain", lambda _session_id: None)
+    _seed_submittable_sessions(tmp_path, [session_id])
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        turn_id,
+        EVENT_TURN_STARTED,
+        status="running",
+        visible_in_model=False,
+    )
+
+    class _OpenTurnControl:
+        turn_id = "turn-fallback"
+
+        def snapshot(self) -> dict:
+            return {
+                "turnId": turn_id,
+                "releasedToUser": False,
+                "stopRequested": False,
+                "stopRequestedAt": "",
+                "stopReason": "",
+            }
+
+    monkeypatch.setattr(session_service, "_get_session_turn_control", lambda _session_id: _OpenTurnControl())
+    monkeypatch.setattr(session_service, "_is_session_running", lambda _session_id: True)
+    submit.submit_session_guidance(session_id, guidance, mode="safe")
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        turn_id,
+        EVENT_TURN_COMPLETED,
+        status="completed",
+        visible_in_model=False,
+    )
+
+    moved = turn_steer.fallback_pending_guides_to_queue(
+        session_id,
+        turn_id,
+        load_conversation_events(tmp_path, session_id),
+    )
+    assert moved == 1
+    rows = session_service.list_session_queued_turns(session_id)
+    assert [row.get("content") for row in rows] == [guidance]
+    events = load_conversation_events(tmp_path, session_id)
+    changed = [
+        event
+        for event in events
+        if event.event_type == EVENT_TURN_STEER
+        and event.payload.get("disposition") == "delivery_changed"
+    ]
+    assert len(changed) == 1
+    assert changed[0].payload["delivery"] == "queue"
+    assert changed[0].payload["fromDelivery"] == "guide"

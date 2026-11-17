@@ -15,6 +15,16 @@ function guidanceTurnId(message: ConversationMessage): string {
   return String(message.metadata?.turnId ?? "").trim();
 }
 
+export function guidanceDeliveryLabel(
+  message: ConversationMessage,
+  lang: "zh" | "en",
+): string {
+  const delivery = message.metadata?.turnSteerDelivery;
+  if (delivery === "guide") return lang === "zh" ? "内联当前轮" : "In this turn";
+  if (delivery === "queue") return lang === "zh" ? "排队下一轮" : "Queued next";
+  return "";
+}
+
 export function guidanceDisplayState(message: ConversationMessage): "pending" | "drained" | "received" {
   const submitted = positiveSequence(message.metadata?.guidanceSequence);
   const consumed = positiveSequence(message.metadata?.guidanceConsumedSequence);

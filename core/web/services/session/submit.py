@@ -1302,6 +1302,7 @@ def submit_session_guidance(
                         "kind": guidance_kind,
                         "source": "steer",
                         "guidanceMode": normalized_mode,
+                        "turnSteerDelivery": "guide",
                         "turnId": active_turn_id,
                         **({"steerId": steer_id} if steer_id else {}),
                     },

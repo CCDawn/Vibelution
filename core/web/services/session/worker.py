@@ -1223,6 +1223,16 @@ def _finish_session_turn_worker(
         turn_id,
         stop_reason=s._get_turn_control_stop_reason(turn_control),
     )
+    try:
+        from .turn_steer import fallback_pending_guides_to_queue
+
+        fallback_pending_guides_to_queue(
+            session_id,
+            turn_id,
+            s._load_session_conversation_events_cached(session_id),
+        )
+    except Exception:
+        pass
     s._record_session_turn_lifecycle_event(
         session_id,
         "worker_finished",

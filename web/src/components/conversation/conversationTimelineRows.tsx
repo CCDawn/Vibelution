@@ -84,7 +84,7 @@ import {
   researchOrgMessageChips,
 } from "./conversationMessagePredicates";
 import type { ConversationModelSwitchBoundary } from "./conversationModelSwitch";
-import { guidanceDisplayState } from "./conversationGuidanceSegments";
+import { guidanceDeliveryLabel, guidanceDisplayState } from "./conversationGuidanceSegments";
 import type { createConversationOperationGroups } from "./conversationOperationGroups";
 import {
   shouldRenderCompactActiveTurnPlaceholder as resolveShouldRenderCompactActiveTurnPlaceholder,
@@ -733,6 +733,7 @@ export function createConversationTimelineRows({
             const showUserContent = agentSections.hasUserContent;
             const steerGuidanceMessage = isSteerGuidanceMessage(message);
             const guidanceState = guidanceDisplayState(message);
+            const guidanceDeliveryText = guidanceDeliveryLabel(message, lang);
             const guidanceStatusLabel = guidanceState === "drained"
               ? (lang === "zh" ? "已纳入" : "Included")
               : guidanceState === "pending"
@@ -1076,7 +1077,8 @@ export function createConversationTimelineRows({
                     : steerGuidanceMessage
                       ? (
                         <VChip data-conversation-guidance-status={guidanceState}>
-                          {resolvedSafeGuidanceLabel} · {guidanceStatusLabel}
+                          {resolvedSafeGuidanceLabel}
+                          {guidanceDeliveryText ? ` · ${guidanceDeliveryText}` : ""} · {guidanceStatusLabel}
                         </VChip>
                       )
                       : null
