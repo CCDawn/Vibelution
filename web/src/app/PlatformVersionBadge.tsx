@@ -30,7 +30,6 @@ export function PlatformVersionBadge() {
   return (
     <span className={styles.wrapper} title={`v${version} · build ${build}`}>
       <span className={styles.version}>v{version}</span>
-      {build > 0 ? <span className={styles.build}>b{build}</span> : null}
       <span className={styles.progress}>{patch}/{perMinor}</span>
     </span>
   );
