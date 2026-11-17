@@ -8851,6 +8851,62 @@ def test_runtime_manager_run_forever_requeues_deferred_restart(monkeypatch, tmp_
     assert saved_states[0]["runtimeState"] == "running"
 
 
+def test_hot_restart_without_requester_records_restart_resume_marker(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    settles: list[str] = []
+
+    monkeypatch.setattr(
+        daemon,
+        "_runtime_manager_active_work_runs",
+        lambda: [{"kind": "chat_turn", "runId": "turn-live", "status": "running", "sessionId": "session-a"}],
+    )
+    monkeypatch.setattr(
+        daemon,
+        "_settle_active_work_for_lifecycle_stop",
+        lambda: settles.append("settle") or {},
+    )
+    monkeypatch.setattr(daemon, "_append_event", lambda *_args, **_kwargs: None)
+
+    blocked = runtime_daemon._block_lifecycle_command_if_active_work(
+        command_id="cmd-hot",
+        command_type="hot_restart_workbench",
+        args={"reason": "code_update"},
+    )
+
+    assert blocked is None
+    assert settles == ["settle"]
+
+
+def test_hot_restart_with_requester_keeps_wake_owned_recovery(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    settles: list[str] = []
+
+    monkeypatch.setattr(
+        daemon,
+        "_runtime_manager_active_work_runs",
+        lambda: [{"kind": "chat_turn", "runId": "turn-live", "status": "running", "sessionId": "session-a"}],
+    )
+    monkeypatch.setattr(
+        daemon,
+        "_settle_active_work_for_lifecycle_stop",
+        lambda: settles.append("settle") or {},
+    )
+    monkeypatch.setattr(daemon, "_append_event", lambda *_args, **_kwargs: None)
+
+    blocked = runtime_daemon._block_lifecycle_command_if_active_work(
+        command_id="cmd-hot",
+        command_type="hot_restart_workbench",
+        args={
+            "reason": "code_update",
+            "allowActiveSessionId": "session-a",
+            "allowActiveRunId": "turn-live",
+        },
+    )
+
+    assert blocked is None
+    assert settles == []
+
+
 def test_hot_restart_allows_only_requester_active_chat_turn(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
     state = {
