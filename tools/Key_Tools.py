@@ -236,10 +236,10 @@ class _PersonalAssistantComputerActionArgs(BaseModel):
     y: int | None = None
 
 
-def _shell_dialect_block() -> str:
+def _shell_dialect_block(*, compact: bool = True) -> str:
     from tools.shell_tools import shell_command_dialect_guidance
 
-    return shell_command_dialect_guidance()
+    return shell_command_dialect_guidance(compact=compact)
 
 
 def _cli_tool_docstring() -> str:
@@ -258,10 +258,8 @@ Codex CLI），无需在命令中指定或选择平台；写命令时遵循下�
 === 调用纪律 ===
 1. 搜索：`rg -n "pattern" path`（无管道；不要 `rg ... | head`）。
 2. 读取文件内容用 `read_file_tool`（整文件用 max_lines=0 且 offset=0）。
-3. 同类 shell 失败 **1 次**后立即换结构化工具，避免 cmd/PowerShell/bash 来回探路。
-4. 输出默认有界；`max_output_chars` 默认 6000，大结果只消费结论。
-5. 本回合工具有额度上限：探查不要耗尽额度，至少预留 2–3 次给 lint/test。
-6. 避免交互式/无休止命令。
+3. 输出默认有界；`max_output_chars` 默认 6000，大结果只消费结论。
+4. 避免交互式/无休止命令。
 
 === 闭环 ===
 修改后分开执行: python -m py_compile <file>.py → python -m pytest <target> -x -q
@@ -288,8 +286,7 @@ def _exec_command_tool_docstring() -> str:
 
 === 调用纪律 ===
 1. 写清与路由匹配的 `cmd`，按当前宿主 Shell 方言书写；勿混用 bash/PowerShell 探路。
-2. 同一失败连续 2 次换结构化工具或不同策略；纯退出码非零（rg 无命中、git diff、pytest 红测）不算失败，修复后重跑成功会自动解除冷却。
-3. `max_output_chars` 默认 6000；续写用 `write_stdin`。
+2. `max_output_chars` 默认 6000；续写用 `write_stdin`。
 
 Args:
     cmd: 按方言规则书写的命令

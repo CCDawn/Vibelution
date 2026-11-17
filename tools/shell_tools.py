@@ -797,7 +797,7 @@ def classify_shell_command(command: str) -> ShellCommandRoute:
     )
 
 
-def shell_command_dialect_guidance(*, host_system: str | None = None) -> str:
+def shell_command_dialect_guidance(*, host_system: str | None = None, compact: bool = False) -> str:
     """Return agent-facing shell dialect rules matching classify_shell_command."""
 
     system = str(host_system or CURRENT_SYSTEM or "").strip()
@@ -806,6 +806,19 @@ def shell_command_dialect_guidance(*, host_system: str | None = None) -> str:
 
         system = platform.system()
     system_key = system.lower()
+
+    if compact:
+        # Tool schemas are sent on every request; the full rule set already ships
+        # once in the system prompt. Keep the schema copy short and point at it.
+        if system_key.startswith("win"):
+            return (
+                "=== Shell 方言 ===\n"
+                "完整规则见系统提示「Shell 方言」章节；要点：默认 `cmd /c`；"
+                "PowerShell 用 `powershell -NoProfile -Command`；Unix 管道片段需 `bash -c`。"
+            )
+        if system_key in {"linux", "darwin"}:
+            return "=== Shell 方言 ===\n默认 bash/Unix；同一失败连续 2 次后改用结构化工具。"
+        return "=== Shell 方言 ===\n只用短、无管道、无平台特有语法的命令。"
 
     if system_key.startswith("win"):
         return "\n".join(
