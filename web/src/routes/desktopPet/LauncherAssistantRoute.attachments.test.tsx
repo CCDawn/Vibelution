@@ -12,7 +12,9 @@ vi.mock("../../components/conversation/LazyConversationView", () => ({ LazyConve
   conversation = props;
   // The composer leading control (ChatComposerPlusMenu) is the surface under
   // test for privacy attachments; render it so its dialog is reachable by DOM.
-  return props.composerLeadingControl ?? null;
+  // The composer-preceding slot carries route-owned banners (e.g. the unknown
+  // send outcome), so honor it the same way the real composer surface does.
+  return createElement("div", null, props.composerPrecedingContent ?? null, props.composerLeadingControl ?? null);
 } }));
 const roots: ReturnType<typeof createRoot>[] = [];
 afterEach(async () => {

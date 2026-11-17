@@ -22,6 +22,12 @@ const READ_MS = 8_000;
  * REQUEST_MS=15s that left ~1s of margin, and one trip killed the host.
  * Only this channel gets the doubled budget; every other RPC keeps its own. */
 const MAIN_CONTROL_RPC_MS = 30_000;
+/** Send admission is a write that must serialize behind the same native global
+ * lock the control channel budgets for: a finishing turn or a stop can hold it
+ * past REQUEST_MS, and an aborted admission leaves the composer reporting an
+ * unknown outcome while the host may still accept that request. The admission
+ * write therefore gets its own budget instead of the generic write default. */
+const SEND_RPC_MS = 30_000;
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 /** Error responses only need to carry a short structured code; larger failure
  * bodies are cancelled unread and fall back to the status-only mapping. */
@@ -1366,7 +1372,7 @@ export class AssistantHost {
         return await this.rpc(generation, "/api/assistant/messages", "POST", { message: payload.message, requestId: payload.requestId,
           ...(payload.attachmentIds?.length ? { attachmentIds: payload.attachmentIds } : {}),
           ...(payload.references?.length ? { references: payload.references } : {}),
-          ...(payload.controlContinuation ? { controlContinuation: payload.controlContinuation } : {}) });
+          ...(payload.controlContinuation ? { controlContinuation: payload.controlContinuation } : {}) }, SEND_RPC_MS);
       }
       case "uploadAttachment": {
         if (!ownKeys(payload, ["operation", "filename", "contentType", "dataBase64"])

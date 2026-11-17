@@ -2031,7 +2031,9 @@ describe("AssistantHost", () => {
     }));
     const result = expect(host.request({ operation: "send", message: "hello", requestId: "timeout-id" }))
       .rejects.toThrow("ASSISTANT_REQUEST_TIMEOUT");
-    await vi.advanceTimersByTimeAsync(15_000);
+    // Send admission carries its own budget: the native global lock can hold a
+    // finishing turn past the generic write default.
+    await vi.advanceTimersByTimeAsync(30_000);
     await result;
     expect(fetchImpl).toHaveBeenCalledTimes(before + 1);
     await host.stop();
@@ -2061,8 +2063,8 @@ describe("AssistantHost", () => {
     }
     await expectTimeoutAt({ operation: "curation", sessionId: "s" }, 8_000);
     await expectTimeoutAt({ operation: "assistantAvatar" }, 8_000);
-    // Writes keep the original request budget; the read tier never shortened them.
-    await expectTimeoutAt({ operation: "send", message: "hello", requestId: "write-budget" }, 15_000);
+    // Send admission keeps its own longer budget; the read tier never shortened it.
+    await expectTimeoutAt({ operation: "send", message: "hello", requestId: "write-budget" }, 30_000);
     await host.stop();
   });
 

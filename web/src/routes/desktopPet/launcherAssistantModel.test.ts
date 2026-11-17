@@ -1173,7 +1173,10 @@ describe("Launcher assistant route lifecycle", () => {
     await act(async () => resolveSend());
     await showConversation();
     expect(conversation?.composerValue).toBe("hello");
-    expect(conversation?.composerError).toContain("尚未确认");
+    // The unknown-outcome notice lives in the composer-preceding slot (one
+    // notice above the input), not as a second inline composer error.
+    expect(document.body.textContent).toContain("尚未确认消息是否收到");
+    expect(conversation?.composerError ?? "").not.toContain("尚未确认");
     await act(async () => conversation?.onSubmit());
     expect(bridge.sendLauncherAssistantMessage.mock.calls[1]).toEqual(first);
   });
