@@ -732,3 +732,77 @@ def test_ensure_claim_keeps_blocking_on_active_overlapping_foreign_claim(
         guard.ensure_development_claim(root)
 
     assert not any(item[0] == "release" for item in calls)
+
+
+def _permit_fixture(root: Path) -> tuple[str, str, datetime]:
+    old_sha = _git(root, "rev-parse", "HEAD").stdout.strip()
+    new_sha = _git(
+        root, "commit-tree", f"{old_sha}^{{tree}}", "-p", old_sha, "-m", "lease test"
+    ).stdout.strip()
+    now = datetime(2026, 9, 3, tzinfo=timezone.utc)
+    guard.issue_main_permit(
+        root,
+        old_sha=old_sha,
+        new_sha=new_sha,
+        integration_claim_id="claim-lease",
+        now=now,
+    )
+    return old_sha, new_sha, now
+
+
+def test_reference_transaction_rejects_permit_after_claim_released(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = _repo(tmp_path)
+    old_sha, new_sha, now = _permit_fixture(root)
+    monkeypatch.setattr(
+        guard,
+        "coordination_call",
+        lambda _root, *args: {"claims": [{"id": "claim-lease", "status": "released"}]},
+    )
+
+    with pytest.raises(guard.ClaimGuardError, match="main_update_permit_claim_released"):
+        guard.check_reference_transaction(
+            root,
+            "prepared",
+            io.StringIO(f"{old_sha} {new_sha} refs/heads/main\n"),
+            now=now,
+        )
+
+
+def test_reference_transaction_allows_permit_while_claim_active(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = _repo(tmp_path)
+    old_sha, new_sha, now = _permit_fixture(root)
+    monkeypatch.setattr(
+        guard,
+        "coordination_call",
+        lambda _root, *args: {"claims": [{"id": "claim-lease", "status": "active"}]},
+    )
+
+    guard.check_reference_transaction(
+        root,
+        "prepared",
+        io.StringIO(f"{old_sha} {new_sha} refs/heads/main\n"),
+        now=now,
+    )
+
+
+def test_reference_transaction_fails_open_when_coordination_unavailable(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = _repo(tmp_path)
+    old_sha, new_sha, now = _permit_fixture(root)
+
+    def unavailable(_root, *args):
+        raise guard.ClaimGuardError("coordination_unavailable")
+
+    monkeypatch.setattr(guard, "coordination_call", unavailable)
+
+    guard.check_reference_transaction(
+        root,
+        "prepared",
+        io.StringIO(f"{old_sha} {new_sha} refs/heads/main\n"),
+        now=now,
+    )
