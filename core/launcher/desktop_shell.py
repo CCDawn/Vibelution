@@ -33,6 +33,7 @@ from core.infrastructure.native_runtime import resolve_native_project_root
 from core.infrastructure.windows_process_job import WindowsProcessJob
 from core.launcher.frontend_build import (
     DESKTOP_SHELL_BUILD_DIR_GC_MIN_INTERVAL_SECONDS,
+    ensure_frontend_build,
     frontend_releases_dir,
     inspect_frontend_build,
     mark_storage_gc,
@@ -2317,6 +2318,20 @@ def rebuild_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, 
             # not. Keep the old package until the independent build is complete.
             _append_refresh_log(root, "rebuild.promote_rejected", reason=status["reason"])
 
+        # The independent package build embeds the active frontend release.
+        # Refresh that release first so the package bytes and the freshness
+        # inspection below describe the same tree; otherwise a concurrent
+        # publish leaves the shell stale and every refresh aborts back to the
+        # previous package. A failed refresh must not block packaging: the
+        # current active release is still a valid, self-consistent frontend.
+        try:
+            ensure_frontend_build(root)
+        except Exception as exc:  # noqa: BLE001 - packaging keeps the active release
+            _append_refresh_log(
+                root,
+                "rebuild.frontend_refresh_failed",
+                detail=f"{type(exc).__name__}: {exc}"[-800:],
+            )
         session = _run_desktop_shell_package_build(root, mode="dir", deadline=deadline)
         try:
             built = session / "builder-output" / "win-unpacked"

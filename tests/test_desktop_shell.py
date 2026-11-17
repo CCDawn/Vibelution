@@ -3526,6 +3526,45 @@ def test_rebuild_desktop_shell_waits_for_prebuild_then_promotes_without_parallel
     assert (live / "main.js").read_text(encoding="utf-8") == "new"
 
 
+def test_rebuild_desktop_shell_refreshes_frontend_before_packaging(tmp_path, monkeypatch):
+    tree = "a" * 40
+    order: list[str] = []
+    _write_live_win_unpacked(tmp_path)
+
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    monkeypatch.setattr(desktop_shell, "_wait_for_desktop_shell_build_lock", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(desktop_shell, "_release_desktop_shell_refresh_lock", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(desktop_shell, "_raise_if_live_owner_holds_shell", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(desktop_shell, "_try_promote_staged_desktop_shell_locked", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        desktop_shell,
+        "ensure_frontend_build",
+        lambda root: order.append("frontend") or {"skipped": True},
+    )
+    session = tmp_path / "dist" / ".desktop-shell-build-test"
+    (session / "builder-output" / "win-unpacked").mkdir(parents=True)
+
+    def fake_package_build(*_args, **_kwargs):
+        order.append("package")
+        return session
+
+    monkeypatch.setattr(desktop_shell, "_run_desktop_shell_package_build", fake_package_build)
+    monkeypatch.setattr(desktop_shell, "_assert_assistant_package", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(desktop_shell, "_publish_built_shell_tree", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(desktop_shell, "_pending_build_retirement_for", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(desktop_shell, "_remove_owned_shell_tree", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        desktop_shell,
+        "inspect_desktop_shell",
+        lambda root: {"stale": False, "reason": "current", "currentElectronTree": tree},
+    )
+
+    result = desktop_shell.rebuild_desktop_shell(tmp_path)
+
+    assert result["rebuilt"] is True
+    assert order == ["frontend", "package"]
+
+
 def test_try_promote_staged_desktop_shell_releases_prebuild_lock_on_every_exit(tmp_path, monkeypatch):
     tree = "a" * 40
     lock_path = desktop_shell._refresh_lock_path(tmp_path, desktop_shell.PREBUILD_LOCK_RELATIVE)
@@ -3584,6 +3623,7 @@ def test_rebuild_desktop_shell_falls_back_to_npm_when_promoted_still_stale(tmp_p
         return {"stale": False, "reason": "current", "currentElectronTree": tree}
 
     monkeypatch.setattr(desktop_shell, "inspect_desktop_shell", fake_inspect)
+    monkeypatch.setattr(desktop_shell, "ensure_frontend_build", lambda root: {"skipped": True})
     _stub_desktop_shell_package_build(monkeypatch, tmp_path, tree_hash=tree)
     result = desktop_shell.rebuild_desktop_shell(tmp_path)
     assert result["rebuilt"] is True
