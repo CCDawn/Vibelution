@@ -93,7 +93,7 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute leftBlock grid min-w-0 shrink-0 gap-1.5 border-0 bg-transparent p-2 shadow-none",
   // Use non-important flex so paneCollapsed `!hidden` always wins when the status rail is closed.
   // Important flex + grid-column:5 previously forced implicit tracks and a blank right strip.,
-  leftRail: `vui-routes-chatcodingroute leftRail min-w-0 flex h-full min-h-0 flex-col overflow-auto rounded-none border-0 border-l border-[var(--vui-border-subtle)] ${vuiRailFillClass} p-1 shadow-none [scrollbar-gutter:stable] [grid-column:5] [grid-row:1]`,
+  leftRail: `vui-routes-chatcodingroute leftRail min-w-0 flex h-full min-h-0 flex-col overflow-auto rounded-none border-0 border-l border-[var(--vui-border-subtle)] ${vuiRailFillClass} p-0 shadow-none [scrollbar-gutter:stable] [grid-column:5] [grid-row:1]`,
   mentalStateBadge:
     `vui-routes-chatcodingroute mentalStateBadge min-w-0 ${vuiControlPillClass}`,
   oneLineValue: `vui-routes-chatcodingroute oneLineValue min-w-0 ${vuiOpaqueRowClass} px-1.5 py-1 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] [&_span]:mr-1.5 [&_span]:font-semibold [&_span]:text-[var(--fg-tertiary)]`,
