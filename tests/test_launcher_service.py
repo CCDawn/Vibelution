@@ -2222,6 +2222,43 @@ def test_launcher_active_work_guard_scans_parallel_chat_turn_snapshots(tmp_path,
     assert {item["runId"] for item in active} == {"chat-turn-alpha", "chat-turn-beta"}
 
 
+@pytest.mark.parametrize(
+    ("owner_state", "blocks"),
+    [("dead", False), ("reused", False), ("live", True), ("unknown", True), ("legacy", True)],
+)
+def test_launcher_chat_guard_checks_recorded_process_identity(tmp_path, monkeypatch, owner_state, blocks):
+    import psutil
+
+    store = WorkRunStore(root=tmp_path / "work_runs")
+    run_id = "chat-turn-crash-recovery"
+    payload = {"runId": run_id, "sessionId": "session-recovery", "status": "running"}
+    if owner_state != "legacy":
+        payload.update(ownerPid=1234, ownerCreateTime=123.5)
+    store.persist_snapshot("chat_turn", payload, active_run_id=run_id)
+    monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", store.root)
+
+    class Process:
+        def __init__(self, pid):
+            assert pid == 1234
+            assert owner_state != "legacy"
+            if owner_state == "dead":
+                raise psutil.NoSuchProcess(pid)
+            if owner_state == "unknown":
+                raise psutil.AccessDenied(pid)
+
+        def create_time(self):
+            return 456.5 if owner_state == "reused" else 123.5
+
+    monkeypatch.setattr(psutil, "Process", Process)
+    before = store.load_snapshot("chat_turn", run_id)
+
+    result = launcher_service.get_launcher_active_work_status()["lifecycleProof"]["activeWorkRuns"]
+
+    assert [item["runId"] for item in result["items"]] == ([run_id] if blocks else [])
+    assert store.load_snapshot("chat_turn", run_id) == before
+    assert store.load_run_index("chat_turn")["activeRunId"] == run_id
+
+
 def test_launcher_active_work_guard_skips_historical_snapshot_files(tmp_path, monkeypatch):
     work_runs_dir = tmp_path / ".runtime" / "runtime-manager" / "work_runs"
     store = WorkRunStore(root=work_runs_dir)

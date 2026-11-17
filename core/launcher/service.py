@@ -38,7 +38,7 @@ from core.runtime_manager.constants import (
     STATE_PATH,
 )
 from core.runtime_manager.evolution_store import load_active_run_snapshot
-from core.runtime_manager.process_identity import is_runtime_manager_process
+from core.runtime_manager.process_identity import is_runtime_manager_process, recorded_process_owner_is_gone
 from core.runtime_manager.scene_logging import (
     append_runtime_manager_file_event,
     record_runtime_manager_scene_event,
@@ -2715,6 +2715,13 @@ def _append_active_work_run(
     if not work_run_store.active_work_payload_blocks_lifecycle(payload):
         return
     if not force_current and work_run_store.snapshot_is_stale(payload):
+        return
+    # A hard backend exit can leave the active chat slot stamped as running.
+    # Keep the recovery snapshot for Session startup and exclude its dead owner
+    # from Launcher admission. Missing or unreadable identity still blocks.
+    if kind == "chat_turn" and recorded_process_owner_is_gone(
+        payload.get("ownerPid"), payload.get("ownerCreateTime")
+    ):
         return
     key = (item["kind"], item["runId"] or item["sessionId"])
     if key in seen:

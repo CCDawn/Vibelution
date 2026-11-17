@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import math
 import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+
+_CREATE_TIME_TOLERANCE_SECONDS = 0.001
 
 
 def _normalized_executable(value: Any) -> str:
@@ -42,6 +46,29 @@ def capture_process_identity(
     }
 
 
+def recorded_process_owner_is_gone(owner_pid: Any, owner_create_time: Any) -> bool:
+    """Prove that a recorded PID and creation time no longer identify a live owner."""
+    if type(owner_pid) is not int or owner_pid <= 0 or isinstance(owner_create_time, bool):
+        return False
+    try:
+        expected_time = float(owner_create_time)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if not math.isfinite(expected_time) or expected_time <= 0:
+        return False
+    try:
+        import psutil
+    except ImportError:
+        return False
+    try:
+        actual_time = psutil.Process(owner_pid).create_time()
+    except (psutil.NoSuchProcess, ProcessLookupError):
+        return True
+    except (psutil.Error, OSError, ValueError, OverflowError):
+        return False
+    return abs(actual_time - expected_time) > _CREATE_TIME_TOLERANCE_SECONDS
+
+
 def inspect_process_identity(
     expected: dict[str, Any],
     *,
@@ -73,7 +100,7 @@ def inspect_process_identity(
     except (OSError, TypeError, ValueError):
         return {"status": "unknown", "reason": "identity_probe_failed"}
 
-    if abs(actual_create_time - expected_create_time) > 0.001:
+    if abs(actual_create_time - expected_create_time) > _CREATE_TIME_TOLERANCE_SECONDS:
         return {"status": "mismatch", "reason": "create_time_mismatch"}
     if _normalized_executable(actual_executable) != _normalized_executable(expected_executable):
         return {"status": "mismatch", "reason": "executable_mismatch"}
@@ -83,7 +110,10 @@ def inspect_process_identity(
 def _identity_matches(actual: dict[str, Any], expected: dict[str, Any]) -> bool:
     try:
         same_pid = int(actual.get("pid") or 0) == int(expected.get("pid") or 0)
-        same_time = abs(float(actual.get("createTime") or 0) - float(expected.get("createTime") or 0)) <= 0.001
+        same_time = (
+            abs(float(actual.get("createTime") or 0) - float(expected.get("createTime") or 0))
+            <= _CREATE_TIME_TOLERANCE_SECONDS
+        )
     except (AttributeError, TypeError, ValueError):
         return False
     actual_exe = _normalized_executable(actual.get("executable"))
