@@ -79,6 +79,12 @@ def _stub_frontend_build_preflight(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_live_backend_freshness(monkeypatch):
+    """Keep simulated open requests from restarting the real workbench."""
+    monkeypatch.setattr(daemon, "_resolve_backend_freshness_for_open", lambda: {"available": False})
+
+
+@pytest.fixture(autouse=True)
 def _stub_live_process_inventory(monkeypatch):
     """Keep lifecycle tests off a full psutil walk of every python/node process.
 
