@@ -173,3 +173,54 @@ def test_missing_worktree_is_dormant_even_with_fresh_claim_timestamp(
 
     assert verdict.dormant is True
     assert "no longer exists" in verdict.reason
+
+def _stamp_new(path: Path) -> None:
+    os.utime(path, (NOW.timestamp(), NOW.timestamp()))
+
+
+def test_dependency_trees_do_not_count_as_activity(tmp_path: Path) -> None:
+    worktree = _sibling_worktree(tmp_path)
+    _age_tree(worktree, minutes=120)
+    for relative in ("node_modules/pkg/index.js", ".venv/lib/site.py", "venv/lib/site.py"):
+        path = worktree / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x", encoding="utf-8")
+        _stamp_new(path)
+
+    last = claim_dormancy.worktree_last_activity(worktree)
+
+    assert last is not None
+    assert last < NOW - timedelta(minutes=60)
+
+
+def test_linked_directories_are_not_followed(tmp_path: Path) -> None:
+    worktree = _sibling_worktree(tmp_path)
+    _age_tree(worktree, minutes=120)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    fresh = outside / "fresh.txt"
+    fresh.write_text("x", encoding="utf-8")
+    _stamp_new(fresh)
+    try:
+        os.symlink(outside, worktree / "vendor-link", target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable on this host")
+
+    last = claim_dormancy.worktree_last_activity(worktree)
+
+    assert last is not None
+    assert last < NOW - timedelta(minutes=60)
+
+
+def test_verification_output_still_counts_as_activity(tmp_path: Path) -> None:
+    worktree = _sibling_worktree(tmp_path)
+    _age_tree(worktree, minutes=120)
+    bundle = worktree / "dist" / "bundle.js"
+    bundle.parent.mkdir(parents=True, exist_ok=True)
+    bundle.write_text("x", encoding="utf-8")
+    _stamp_new(bundle)
+
+    last = claim_dormancy.worktree_last_activity(worktree)
+
+    assert last is not None
+    assert last >= NOW - timedelta(minutes=1)

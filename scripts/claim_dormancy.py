@@ -21,7 +21,15 @@ from typing import Any, Mapping, Sequence
 DEFAULT_DORMANCY_MINUTES = 30
 _HARD_FLOOR_MINUTES = 5
 _ENV_OVERRIDE = "VIBELUTION_CLAIM_DORMANCY_MINUTES"
-_EXCLUDED_DIRECTORY_NAMES = frozenset({".git"})
+# Dependency trees never signal author activity: `node_modules` and `.venv`
+# hold hundreds of thousands of files that only change on install, and on
+# Windows a junction can point back into another checkout entirely.
+_EXCLUDED_DIRECTORY_NAMES = frozenset({
+    ".git",
+    "node_modules",
+    ".venv",
+    "venv",
+})
 
 
 @dataclass(frozen=True)
@@ -75,8 +83,15 @@ def worktree_last_activity(
     """
 
     newest: float | None = None
-    for dirpath, dirnames, filenames in os.walk(worktree):
-        dirnames[:] = [name for name in dirnames if name not in exclude_directories]
+    for dirpath, dirnames, filenames in os.walk(worktree, followlinks=False):
+        # os.walk honours followlinks only for real symlinks; Windows junctions
+        # still report as directories, so drop every linked entry explicitly.
+        dirnames[:] = [
+            name
+            for name in dirnames
+            if name not in exclude_directories
+            and not os.path.islink(os.path.join(dirpath, name))
+        ]
         for name in filenames:
             try:
                 mtime = os.stat(os.path.join(dirpath, name)).st_mtime
