@@ -3663,6 +3663,53 @@ def test_rebuild_desktop_shell_promote_sharing_violation_falls_back_to_npm(tmp_p
     assert not desktop_shell._refresh_lock_path(tmp_path, desktop_shell.PREBUILD_LOCK_RELATIVE).is_file()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows package process enumeration")
+def test_live_package_process_ids_only_include_current_package(tmp_path, monkeypatch):
+    live = tmp_path / desktop_shell.PACKAGED_EXE_RELATIVE
+    previous = tmp_path / desktop_shell.PREVIOUS_WIN_UNPACKED_RELATIVE / live.name
+    processes = [
+        types.SimpleNamespace(pid=41, info={"exe": str(live).upper()}),
+        types.SimpleNamespace(pid=42, info={"exe": str(previous)}),
+        types.SimpleNamespace(pid=43, info={"exe": None}),
+    ]
+    monkeypatch.setitem(sys.modules, "psutil", types.SimpleNamespace(process_iter=lambda _attrs: processes))
+
+    assert desktop_shell._live_package_process_ids(tmp_path) == (41,)
+
+
+def test_staged_shell_waits_for_remaining_package_process_before_promotion(tmp_path, monkeypatch):
+    tree = "a" * 40
+    live = _write_live_win_unpacked(tmp_path)
+    _write_staged_shell(tmp_path, tree_hash=tree)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    snapshots = iter([(41,), ()])
+    monkeypatch.setattr(desktop_shell, "_live_package_process_ids", lambda _root: next(snapshots))
+
+    def check_old_package_before_exit(_seconds):
+        assert (live / "main.js").read_text(encoding="utf-8") == "old"
+
+    monkeypatch.setattr(desktop_shell.time, "sleep", check_old_package_before_exit)
+
+    assert desktop_shell._try_promote_staged_desktop_shell(tmp_path) is True
+    assert (live / "main.js").read_text(encoding="utf-8") == "new"
+
+
+def test_package_process_timeout_keeps_live_and_staged_shells(tmp_path, monkeypatch):
+    tree = "a" * 40
+    live = _write_live_win_unpacked(tmp_path)
+    staged = _write_staged_shell(tmp_path, tree_hash=tree)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    monkeypatch.setattr(desktop_shell, "_live_package_process_ids", lambda _root: (41,))
+    monkeypatch.setattr(desktop_shell, "PACKAGED_SHELL_EXIT_TIMEOUT_SECONDS", 0.0)
+
+    with pytest.raises(TimeoutError, match="desktop package is still in use by processes 41"):
+        desktop_shell._try_promote_staged_desktop_shell(tmp_path)
+
+    assert (live / "main.js").read_text(encoding="utf-8") == "old"
+    assert (staged / "main.js").read_text(encoding="utf-8") == "new"
+    assert not desktop_shell._refresh_lock_path(tmp_path, desktop_shell.PREBUILD_LOCK_RELATIVE).is_file()
+
+
 def test_rebuild_desktop_shell_refuses_to_promote_over_live_owner(tmp_path, monkeypatch):
     """A live owner maps the packaged exe; promoting would fail at the rename."""
     tree = "a" * 40
