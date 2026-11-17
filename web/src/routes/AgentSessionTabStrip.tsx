@@ -225,6 +225,44 @@ function renderAgentSessionStatusSlot(tone: AgentSessionStatusTone) {
   );
 }
 
+/** Group header status: a bare dot cannot say how many sessions are waiting. */
+function renderAgentSessionGroupStatus(
+  counts: Record<AgentSessionStatusTone, number>,
+  lang: "zh" | "en",
+) {
+  const focus = (["approval", "running", "error", "completed"] as const).find(
+    (tone) => counts[tone] > 0,
+  );
+  if (!focus) {
+    return (
+      <span
+        className={styles.agentSessionTabStatusSlot}
+        aria-hidden="true"
+        data-session-tab-status-slot
+      />
+    );
+  }
+  const badgeClassName = [
+    styles.agentSessionTabGroupStatusBadge,
+    focus === "approval" ? styles.agentSessionTabGroupStatusBadgeApproval : "",
+    focus === "running" ? styles.agentSessionTabGroupStatusBadgeRunning : "",
+    focus === "error" ? styles.agentSessionTabGroupStatusBadgeError : "",
+    focus === "completed" ? styles.agentSessionTabGroupStatusBadgeCompleted : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return (
+    <span
+      className={styles.agentSessionTabGroupStatusSlot}
+      title={sessionActivityLabel(focus, lang)}
+      data-session-tab-group-status={focus}
+      data-session-tab-group-status-count={counts[focus]}
+    >
+      <span className={badgeClassName}>{counts[focus]}</span>
+    </span>
+  );
+}
+
 export function agentSessionStatusShortLabel(tone: AgentSessionStatusTone, lang: "zh" | "en") {
   return sessionActivityLabel(tone, lang);
 }
@@ -782,6 +820,22 @@ export function AgentSessionTabStrip({
       isActive: activeSessionId === session.id,
     });
 
+  const groupToneCounts = (section: AgentSessionTabGroupSection) => {
+    const counts: Record<AgentSessionStatusTone, number> = {
+      approval: 0,
+      running: 0,
+      stopping: 0,
+      paused: 0,
+      error: 0,
+      completed: 0,
+      none: 0,
+    };
+    for (const session of section.sessions) {
+      counts[groupSessionTone(session)] += 1;
+    }
+    return counts;
+  };
+
   const groupAggregateTone = (section: AgentSessionTabGroupSection): AgentSessionStatusTone =>
     section.sessions.reduce<AgentSessionStatusTone>(
       (worst, session) => {
@@ -952,14 +1006,14 @@ export function AgentSessionTabStrip({
               setGroupMenu({ groupId: section.groupId, x: event.clientX, y: event.clientY });
             }}
           >
-            {activeColor ? (
+            {activeColor && activeColor !== "gray" ? (
               <span
                 className={[styles.agentSessionTabGroupDot, groupDot].filter(Boolean).join(" ")}
                 aria-hidden="true"
                 data-group-dot={activeColor}
               />
             ) : null}
-            {renderAgentSessionStatusSlot(aggregateTone)}
+            {renderAgentSessionGroupStatus(groupToneCounts(section), lang)}
             {renaming ? (
               <span onPointerDown={(event) => event.stopPropagation()}>
                 <VNativeInput

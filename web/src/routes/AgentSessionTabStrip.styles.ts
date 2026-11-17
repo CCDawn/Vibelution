@@ -83,6 +83,18 @@ const styles = {
     "vui-routes-chatcodingroute agentSessionTabStatusError h-2.5 w-2.5 rounded-full bg-[var(--state-error)]",
   agentSessionTabStatusCompleted:
     "vui-routes-chatcodingroute agentSessionTabStatusCompleted h-2.5 w-2.5 rounded-full bg-[var(--accent-cool)]",
+  agentSessionTabGroupStatusSlot:
+    "vui-routes-chatcodingroute agentSessionTabGroupStatusSlot inline-flex h-3.5 min-w-3.5 shrink-0 items-center justify-center self-center",
+  agentSessionTabGroupStatusBadge:
+    "vui-routes-chatcodingroute agentSessionTabGroupStatusBadge inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full px-1 text-[10px] font-medium leading-none tabular-nums text-[var(--vui-surface-chat)]",
+  agentSessionTabGroupStatusBadgeApproval:
+    "vui-routes-chatcodingroute agentSessionTabGroupStatusBadgeApproval bg-[var(--state-warning)]",
+  agentSessionTabGroupStatusBadgeRunning:
+    "vui-routes-chatcodingroute agentSessionTabGroupStatusBadgeRunning bg-[var(--state-success)]",
+  agentSessionTabGroupStatusBadgeError:
+    "vui-routes-chatcodingroute agentSessionTabGroupStatusBadgeError bg-[var(--state-error)]",
+  agentSessionTabGroupStatusBadgeCompleted:
+    "vui-routes-chatcodingroute agentSessionTabGroupStatusBadgeCompleted bg-[var(--accent-cool)]",
   // Legacy class names kept so layout source tests that still mention dots do not hard-fail mid-migration.
   agentSessionTabStatusDot:
     "vui-routes-chatcodingroute agentSessionTabStatusDot h-2.5 w-2.5 shrink-0 rounded-full",
