@@ -8,6 +8,27 @@ import type {
 } from "../../api/types";
 import type { ComposerQueueItem } from "../../components/conversation/composerFollowupQueueModel";
 import { resolveStopStageLabel } from "./stopStageLabel";
+
+function guidanceDeliveryNotice(
+  delivery: "guide" | "queue" | "interrupt" | "dropped" | undefined,
+  lang: "zh" | "en",
+): string {
+  if (delivery === "guide") {
+    return lang === "zh"
+      ? "已插入当前 turn，模型会在下一次调用时看到"
+      : "Inserted into the running turn; the model sees it on its next request.";
+  }
+  if (delivery === "queue") {
+    return lang === "zh" ? "当前 turn 即将结束，已排队到下一轮" : "Queued for the next turn.";
+  }
+  if (delivery === "interrupt") {
+    return lang === "zh" ? "已请求停止当前 turn，随后插入" : "Stopping the current turn, then inserting.";
+  }
+  if (delivery === "dropped") {
+    return lang === "zh" ? "当前 turn 已结束，未能插入" : "The turn ended before the insert landed.";
+  }
+  return "";
+}
 import type { TranslationKey } from "../../i18n/dictionary";
 import {
   latestUserMessageId as deriveLatestUserMessageId,
@@ -72,6 +93,8 @@ export interface UseChatComposerBridgeStateParams {
   };
   sessionGuidanceMutation: {
     isPending: boolean;
+    isSuccess?: boolean;
+    data?: SessionDetail;
     variables?: { sessionId?: string; mode?: SessionGuidanceMode };
   };
   continueEnabled?: boolean;
@@ -182,6 +205,9 @@ export function useChatComposerBridgeState({
   const composerStopPending = (stopTurnMutation.isPending && stopMutationMatchesActiveSession) || sessionStopping;
   // While a stop is settling the composer names the hop it is waiting on, so a
   // long tool teardown reads as progress instead of a frozen "stopping".
+  const guidanceDeliveryNoticeText = sessionGuidanceMutation.isSuccess
+    ? guidanceDeliveryNotice(sessionGuidanceMutation.data?.guidanceDelivery, lang)
+    : "";
   const stopStageGuidance = sessionStopping
     ? resolveStopStageLabel(detail?.stopStages, lang)
     : "";
@@ -201,7 +227,7 @@ export function useChatComposerBridgeState({
       editTargetPreview: resolvedEditTarget?.original,
       error: activeComposerError,
       followupQueue: activeFollowupQueue,
-      guidance: stopStageGuidance || activeImageInputGuidance,
+      guidance: stopStageGuidance || guidanceDeliveryNoticeText || activeImageInputGuidance,
       imageAttachments: activeImageAttachments,
       imageInputUnsupported: activeAgentImageInputUnsupported,
       interruptGuidancePending: composerInterruptGuidancePending,
@@ -246,6 +272,7 @@ export function useChatComposerBridgeState({
       composerSafeGuidancePending,
       composerStopPending,
       stopStageGuidance,
+      guidanceDeliveryNoticeText,
       sessionBusy,
       sessionStopping,
       submitPending,

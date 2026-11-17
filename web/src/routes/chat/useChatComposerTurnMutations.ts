@@ -30,6 +30,7 @@ import type {
   SessionQueuedTurn,
   SessionReferenceAttachment,
   SessionTurnAcceptedResponse,
+  UserConversationMessage,
 } from "../../api/types";
 import type { RuntimeSummary } from "../../api/types/runtime";
 import type { TranslationKey } from "../../i18n/dictionary";
@@ -1237,13 +1238,34 @@ export function useChatComposerTurnMutations({
       },
     ) =>
       submitSessionGuidance(sessionId, { content, mode, attachmentIds, references }),
-    onMutate: (variables) => ({
-      telemetry: startUserAction("session_guidance_submit", {
-        sessionId: variables.sessionId,
-        mode: variables.mode,
-        contentLength: variables.content.length,
-      }),
-    }),
+    onMutate: (variables) => {
+      const optimisticGuidanceMessageId = `optimistic-guidance-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const optimisticMessage: UserConversationMessage = {
+        id: optimisticGuidanceMessageId,
+        role: "user",
+        content: variables.content,
+        timestamp: new Date().toISOString(),
+        metadata: {
+          kind: variables.mode === "interrupt" ? "user_interrupt_guidance" : "user_guidance",
+          source: "steer",
+          guidanceMode: variables.mode,
+          optimistic: true,
+        },
+      };
+      queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detailState) =>
+        detailState
+          ? { ...detailState, messages: [...(detailState.messages ?? []), optimisticMessage] }
+          : detailState,
+      );
+      return {
+        telemetry: startUserAction("session_guidance_submit", {
+          sessionId: variables.sessionId,
+          mode: variables.mode,
+          contentLength: variables.content.length,
+        }),
+        optimisticGuidanceMessageId,
+      };
+    },
     onSuccess: (nextDetail, variables, context) => {
       context?.telemetry?.succeeded({
         sessionId: variables.sessionId,
@@ -1280,6 +1302,18 @@ export function useChatComposerTurnMutations({
       void chatWorkspaceCache.afterSessionChanged({ sessionId: variables.sessionId });
     },
     onError: (error, variables, context) => {
+      if (context?.optimisticGuidanceMessageId) {
+        queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detailState) =>
+          detailState
+            ? {
+              ...detailState,
+              messages: (detailState.messages ?? []).filter(
+                (message) => message.id !== context.optimisticGuidanceMessageId,
+              ),
+            }
+            : detailState,
+        );
+      }
       context?.telemetry?.failed(error, {
         sessionId: variables.sessionId,
         mode: variables.mode,

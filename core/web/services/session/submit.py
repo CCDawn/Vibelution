@@ -1273,6 +1273,7 @@ def submit_session_guidance(
                 keep_quote=True,
             ),
         ]
+    guidance_delivery = "queue"
     if active_turn_id:
         from . import turn_steer
 
@@ -1309,6 +1310,7 @@ def submit_session_guidance(
                 source="submit_session_guidance",
                 visible_in_model=True,
             )
+            guidance_delivery = "guide"
         except TurnJournalPostTerminalWriteError:
             # The turn settled while the guide was being journaled. The text
             # must not disappear: retarget the same steer id onto the next-turn
@@ -1324,6 +1326,7 @@ def submit_session_guidance(
                         lang=lang,
                     )
                     retargeted = True
+                    guidance_delivery = "queue"
                 except Exception as exc:
                     try:
                         s.record_runtime_scene_event(
@@ -1384,10 +1387,16 @@ def submit_session_guidance(
                     pass
 
     if normalized_mode == "interrupt" and running:
-        return s.request_stop_session_turn(conversation_id, fast_ack=True)
+        stopped = s.request_stop_session_turn(conversation_id, fast_ack=True)
+        if isinstance(stopped, dict):
+            stopped["guidanceDelivery"] = "interrupt"
+        return stopped
 
     s._publish_session_detail_snapshot(conversation_id)
-    return s.get_session_detail(conversation_id) or detail
+    result = s.get_session_detail(conversation_id) or detail
+    if isinstance(result, dict):
+        result["guidanceDelivery"] = guidance_delivery
+    return result
 
 
 def _settle_session_submit_admission_failure(

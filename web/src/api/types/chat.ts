@@ -1224,6 +1224,8 @@ export type SessionMessageWindow = {
 };
 
 export type SessionDetail = SessionSummary & {
+  /** Guidance endpoint only: where the inserted guidance actually landed. */
+  guidanceDelivery?: "guide" | "queue" | "interrupt" | "dropped";
   ledgerSeq?: number;
   activeTurnId?: string;
   /** Active-path leaf node id; branch switching targets any node on a branch. */
