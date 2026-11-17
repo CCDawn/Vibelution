@@ -648,7 +648,33 @@ def project_tool_result_for_model(content: str) -> str:
     return project_tool_result_for_model_with_hints(content)[0]
 
 
-def project_tool_result_for_model_with_hints(content: str) -> tuple[str, bool]:
+def _preserve_source_evidence_literals(raw: dict[str, Any], visible: dict[str, Any]) -> None:
+    def entries(value: Any) -> list[Any]:
+        return value if isinstance(value, list) else []
+
+    def preserve(value: Any, target: dict[str, Any], key: str) -> None:
+        if isinstance(value, str) and not _project_text_for_model_with_hints(value)[1]:
+            target[key] = value
+
+    for source, projected in zip(entries(raw.get("quotableSources")), entries(visible.get("quotableSources"))):
+        if isinstance(source, dict) and isinstance(projected, dict):
+            for block, visible_block in zip(entries(source.get("blocks")), entries(projected.get("blocks"))):
+                if isinstance(block, dict) and isinstance(visible_block, dict):
+                    preserve(block.get("text"), visible_block, "text")
+    for field in ("relationEvidence", "directCounterEvidence"):
+        for card, projected in zip(entries(raw.get(field)), entries(visible.get(field))):
+            if isinstance(card, dict) and isinstance(projected, dict):
+                preserve(card.get("quote"), projected, "quote")
+    questions = visible.get("claimsToInvestigate")
+    if isinstance(questions, list):
+        for index, question in enumerate(raw["claimsToInvestigate"]):
+            if isinstance(question, str) and not _project_text_for_model_with_hints(question)[1]:
+                questions[index] = question
+
+
+def project_tool_result_for_model_with_hints(
+    content: str, *, preserve_source_evidence: bool = False,
+) -> tuple[str, bool]:
     """同 project_tool_result_for_model，并返回是否删减过运行时文本提示。
 
     结构化 JSON 的 key 剥离按既有设计保持静默（只返回 False）；只有文本
@@ -658,9 +684,12 @@ def project_tool_result_for_model_with_hints(content: str) -> tuple[str, bool]:
     normalized = str(content or "")
     parsed = _try_parse_json_object(normalized)
     if parsed is not None:
+        visible = _project_structured_result_for_model(parsed)
+        if preserve_source_evidence and parsed.get("contextKind") == "source_collection_stage_task_context":
+            _preserve_source_evidence_literals(parsed, visible)
         return (
             json.dumps(
-                _project_structured_result_for_model(parsed),
+                visible,
                 ensure_ascii=False,
                 sort_keys=True,
                 separators=(",", ":"),
@@ -744,10 +773,80 @@ def _compact_source_collection_context_assignments(
     }
 
 
+def _compact_source_collection_evidence_result(payload: dict[str, Any], max_chars: int) -> Optional[str]:
+    """Reserve space for evidence the next agent can actually cite."""
+    evidence_fields = (
+        "claimsToInvestigate", "quotableSources", "directCounterEvidence", "relationEvidence",
+        "allowedEvidenceRefs",
+    )
+    if not any(key in payload for key in evidence_fields):
+        return None
+
+    view = {
+        key: payload[key]
+        for key in ("status", "contextKind", "contextMode", "teamId", "runId", "stageId", "taskId", "candidatePage", "recordPage")
+        if key in payload
+    }
+    usage = payload.get("usage")
+    if isinstance(usage, dict):
+        view["usage"] = {
+            key: usage[key]
+            for key in ("quoteAnchorInstruction", "evidenceInstruction", "retryInstruction", "continuationHint",
+                        "recordContinuationHint")
+            if key in usage
+        }
+
+    def serialize() -> str:
+        return json.dumps(view, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+    # Leave space for the model message header and the explicit omission notice.
+    budget = max_chars - 800
+    for key in ("quoteAnchorRemediation", "writebackRemediation"):
+        if isinstance(payload.get(key), dict):
+            view[key] = payload[key]
+            if len(serialize()) > budget:
+                view.pop(key)
+
+    omitted: dict[str, int] = {}
+    for key in evidence_fields:
+        items = payload.get(key)
+        if not isinstance(items, list):
+            continue
+        visible: list[Any] = []
+        view[key] = visible
+        for item in items:
+            visible.append(item)
+            if len(serialize()) > budget:
+                visible.pop()
+        if len(visible) < len(items):
+            omitted[key] = len(items) - len(visible)
+    if omitted:
+        view["omittedEvidenceItems"] = omitted
+        view["evidencePagingHint"] = (
+            "模型视图达到限长，省略项不表示原文缺失。请用更小的 candidate_limit 或 record_limit "
+            "及对应 offset 重读；只从当前显示的原文块复制 quote。"
+        )
+
+    for key in ("candidates", "records"):
+        if isinstance(payload.get(key), list):
+            view[key] = [
+                {field: item[field] for field in ("candidateId", "recordId", "title", "sourceUrl", "sourceKind", "sourceType")
+                 if field in item}
+                for item in payload[key]
+                if isinstance(item, dict)
+            ]
+            if len(serialize()) > budget:
+                view.pop(key)
+    return serialize()
+
+
 def _compact_source_collection_context_result(result_str: str, max_chars: int, continuation_hint: str) -> Optional[str]:
     payload = _try_parse_json_object(result_str)
     if not payload:
         return None
+    evidence_view = _compact_source_collection_evidence_result(payload, max_chars)
+    if evidence_view is not None:
+        return evidence_view
     raw_context_mode = str(payload.get("contextMode") or "compact").strip().lower() or "compact"
     if raw_context_mode not in {"compact", "minimal", "evidence", "retry_missing", "retry_evidence", "full"}:
         raw_context_mode = "compact"
@@ -1415,7 +1514,9 @@ def package_tool_result_facts(
     if content is None:
         # ToolMessage 投影处：文本正文删掉了运行时提示时，末尾追加轻量标记，
         # 让模型知道相对原始结果有删减（结构化 key 剥离仍按设计静默）。
-        content, runtime_hint_trimmed = project_tool_result_for_model_with_hints(packaged.content)
+        content, runtime_hint_trimmed = project_tool_result_for_model_with_hints(
+            packaged.content, preserve_source_evidence=tool_name == "source_collection_context_tool",
+        )
         if runtime_hint_trimmed and content:
             content = f"{content}\n{RUNTIME_HINT_OMITTED_MARKER}"
     return ToolResultFacts(
@@ -1510,6 +1611,12 @@ def render_tool_result_for_model(
     effective_truncated = True
     empty_render = _render("", truncated=True)
     content_budget = max(0, bounded_limit - len(empty_render))
+    if facts.result_kind == "source_collection_context":
+        evidence_view = _compact_source_collection_evidence_result(
+            _try_parse_json_object(model_content) or {}, content_budget,
+        )
+        if evidence_view is not None and len(evidence_view) <= content_budget:
+            return _render(evidence_view, truncated=True)
     marker = (
         f"[...模型上下文已限长，原始工具结果 {facts.original_length} 字符...]"
     )

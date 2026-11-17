@@ -659,6 +659,35 @@ class TestSourceCollectionContextFloorContract:
     所有降档形态都保留分派查询投影且裁剪显式标记。
     """
 
+    @pytest.mark.parametrize("stage", ["extraction", "relations"])
+    def test_model_render_preserves_primary_evidence_when_context_is_oversized(self, stage):
+        original = "The earlier kernel reached only half the control throughput.\n\n  Additional result."
+        quote = {"text": original, "citationUrl": "https://arxiv.org/abs/2401.12345v2", "eventId": "fetch-one"}
+        card = {"claimEvidenceId": "ce-counter", "candidateId": "cand-one", "supportLevel": "contradicts", "quote": original}
+        fields = {
+            "quotableSources": [{"sourceId": "cand-one", "quoteAvailable": True, "blocks": [quote]}],
+        } if stage == "extraction" else {
+            "relationEvidence": [card],
+            "directCounterEvidence": [{"evidenceRef": "ce-counter", "quote": original}],
+            "allowedEvidenceRefs": ["ce-counter"],
+        }
+        payload = {
+            "status": "ok",
+            "contextKind": "source_collection_stage_task_context",
+            "contextMode": "evidence",
+            "stageId": stage,
+            "claimsToInvestigate": ["Did the earlier kernel reach the control throughput?"],
+            "candidates": [{"candidateId": "cand-one", "summary": "untrusted metadata " * 2600}],
+            **fields,
+        }
+        facts = package_tool_result_facts(json.dumps(payload), tool_name="source_collection_context_tool")
+        rendered = render_tool_result_for_model(facts)
+        body = json.loads(rendered.split("\nResult:\n", 1)[1])
+
+        assert body["claimsToInvestigate"] == payload["claimsToInvestigate"]
+        for field, expected in fields.items():
+            assert body[field] == expected
+
     def test_floor_overrides_small_caller_budget_and_passes_through(self):
         queries = [
             {
