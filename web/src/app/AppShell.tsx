@@ -3137,13 +3137,13 @@ export function AppShell() {
         </nav>
         <div className={styles.topBarActions} data-shell-group="top-bar-actions">
           <MobilePairingTopBarEntry lang={lang} />
-          <PlatformVersionBadge />
         </div>
         <div className={styles.mobileNav} data-shell-group="mobile-navigation" aria-label={activePrimaryRouteLabel}>
           <span className={styles.mobileNavLabel}>{activePrimaryRouteLabel}</span>
         </div>
 
         <div className={styles.windowDragRegion} data-shell-group="window-drag-region" aria-hidden="true" />
+        <div className={styles.topBarStatusStack} data-shell-group="top-bar-status">
         {updateBannerVisible ? (
           <VPopover
             onOpenChange={(open) => { if (open) void refreshUpdateFreshness(queryClient); }}
@@ -3193,6 +3193,8 @@ export function AppShell() {
             </div>
           </VPopover>
         ) : null}
+        <PlatformVersionBadge />
+        </div>
         <div className={styles.activeWorkSlot} data-shell-group="active-work">
           <VPopover
             open={activeWorkOpen}

@@ -29,10 +29,9 @@ export function PlatformVersionBadge() {
 
   return (
     <span className={styles.wrapper} title={`v${version} · build ${build}`}>
-      <span>v{version}</span>
+      <span className={styles.version}>v{version}</span>
       {build > 0 ? <span className={styles.build}>b{build}</span> : null}
       <span className={styles.progress}>{patch}/{perMinor}</span>
-      {data?.unreleasedPending ? <span className={styles.pending} aria-label="待结算" /> : null}
     </span>
   );
 }

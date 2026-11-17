@@ -83,6 +83,7 @@ const styles = {
     "vui-app-appshell mainArea min-w-0 w-full",
   topBarActions:
     "vui-app-appshell topBarActions ml-auto flex min-w-0 items-center gap-1",
+  topBarStatusStack: "flex min-w-0 flex-col items-end gap-1",
   mobileNav: `vui-app-appshell mobileNav hidden min-w-0 items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] ${vuiToolbarFillClass} px-2 py-1`,
   mobileNavLabel:
     "vui-app-appshell mobileNavLabel min-w-0 truncate [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-primary)]",
