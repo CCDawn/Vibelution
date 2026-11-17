@@ -216,6 +216,36 @@ def _read_context(setup) -> dict:
     )
 
 
+@pytest.mark.parametrize(("stage", "role"), [
+    ("extraction", "source_extractor"),
+    ("relations", "source_relation_mapper"),
+])
+def test_evidence_stages_share_frozen_investigation_questions(tmp_path, monkeypatch, stage, role):
+    from core.web.services.team_workflow.source_collection_context import compact_source_collection_stage_task_context
+
+    setup = _start_stage_task(tmp_path, monkeypatch, stage_id=stage, agent_role=role)
+    service = stage_writeback._service()
+    original_bundle = service._source_collection_run_context_bundle
+    question = "Did the original kernel reach the optimized control on the same GPU?"
+
+    def read_scope(*args):
+        bundle = original_bundle(*args)
+        run = bundle["run"]
+        return {
+            **bundle,
+            "run": {**run, "scope": {**run["scope"], "knowledgeRequest": {
+                "searchEnvelope": {"claimsToInvestigate": [question]},
+                "requirements": {"operatorClaims": {"counterevidence": "unverified hypothesis"}},
+            }}},
+        }
+
+    monkeypatch.setattr(service, "_source_collection_run_context_bundle", read_scope)
+    context = _read_context(setup)
+    for surfaced in (context, compact_source_collection_stage_task_context(context)):
+        assert surfaced["claimsToInvestigate"] == [question]
+        assert "knowledgeRequest" not in surfaced
+
+
 def _reject_relations_writeback(setup, result: dict) -> str:
     with pytest.raises(
         team_workflow_orchestration_service.TeamWorkflowOrchestrationError

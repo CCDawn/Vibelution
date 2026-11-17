@@ -328,9 +328,9 @@ def test_relation_prompt_and_contract_expose_executable_array_shapes() -> None:
     assert result_contract["collectionFieldTypes"]["counterEvidenceRefs"] == "object[]"
     assert result_contract["minimumExample"]["counterEvidenceRefs"] == [
         {
-            "evidenceRef": "ce-limit",
-            "claim": "该结论受设备与负载边界限制",
-            "disposition": "limit_scope",
+            "evidenceRef": "ce-counter",
+            "claim": "原实现于同设备、同负载达到对照实现的吞吐",
+            "disposition": "challenges_ontology",
         }
     ]
 

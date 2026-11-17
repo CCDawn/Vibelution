@@ -1372,6 +1372,21 @@ def get_source_collection_stage_task_context(
             "fallback": "If required context is missing, write back status=blocked with a short reason.",
         },
     }
+    if normalized_stage_id in {"extraction", "relations"}:
+        scope = run_bundle["run"].get("scope")
+        workflow_run_id = task.get("workflowRunId")
+        if (
+            isinstance(scope, dict) and task_run_id == normalized_run_id
+            and workflow_run_id and workflow_run_id == scope.get("workflowRunId")
+        ):
+            request = scope.get("knowledgeRequest")
+            envelope = request.get("searchEnvelope") if isinstance(request, dict) else None
+            questions = s._normalize_text_list(
+                envelope.get("claimsToInvestigate") if isinstance(envelope, dict) else None,
+                max_items=12, max_length=2000,
+            )
+            if questions:
+                context["claimsToInvestigate"] = questions
     if normalized_stage_id == "relations" or task_agent_role == "source_relation_mapper":
         from ..research_runtime.artifact_readback_registry import (
             load_allowed_evidence_refs,
@@ -1412,8 +1427,9 @@ def get_source_collection_stage_task_context(
             "allowedEvidenceRefs 中的 claimEvidenceId；relationEvidence[] 是全量证据绑定图，"
             "不因分页截断，每张卡给出 claimEvidenceId、候选 ID、原文引述和支持方向的对应关系，"
             "inCurrentPage 标注该证据的候选是否在当前分页（页外候选的绑定同样可用于构图）；"
-            "先看 directCounterEvidence 中的逐字原文与 evidenceRef。若原文直接反驳一个相关命题，"
-            "将该 evidenceRef 与被反驳的命题写入 counterEvidenceRefs，disposition=challenges_ontology；"
+            "先对照 claimsToInvestigate 与 directCounterEvidence 的逐字原文。"
+            "若同一对象、指标和条件下的原文给出与待检验命题相反的结果，"
+            "将该 evidenceRef 与明确的被反驳命题写入 counterEvidenceRefs，disposition=challenges_ontology；"
             "找不到原记录对应的证据卡时，不要清空其他来源的有效反证，也不要为原记录串绑另一张卡。"
             "不要通过重复读取猜测映射。allowedEvidenceRefs 非空而 relationEvidence 缺少对应"
             "绑定卡时才报告证据绑定缺失；两个列表同时为空表示本轮没有可绑定证据。"
@@ -1482,6 +1498,8 @@ def get_source_collection_stage_task_context(
             "（blocks[].text 来自本任务或经正式搜集交接绑定的 web_fetch_tool 成功回执，"
             "超长块已截断并标注 truncated=true，只允许引用块内文本）；"
             "有可引用原文的来源直接使用现有块，无需重复抓取；"
+            "对照 claimsToInvestigate，直接反证优先引用报告相反结果的原句，保留对象、指标和适用条件；"
+            "单独解释原因、给出适用条件的句子不能替代所报告的结果；"
             "claims[].quote 与 evidenceRefs[].quote 必须逐字取自对应 sourceId 的 blocks[].text，"
             "原样复制，禁止改写、拼接、凭记忆重写或写空串；"
             "source_url、sourceRef 和引文定位 URL 复制同一个块的 citationUrl；"

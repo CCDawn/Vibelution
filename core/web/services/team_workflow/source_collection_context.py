@@ -269,6 +269,8 @@ def compact_source_collection_stage_task_context(context: dict[str, Any]) -> dic
         )
     if isinstance(context.get("retryFocus"), dict):
         compact["retryFocus"] = normalize_metadata(context["retryFocus"])
+    if context.get("claimsToInvestigate"):
+        compact["claimsToInvestigate"] = list(context["claimsToInvestigate"])
     if isinstance(context.get("quotableSources"), list):
         # 空 quotableSources 列表也是有效供给状态（本任务没有任何可引用
         # 来源）：字段显式保留为（可能为空的）数组，与下方 blocks 空数组的
