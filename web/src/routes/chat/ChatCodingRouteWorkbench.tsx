@@ -1991,6 +1991,12 @@ export function ChatCodingRouteWorkbench() {
     });
     return [...runningSessionIds];
   }, [activeTurnLayersBySessionRef, activeTurnRunningSessionKey, runtimeChatTurnSessionIds]);
+  // Fresh local optimistic turns, split off the layer signal: these outrank a
+  // summary that still says ``ready``, while a stale runtime flag must not.
+  const optimisticRunningSessionIds = useMemo(
+    () => (activeTurnRunningSessionKey ? activeTurnRunningSessionKey.split("|").filter(Boolean) : []),
+    [activeTurnRunningSessionKey],
+  );
   const {
     activeDraft,
     activeFollowupQueue,
@@ -3363,6 +3369,7 @@ export function ChatCodingRouteWorkbench() {
             resolveModelLabel={resolveModelLabel}
             teams={teams}
             runtimeRunningSessionIds={runtimeRunningSessionIds}
+            optimisticRunningSessionIds={optimisticRunningSessionIds}
             sessionIdsNeedingApproval={sessionIdsNeedingApproval}
             statusLabel={statusLabel}
             t={t}

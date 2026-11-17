@@ -210,4 +210,21 @@ describe("sessionActivityIndicator", () => {
     // Writing the stamp must drop the cached tone so the row goes quiet.
     expect(resolveSessionActivityTone(session)).toBe("none");
   });
+  it("shows the spinner for a fresh optimistic turn while the summary still reads ready", () => {
+    // A just-submitted local turn is fresher than the resting summary row.
+    expect(resolveSessionActivityTone(
+      { id: "s-optimistic", status: "ready", updatedAt: "t1" },
+      { isOptimisticRunning: true },
+    )).toBe("running");
+    // The possibly-stale runtime flag keeps its conservative behavior.
+    expect(resolveSessionActivityTone(
+      { id: "s-optimistic-stale", status: "ready", updatedAt: "t1" },
+      { isRuntimeRunning: true },
+    )).toBe("none");
+    // Approval still outranks the optimistic spinner.
+    expect(resolveSessionActivityTone(
+      { id: "s-optimistic-approval", status: "ready", updatedAt: "t1" },
+      { isOptimisticRunning: true, needsApproval: true },
+    )).toBe("approval");
+  });
 });

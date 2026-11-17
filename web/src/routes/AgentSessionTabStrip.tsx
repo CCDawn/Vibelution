@@ -158,6 +158,7 @@ export function agentSessionStatusTone(
   options?: {
     needsApproval?: boolean;
     isRuntimeRunning?: boolean;
+    isOptimisticRunning?: boolean;
     session?: Pick<
       SessionSummary,
       | "id"
@@ -181,6 +182,7 @@ export function agentSessionStatusTone(
       {
         needsApproval: options.needsApproval,
         isRuntimeRunning: options.isRuntimeRunning,
+        isOptimisticRunning: options.isOptimisticRunning,
         isActive: options.isActive,
       },
     );
@@ -190,6 +192,7 @@ export function agentSessionStatusTone(
     {
       needsApproval: options?.needsApproval,
       isRuntimeRunning: options?.isRuntimeRunning,
+      isOptimisticRunning: options?.isOptimisticRunning,
       isActive: options?.isActive,
     },
   );
@@ -254,6 +257,9 @@ export type AgentSessionTabStripProps = {
   teams?: Team[];
   /** Session ids with an active runtime chat_turn (green spinner). */
   runtimeRunningSessionIds?: readonly string[];
+  /** Session ids with a fresh local optimistic turn (spinner before the
+   *  session summary itself reaches ``running``). */
+  optimisticRunningSessionIds?: readonly string[];
   /** Session ids waiting on tool/permission approval (yellow spinner). */
   sessionIdsNeedingApproval?: readonly string[];
   statusLabel: (status: string) => string;
@@ -315,6 +321,7 @@ export function AgentSessionTabStrip({
   sessions,
   teams = [],
   runtimeRunningSessionIds = [],
+  optimisticRunningSessionIds = [],
   sessionIdsNeedingApproval = [],
   statusLabel: _statusLabel,
   t,
@@ -478,6 +485,7 @@ export function AgentSessionTabStrip({
     const statusTone = agentSessionStatusTone(String(sessionStatus || ""), {
       needsApproval,
       isRuntimeRunning,
+      isOptimisticRunning: optimisticSessionIds.has(session.id),
       session,
       // Blue/unread clears for the open conversation, even if a file tab is in front.
       isActive: activeSessionId === session.id,
@@ -769,6 +777,7 @@ export function AgentSessionTabStrip({
     agentSessionStatusTone(String(session.status || ""), {
       needsApproval: approvalSessionIds.has(session.id),
       isRuntimeRunning: runtimeSessionIds.has(session.id),
+      isOptimisticRunning: optimisticSessionIds.has(session.id),
       session,
       isActive: activeSessionId === session.id,
     });
@@ -1097,6 +1106,9 @@ export function AgentSessionTabStrip({
   );
   const runtimeSessionIds = new Set(
     runtimeRunningSessionIds.map((id) => String(id || "").trim()).filter(Boolean),
+  );
+  const optimisticSessionIds = new Set(
+    optimisticRunningSessionIds.map((id) => String(id || "").trim()).filter(Boolean),
   );
   const navigationTabs = [
     ...visibleSessions.map((session) => ({ kind: "session" as const, id: session.id })),

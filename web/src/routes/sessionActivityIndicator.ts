@@ -228,12 +228,21 @@ function computeSessionActivityTone(
     needsApproval?: boolean;
     /** True when runtime reports an active chat_turn for this session. */
     isRuntimeRunning?: boolean;
+    /** Fresh local optimistic turn: it outranks a resting summary, unlike the
+     *  possibly-stale runtime flag above. */
+    isOptimisticRunning?: boolean;
     /** When true, completed activity is treated as already read. */
     isActive?: boolean;
   },
 ): SessionActivityTone {
   if (options?.needsApproval) {
     return "approval";
+  }
+  // A just-submitted turn is fresher than the summary: the session row
+  // still reads ``ready`` until the runtime/summary refresh lands, and the
+  // resting short-circuit below would otherwise hide the spinner that whole gap.
+  if (options?.isOptimisticRunning) {
+    return "running";
   }
   const state = resolveSessionActivity(session, { runtimeRunning: options?.isRuntimeRunning });
   if (state.execution === "paused") {
@@ -285,6 +294,7 @@ function toneCacheKey(
     session.agentInboxPendingCount,
     options?.needsApproval ? 1 : 0,
     options?.isRuntimeRunning ? 1 : 0,
+    options?.isOptimisticRunning ? 1 : 0,
     options?.isActive ? 1 : 0,
   ].join("\u0001");
 }

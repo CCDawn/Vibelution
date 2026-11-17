@@ -68,6 +68,7 @@ export type ChatCodingCenterTabsProps = {
   resolveModelLabel: AgentSessionTabStripProps["resolveModelLabel"];
   teams: Team[];
   runtimeRunningSessionIds: readonly string[];
+  optimisticRunningSessionIds?: readonly string[];
   sessionIdsNeedingApproval: readonly string[];
   statusLabel: (status: string) => string;
   t: (key: TranslationKey) => string;
@@ -138,6 +139,7 @@ export function ChatCodingCenterTabs({
   resolveModelLabel,
   teams,
   runtimeRunningSessionIds,
+  optimisticRunningSessionIds,
   sessionIdsNeedingApproval,
   statusLabel,
   t,
@@ -274,6 +276,7 @@ export function ChatCodingCenterTabs({
           sessions={agentSessionTabs}
           teams={teams}
           runtimeRunningSessionIds={runtimeRunningSessionIds}
+          optimisticRunningSessionIds={optimisticRunningSessionIds}
           sessionIdsNeedingApproval={sessionIdsNeedingApproval}
           statusLabel={statusLabel}
           t={t}
