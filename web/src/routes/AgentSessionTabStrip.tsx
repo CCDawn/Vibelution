@@ -85,14 +85,7 @@ const GROUP_TINT_CLASS: Record<AgentSessionTabGroupColor, string> = {
   rose: styles.agentSessionTabGroupTintRose,
 };
 
-const GROUP_DOT_CLASS: Record<AgentSessionTabGroupColor, string> = {
-  gray: styles.agentSessionTabGroupDotGray,
-  blue: styles.agentSessionTabGroupDotBlue,
-  green: styles.agentSessionTabGroupDotGreen,
-  amber: styles.agentSessionTabGroupDotAmber,
-  violet: styles.agentSessionTabGroupDotViolet,
-  rose: styles.agentSessionTabGroupDotRose,
-};
+
 import "./AgentSessionTabStrip.armed.css";
 import "./AgentSessionTabStrip.groups.css";
 import { sessionBlocksMutation } from "./sessionActivityState";
@@ -924,13 +917,7 @@ export function AgentSessionTabStrip({
     const dropActive = groupDropTarget === section.groupId;
     const aggregateTone = groupAggregateTone(section);
     const activeColor = sessionTabGroupColorFor(groupState, section.groupId);
-    const groupDot = activeColor ? GROUP_DOT_CLASS[activeColor] : "";
-    // The chip itself carries the group colour. A 6px dot alone was too quiet to
-    // read as "the colour changed", and the accent ring it replaced made a group
-    // look identical to the selected session tab. Neutral groups stay unpainted
-    // so the default bucket keeps a flat surface.
-    const groupTint =
-      activeColor && activeColor !== "gray" ? GROUP_TINT_CLASS[activeColor] : "";
+    const groupTint = activeColor ? GROUP_TINT_CLASS[activeColor] : "";
     const isOpen = groupIsOpen(section.groupId);
     const headerClassName = [
       styles.agentSessionTabGroupHeader,
@@ -1007,13 +994,6 @@ export function AgentSessionTabStrip({
               setGroupMenu({ groupId: section.groupId, x: event.clientX, y: event.clientY });
             }}
           >
-            {activeColor && activeColor !== "gray" ? (
-              <span
-                className={[styles.agentSessionTabGroupDot, groupDot].filter(Boolean).join(" ")}
-                aria-hidden="true"
-                data-group-dot={activeColor}
-              />
-            ) : null}
             {renderAgentSessionGroupStatus(groupToneCounts(section), lang)}
             {renaming ? (
               <span onPointerDown={(event) => event.stopPropagation()}>
