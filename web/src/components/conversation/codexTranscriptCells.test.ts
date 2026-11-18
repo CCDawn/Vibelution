@@ -88,7 +88,7 @@ describe("codexTranscriptCells", () => {
     expect(cells.map((cell) => cell.status)).toEqual(["completed", "completed", "pending"]);
   });
 
-  it("keeps the user-facing commentary copy when it restates the reasoning stream", () => {
+  it("keeps a longer reasoning trace next to the commentary copy that restates part of it", () => {
     const cells: CodexTranscriptCell[] = [
       {
         id: "thought-done",
@@ -110,10 +110,8 @@ describe("codexTranscriptCells", () => {
       },
     ];
     const deduped = dedupeThoughtLikeTranscriptCells(cells);
-    expect(deduped).toHaveLength(1);
-    // Commentary is the user-facing lane; dedupe must not swallow it into thinking.
-    expect(deduped[0].id).toBe("thought-done");
-    expect(deduped[0].status).toBe("completed");
+    // A short commentary line must not swallow the longer reasoning trace.
+    expect(deduped.map((cell) => cell.id)).toEqual(["thought-done", "thought-running"]);
   });
 
   it("dedupes duplicate tool rows that share the same call id", () => {
@@ -196,7 +194,7 @@ describe("codexTranscriptCells", () => {
     expect(display.map((cell) => cell.id)).toEqual(["thought-run", "tool-committed"]);
   });
 
-  it("dedupes substring-overlapping thought vs commentary (mid-stream protocol segment)", () => {
+  it("keeps the reasoning trace when only a short commentary segment overlaps it", () => {
     const cells = [
       {
         id: "reasoning-full",
@@ -218,7 +216,8 @@ describe("codexTranscriptCells", () => {
       },
     ];
     const deduped = dedupeCodexTranscriptCellsForDisplay(cells);
-    expect(deduped.map((cell) => cell.id)).toEqual(["commentary-segment"]);
+    // A short commentary segment must not swallow the full reasoning trace.
+    expect(deduped.map((cell) => cell.id)).toEqual(["reasoning-full", "commentary-segment"]);
   });
 
   it("drops a progress narration copy that the final answer repeats", () => {

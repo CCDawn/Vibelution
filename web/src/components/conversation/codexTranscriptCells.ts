@@ -922,9 +922,14 @@ function thoughtLikeCellRank(cell: CodexTranscriptCell) {
 
 /**
  * Drop overlapping thought/commentary cells that restate the same stream
- * (completed snapshot + running longer copy, exact duplicates, or substring
- * overlaps where protocol commentary is a mid-stream segment of the full
- * reasoning text).
+ * (completed snapshot + running longer copy, exact duplicates, or nearly
+ * identical copies of the same segment).
+ *
+ * A short commentary line that merely appears inside a long reasoning trace
+ * is not a duplicate: treating it as one collapsed the thinking lane to one
+ * or two lines while the real reasoning was dropped. Cross-lane overlap now
+ * needs a near-identical match (shorter side at least 90% of the longer one);
+ * same-lane snapshots keep the original substring collapse.
  */
 export function dedupeThoughtLikeTranscriptCells(
   cells: readonly CodexTranscriptCell[],
@@ -949,11 +954,20 @@ export function dedupeThoughtLikeTranscriptCells(
       if (!rightText) {
         continue;
       }
-      const overlaps = leftText === rightText
-        || rightText.startsWith(leftText)
-        || leftText.startsWith(rightText)
-        || leftText.includes(rightText)
-        || rightText.includes(leftText);
+      const leftIsCommentary = isCommentaryTranscriptCell(cells[i]);
+      const rightIsCommentary = isCommentaryTranscriptCell(cells[j]);
+      const sameLane = leftIsCommentary === rightIsCommentary;
+      const longerLength = Math.max(leftText.length, rightText.length);
+      const shorterLength = Math.min(leftText.length, rightText.length);
+      const nearDuplicate = longerLength > 0 && shorterLength / longerLength >= 0.9;
+      const overlaps = (sameLane || nearDuplicate)
+        && (
+          leftText === rightText
+          || rightText.startsWith(leftText)
+          || leftText.startsWith(rightText)
+          || leftText.includes(rightText)
+          || rightText.includes(leftText)
+        );
       if (!overlaps) {
         continue;
       }
