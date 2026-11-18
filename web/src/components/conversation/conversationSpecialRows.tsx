@@ -134,16 +134,18 @@ export function createConversationSpecialRows({
           data-session-recovery-notice
           data-conversation-row-key={rowKey}
         >
-          <span className={recoveryStyles.icon} aria-hidden="true">
-            <RefreshCw size={14} />
-          </span>
-          <span className={recoveryStyles.label}>
-            {sessionRecoveryResumedLabel(message, lang)}
-          </span>
+          <div className={recoveryStyles.head}>
+            <span className={recoveryStyles.icon} aria-hidden="true">
+              <RefreshCw size={13} />
+            </span>
+            <span className={recoveryStyles.label}>
+              {sessionRecoveryResumedLabel(message, lang)}
+            </span>
+            {message.timestamp ? (
+              <time className={recoveryStyles.time} dateTime={message.timestamp}>{formatTimestamp(message.timestamp)}</time>
+            ) : null}
+          </div>
           {detail ? <span className={recoveryStyles.detail}>{detail}</span> : null}
-          {message.timestamp ? (
-            <time className={recoveryStyles.time} dateTime={message.timestamp}>{formatTimestamp(message.timestamp)}</time>
-          ) : null}
         </article>
       );
     }
