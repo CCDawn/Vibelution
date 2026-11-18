@@ -562,35 +562,6 @@ def _drain_guidance_events_locked(
     return pending
 
 
-def guide_turn_is_live(session_id: str, turn_id: str) -> bool:
-    """Return whether a turn can still drain a guide.
-
-    A guide may only keep waiting while its turn is the executing turn. A turn
-    that died without a terminal event must not pin the badge forever: the
-    settle fallback treats it as finished and moves the input to the queue.
-    """
-    s = _service()
-    normalized_turn_id = str(turn_id or "").strip()
-    if not normalized_turn_id:
-        return False
-    try:
-        controller = s._get_session_turn_control(session_id)
-        if controller is not None and (
-            str(getattr(controller, "turn_id", "") or "").strip() == normalized_turn_id
-        ):
-            return True
-        for run in s.list_active_session_work_runs():
-            if (
-                str(run.get("sessionId") or "").strip() == str(session_id or "").strip()
-                and str(run.get("runId") or "").strip() == normalized_turn_id
-            ):
-                return True
-    except Exception:
-        # 活性查询失败不能把仍在跑的引导误转队列；保守视为存活。
-        return True
-    return False
-
-
 def fallback_pending_guides_to_queue(
     session_id: str,
     turn_id: str,
@@ -605,11 +576,9 @@ def fallback_pending_guides_to_queue(
     text would otherwise only live in the transcript, where the model never
     saw it. Queue it as a real next turn so the input is not lost.
 
-    ``unconfirmed`` state is moved because the turn is terminal without a drain
-    receipt. ``pending`` is moved only when its turn is no longer live: a live
-    turn still owns its next drain. The sweep is session-wide so a row stranded
-    by an older dead turn cannot stay waiting forever. Failures are swallowed so
-    settlement never breaks.
+    Only ``unconfirmed`` state (the turn is terminal and no drain receipt
+    exists) is moved; ``pending`` turns are still running and their worker
+    owns the next drain. Failures are swallowed so settlement never breaks.
     """
     s = _service()
     event_list = list(events or [])
@@ -618,11 +587,7 @@ def fallback_pending_guides_to_queue(
     for event in event_list:
         if str(getattr(event, "event_type", "") or "") != EVENT_USER_MESSAGE:
             continue
-        event_turn_id = str(getattr(event, "turn_id", "") or "").strip()
-        if event_turn_id and event_turn_id != turn_id and guide_turn_is_live(
-            session_id, event_turn_id
-        ):
-            # Another turn is still running; its worker owns the drain.
+        if str(getattr(event, "turn_id", "") or "").strip() != turn_id:
             continue
         payload = dict(getattr(event, "payload", None) or {})
         metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
@@ -632,13 +597,7 @@ def fallback_pending_guides_to_queue(
         if not event_id:
             continue
         guide_state = str((state.get(event_id) or {}).get("guidanceState") or "")
-        if guide_state not in {"unconfirmed", "pending"}:
-            continue
-        # A live turn still owns its next drain; only a finished turn is a
-        # stranded state that must move to the queue.
-        if guide_state == "pending" and event_turn_id and guide_turn_is_live(
-            session_id, event_turn_id
-        ):
+        if guide_state != "unconfirmed":
             continue
         content = str(payload.get("content") or "").strip()
         if not content:
@@ -648,7 +607,7 @@ def fallback_pending_guides_to_queue(
             record_delivery_changed(
                 session_id,
                 steer_id=steer_id,
-                turn_id=event_turn_id or turn_id,
+                turn_id=turn_id,
                 target_turn_id=turn_id,
                 content=content,
             )

@@ -95,33 +95,6 @@ def test_drained_receipt_records_the_consuming_turn() -> None:
     assert state["evt-guide"]["guidanceDrainedTurnId"] == "turn-1"
 
 
-def test_pending_guide_leaves_when_its_turn_is_gone(monkeypatch) -> None:
-    queued: list[str] = []
-
-    class _Stub:
-        def enqueue_session_queued_turn(self, _session_id, **kwargs):
-            queued.append(kwargs["content"])
-            return {}
-
-    monkeypatch.setattr(turn_steer, "guide_turn_is_live", lambda _sid, _tid: False)
-    monkeypatch.setattr(turn_steer, "_service", lambda: _Stub())
-    monkeypatch.setattr(turn_steer, "record_delivery_changed", lambda *a, **k: None)
-
-    assert turn_steer.fallback_pending_guides_to_queue("session-1", "turn-1", [_guide()]) == 1
-    assert queued == ["check the queue contract"]
-
-
-def test_pending_guide_waits_while_its_turn_is_live(monkeypatch) -> None:
-    class _Stub:
-        def enqueue_session_queued_turn(self, *_args, **_kwargs):
-            raise AssertionError("a live turn must keep its own pending guide")
-
-    monkeypatch.setattr(turn_steer, "guide_turn_is_live", lambda _sid, _tid: True)
-    monkeypatch.setattr(turn_steer, "_service", lambda: _Stub())
-
-    assert turn_steer.fallback_pending_guides_to_queue("session-1", "turn-1", [_guide()]) == 0
-
-
 def test_guided_text_is_not_replayed_by_a_second_worker(monkeypatch) -> None:
     monkeypatch.setattr(turn_steer, "append_turn_steer_event", lambda *a, **k: None)
     events = [_guide()]
@@ -142,40 +115,3 @@ def test_a_new_process_replays_after_restart(monkeypatch) -> None:
     turn_steer._CONSUMED_GUIDE_KEYS.clear()
 
     assert len(turn_steer.drain_guidance_events("session-restart", "turn-1", events, set())) == 1
-
-def test_pending_guide_from_an_older_dead_turn_is_swept(monkeypatch) -> None:
-    queued: list[str] = []
-
-    class _Stub:
-        def enqueue_session_queued_turn(self, _session_id, **kwargs):
-            queued.append(kwargs["content"])
-            return {}
-
-    monkeypatch.setattr(turn_steer, "guide_turn_is_live", lambda _sid, _tid: False)
-    monkeypatch.setattr(turn_steer, "_service", lambda: _Stub())
-    monkeypatch.setattr(turn_steer, "record_delivery_changed", lambda *a, **k: None)
-
-    # 结算的是 turn-2；被它顺手收口的是 turn-1 遗留的悬挂行。
-    assert (
-        turn_steer.fallback_pending_guides_to_queue(
-            "session-1", "turn-2", [_guide(turn_id="turn-1")]
-        )
-        == 1
-    )
-    assert queued == ["check the queue contract"]
-
-
-def test_live_other_turn_keeps_its_own_pending_guide(monkeypatch) -> None:
-    class _Stub:
-        def enqueue_session_queued_turn(self, *_args, **_kwargs):
-            raise AssertionError("a live turn must keep its own pending guide")
-
-    monkeypatch.setattr(turn_steer, "guide_turn_is_live", lambda _sid, tid: tid == "turn-1")
-    monkeypatch.setattr(turn_steer, "_service", lambda: _Stub())
-
-    assert (
-        turn_steer.fallback_pending_guides_to_queue(
-            "session-1", "turn-2", [_guide(turn_id="turn-1")]
-        )
-        == 0
-    )
