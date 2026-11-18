@@ -59,6 +59,7 @@ import {
 import {
   formatActiveWorkRunsDetail,
   isActiveWorkRestartBlocked,
+  isRestartConnectionInterrupted,
   isActiveWorkStopBlocked,
   parseRuntimeControlBlockedDetail,
 } from "./workbenchLifecycleActions";
@@ -2057,7 +2058,7 @@ export function AppShell() {
       if (requestSeq !== lifecycleRequestSeqRef.current) return;
       allowNextWorkbenchWindowUnload();
       window.location.reload();
-    })().catch((error) => {
+    })().catch(async (error) => {
       if (requestSeq !== lifecycleRequestSeqRef.current) {
         return;
       }
@@ -2100,6 +2101,40 @@ export function AppShell() {
       // reached the desktop control channel, so the honest overlay says the
       // restart did not start instead of claiming it may already be running.
       const restartNotDelivered = isLauncherControlPlaneNotReady(error);
+      // A restart tears down the very server that would answer this request, so
+      // the reply can be lost even though the relaunch already started. That is
+      // a normal switching state, not a failure: wait for the replacement
+      // backend and reload instead of showing an unactionable "not confirmed".
+      if (mode !== "update" && !restartNotDelivered && isRestartConnectionInterrupted(error)) {
+        restartPhaseRef.current = "switching";
+        setRestartPhase("switching");
+        setRestartRequested(false);
+        setShutdownRequested(false);
+        setShutdownOpen(true);
+        setShutdownSettled(false);
+        setLifecycleAction("restart");
+        setLifecycleCommandId("");
+        setLifecycleCancelPending(false);
+        setShutdownTitle(restartHeading);
+        setShutdownDetail(restartSwitchingBody);
+        try {
+          await waitForRestartedBackend({
+            previousPid: backendPidAtRestartRef.current,
+            shouldContinue: () => requestSeq === lifecycleRequestSeqRef.current,
+          });
+          if (requestSeq !== lifecycleRequestSeqRef.current) return;
+          allowNextWorkbenchWindowUnload();
+          window.location.reload();
+        } catch (waitError) {
+          if (requestSeq !== lifecycleRequestSeqRef.current) return;
+          const waitMessage = waitError instanceof Error ? waitError.message : String(waitError || "");
+          if (waitMessage === "RESTART_WAIT_CANCELLED") return;
+          setShutdownSettled(true);
+          setShutdownTitle(restartTimedOutTitle);
+          setShutdownDetail(restartTimedOutBody);
+        }
+        return;
+      }
       setRestartRequested(false);
       setShutdownRequested(false);
       setShutdownOpen(true);
