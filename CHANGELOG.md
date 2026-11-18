@@ -1,10 +1,40 @@
 # Changelog
 
 ## Unreleased
+
+## 2.5.2 - 2026-11-17
+
+### Changed
+- fix: keep inline message edit keystrokes in the composer draft store
+- fix: refresh the frontend release before rebuilding the desktop shell
+- fix: 未确认发送提示回到输入框上方并放宽发送准入预算
+- fix(git): require a live integration claim before moving main
+- fix(launcher): wait for packaged Electron processes before replacing shell
+- test(runtime): isolate launcher open tests from live backend freshness
+- fix(launcher): ignore chat snapshots owned by exited processes
+- fix(launcher): recover crashed chat turns through guarded CLI restart
+- perf(claims): keep dependency trees out of the dormancy scan
+- fix(launcher): recover workbench when a live package directory is locked
+- fix(chat): spin the session indicator for a fresh optimistic turn
+- test(session-archive): assert the archive wiring at its workbench owner
+- fix(workbench): reload the window when a newer frontend release lands
+- fix: resume interrupted turns after a requester-less hot restart
+- fix(tone): carry optimistic running into directory, index and browser rows
+- fix(platform-version): keep the version badge readable beside the update bar
+- fix(platform-version): drop the extra pending dot and lift the badge contrast
+- refactor(tools): stop re-embedding the shell dialect rules in tool schemas
+- feat(authorization): tell the model why a visible tool cannot run this turn
+- feat(chat): make guidance insert paint immediately and report where it landed
+- feat(chat): show group status counts and drop the neutral dot
+- feat(platform-version): keep the version on one quiet line beside the update banner
+- fix(chat): separate session tabs from group chips by shape
+- feat(chat): persist guidance delivery and settle undrained steers
+- feat(guard): require an Unreleased line for product commits
+
+## 2.0.1 - 2026-11-16
+
 ### Added
-- 平台版本按本地演进节奏自动推进：每次带 Unreleased 声明的合入结算一个小版本，满 5 个进中版本，满 10 个进大版本；`/platform-version` 页面实时展示当前版本、build、档位进度与结算记录。
-- 右栏标签面板停靠时保持直角并与所在列贴齐，左上角不再出现半圆缺口；浮层形态仍保留 12px 圆角。
-- 右栏标签面板停靠时保持直角并与所在列贴齐，左上角不再出现半圆缺口；浮层形态仍保留 12px 圆角。
+- 平台版本按本地演进节奏自动推进：每次带 Unreleased 声明的合入结算一个小版本，满 5 个进中版本，满 10 个进大版本；\`/platform-version\` 页面实时展示当前版本、build、档位进度与结算记录。
 
 ## 2.0.0 - 2026-10-03
 

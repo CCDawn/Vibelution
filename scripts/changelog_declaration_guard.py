@@ -132,11 +132,29 @@ def evaluate(repo: Path) -> tuple[bool, str]:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", default=".")
+    parser.add_argument(
+        "--suggest",
+        action="store_true",
+        help="Print a ready-to-paste Unreleased line for the staged files.",
+    )
     arguments = parser.parse_args(argv)
-    ok, detail = evaluate(Path(arguments.repo).resolve())
+    repo = Path(arguments.repo).resolve()
+    if arguments.suggest:
+        staged = staged_paths(repo)
+        product_paths = [path for path in staged if is_product_path(path)]
+        if not product_paths:
+            print("changelog-guard: nothing staged that needs a declaration")
+            return 0
+        scopes = sorted({path.split("/")[0] for path in product_paths})
+        print("Suggested line for CHANGELOG.md under '## Unreleased':")
+        print()
+        print(f"- {'、'.join(scopes)}：<一句话说明这次改了什么、用户能感知到什么>")
+        return 0
+    ok, detail = evaluate(repo)
     if ok:
         return 0
     print(detail, file=sys.stderr)
+    print(detail)
     return 1
 
 
