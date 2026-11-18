@@ -164,6 +164,134 @@ describe("work_runs settlement on a verified backend stop", () => {
   });
 });
 
+/** A backend whose only registered handle is verifiably dead: the crash
+ * scenario where the verified-stop settlement hook never ran and zombie
+ * "running" snapshots would otherwise wedge stop and restart forever. */
+function deadBackendLifecycleInput(workspaceRoot: string, operation: "stop" | "restart") {
+  let spawned = false;
+  const spawnImpl = vi.fn(() => {
+    spawned = true;
+    return { pid: 4243, exitCode: null as number | null, killed: false, unref: () => undefined, kill: () => true };
+  });
+  const written: Record<string, unknown>[] = [];
+  const gracefulShutdown = vi.fn(async () => {
+    spawned = true;
+    return { requested: true, completed: true, status: 202, reason: "closed" };
+  });
+  const terminateProcessTree = vi.fn(async () => true);
+  return {
+    spawned: () => spawned,
+    written,
+    gracefulShutdown,
+    terminateProcessTree,
+    input: {
+      workspaceRoot,
+      pythonPath: join(workspaceRoot, ".venv", "Scripts", "python.exe"),
+      operation,
+      command: {
+        commandId: operation === "stop" ? "cmd_dead_backend_stop" : "cmd_dead_backend_restart",
+        type: operation,
+        operation,
+        noBrowser: true
+      },
+      spawnImpl,
+      fileExists: (path: string) => path.endsWith("pythonw.exe") || path.endsWith("index.html"),
+      readState: () => ({
+        backendPid: 4242,
+        backendCreateTime: 1,
+        backendExecutable: "C:/Python/pythonw.exe",
+        backendPort: 8000
+      }),
+      writeState: (state: Record<string, unknown>) => {
+        written.push(state);
+      },
+      ensureFrontend: async () => undefined,
+      connect: async () => spawned,
+      fetchHealth: async () => ({
+        status: 200,
+        json: async () => ({ status: "ok", routesReady: true, pid: 4243, workspaceRoot })
+      }),
+      pidAlive: () => false,
+      gracefulShutdown,
+      terminateProcessTree,
+      captureProcessIdentity: async ({ pid }: { pid: number }) => ({
+        pid,
+        createTime: 1,
+        executable: "C:/Python/pythonw.exe"
+      })
+    }
+  };
+}
+
+describe("work_runs escape when a blocked lifecycle command finds a dead backend", () => {
+  it("stop releases a running snapshot once every registered backend handle is dead", async () => {
+    const root = makeWorkspaceRoot();
+    const snapshot = writeRun(root, "chat_turn", "zombie-turn", {}, "zombie-turn");
+    expect(listActiveWorkRuns(root).map((run) => run.runId)).toEqual(["zombie-turn"]);
+
+    const harness = deadBackendLifecycleInput(root, "stop");
+    await expect(executeMainLineWorkbench(harness.input))
+      .resolves.toMatchObject({ accepted: true, operation: "stop" });
+
+    // The escape reused the orphan reconciliation: terminal receipt, stopped
+    // verdict with the pre-stop reading kept for audit, index claim cleared.
+    const payload = JSON.parse(readFileSync(snapshot, "utf8")) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      status: "stopped",
+      preStopStatus: "running",
+      runtimeStatus: "orphan_reconciled",
+      reconciliationSource: "electron_workbench_stop"
+    });
+    expect(String(payload.finishedAt || "").trim()).not.toBe("");
+    expect(listActiveWorkRuns(root)).toEqual([]);
+  });
+
+  it("restart executes instead of queueing behind a dead backend's running snapshot", async () => {
+    const root = makeWorkspaceRoot();
+    writeRun(root, "chat_turn", "zombie-turn", {}, "zombie-turn");
+
+    const harness = deadBackendLifecycleInput(root, "restart");
+    const result = await executeMainLineWorkbench(harness.input);
+    expect(result.code).not.toBe("restart_queued");
+    expect(result).toMatchObject({ accepted: true, operation: "restart" });
+    // The guard released the restart, so the retirement + fresh spawn ran.
+    expect(harness.spawned()).toBe(true);
+    expect(listActiveWorkRuns(root)).toEqual([]);
+  });
+
+  it("keeps the guard's veto while a backend handle is alive, even with a running snapshot", async () => {
+    const root = makeWorkspaceRoot();
+    writeRun(root, "chat_turn", "live-turn", {}, "live-turn");
+    const base = deadBackendLifecycleInput(root, "stop");
+    const aliveBackend = {
+      ...base.input,
+      pidAlive: (pid: number) => pid === 4242
+    };
+    await expect(executeMainLineWorkbench(aliveBackend))
+      .resolves.toMatchObject({ accepted: false, code: "active_work_blocked" });
+    // The snapshot was never touched: no release, no settlement.
+    expect(listActiveWorkRuns(root).map((run) => run.runId)).toEqual(["live-turn"]);
+
+    const restart = deadBackendLifecycleInput(root, "restart");
+    await expect(executeMainLineWorkbench({
+      ...restart.input,
+      pidAlive: (pid: number) => pid === 4242
+    })).resolves.toMatchObject({ accepted: true, code: "restart_queued" });
+    expect(restart.spawned()).toBe(false);
+    expect(listActiveWorkRuns(root).map((run) => run.runId)).toEqual(["live-turn"]);
+  });
+
+  it("leaves a stop with no blocking snapshot and a dead backend unchanged", async () => {
+    const root = makeWorkspaceRoot();
+    const harness = deadBackendLifecycleInput(root, "stop");
+    await expect(executeMainLineWorkbench(harness.input))
+      .resolves.toMatchObject({ accepted: true, operation: "stop" });
+    expect(listActiveWorkRuns(root)).toEqual([]);
+    expect(harness.gracefulShutdown).not.toHaveBeenCalled();
+    expect(harness.terminateProcessTree).not.toHaveBeenCalled();
+  });
+});
+
 describe("restart intent garbage collection on accepted lifecycle commands", () => {
   it("drops failed and expired terminal intents behind an accepted stop", async () => {
     const root = makeWorkspaceRoot();
