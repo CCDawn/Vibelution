@@ -145,3 +145,35 @@ def test_settled_snapshot_falls_back_to_a_bare_frame_when_detail_is_gone(monkeyp
     publish._publish_session_detail_snapshot(session_id)
 
     assert published == [{"sessionId": session_id, "patch": None}]
+
+def test_settled_snapshot_survives_a_failed_projection(monkeypatch):
+    """Turn finalization must not fail because the rail row could not hydrate.
+
+    This branch runs while a finished turn is being finalized, so raising here
+    would report a completed session as a crashed worker. The rail still gets
+    the bare frame, which it already handles by re-reading the index.
+    """
+    from core.web.services import session_service as service
+    from core.web.services.session import publish
+
+    session_id = "settled-projection-raises"
+    published: list[dict] = []
+    monkeypatch.setattr(publish, "_service", lambda: service)
+    monkeypatch.setattr(service, "_SESSION_STREAM_SUBSCRIBERS", {})
+    monkeypatch.setattr(service, "_is_session_running", lambda _id: False)
+    monkeypatch.setattr(service, "_record_session_detail_snapshot_published_event", lambda **kwargs: None)
+
+    def explode(_id, **_kwargs):
+        raise RuntimeError("projection gate refused the read")
+
+    monkeypatch.setattr(service, "get_session_detail", explode)
+
+    def capture(session_id, change_type, *, patch=None):
+        published.append({"sessionId": session_id, "patch": None if patch is None else dict(patch)})
+        return 0
+
+    monkeypatch.setattr(session_index_stream, "publish_session_index_delta", capture)
+
+    publish._publish_session_detail_snapshot(session_id)
+
+    assert published == [{"sessionId": session_id, "patch": None}]

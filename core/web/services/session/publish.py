@@ -669,20 +669,28 @@ def _publish_session_detail_snapshot(session_id: str, *, detail: dict[str, Any] 
         # settled row: a bare "this row moved" frame costs every open window a
         # full index read, so hydrate the projection once here and ship the
         # same patch the watched path sends.
+        #
+        # This runs while a finished turn is being finalized, so a projection
+        # failure must never escape: the session already ended, and raising from
+        # this path would report a completed turn as a crashed worker. A failed
+        # hydration degrades to the bare frame the rail already knows how to
+        # handle by re-reading the index.
         from core.web.services.session import session_index_stream
 
-        settled_detail = detail if detail is not None else s.get_session_detail(
-            session_id,
-            message_limit=s._SESSION_STREAM_DETAIL_MESSAGE_LIMIT,
-            transcript_scope=s._SESSION_STREAM_DETAIL_TRANSCRIPT_SCOPE,
-        )
-        if settled_detail is None:
-            session_index_stream.publish_session_index_delta(session_id, "upsert")
-            return
+        settled_patch: dict[str, Any] = {}
+        try:
+            settled_detail = detail if detail is not None else s.get_session_detail(
+                session_id,
+                message_limit=s._SESSION_STREAM_DETAIL_MESSAGE_LIMIT,
+                transcript_scope=s._SESSION_STREAM_DETAIL_TRANSCRIPT_SCOPE,
+            )
+            settled_patch = session_index_stream.index_patch_from_detail(settled_detail)
+        except Exception:
+            settled_patch = {}
         session_index_stream.publish_session_index_delta(
             session_id,
             "upsert",
-            patch=session_index_stream.index_patch_from_detail(settled_detail),
+            patch=settled_patch or None,
         )
         return
     if not subscribers:
