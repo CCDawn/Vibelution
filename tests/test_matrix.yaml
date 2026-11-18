@@ -491,6 +491,7 @@ rules:
       - "local-parallel"
     paths:
       - ".github/workflows/ci.yml"
+      - ".githooks/pre-receive"
       - "scripts/local_quality_gate.py"
       - "scripts/git_claim_guard.py"
       - "scripts/git_hook_install.py"
@@ -933,6 +934,8 @@ rules:
       - "local-parallel"
       - "remote-distributed"
     paths:
+      - "tools/Key_Tools.py"
+      - "core/web/services/tool_catalog.py"
       - "core/web/services/tool_registry_service.py"
       - "core/web/routes/tools.py"
       - "tests/test_tool_registry_service.py"
@@ -941,7 +944,7 @@ rules:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_tool_registry_service.py tests/test_tool_registry_routes.py -q"
       - ".\\.venv\\Scripts\\python.exe tests/prompt_debugger.py --suite --quick"
     notes:
-      - "Tool registry changes need route/service validation and prompt debugger coverage because they affect tool visibility."
+      - "Built-in registration changes need full registry construction, route coverage and prompt debugger coverage because they affect tool visibility."
 
   - id: git-worktree
     description: "Git service, Git memory, worktree hygiene, and no-console Git process paths."

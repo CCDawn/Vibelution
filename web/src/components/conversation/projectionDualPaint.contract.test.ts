@@ -95,7 +95,7 @@ describe("projection dual-paint contracts", () => {
     })).toBe(false);
   });
 
-  it("prefers the user-facing commentary copy over its reasoning restream", () => {
+  it("keeps a longer reasoning restream when the commentary copy is only a fragment", () => {
     const deduped = dedupeThoughtLikeTranscriptCells([
       {
         id: "done",
@@ -115,7 +115,7 @@ describe("projection dual-paint contracts", () => {
         text: "短思考，继续展开。",
       },
     ]);
-    expect(deduped.map((cell) => cell.id)).toEqual(["done"]);
+    expect(deduped.map((cell) => cell.id)).toEqual(["done", "run"]);
   });
 
   it("display dedupe collapses duplicate tool identities after thought dedupe", () => {
@@ -182,6 +182,6 @@ describe("projection dual-paint contracts", () => {
         },
       },
     ]);
-    expect(display.map((cell) => cell.id)).toEqual(["thought-a", "tool-b"]);
+    expect(display.map((cell) => cell.id)).toEqual(["thought-a", "thought-b", "tool-b"]);
   });
 });

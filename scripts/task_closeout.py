@@ -66,6 +66,7 @@ class CloseoutContext:
     main_root: Path
     task_root: Path
     branch: str
+    base: str = "main"
 
 
 @dataclass(frozen=True)
@@ -358,7 +359,7 @@ def resolve_context(
     if gate.git_lines(task_root, "--no-optional-locks", "status", "--porcelain"):
         raise ManagedCloseoutError("dirty_worktree")
     expected_parent = (main_root / ".worktrees").resolve()
-    context = CloseoutContext(main_root=main_root, task_root=task_root, branch=branch)
+    context = CloseoutContext(main_root=main_root, task_root=task_root, branch=branch, base=base)
     if retain_worktree and not worktree_is_registered(context):
         raise ManagedCloseoutError("unregistered_task_worktree")
     if task_root.parent != expected_parent and not retain_worktree:
@@ -599,6 +600,8 @@ def prune_coordination(context: CloseoutContext) -> None:
 
 
 def merge_ff_only(context: CloseoutContext, *, integration_claim_id: str, target_sha: str | None = None) -> str:
+    if gate.current_branch(context.main_root) != context.base:
+        raise ManagedCloseoutError("invalid_main_worktree")
     if gate.git_lines(context.main_root, "status", "--porcelain"):
         raise dirty_main_error(context)
     target_sha = gate.rev_parse(context.task_root, target_sha or "HEAD")

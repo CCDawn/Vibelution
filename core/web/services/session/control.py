@@ -21,6 +21,9 @@ import json
 
 
 _RUNTIME_STOP_REASONS = frozenset({"electron_user_restart", "electron_user_close", "runtime_shutdown"})
+# Restart reasons stay continuable after the fact; close and shutdown are
+# operator decisions, so they never enter the restart-resume marker.
+_RESTART_RESUME_REASONS = frozenset({"electron_user_restart"})
 
 # ---------------------------------------------------------------------------
 # 停止收尾总上界 watchdog（stop settlement watchdog）与停止阶段登记
@@ -566,6 +569,12 @@ def request_stop_session_turn(
             conversation_id, "runtime_stop_requested", turn_id=stop_turn_id,
             outcome="requested", fields={"source": effective_reason, "stopReason": effective_reason},
         )
+        if effective_reason in _RESTART_RESUME_REASONS:
+            # Single write point: every shutdown path that interrupts a turn
+            # for a restart reason lands here, so startup recovery gets the
+            # same marker whether the stop came from a daemon command, the
+            # operator restart harvest, or a runtime shutdown.
+            s.append_restart_resume_pending(conversation_id, stop_turn_id)
     else:
         s._record_chat_next_state_signal(
             session_id=conversation_id,

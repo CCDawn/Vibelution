@@ -94,6 +94,7 @@ from core.infrastructure.workspace_cleaner import (
 from tools.agent_tools import continue_subagent as _continue_subagent_impl
 from tools.agent_tools import spawn_agent as _spawn_agent_impl
 from tools.agent_message_tools import agent_message_tool as _agent_message_impl
+from tools.agent_directory_tools import agent_directory_tool as _agent_directory_impl
 from tools.dev_task_board_tools import dev_task_board_tool as _dev_task_board_impl
 from tools.episodic_memory_tools import (
     append_personal_memory_tool as _append_personal_memory_impl,
@@ -2517,6 +2518,38 @@ def _build_key_tools() -> List[BaseTool]:
         )
 
     @tool
+    def agent_directory_tool(
+        query: str = "",
+        include_sessions: bool = True,
+        limit: int = 20,
+        sessions_per_agent: int = 3,
+    ) -> str:
+        """
+        【Agent 目录】列出可发现的 Agent 及其对应会话，用于找到该联系谁、发到哪个会话。
+
+        只读：不会发送消息、不会修改任何 Agent 或会话状态。发送请另行使用
+        agent_message_tool，并把这里返回的 directSessionId 或 sessions[].sessionId
+        作为 target_session。
+
+        Args:
+            query: 可选过滤词，匹配 agentId / agentCode / displayName / roleKey（不区分大小写）。
+            include_sessions: 是否附带每个 Agent 最近的会话（默认 True）。
+            limit: 最多返回多少个 Agent，1-50，默认 20。
+            sessions_per_agent: 每个 Agent 最多附带几个会话，0-10，默认 3。
+
+        Returns:
+            JSON 字符串，含 ok、totalAgents、matchedAgents、returned、sessionsAvailable
+            和 agents 列表；每个 Agent 带 agentId、agentCode、displayName、status、
+            directSessionId、inboxPendingCount，以及可选的 sessions。
+        """
+        return _agent_directory_impl(
+            query=query,
+            include_sessions=include_sessions,
+            limit=limit,
+            sessions_per_agent=sessions_per_agent,
+        )
+
+    @tool
     def dev_task_board_tool(
         action: str,
         team_id: str,
@@ -4094,6 +4127,7 @@ def _build_key_tools() -> List[BaseTool]:
         clean_workspace_debris_tool,
         get_session_files_tool,
         # Agent 间通信
+        agent_directory_tool,
         agent_message_tool,
         send_message_tool,
         dev_task_board_tool,

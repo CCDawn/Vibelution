@@ -2544,6 +2544,29 @@ def _set_session_live_context_composition(
     s._set_session_live_output(session_id, turn_id=turn_id, context_composition=context_composition)
 
 
+def _publish_session_index_running_status(session_id: str) -> None:
+    """Tell every rail row that this session started running.
+
+    The settled pass already publishes the terminal patch. Without this, the
+    rail only learns about a running turn from that session's detail stream,
+    which is why a background session looked frozen until it was opened.
+    """
+    try:
+        from core.web.services.session import session_index_stream
+
+        session_index_stream.publish_session_index_change_safely(
+            session_id,
+            "upsert",
+            patch={
+                "status": "running",
+                "currentPhase": "running",
+                "updatedAt": _now_timestamp(),
+            },
+        )
+    except Exception:
+        pass
+
+
 def _set_session_running(
     session_id: str,
     is_running: bool,
@@ -2552,7 +2575,9 @@ def _set_session_running(
     leases: list[str] | None = None,
 ) -> None:
     s = _service()
+    became_running = False
     with s._RUNNING_SESSIONS_LOCK:
+        was_running = session_id in s._RUNNING_SESSION_IDS
         if is_running:
             s._RUNNING_SESSION_IDS.add(session_id)
             if turn_id:
@@ -2564,6 +2589,10 @@ def _set_session_running(
                 s._RUNNING_SESSION_IDS.discard(session_id)
                 s._SESSION_ACTIVE_TURN_IDS.pop(session_id, None)
                 s._SESSION_ACTIVE_TURN_LEASES.pop(session_id, None)
+    became_running = is_running and not was_running
+    if became_running:
+        _publish_session_index_running_status(session_id)
+
     # Only a turn-scoped settle may release the queue: unconditional cleanup
     # calls can fire while the owning worker is still alive.
     if is_running or not turn_id:

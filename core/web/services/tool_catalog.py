@@ -154,6 +154,7 @@ EXPLICIT_ALLOW_TOOLS = {
     "financial_evidence_stage_tool",
     "financial_evidence_withdraw_tool",
     "cli_agent_run_tool",
+    "agent_directory_tool",
     "computer_use_session_tool",
     "computer_use_task_tool",
     "read_file_tool",
@@ -588,6 +589,12 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "capabilityTags": ["agent_message", "wake"],
         "riskTags": ["cross_agent_message", "can_wake_agent"],
         "permissionTier": HIGH_PERMISSION_TIER,
+    },
+    "agent_directory_tool": {
+        "category": "agent_collaboration",
+        "capabilityTags": ["agent_discovery", "conversation_index", "read_only"],
+        "riskTags": ["session_data_access"],
+        "permissionTier": MEDIUM_PERMISSION_TIER,
     },
     "create_child_session_tool": {
         "category": "agent_collaboration",

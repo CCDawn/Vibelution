@@ -76,6 +76,59 @@ def record_pending_restart_resume(
         )
 
 
+def append_pending_restart_resume(
+    store: Any, entries: Iterable[dict[str, Any]]
+) -> None:
+    """Merge turns into the marker, keeping entries written earlier.
+
+    Interrupted turns arrive here one at a time as their owners stop them, so
+    this path must extend the marker instead of replacing it the way
+    ``record_pending_restart_resume`` does; the first stop of a restart must
+    not erase the turns that stopped before it.
+    """
+
+    path = marker_path_for_store(store)
+    if path is None:
+        return
+    merged: dict[str, set[str]] = {
+        session_id: set(turn_ids)
+        for session_id, turn_ids in load_pending_restart_resume(store).items()
+    }
+    changed = False
+    for entry in entries or ():
+        if not isinstance(entry, dict):
+            continue
+        session_id = str(entry.get("sessionId") or "").strip()
+        turn_id = str(entry.get("turnId") or "").strip()
+        if not session_id or not turn_id:
+            continue
+        bucket = merged.setdefault(session_id, set())
+        if turn_id not in bucket:
+            bucket.add(turn_id)
+            changed = True
+    if not changed:
+        return
+    payload = {
+        "schemaVersion": MARKER_SCHEMA_VERSION,
+        "sessions": {
+            session_id: sorted(turn_ids)
+            for session_id, turn_ids in merged.items()
+            if turn_ids
+        },
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(f"{path.suffix}.tmp-{os.getpid()}")
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        os.replace(temporary, path)
+    except OSError as exc:  # losing the marker only restores manual resume
+        _logger.warning(
+            "Failed to append restart-resume marker (%s).", type(exc).__name__
+        )
+
+
 def load_pending_restart_resume(store: Any) -> dict[str, set[str]]:
     """Session id -> interrupted turn ids; a missing or invalid marker is empty."""
 

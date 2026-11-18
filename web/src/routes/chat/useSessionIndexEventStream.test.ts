@@ -1,7 +1,7 @@
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 
-import type { SessionSummary } from "../../api/types";
+import type { SessionQueryResponse, SessionSummary } from "../../api/types";
 import {
   applySessionIndexDeltaToQueryClient,
   parseSessionIndexDelta,
@@ -105,6 +105,28 @@ describe("applySessionIndexDeltaToQueryClient", () => {
     });
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["sessions"] });
+  });
+
+  it("moves the per-Agent tab cache with the same patch", () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+    });
+    queryClient.setQueryData<SessionSummary[]>(["sessions"], [summary("s1")]);
+    queryClient.setQueryData<SessionQueryResponse>(["sessions", "agent", "a1"], {
+      items: [summary("s1")],
+      totalEstimate: 1,
+    });
+
+    applySessionIndexDeltaToQueryClient(queryClient, {
+      type: "session.upserted",
+      sessionId: "s1",
+      patch: { status: "running", currentPhase: "running" },
+    });
+
+    expect(queryClient.getQueryData<SessionSummary[]>(["sessions"])?.[0]?.status).toBe("running");
+    const agentRows = queryClient.getQueryData<SessionQueryResponse>(["sessions", "agent", "a1"]);
+    expect(agentRows?.items[0]?.status).toBe("running");
+    expect(agentRows?.items[0]?.currentPhase).toBe("running");
   });
 
   it("keeps the cache value identical when the patched row is not loaded", () => {

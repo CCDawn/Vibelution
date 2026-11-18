@@ -36,6 +36,7 @@ def snapshot_files(source_root: Path) -> dict[str, bytes]:
         "scripts/git_history_bridge.py": (source_root / "scripts/git_history_bridge.py").read_bytes(),
         "scripts/git_hook_dispatch.py": (source_root / "scripts/git_hook_dispatch.py").read_bytes(),
         "hooks/reference-transaction": reference.encode("utf-8"),
+        "hooks/pre-receive": (source_root / ".githooks/pre-receive").read_bytes(),
     }
     # Preserve the original checkout hook's body and invoke the shared guard
     # inside it, so old task copies calculate claims against the old baseline.
