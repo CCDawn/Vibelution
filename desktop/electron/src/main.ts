@@ -185,7 +185,8 @@ import {
   instancesRegistryPath,
   readRegistry,
   recordSpawnPid,
-  upsert
+  upsert,
+  registerWorkbenchInstance
 } from "./lifecycle/instanceRegistryStore.js";
 import { reconcileOrphanedInstanceRegistry } from "./lifecycle/instanceRegistryRecovery.js";
 import { reconcileRegistryWithObservation } from "./lifecycle/instanceRegistryReconciler.js";
@@ -2652,6 +2653,19 @@ async function openWorkbenchAtCurrentLauncherUrlImpl(
       workbenchUrl = new URL("/config", workbenchUrl).toString();
     }
     currentWorkbenchUrl = workbenchUrl;
+    // Opening a window never went through the isolated-start claim, so the
+    // registry kept no row for this backend and a launcher `restart` had
+    // nothing to find. Record the fact here; a failure must not block the
+    // window that is already navigating.
+    try {
+      await registerWorkbenchInstance(instancesRegistryPath(), {
+        projectRoot: paths.workspaceRoot,
+        port: Number(new URL(workbenchUrl).port || 0),
+        url: workbenchUrl
+      });
+    } catch (error: unknown) {
+      console.warn("workbench instance registration failed", error);
+    }
     // A stale resolution can still name port 8000 after the backend died
     // (2026-09-29: "open window" created a Workbench window against a dead
     // backend and the window flashed away with no explanation). Prove the

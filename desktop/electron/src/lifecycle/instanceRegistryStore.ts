@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { randomBytes } from "node:crypto";
@@ -131,6 +131,75 @@ export function instancesRegistryPath(env: NodeJS.Dict<string> = process.env): s
   const local = String(env.LOCALAPPDATA || "").trim();
   const root = local || join(String(env.USERPROFILE || env.HOME || ""), "AppData", "Local");
   return join(root, "Vibelution", "instances.json");
+}
+
+const ORPHAN_REGISTRY_TEMP = /^\.[0-9a-f]{12}\.instances\.json$/;
+
+/** Remove temp siblings left behind by a writeRegistry that never renamed. */
+export async function sweepOrphanRegistryTemps(registryPath: string): Promise<string[]> {
+  const directory = dirname(registryPath);
+  let names: string[];
+  try {
+    names = await readdir(directory);
+  } catch {
+    return [];
+  }
+  const removed: string[] = [];
+  for (const name of names) {
+    if (!ORPHAN_REGISTRY_TEMP.test(name)) continue;
+    try {
+      await rm(join(directory, name), { force: true });
+      removed.push(name);
+    } catch {
+      // A locked temp retries on the next startup instead of failing it.
+    }
+  }
+  return removed;
+}
+
+export type WorkbenchRegistrationInput = {
+  projectRoot: string;
+  port: number;
+  controlPort?: number;
+  url?: string;
+  ownerPid?: number;
+  instanceId?: string;
+  nowMs?: number;
+};
+
+/**
+ * Record an already-open Workbench. Opening the window never reserved an
+ * isolated start, so without this row the launcher cannot see the live backend
+ * and `restart` degrades into a silent no-op.
+ */
+export async function registerWorkbenchInstance(
+  registryPath: string,
+  input: WorkbenchRegistrationInput,
+  options: RegistryStoreOptions = {}
+): Promise<UpsertResult> {
+  const ownerPid = Math.trunc(input.ownerPid ?? process.pid);
+  return mutateRegistry(
+    registryPath,
+    (payload) => {
+      const fields: Record<string, unknown> = {
+        projectRoot: input.projectRoot,
+        host: "127.0.0.1",
+        port: Math.trunc(input.port),
+        url: String(input.url || loopbackUrl(input.port)),
+        status: "open",
+        phase: "ready",
+        startedAt: toIsoUtc(input.nowMs ?? Date.now()),
+        ownerPid,
+        ownerId: `pid:${ownerPid}`
+      };
+      const controlPort = Number(input.controlPort || 0);
+      if (Number.isFinite(controlPort) && controlPort > 0) {
+        fields.controlPort = Math.trunc(controlPort);
+      }
+      return applyUpsert(payload, String(input.instanceId || "main"), fields);
+    },
+    options
+  );
 }
 
 export function loopbackUrl(port: number): string {
@@ -821,8 +890,16 @@ async function writeRegistry(registryPath: string, payload: RegistryPayload): Pr
   await mkdir(dirname(registryPath), { recursive: true });
   const tempPath = join(dirname(registryPath) || tmpdir(), `.${randomBytes(6).toString("hex")}.instances.json`);
   const body = `${JSON.stringify(payload, null, 2)}\n`;
-  await writeFile(tempPath, body, "utf8");
-  await rename(tempPath, registryPath);
+  try {
+    await writeFile(tempPath, body, "utf8");
+    await rename(tempPath, registryPath);
+  } catch (error) {
+    // A failed rename (target held open, scanner lock) used to leave the temp
+    // sibling behind. It carries the registry shape, so a stale one is
+    // indistinguishable from real state and silently piles up in LOCALAPPDATA.
+    await rm(tempPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
 }
 
 export type RegistryStoreOptions = InstanceLockOptions & {
