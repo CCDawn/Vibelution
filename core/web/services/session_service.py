@@ -1433,11 +1433,15 @@ def stop_session_service_admission() -> None:
             _SESSION_EXECUTOR_DRAIN_THREADS.append(joiner)
 
 
-def record_restart_resume_pending(*, replace: bool = True) -> None:
+def record_restart_resume_pending(
+    *, replace: bool = True, exclude_turn_ids: set[str] | None = None
+) -> None:
     """Record turns this graceful stop interrupts so startup can resume them.
 
     A restart and an operator pressing stop both end in the same terminal
     ``stopped`` state, so the snapshot alone cannot tell them apart later.
+    ``exclude_turn_ids`` drops turns another owner already resumes (a scoped
+    hot-restart wake) so startup recovery does not resume them a second time.
     """
 
     from core.web.services.session import restart_resume_pending
@@ -1448,6 +1452,9 @@ def record_restart_resume_pending(*, replace: bool = True) -> None:
         return
     if not isinstance(snapshots, list):
         return
+    excluded_turn_ids = {
+        str(turn_id).strip() for turn_id in (exclude_turn_ids or set())
+    } - {""}
     entries = [
         {
             "sessionId": str(snapshot.get("sessionId") or "").strip(),
@@ -1455,6 +1462,7 @@ def record_restart_resume_pending(*, replace: bool = True) -> None:
         }
         for snapshot in snapshots
         if isinstance(snapshot, dict)
+        and str(snapshot.get("runId") or "").strip() not in excluded_turn_ids
     ]
     restart_resume_pending.record_pending_restart_resume(
         _WORK_RUN_STORE, entries, replace=replace

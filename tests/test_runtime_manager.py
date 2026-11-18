@@ -8863,7 +8863,7 @@ def test_hot_restart_without_requester_records_restart_resume_marker(monkeypatch
     monkeypatch.setattr(
         daemon,
         "_settle_active_work_for_lifecycle_stop",
-        lambda: settles.append("settle") or {},
+        lambda *, exclude_turn_ids=None: settles.append("settle") or {},
     )
     monkeypatch.setattr(daemon, "_append_event", lambda *_args, **_kwargs: None)
 
@@ -8879,7 +8879,7 @@ def test_hot_restart_without_requester_records_restart_resume_marker(monkeypatch
 
 def test_hot_restart_with_requester_keeps_wake_owned_recovery(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
-    settles: list[str] = []
+    settles: list[set[str] | None] = []
 
     monkeypatch.setattr(
         daemon,
@@ -8889,7 +8889,7 @@ def test_hot_restart_with_requester_keeps_wake_owned_recovery(monkeypatch):
     monkeypatch.setattr(
         daemon,
         "_settle_active_work_for_lifecycle_stop",
-        lambda: settles.append("settle") or {},
+        lambda *, exclude_turn_ids=None: settles.append(exclude_turn_ids) or {},
     )
     monkeypatch.setattr(daemon, "_append_event", lambda *_args, **_kwargs: None)
 
@@ -8904,7 +8904,9 @@ def test_hot_restart_with_requester_keeps_wake_owned_recovery(monkeypatch):
     )
 
     assert blocked is None
-    assert settles == []
+    # The requester's own turn stays wake-owned, but the marker must still
+    # cover every other turn the same restart interrupted.
+    assert settles == [{"turn-live"}]
 
 
 def test_hot_restart_allows_only_requester_active_chat_turn(monkeypatch):

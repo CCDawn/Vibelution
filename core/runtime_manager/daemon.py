@@ -359,18 +359,24 @@ def _filter_active_work_for_lifecycle_command(
     return blocked, allowed
 
 
-def _settle_active_work_for_lifecycle_stop() -> dict[str, Any]:
+def _settle_active_work_for_lifecycle_stop(
+    *, exclude_turn_ids: set[str] | None = None
+) -> dict[str, Any]:
     """Persist interruption state before a lifecycle command retires the backend.
 
     Chat turns get the same restart-resume marker a graceful shutdown writes;
     evolution runs settle through their existing shutdown owner. This runs
     before the fast-path stop so a terminated process cannot drop that state.
+    ``exclude_turn_ids`` keeps a turn that another owner already resumes (the
+    hot-restart wake) out of the marker, so it is never resumed twice.
     """
 
     from core.web.services import session_service
 
     try:
-        session_service.record_restart_resume_pending(replace=False)
+        session_service.record_restart_resume_pending(
+            replace=False, exclude_turn_ids=exclude_turn_ids
+        )
     except Exception as exc:  # noqa: BLE001 - resume is best effort, stop still proceeds
         _append_event(
             "workbench.lifecycle.restart_resume_record_failed",
@@ -3287,20 +3293,20 @@ class RuntimeManagerDaemon:
                     and _hot_restart_requester_fields(args).get("sessionId")
                     else "interrupting_active_work"
                 )
-                # A scoped hot restart wakes exactly the requester's turn. When
-                # no requester owns that wake -- tray, desktop shell, or a hot
-                # update with no session -- nothing would resume the interrupted
-                # turns, so they get the restart-resume marker a planned restart
-                # writes. With a requester the wake owns recovery and the marker
-                # stays off to avoid a second resume of the same turn.
-                unowned_hot_restart = (
-                    command_type == "hot_restart_workbench"
-                    and not _hot_restart_requester_fields(args).get("sessionId")
-                )
-                settle = (
-                    _settle_active_work_for_lifecycle_stop()
-                    if command_type != "hot_restart_workbench" or unowned_hot_restart
-                    else {}
+                # A scoped hot restart wakes exactly the requester's turn.
+                # Every other turn interrupted by the same restart has no owner,
+                # so it gets the restart-resume marker a planned restart writes;
+                # the requester's own turn stays wake-owned and is excluded so
+                # it is never resumed twice. Without a requester every turn is
+                # unowned and the marker covers them all.
+                requester = _hot_restart_requester_fields(args)
+                settle = _settle_active_work_for_lifecycle_stop(
+                    exclude_turn_ids=(
+                        {requester["runId"]}
+                        if command_type == "hot_restart_workbench"
+                        and requester.get("runId")
+                        else None
+                    ),
                 )
                 _append_event(
                     f"workbench.{event_verb}.{event_name}",
