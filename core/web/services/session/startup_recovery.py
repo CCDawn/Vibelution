@@ -142,6 +142,7 @@ def _new_summary() -> dict[str, Any]:
         "candidateCount": 0,
         "prefilterSkippedCount": 0,
         "tailSkippedCount": 0,
+        "markerResumeCount": 0,
         "workerCount": 1,
         "watermarkApplied": False,
         "durationMs": 0,
@@ -1052,6 +1053,26 @@ def _resume_interrupted_turn(
     summary["resumedCount"] += 1
 
 
+def _latest_marker_turn_id(events: list[Any], marker_turn_ids: set[str]) -> str:
+    """Newest marker turn the journal actually saw, else the marker's own id.
+
+    The marker lists turns a restart stopped. The journal may already carry a
+    stop fact for them or may lag the marker write, so prefer the newest
+    journal-visible id and fall back to the marker id when the ledger has not
+    caught up yet.
+    """
+
+    seen: list[str] = []
+    for row in events or []:
+        turn_id = str(getattr(row, "turn_id", "") or "").strip()
+        if turn_id and turn_id in marker_turn_ids and turn_id not in seen:
+            seen.append(turn_id)
+    if seen:
+        return seen[-1]
+    ordered = sorted(marker_turn_ids)
+    return ordered[-1] if ordered else ""
+
+
 def _recover_session_on_startup(
     s: Any,
     session_id: str,
@@ -1061,6 +1082,7 @@ def _recover_session_on_startup(
     should_stop: Callable[[], bool] | None = None,
     active_turn_session_ids: set[str] | None = None,
     pending_turn_ids: set[str] | None = None,
+    pending_session_turn_ids: dict[str, set[str]] | None = None,
 ) -> None:
     if _shutdown_requested(should_stop):
         return
@@ -1144,26 +1166,39 @@ def _recover_session_on_startup(
             summary["noActiveTurnSkipCount"] += 1
             return
     else:
-        tail_decision, tail_resumed_skips = _tail_may_need_resume(s, session_id)
-        summary["alreadyResumedSkipCount"] += tail_resumed_skips
-        if tail_decision is False:
-            summary["tailSkippedCount"] += 1
-            return
-        events = s._load_session_conversation_events_cached(session_id)
-        open_turn_id = latest_open_turn_id(events)
-        if not open_turn_id:
-            (
-                continuable_turn_id,
-                continuable_at,
-                continuable_skips,
-            ) = _latest_continuable_turn(events)
-            summary["alreadyResumedSkipCount"] += continuable_skips
-            if continuable_turn_id and _within_resume_age_window(continuable_at):
-                open_turn_id = continuable_turn_id
-                journal_interrupt_evidence = True
-                summary["continuableResumeCount"] += 1
-            else:
+        marker_turn_ids = set((pending_session_turn_ids or {}).get(session_id) or ())
+        if marker_turn_ids:
+            # The restart marker is the authoritative record that a restart
+            # interrupted this turn. A stop writes its own terminal fact and a
+            # hint can be backfilled as terminal, so the tail alone would skip
+            # exactly the turns the operator expects back.
+            events = s._load_session_conversation_events_cached(session_id)
+            open_turn_id = _latest_marker_turn_id(events, marker_turn_ids)
+            if not open_turn_id:
+                summary["noInterruptedTurnCount"] += 1
                 return
+            summary["markerResumeCount"] += 1
+        else:
+            tail_decision, tail_resumed_skips = _tail_may_need_resume(s, session_id)
+            summary["alreadyResumedSkipCount"] += tail_resumed_skips
+            if tail_decision is False:
+                summary["tailSkippedCount"] += 1
+                return
+            events = s._load_session_conversation_events_cached(session_id)
+            open_turn_id = latest_open_turn_id(events)
+            if not open_turn_id:
+                (
+                    continuable_turn_id,
+                    continuable_at,
+                    continuable_skips,
+                ) = _latest_continuable_turn(events)
+                summary["alreadyResumedSkipCount"] += continuable_skips
+                if continuable_turn_id and _within_resume_age_window(continuable_at):
+                    open_turn_id = continuable_turn_id
+                    journal_interrupt_evidence = True
+                    summary["continuableResumeCount"] += 1
+                else:
+                    return
     _resume_interrupted_turn(
         s,
         session_id,
@@ -1191,6 +1226,7 @@ _SWEEP_COUNTER_FIELDS = (
     "externalTaskSkipCount",
     "errorCount",
     "tailSkippedCount",
+    "markerResumeCount",
 )
 
 
@@ -1351,6 +1387,7 @@ def _run_session_candidates(
     active_turn_session_ids: set[str] | None,
     pending_turn_ids: set[str],
     priority_session_ids: set[str] | None = None,
+    pending_session_turn_ids: dict[str, set[str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Run one candidate per session, serially or on a staggered pool.
 
@@ -1374,6 +1411,7 @@ def _run_session_candidates(
                 should_stop=should_stop,
                 active_turn_session_ids=active_turn_session_ids,
                 pending_turn_ids=pending_turn_ids,
+                pending_session_turn_ids=pending_session_turn_ids,
             )
         except Exception as exc:  # noqa: BLE001 - one bad session never blocks startup
             local["errorCount"] += 1
@@ -1538,6 +1576,7 @@ def recover_interrupted_session_turns_on_startup(
             active_turn_session_ids=active_turn_session_ids,
             pending_turn_ids=restart_pending_turn_ids,
             priority_session_ids=resume_priority_session_ids,
+            pending_session_turn_ids=restart_pending_map,
         )
         summary["phaseCandidatesMs"] = int((time.perf_counter() - _phase_start) * 1000)
         _merge_recovery_summaries(summary, results)

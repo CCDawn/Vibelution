@@ -29,6 +29,7 @@ from core.chat.conversation_ledger import conversation_ledger_path
 from core.chat.turn_journal import (
     EVENT_ASSISTANT_PARTIAL,
     EVENT_SESSION_RECOVERY_RESUMED,
+    EVENT_TURN_COMPLETED,
     EVENT_TURN_INTERRUPTED,
     EVENT_TURN_STARTED,
     EVENT_USER_MESSAGE,
@@ -43,6 +44,7 @@ from core.web.services import session_service
 from core.web.services.session import (
     queued_turns,
     recovery_sweep_state,
+    restart_resume_pending,
     startup_recovery,
 )
 
@@ -1125,3 +1127,36 @@ def test_tail_verdict_decides_from_the_probe_alone() -> None:
     assert startup_recovery._tail_verdict(open_turn) == (True, 0)
     assert startup_recovery._tail_verdict(undecided) == (None, 0)
     assert startup_recovery._tail_verdict([]) == (None, 0)
+
+
+def test_marker_turn_resumes_even_when_the_journal_tail_looks_settled(
+    recovery_env, tmp_path, submit_calls
+) -> None:
+    """The restart marker outranks a settled-looking tail.
+
+    A stop writes its own terminal fact, so the journal tail can look finished
+    even for a turn the restart marker says was interrupted. The marker is the
+    authoritative record; resume it instead of skipping on the tail.
+    """
+
+    _seed_conversation(tmp_path)
+    _seed_interrupted_turn(tmp_path)
+    append_turn_event(
+        tmp_path,
+        SESSION_ID,
+        ORIGINAL_TURN_ID,
+        EVENT_TURN_COMPLETED,
+        status="stopped",
+        payload={},
+        source="turn_stop",
+    )
+    restart_resume_pending.record_pending_restart_resume(
+        recovery_env, [{"sessionId": SESSION_ID, "turnId": ORIGINAL_TURN_ID}]
+    )
+
+    summary = startup_recovery.recover_interrupted_session_turns_on_startup()
+
+    assert summary["markerResumeCount"] == 1
+    assert summary["resumedCount"] == 1
+    assert [call["content"] for call in submit_calls] == [ORIGINAL_PROMPT]
+    assert submit_calls[0]["turn_mode"] == "hot_restart_resume"
