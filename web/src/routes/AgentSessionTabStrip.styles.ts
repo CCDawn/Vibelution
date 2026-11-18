@@ -84,9 +84,11 @@ const styles = {
   agentSessionTabStatusCompleted:
     "vui-routes-chatcodingroute agentSessionTabStatusCompleted h-2.5 w-2.5 rounded-full bg-[var(--accent-cool)]",
   agentSessionTabGroupStatusSlot:
-    "vui-routes-chatcodingroute agentSessionTabGroupStatusSlot inline-flex h-3.5 min-w-3.5 shrink-0 items-center justify-center self-center",
+    "vui-routes-chatcodingroute agentSessionTabGroupStatusSlot inline-flex h-3.5 shrink-0 items-center gap-1 self-center",
   agentSessionTabGroupStatusBadge:
-    "vui-routes-chatcodingroute agentSessionTabGroupStatusBadge inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full px-1 text-[10px] font-medium leading-none tabular-nums text-[var(--vui-surface-chat)]",
+    "vui-routes-chatcodingroute agentSessionTabGroupStatusBadge inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full px-1 text-[10px] font-semibold leading-none tabular-nums text-[var(--vui-surface-chat)]",
+  agentSessionTabGroupStatusBadgeEmpty:
+    "vui-routes-chatcodingroute agentSessionTabGroupStatusBadgeEmpty opacity-45",
   agentSessionTabGroupStatusBadgeApproval:
     "vui-routes-chatcodingroute agentSessionTabGroupStatusBadgeApproval bg-[var(--state-warning)]",
   agentSessionTabGroupStatusBadgeRunning:

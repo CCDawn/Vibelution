@@ -218,40 +218,35 @@ function renderAgentSessionStatusSlot(tone: AgentSessionStatusTone) {
   );
 }
 
-/** Group header status: a bare dot cannot say how many sessions are waiting. */
+/**
+ * Group header status: running and finished counts sit side by side and are
+ * always rendered, so a group chip never changes width as work starts or ends.
+ * The number lives inside a colour pip instead of next to an icon.
+ */
 function renderAgentSessionGroupStatus(
   counts: Record<AgentSessionStatusTone, number>,
   lang: "zh" | "en",
 ) {
-  const focus = (["approval", "running", "error", "completed"] as const).find(
-    (tone) => counts[tone] > 0,
-  );
-  if (!focus) {
-    return (
-      <span
-        className={styles.agentSessionTabStatusSlot}
-        aria-hidden="true"
-        data-session-tab-status-slot
-      />
-    );
-  }
-  const badgeClassName = [
-    styles.agentSessionTabGroupStatusBadge,
-    focus === "approval" ? styles.agentSessionTabGroupStatusBadgeApproval : "",
-    focus === "running" ? styles.agentSessionTabGroupStatusBadgeRunning : "",
-    focus === "error" ? styles.agentSessionTabGroupStatusBadgeError : "",
-    focus === "completed" ? styles.agentSessionTabGroupStatusBadgeCompleted : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
   return (
-    <span
-      className={styles.agentSessionTabGroupStatusSlot}
-      title={sessionActivityLabel(focus, lang)}
-      data-session-tab-group-status={focus}
-      data-session-tab-group-status-count={counts[focus]}
-    >
-      <span className={badgeClassName}>{counts[focus]}</span>
+    <span className={styles.agentSessionTabGroupStatusSlot}>
+      {(["running", "completed"] as const).map((tone) => (
+        <span
+          key={tone}
+          className={[
+            styles.agentSessionTabGroupStatusBadge,
+            tone === "running" ? styles.agentSessionTabGroupStatusBadgeRunning : "",
+            tone === "completed" ? styles.agentSessionTabGroupStatusBadgeCompleted : "",
+            counts[tone] === 0 ? styles.agentSessionTabGroupStatusBadgeEmpty : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          title={sessionActivityLabel(tone, lang)}
+          data-session-tab-group-status={tone}
+          data-session-tab-group-status-count={counts[tone]}
+        >
+          {counts[tone]}
+        </span>
+      ))}
     </span>
   );
 }
