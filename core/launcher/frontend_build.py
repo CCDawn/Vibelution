@@ -19,6 +19,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 import time
 import uuid
 from collections.abc import Iterator
@@ -1912,14 +1913,47 @@ def frontend_build_status(project_root: Path | str) -> dict[str, Any]:
     }
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Report the frontend build this checkout serves (``python -m core.launcher.frontend_build``)."""
+def _build_command(project_root: Path | str, *, as_json: bool) -> int:
+    """Publish the release this checkout should serve, then report it."""
 
-    parser = argparse.ArgumentParser(description="Report the frontend build this checkout serves.")
-    parser.add_argument("command", nargs="?", default="status", choices=("status",))
+    try:
+        result = ensure_frontend_build(project_root)
+    except Exception as error:  # noqa: BLE001 - a CLI must name the failure, not dump a traceback
+        print(f"frontend build failed: {error}", file=sys.stderr)
+        return 1
+    status = frontend_build_status(project_root)
+    if as_json:
+        print(
+            json.dumps(
+                {**status, "build": result}, ensure_ascii=False, indent=2, sort_keys=True
+            )
+        )
+        return 0 if status["current"] else 1
+    action = "rebuilt" if result.get("rebuilt") else "reused"
+    print(f"frontend build: {action}")
+    print(f"  buildKey: {status['buildKey'] or '-'}")
+    print(f"  served: {status['source']} {status['release'] or '-'}")
+    print(f"  dist: {status['dist']}")
+    if status["fallbackReason"]:
+        print(f"  fallback: {status['fallbackReason']}")
+    return 0 if status["current"] else 1
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Report what this checkout serves, or build the release it should serve.
+
+    ``status`` answers which bytes run; ``build`` produces those bytes through
+    the same lock, BuildKey and atomic publish the Launcher uses, so a manual
+    build reaches the workbench instead of only refreshing ``web/dist``.
+    """
+
+    parser = argparse.ArgumentParser(description="Report or build the frontend release this checkout serves.")
+    parser.add_argument("command", nargs="?", default="status", choices=("status", "build"))
     parser.add_argument("--project-root", type=Path, default=Path.cwd())
-    parser.add_argument("--json", action="store_true", help="Print the raw status payload.")
+    parser.add_argument("--json", action="store_true", help="Print the raw payload.")
     args = parser.parse_args(argv)
+    if args.command == "build":
+        return _build_command(args.project_root, as_json=args.json)
     status = frontend_build_status(args.project_root)
     if args.json:
         print(json.dumps(status, ensure_ascii=False, indent=2, sort_keys=True))

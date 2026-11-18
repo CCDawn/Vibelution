@@ -7,6 +7,7 @@
     "dev": "vite --config vite.config.ts",
     "preview:stream": "vite --config vite.design-preview.config.ts --host 127.0.0.1 --port 5179",
     "build": "node scripts/parallelBuild.mjs",
+    "build:release": "node scripts/buildRelease.mjs",
     "build:probe": "node scripts/checkElkWorkerHandshake.mjs --build-only",
     "check:bundle": "node scripts/checkBundleBudget.mjs",
     "check:elk-worker-handshake": "node scripts/checkElkWorkerHandshake.mjs",
