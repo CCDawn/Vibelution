@@ -497,3 +497,34 @@ def test_serial_recovery_path_never_staggers(monkeypatch):
 
     assert recovered == session_ids
     assert sleeps == [], "the serial path is staggered by construction"
+
+
+def test_recovery_submits_interrupted_sessions_before_the_idle_stagger(monkeypatch):
+    recovered: list[str] = []
+
+    def _fake_recover(_session, session_id, **_kwargs):
+        recovered.append(str(session_id))
+
+    monkeypatch.setattr(startup_recovery, "_recover_session_on_startup", _fake_recover)
+    sleeps: list[float] = []
+    monkeypatch.setattr(
+        startup_recovery, "_stagger_sleep", lambda seconds: sleeps.append(seconds)
+    )
+
+    session_ids = ["session-idle-a", "session-interrupted", "session-idle-b"]
+    startup_recovery._run_session_candidates(
+        SimpleNamespace(),
+        session_ids,
+        worker_count=3,
+        companion_session_ids=set(),
+        should_stop=None,
+        active_turn_session_ids={"session-interrupted"},
+        pending_turn_ids=set(),
+        priority_session_ids={"session-interrupted"},
+    )
+
+    assert recovered[0] == "session-interrupted", "the interrupted turn resumes first"
+    assert sorted(recovered) == sorted(session_ids)
+    assert sleeps == [startup_recovery._RECOVERY_STAGGER_SECONDS], (
+        "only the idle candidates keep the rolling stagger"
+    )

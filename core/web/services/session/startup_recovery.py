@@ -1350,12 +1350,17 @@ def _run_session_candidates(
     should_stop: Callable[[], bool] | None,
     active_turn_session_ids: set[str] | None,
     pending_turn_ids: set[str],
+    priority_session_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Run one candidate per session, serially or on a staggered pool.
 
     Each call gets a private summary so no counter is shared between threads;
     the caller merges them afterwards into the same shape a serial sweep
-    produced.
+    produced. Sessions named by the restart marker or by an active turn are
+    submitted first and without the stagger: they are the work a restart
+    actually interrupted, so waiting behind idle history would turn a resume
+    into a multi-minute silence. The remaining candidates keep the rolling
+    stagger that protects journal projection rebuilds.
     """
 
     def run_one(session_id: str) -> dict[str, Any]:
@@ -1383,19 +1388,28 @@ def _run_session_candidates(
         return [run_one(session_id) for session_id in session_ids]
     from concurrent.futures import ThreadPoolExecutor
 
+    priority = set(priority_session_ids or ())
+    ordered = [session_id for session_id in session_ids if session_id in priority]
+    ordered.extend(
+        session_id for session_id in session_ids if session_id not in priority
+    )
     with ThreadPoolExecutor(
         max_workers=worker_count, thread_name_prefix="session-recovery"
     ) as pool:
         futures = []
-        for index, session_id in enumerate(session_ids):
-            if index and not _shutdown_requested(should_stop):
+        previous_was_regular = False
+        for session_id in ordered:
+            is_priority = session_id in priority
+            if previous_was_regular and not _shutdown_requested(should_stop):
                 # 恢复错峰：重启后 N 个候选若同时拉起，N 个会话立刻并行追加
                 # turn_journal，每个进行中会话的 detail 投影全量重建在 GIL 上
                 # 互踩（35MB journal 单次 1.5-4.5s，并发劣化 2-3 倍），SSE 心跳
                 # 被饿死导致前端断连重连风暴。滚动提交让恢复约每
                 # _RECOVERY_STAGGER_SECONDS 拉起一个会话，投影重建压力随之摊开；
-                # 自动恢复语义不变，只是不再齐发。
+                # 自动恢复语义不变，只是不再齐发。被重启中断的候选已在队首
+                # 提交完毕，这里只摊开空闲历史。
                 _stagger_sleep(_RECOVERY_STAGGER_SECONDS)
+            previous_was_regular = not is_priority
             futures.append(pool.submit(run_one, session_id))
         return [future.result() for future in futures]
 
@@ -1512,6 +1526,9 @@ def recover_interrupted_session_turns_on_startup(
         )
         summary["workerCount"] = worker_count
         _phase_start = time.perf_counter()
+        resume_priority_session_ids = set(restart_pending_session_ids)
+        if active_turn_session_ids:
+            resume_priority_session_ids |= set(active_turn_session_ids)
         results = _run_session_candidates(
             s,
             candidates,
@@ -1520,6 +1537,7 @@ def recover_interrupted_session_turns_on_startup(
             should_stop=should_stop,
             active_turn_session_ids=active_turn_session_ids,
             pending_turn_ids=restart_pending_turn_ids,
+            priority_session_ids=resume_priority_session_ids,
         )
         summary["phaseCandidatesMs"] = int((time.perf_counter() - _phase_start) * 1000)
         _merge_recovery_summaries(summary, results)
