@@ -1417,21 +1417,10 @@ def submit_session_guidance(
                 except Exception:
                     pass
     else:
-        # 没有可插入的回合时，引导没有可纳入的身份。写空 turn_id 的 guidance
-        # 事件会让纳入判定永远看不到终态，只能悬挂；直接作为普通下一轮输入入队。
-        s.enqueue_session_queued_turn(
-            conversation_id,
-            content=guidance_text,
-            attachments=guidance_attachments,
-            references=guidance_references,
-            mental_model_enabled=None,
-            runtime_status_enabled=None,
-            turn_mode="",
-            write_intent=None,
-            client_submission_id="",
-            lang=lang,
-        )
-        guidance_delivery = "queue"
+        # 没有可插入的回合：这条引导没有可纳入的身份。写空 turn_id 的事件会
+        # 永远等不到终态；重新入队又会让同一条内容在时间线和排片区各出现一次。
+        # 如实告诉前端没能插入，由用户决定是否重发。
+        guidance_delivery = "dropped"
 
     if normalized_mode == "interrupt" and running:
         stopped = s.request_stop_session_turn(conversation_id, fast_ack=True)
