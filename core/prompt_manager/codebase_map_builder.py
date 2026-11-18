@@ -510,6 +510,25 @@ def _write_meta(map_path: Path, files: List[Path], timestamp: str):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+def _project_relative_path(filepath: str) -> Optional[str]:
+    """把项目内路径归一化为相对项目根的 POSIX 路径；项目外路径返回 None。
+
+    文件修改工具可能传入项目外的绝对路径（例如临时目录中的脚本）。地图
+    只能描述项目内文件，这类路径必须在此收敛，否则后续 ``relative_to``
+    会抛 ValueError。
+    """
+    if not isinstance(filepath, str) or not filepath.strip():
+        return None
+    project_root = _resolve_project_root().resolve()
+    try:
+        candidate = Path(filepath)
+        if not candidate.is_absolute():
+            candidate = project_root / candidate
+        return candidate.resolve().relative_to(project_root).as_posix()
+    except (OSError, ValueError):
+        return None
+
+
 def incremental_update_file(filepath: str) -> bool:
     """增量更新单个文件的条目。
 
@@ -517,18 +536,21 @@ def incremental_update_file(filepath: str) -> bool:
     若文件不存在（已删除），则移除对应条目。
 
     Args:
-        filepath: 相对于项目根目录的文件路径
+        filepath: 相对于项目根目录的文件路径，也接受项目内绝对路径
 
     Returns:
-        True 表示更新成功
+        True 表示更新成功；路径在项目外或无法归一化时返回 False
     """
     project_root = _resolve_project_root()
-    abs_path = project_root / filepath
+    rel_path = _project_relative_path(filepath)
+    if rel_path is None:
+        return False
+    abs_path = project_root / rel_path
 
-    _record_change(filepath, "modified")
+    _record_change(rel_path, "modified")
 
     # 只处理 .py 文件
-    if not filepath.endswith(".py"):
+    if not rel_path.endswith(".py"):
         # 非 .py 文件变更可能导致目录结构变化，触发全量重建
         return _schedule_rebuild()
 
@@ -543,8 +565,8 @@ def incremental_update_file(filepath: str) -> bool:
 
     # 文件被删除 → 移除条目
     if not abs_path.exists():
-        _record_change(filepath, "deleted")
-        new_content = _remove_file_entry_from_map(existing, filepath)
+        _record_change(rel_path, "deleted")
+        new_content = _remove_file_entry_from_map(existing, rel_path)
         if new_content != existing:
             _update_map_file(map_path, new_content, project_root)
             return True
@@ -552,7 +574,7 @@ def incremental_update_file(filepath: str) -> bool:
 
     # 文件被修改 → 重建该条目并替换
     new_entry = _build_file_entry(abs_path, project_root)
-    new_content = _replace_file_entry_in_map(existing, filepath, new_entry)
+    new_content = _replace_file_entry_in_map(existing, rel_path, new_entry)
     if new_content != existing:
         existing = new_content
     # 始终更新时间戳和变更日志
@@ -1154,32 +1176,29 @@ def extract_file_path(tool_name: str, tool_args: dict) -> Optional[str]:
     if not filepath:
         return None
 
-    # 标准化为相对路径
-    project_root = _resolve_project_root()
-    try:
-        abs_path = Path(filepath).resolve()
-        rel_path = abs_path.relative_to(project_root).as_posix()
-        return rel_path
-    except (ValueError, OSError):
-        return filepath
+    # 标准化为项目内相对路径；项目外路径不进入地图/事件流
+    return _project_relative_path(filepath)
 
 
 def on_file_modified(filepath: str):
     """文件修改后的回调（由 ToolExecutor 钩子调用）。
 
-    在后台线程中执行增量更新，不阻塞主循环。
+    在后台线程中执行增量更新，不阻塞主循环。项目外路径直接忽略。
     """
-    if not filepath.endswith(".py"):
+    rel_path = _project_relative_path(filepath)
+    if rel_path is None:
+        return
+    if not rel_path.endswith(".py"):
         return
     # 只追踪项目内的 Python 文件
-    if any(part.startswith(".") for part in Path(filepath).parts):
+    if any(part.startswith(".") for part in Path(rel_path).parts):
         return
-    if "workspace" in filepath or "log_info" in filepath or "__pycache__" in filepath:
+    if "workspace" in rel_path or "log_info" in rel_path or "__pycache__" in rel_path:
         return
 
     # 后台线程执行增量更新
     t = threading.Thread(
-        target=lambda: incremental_update_file(filepath),
+        target=lambda: incremental_update_file(rel_path),
         daemon=True,
         name="map-updater",
     )

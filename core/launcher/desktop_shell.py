@@ -1868,6 +1868,51 @@ def _read_log_tail(handle: Any, *, limit: int = 1200) -> str:
     return raw.decode("utf-8", errors="replace")[-limit:].strip().replace("\r", "")
 
 
+# A failure receipt carries the stage that failed and the last lines of the
+# build output, so one opaque failure string never hides three distinct causes.
+BUILD_FAILURE_TAIL_MAX_LINES = 40
+BUILD_FAILURE_TAIL_MAX_LINE_CHARS = 500
+
+
+def _bounded_tail_lines(text: str, *, max_lines: int) -> list[str]:
+    """The last informative lines of one captured stream, each length-bounded."""
+
+    if max_lines <= 0:
+        return []
+    lines = [line.rstrip() for line in text.splitlines() if line.strip()]
+    return [line[:BUILD_FAILURE_TAIL_MAX_LINE_CHARS] for line in lines[-max_lines:]]
+
+
+def _build_output_tail(stdout_log: Any, stderr_log: Any) -> str:
+    """Combine both captured stream tails into one bounded block.
+
+    stderr keeps the whole line budget when the streams compete: node-gyp and
+    Node fs errors report there, while stdout chatter fills any remainder.
+    """
+
+    budget = BUILD_FAILURE_TAIL_MAX_LINES
+    read_limit = BUILD_FAILURE_TAIL_MAX_LINES * BUILD_FAILURE_TAIL_MAX_LINE_CHARS * 2
+    stderr_lines = _bounded_tail_lines(_read_log_tail(stderr_log, limit=read_limit), max_lines=budget)
+    stdout_lines = _bounded_tail_lines(
+        _read_log_tail(stdout_log, limit=read_limit), max_lines=budget - len(stderr_lines),
+    )
+    return "\n".join([*stdout_lines, *stderr_lines])
+
+
+def _tag_build_failure(exc: BaseException, *, stage: str, output_tail: str = "") -> BaseException:
+    """Attach the failed build stage and captured output tail to an exception.
+
+    Inner callers win: an exception already tagged by a finer step keeps its
+    stage, so an outer wrapper only labels what the chain left untagged.
+    """
+
+    if stage and not getattr(exc, "build_stage", ""):
+        exc.build_stage = stage
+    if output_tail and not getattr(exc, "build_output_tail", ""):
+        exc.build_output_tail = output_tail
+    return exc
+
+
 def _close_owned_process(owner: OwnedProcess, *, deadline: float) -> None:
     last_error: BaseException | None = None
     for attempt in range(DESKTOP_SHELL_BUILD_CLOSE_RETRIES):
@@ -1894,12 +1939,15 @@ def _run_owned_process(
     label: str,
     env: dict[str, str] | None = None,
     temp_root: Path | None = None,
+    stage: str = "",
 ) -> subprocess.CompletedProcess:
     """Run a bounded, console-free process tree with disk-backed output tails."""
 
     remaining = max(0.0, deadline - time.monotonic())
     if remaining <= DESKTOP_SHELL_BUILD_CLEANUP_RESERVE_SECONDS:
-        raise TimeoutError(f"{label} could not start within the desktop build deadline")
+        raise _tag_build_failure(
+            TimeoutError(f"{label} could not start within the desktop build deadline"), stage=stage,
+        )
     owner: OwnedProcess | None = None
     # A sandboxed parent's TEMP can be retired while the detached build helper
     # is still spawning, which surfaces as ENOENT on the capture files. Pin both
@@ -1953,6 +2001,11 @@ def _run_owned_process(
                 detail = _npm_failure_detail(result)
                 raise RuntimeError(f"{label} failed with exit code {result.returncode}: {detail}")
             return result
+        except Exception as exc:
+            # Success discards the logs; a failure receipt must say which stage
+            # broke and what the process printed before it did.
+            _tag_build_failure(exc, stage=stage, output_tail=_build_output_tail(stdout_log, stderr_log))
+            raise
         finally:
             if owner is not None:
                 _close_owned_process(owner, deadline=deadline)
@@ -2029,11 +2082,13 @@ def _build_assistant_payload_once(
                ("import sys; from scripts.build_assistant_runtime import build_launcher_assistant_payload; "
                 "build_launcher_assistant_payload(sys.argv[1], sys.argv[2])"), str(root), str(payload)]
     _run_owned_process(command, cwd=root, deadline=deadline, label="desktop assistant payload", env=env,
-                       temp_root=root)
+                       temp_root=root, stage="assistant-payload")
     assistant_payload = _assistant_payload_builder()
     path = assistant_payload._checked(assistant_payload._trusted_root(payload), "manifest.json")
     if not path.is_file() or path.stat().st_size > 32 * 1024 * 1024:
-        raise RuntimeError("desktop assistant builder did not produce a complete manifest")
+        raise _tag_build_failure(
+            RuntimeError("desktop assistant builder did not produce a complete manifest"), stage="assistant-payload",
+        )
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 def _stable_build_temp_dir(root: Path) -> Path:
@@ -2081,6 +2136,7 @@ def _run_desktop_shell_package_build(root: Path, *, mode: str, deadline: float) 
             label=f"desktop shell package:{mode}",
             env=env,
             temp_root=root,
+            stage="node-build",
         )
         return session
     except BuildProcessRetirementError as exc:
@@ -2151,6 +2207,12 @@ def build_desktop_shell_package(
                 live_package_root=root if mode == "dir" else None, deadline=deadline,
             )
         return {"built": True, "mode": mode, "output": str(published_output)}
+    except Exception as exc:
+        # Once a build session exists, every later failure is publish-side
+        # verification or promotion; the build steps tag themselves earlier.
+        if session is not None:
+            _tag_build_failure(exc, stage="publish")
+        raise
     finally:
         if session is not None and not _pending_build_retirement_for(root, cleanup_path=session):
             _remove_owned_shell_tree(session, within=root / "dist")

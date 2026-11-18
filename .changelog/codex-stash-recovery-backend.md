@@ -1,0 +1,1 @@
+- Keep incremental codebase-map updates working when a file tool reports an absolute path outside the project; normalize to project-relative paths and ignore foreign paths.
