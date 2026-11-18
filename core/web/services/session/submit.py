@@ -1305,6 +1305,11 @@ def submit_session_guidance(
                         "turnSteerDelivery": "guide",
                         "turnId": active_turn_id,
                         **({"steerId": steer_id} if steer_id else {}),
+                        **(
+                            {"clientSubmissionId": f"steer:{steer_id}"}
+                            if steer_id
+                            else {}
+                        ),
                     },
                     "source": "steer",
                 },

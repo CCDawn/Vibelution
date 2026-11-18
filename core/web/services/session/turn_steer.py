@@ -340,6 +340,26 @@ def guidance_metadata_from_events(events: Any) -> dict[str, dict[str, Any]]:
             guidanceState="drained",
             guidanceConsumedSequence=receipt_sequence,
         )
+    # A guide the settled turn never drained is promoted onto the next-turn
+    # queue. The original row stops being a live badge; the queued-turn message
+    # is the visible copy, so the transcript never shows the same input twice.
+    for event in event_list:
+        if str(getattr(event, "event_type", "") or "") != EVENT_TURN_STEER:
+            continue
+        payload = dict(getattr(event, "payload", None) or {})
+        if payload.get("disposition") != DISPOSITION_PROMOTED:
+            continue
+        steer_id = str(payload.get("steerId") or "").strip()
+        if not steer_id:
+            continue
+        for event_id, guide in guides.items():
+            metadata = dict(getattr(guide, "payload", {}).get("metadata") or {})
+            if str(metadata.get("steerId") or "").strip() != steer_id:
+                continue
+            result[event_id].update(
+                guidanceState="promoted",
+                guidanceDelivery=str(payload.get("delivery") or DELIVERY_QUEUE),
+            )
     return result
 
 
