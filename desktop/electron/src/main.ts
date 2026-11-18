@@ -2618,6 +2618,15 @@ async function openWorkbenchAtCurrentLauncherUrl(
     openWorkbenchAtCurrentLauncherUrlImpl(paths, bootstrap, provider, payload, ticket));
 }
 
+/** Launcher control-plane port, or 0 when the URL carries none. */
+function launcherControlPort(launcherUrl: string): number {
+  try {
+    return Number(new URL(launcherUrl).port || 0);
+  } catch {
+    return 0;
+  }
+}
+
 async function openWorkbenchAtCurrentLauncherUrlImpl(
   paths: DesktopPaths,
   bootstrap: LauncherBootstrapResult,
@@ -2662,6 +2671,7 @@ async function openWorkbenchAtCurrentLauncherUrlImpl(
       await registerWorkbenchInstance(instancesRegistryPath(), {
         projectRoot: paths.workspaceRoot,
         port: Number(new URL(workbenchUrl).port || 0),
+        controlPort: launcherControlPort(bootstrap.launcherUrl),
         url: workbenchUrl
       });
     } catch (error: unknown) {
