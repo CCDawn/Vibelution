@@ -135,16 +135,30 @@ def test_health_reports_pinned_serving_metadata_after_active_pointer_switch(monk
     monkeypatch.setattr(app_module, "build_serving_metadata", lambda _root: json.loads(json.dumps(first_metadata)))
     app = app_module.create_app()
 
-    # Simulate a later publish.  The already-created app must keep serving the
-    # immutable release selected at startup.
-    second = tmp_path / "release-second"
-    second.mkdir()
-    (tmp_path / "active.json").write_text(json.dumps({"release": second.name, "buildKey": "key-second"}), encoding="utf-8")
-
     with TestClient(app) as client:
+        # Nothing is published yet, so the pointer has nothing to disagree with.
+        before = client.get("/api/health").json()
+
+        # Simulate a later publish.  The already-created app must keep serving the
+        # immutable release selected at startup.
+        second = tmp_path / "release-second"
+        second.mkdir()
+        pointer = frontend_build.active_release_path(tmp_path)
+        pointer.parent.mkdir(parents=True, exist_ok=True)
+        pointer.write_text(
+            json.dumps({"release": second.name, "buildKey": "key-second"}),
+            encoding="utf-8",
+        )
         payload = client.get("/api/health").json()
 
+    assert before["activeRelease"] == ""
+    assert before["releaseStale"] is False
     assert payload["apiContractVersion"] == "v1"
     assert payload["serving"]["frontend"]["release"] == "release-first"
     assert payload["servingBuildKey"] == "key-first"
+    # The pointer moved but this process still serves its pinned release.  Health
+    # has to say so, otherwise "why does my change not show up" stays invisible
+    # and the only remaining signal is an empty servingRelease field.
+    assert payload["activeRelease"] == "release-second"
+    assert payload["releaseStale"] is True
     assert payload["backendCodeFingerprint"]["dirtyTreeDigest"] == "digest-first"

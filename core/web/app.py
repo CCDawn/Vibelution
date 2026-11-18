@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -107,6 +108,25 @@ def create_app() -> FastAPI:
         serving_value = getattr(app.state, "serving_metadata", {})
         serving = serving_value if isinstance(serving_value, dict) else {}
         serving_frontend = serving.get("frontend") if isinstance(serving.get("frontend"), dict) else {}
+        serving_release = str(serving_frontend.get("release") or "")
+        # This process keeps serving the release it mounted at startup, so a newer
+        # active.json changes nothing until the launcher restarts the backend.
+        # Report the pointer alongside the pinned release: an empty servingRelease
+        # or a stale flag is the signal that a restart is what is missing, instead
+        # of leaving operators to compare two documents by hand.
+        active_release = ""
+        try:
+            from core.launcher.frontend_build import active_release_path
+
+            pointer = json.loads(
+                active_release_path(_health_workspace_root()).read_text(encoding="utf-8")
+            )
+        except (OSError, ValueError, TypeError):
+            pointer = {}
+        if isinstance(pointer, dict):
+            candidate = str(pointer.get("release") or "").strip()
+            if candidate.startswith("release-") and Path(candidate).name == candidate:
+                active_release = candidate
         return {
             "status": "ok",
             "routesReady": routes_ready,
@@ -121,7 +141,9 @@ def create_app() -> FastAPI:
             # Keep the high-value fields flat for lightweight launcher clients
             # and older diagnostics that do not understand nested metadata.
             "servingBuildKey": str(serving_frontend.get("buildKey") or ""),
-            "servingRelease": str(serving_frontend.get("release") or ""),
+            "servingRelease": serving_release,
+            "activeRelease": active_release,
+            "releaseStale": bool(active_release) and active_release != serving_release,
             "backendCodeFingerprint": serving.get("backend") or {},
         }
 
