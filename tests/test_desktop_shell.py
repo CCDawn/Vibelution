@@ -221,9 +221,29 @@ def test_source_change_during_build_is_rejected_before_publication(tmp_path, mon
         return session
 
     monkeypatch.setattr(desktop_shell, "_run_desktop_shell_package_build", build)
-    with pytest.raises(RuntimeError, match="assistant_source_mismatch"):
+    with pytest.raises(RuntimeError, match="assistant_source_mismatch") as excinfo:
         desktop_shell.build_desktop_shell_package(tmp_path)
     assert (live / "main.js").read_text() == "old"
+    # Post-build verification is reported as the publish stage in failure receipts.
+    assert excinfo.value.build_stage == "publish"
+
+
+def test_build_step_failures_keep_their_own_stage_through_the_package_owner(tmp_path, monkeypatch):
+    def build(root, **kwargs):
+        raise desktop_shell._tag_build_failure(
+            RuntimeError("desktop shell package:dir failed with exit code 1: ENOENT electron/dist"),
+            stage="node-build", output_tail="Error: ENOENT: no such file or directory",
+        )
+
+    monkeypatch.setattr(desktop_shell, "_run_desktop_shell_package_build", build)
+    with pytest.raises(RuntimeError, match="ENOENT") as excinfo:
+        desktop_shell.build_desktop_shell_package(tmp_path)
+    assert excinfo.value.build_stage == "node-build"
+    assert excinfo.value.build_output_tail == "Error: ENOENT: no such file or directory"
+    # A later wrapper never overwrites the finer stage the failing step recorded.
+    desktop_shell._tag_build_failure(excinfo.value, stage="publish", output_tail="later")
+    assert (excinfo.value.build_stage, excinfo.value.build_output_tail) == (
+        "node-build", "Error: ENOENT: no such file or directory")
 
 
 def test_owner_cleanup_handles_long_payload_paths_and_refuses_other_targets(tmp_path):
