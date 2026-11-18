@@ -158,10 +158,34 @@ def test_installation_is_complete_idempotent_and_checks_damage(tmp_path: Path) -
     assert git(root, "rev-parse", "main").stdout.strip() == candidate
 
 
+def test_receive_hook_blocks_local_push_to_main_even_with_a_permit(tmp_path: Path) -> None:
+    root = repo(tmp_path)
+    old_sha = git(root, "rev-parse", "main").stdout.strip()
+    git(root, "switch", "-c", "codex/task")
+    (root / "feature.txt").write_text("task work\n", encoding="utf-8")
+    git(root, "add", "feature.txt")
+    git(root, "commit", "-m", "task work")
+    candidate = git(root, "rev-parse", "HEAD").stdout.strip()
+    installer.install_hooks(root)
+    guard.issue_main_permit(root, old_sha=old_sha, new_sha=candidate, integration_claim_id="human")
+
+    push = git(root, "push", "--no-verify", ".", "HEAD:refs/heads/main", check=False)
+
+    assert push.returncode != 0
+    assert "Refusing push to local main" in push.stderr
+    assert git(root, "rev-parse", "main").stdout.strip() == old_sha
+    assert git(root, "rev-parse", "HEAD").stdout.strip() == candidate
+    assert git(root, "status", "--porcelain").stdout == ""
+    assert (root / "feature.txt").read_text(encoding="utf-8") == "task work\n"
+
+    git(root, "push", "--no-verify", ".", "HEAD:refs/heads/codex/preserved")
+    assert git(root, "rev-parse", "codex/preserved").stdout.strip() == candidate
+
+
 def test_guard_source_update_is_detected_and_installed_as_a_new_snapshot(tmp_path: Path) -> None:
     root = repo(tmp_path)
     source = tmp_path / "source"
-    for name in ("scripts/git_claim_guard.py", "scripts/claim_dormancy.py", "scripts/git_history_bridge.py", "scripts/git_hook_dispatch.py", ".githooks/reference-transaction"):
+    for name in ("scripts/git_claim_guard.py", "scripts/claim_dormancy.py", "scripts/git_history_bridge.py", "scripts/git_hook_dispatch.py", ".githooks/reference-transaction", ".githooks/pre-receive"):
         target = source / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes((SOURCE / name).read_bytes())

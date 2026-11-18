@@ -562,6 +562,7 @@ def test_closeout_merge_issues_exact_main_permit(
         branch="codex/test-task",
     )
     calls: list[tuple[str, object]] = []
+    monkeypatch.setattr(gate, "current_branch", lambda _root: "main")
     monkeypatch.setattr(gate, "git_lines", lambda *_args: [])
     monkeypatch.setattr(
         gate,

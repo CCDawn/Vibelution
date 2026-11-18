@@ -175,6 +175,11 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
     assert image_tool["category"] == "media_research"
     assert image_tool["permissionTier"] == "high"
     assert "model_cost" in image_tool["riskTags"]
+    directory_tool = next(item for item in payload["tools"] if item["name"] == "agent_directory_tool")
+    directory_descriptor = next(item for item in payload["descriptors"] if item["name"] == "agent_directory_tool")
+    assert directory_descriptor["risk"] == "read"
+    assert "session_data_access" in directory_tool["riskTags"]
+    assert directory_tool["permissionPolicy"]["requiresExplicitAllow"] is True
     edge_tool = next(item for item in payload["tools"] if item["name"] == "research_communication_edge_proposal_tool")
     assert edge_tool["category"] == "agent_collaboration"
     assert edge_tool["permissionTier"] == "high"

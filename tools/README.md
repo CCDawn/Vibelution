@@ -27,6 +27,8 @@ Model 可见性
   → 新工具：实现模块 + Key_Tools 导入/包装 + tool_catalog 条目 + 聚焦 pytest
 ```
 
+改动 `Key_Tools.py` 或 `tool_catalog.py` 时，合入选测会构建整张工具目录并检查 API。只跑新工具函数的单测无法发现目录缺项造成的普通会话回归。
+
 **禁止：** 在 route/service 直接 `ToolExecutor` 调未注册名；在 `Key_Tools` 外暴露第二套 LLM tool list；协议 adapter 自行增删授权。
 
 ---
