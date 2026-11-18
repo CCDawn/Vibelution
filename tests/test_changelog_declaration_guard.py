@@ -54,3 +54,8 @@ def test_evaluate_ignores_test_only_commits(monkeypatch):
     monkeypatch.setattr(guard, "staged_paths", lambda repo: ["tests/test_x.py"])
     ok, _ = guard.evaluate(Path("."))
     assert ok
+
+def test_test_and_spec_files_are_not_product_code():
+    assert not guard.is_product_path("web/src/routes/chat/useSessionIndexEventStream.test.ts")
+    assert not guard.is_product_path("core/web/app.spec.py")
+    assert guard.is_product_path("web/src/routes/chat/useSessionIndexEventStream.ts")

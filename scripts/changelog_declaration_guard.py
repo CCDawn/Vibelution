@@ -55,6 +55,9 @@ def is_product_path(path: str) -> bool:
         return False
     if normalized.endswith(EXEMPT_SUFFIXES):
         return False
+    name = normalized.rsplit("/", 1)[-1]
+    if ".test." in name or ".spec." in name:
+        return False
     return normalized.startswith(PRODUCT_PREFIXES)
 
 
