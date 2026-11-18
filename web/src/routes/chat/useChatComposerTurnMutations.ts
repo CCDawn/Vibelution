@@ -1283,6 +1283,33 @@ export function useChatComposerTurnMutations({
       clearLiveComposerDraftIfEquals(variables.sessionId, variables.content);
       clearRegisteredComposerDraft(variables.sessionId, variables.content);
       removeStoredSessionDraft(variables.sessionId);
+      // The optimistic guidance row is only a stand-in for the row the server
+      // echoes back. Keep it while that row is still missing, but drop it as
+      // soon as it lands: the two never share an id, so any id-based reconcile
+      // would otherwise paint the same guidance twice.
+      if (context?.optimisticGuidanceMessageId) {
+        const optimisticGuidanceMessageId = context.optimisticGuidanceMessageId;
+        queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detailState) => {
+          const messages = detailState?.messages;
+          if (!detailState || !messages?.length) {
+            return detailState;
+          }
+          const canonicalPresent = messages.some((message) => (
+            message.id !== optimisticGuidanceMessageId
+            && message.role === "user"
+            && message.content.trim() === variables.content.trim()
+            && (message.metadata?.kind === "user_guidance"
+              || message.metadata?.kind === "user_interrupt_guidance")
+          ));
+          if (!canonicalPresent) {
+            return detailState;
+          }
+          return {
+            ...detailState,
+            messages: messages.filter((message) => message.id !== optimisticGuidanceMessageId),
+          };
+        });
+      }
       syncSessionDetail(nextDetail);
       if (variables.steeredQueuedTurnId) {
         // Optimistic steer: the row left the cache before the POST, but this

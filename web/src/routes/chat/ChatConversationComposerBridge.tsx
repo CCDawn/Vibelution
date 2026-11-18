@@ -193,12 +193,15 @@ export function buildConversationComposerBridgeState(
   // ZCode chatPlaceholder tri-state parity: while a turn runs the composer
   // always names the queueing semantics instead of going blank — the empty
   // queue shows the plain "queues and sends after this turn" hint, and once
-  // items are queued the placeholder flips to the append hint.
+  // items are queued the placeholder flips to the append hint. An active
+  // guidance notice already owns that line, so the placeholder must not
+  // restate the queueing rule beside it: two stacked hints that contradict
+  // each other above one input read as one broken state.
   const placeholder = input.readOnly
     ? input.labels.readOnlySession ?? input.labels.loadingSession
     : !hasSession
     ? input.labels.loadingSession
-    : input.sessionBusy && !input.sessionStopping
+    : input.sessionBusy && !input.sessionStopping && !input.guidance
       ? (input.followupQueue?.length
         ? input.labels.sessionBusyQueuedPlaceholder
         : input.labels.sessionBusyQueuePlaceholder)

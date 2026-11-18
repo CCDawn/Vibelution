@@ -421,7 +421,9 @@ export function createConversationTimelineItems({
               </span>
             ) : null}
             {visibleSummary ? <span className={styles.timelineCellSeparator} aria-hidden="true">·</span> : null}
-            {visibleSummary ? <span className={styles.timelineCellInlineSummary}>{visibleSummary}</span> : null}
+            {visibleSummary ? (
+              <span className={styles.timelineCellInlineSummary} title={visibleSummary}>{visibleSummary}</span>
+            ) : null}
           </span>
         </span>
       </>
