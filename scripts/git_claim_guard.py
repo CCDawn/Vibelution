@@ -401,6 +401,10 @@ def release_dormant_blocking_claims(
     return released
 
 
+# CHANGELOG.md is the shared release ledger: every task appends one line,
+# so claiming it exclusively would serialize every parallel task.
+SHARED_CLAIM_PATHS = frozenset({"CHANGELOG.md"})
+
 def ensure_development_claim(root: Path | str) -> ClaimBinding | None:
     root_path = repository_root(root)
     branch = _git_value(root_path, "branch", "--show-current")
@@ -410,6 +414,7 @@ def ensure_development_claim(root: Path | str) -> ClaimBinding | None:
     if not staged:
         return None
     paths = tuple(sorted(set(staged) | set(committed_task_paths(root_path))))
+    claim_paths = tuple(path for path in paths if path not in SHARED_CLAIM_PATHS) or paths
 
     status = coordination_call(root_path, "status")
     agents = status.get("agents") if isinstance(status.get("agents"), list) else []
@@ -436,7 +441,7 @@ def ensure_development_claim(root: Path | str) -> ClaimBinding | None:
         if isinstance(item, dict)
         and item.get("agentId") == agent_id
         and item.get("status") in ACTIVE_CLAIM_STATUSES
-        and _claim_covers(item, paths)
+        and _claim_covers(item, claim_paths)
     ]
     if len(covering) > 1:
         raise ClaimGuardError("ambiguous_covering_claim")
@@ -462,7 +467,7 @@ def ensure_development_claim(root: Path | str) -> ClaimBinding | None:
                 branch,
                 "--worktree",
                 str(root_path),
-                *(value for path in paths for value in ("--scope", path)),
+                *(value for path in claim_paths for value in ("--scope", path)),
                 "--ttl-minutes",
                 "240",
             )
@@ -471,7 +476,7 @@ def ensure_development_claim(root: Path | str) -> ClaimBinding | None:
             claims=claims,
             agents=agents,
             own_agent_id=agent_id,
-            paths=paths,
+            paths=claim_paths,
         )
         for existing in claims:
             if (
@@ -483,7 +488,7 @@ def ensure_development_claim(root: Path | str) -> ClaimBinding | None:
                     _scope_covers(str(scope), path) or _scope_covers(path, str(scope))
                     for scope in existing.get("scopes", [])
                     if isinstance(scope, str)
-                    for path in paths
+                    for path in claim_paths
                 )
             ):
                 coordination_call(
@@ -501,7 +506,7 @@ def ensure_development_claim(root: Path | str) -> ClaimBinding | None:
             "claim",
             "--lane",
             f"development/{branch.removeprefix('codex/')}",
-            *(value for path in paths for value in ("--scope", path)),
+            *(value for path in claim_paths for value in ("--scope", path)),
             "--agent-id",
             agent_id,
             "--task",
@@ -525,7 +530,7 @@ def ensure_development_claim(root: Path | str) -> ClaimBinding | None:
         worktree=str(root_path),
         scopes=tuple(str(item) for item in scopes)
         if isinstance(scopes, list)
-        else paths,
+        else claim_paths,
     )
     _write_claim_binding(root_path, binding)
     return binding
