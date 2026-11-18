@@ -368,6 +368,9 @@ class SessionStopPayload(BaseModel):
 class SessionGuidancePayload(BaseModel):
     content: str = ""
     mode: str = "safe"
+    # 前端生成的身份，用于把提交时的乐观行和落地的 journal 行对上。
+    # 没有它，前端只能靠文本猜测哪一行是回显，重复提交时永远猜不对。
+    clientSubmissionId: str = ""
     attachmentIds: list[str] = Field(default_factory=list)
     references: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -1537,6 +1540,7 @@ def session_submit_guidance(session_id: str, payload: SessionGuidancePayload) ->
             mode=payload.mode,
             attachment_ids=payload.attachmentIds,
             references=payload.references,
+            client_submission_id=payload.clientSubmissionId,
         )
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

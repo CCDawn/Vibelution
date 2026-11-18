@@ -770,6 +770,8 @@ export function submitSessionGuidance(
     mode: SessionGuidanceMode;
     attachmentIds?: string[];
     references?: SessionReferenceAttachment[];
+    /** 提交身份：服务器把它写进 journal metadata，前端据此认领回显行。 */
+    clientSubmissionId?: string;
   },
 ): Promise<SessionDetail> {
   return fetchJson<SessionDetail>(

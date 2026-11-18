@@ -80,6 +80,8 @@ export type UseSubmitTurnWithAttachmentsInput = {
         mode: SessionGuidanceMode;
         attachmentIds?: string[];
         references?: SessionReferenceAttachment[];
+        /** 提交身份：服务端把它写进 journal metadata，前端据此认领回显行。 */
+        clientSubmissionId?: string;
       },
       options?: { onSuccess?: () => void; onError?: () => void },
     ) => void;
@@ -346,6 +348,7 @@ export function useSubmitTurnWithAttachments({
             mode: "safe",
             attachmentIds: uploadedAttachmentIds,
             references,
+            clientSubmissionId,
           },
           {
             onSuccess: () => {

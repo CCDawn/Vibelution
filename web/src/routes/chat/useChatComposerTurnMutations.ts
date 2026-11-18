@@ -1228,6 +1228,7 @@ export function useChatComposerTurnMutations({
         mode,
         attachmentIds,
         references,
+        clientSubmissionId,
       }: {
         sessionId: string;
         content: string;
@@ -1235,11 +1236,23 @@ export function useChatComposerTurnMutations({
         steeredQueuedTurnId?: string;
         attachmentIds?: string[];
         references?: SessionReferenceAttachment[];
+        clientSubmissionId?: string;
       },
     ) =>
-      submitSessionGuidance(sessionId, { content, mode, attachmentIds, references }),
+      submitSessionGuidance(sessionId, {
+        content,
+        mode,
+        attachmentIds,
+        references,
+        clientSubmissionId,
+      }),
     onMutate: (variables) => {
       const optimisticGuidanceMessageId = `optimistic-guidance-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      // 同一个提交身份会随请求下发并写进 journal metadata；乐观行带同一份
+      // 身份，回显行一落地就能按 id 认领，不再靠正文猜。
+      const submissionIdentity = String(variables.clientSubmissionId || "").trim()
+        ? `steer:${String(variables.clientSubmissionId).trim()}`
+        : "";
       const optimisticMessage: UserConversationMessage = {
         id: optimisticGuidanceMessageId,
         role: "user",
@@ -1249,6 +1262,7 @@ export function useChatComposerTurnMutations({
           kind: variables.mode === "interrupt" ? "user_interrupt_guidance" : "user_guidance",
           source: "steer",
           guidanceMode: variables.mode,
+          ...(submissionIdentity ? { clientSubmissionId: submissionIdentity } : {}),
           optimistic: true,
         },
       };
@@ -1264,6 +1278,7 @@ export function useChatComposerTurnMutations({
           contentLength: variables.content.length,
         }),
         optimisticGuidanceMessageId,
+        submissionIdentity,
       };
     },
     onSuccess: (nextDetail, variables, context) => {
@@ -1294,13 +1309,18 @@ export function useChatComposerTurnMutations({
           if (!detailState || !messages?.length) {
             return detailState;
           }
-          const canonicalPresent = messages.some((message) => (
-            message.id !== optimisticGuidanceMessageId
-            && message.role === "user"
-            && message.content.trim() === variables.content.trim()
-            && (message.metadata?.kind === "user_guidance"
-              || message.metadata?.kind === "user_interrupt_guidance")
-          ));
+          const canonicalPresent = messages.some((message) => {
+            if (message.id === optimisticGuidanceMessageId || message.role !== "user") {
+              return false;
+            }
+            // 身份优先：同一次提交只有一个 submit id，正文重复也不影响认领。
+            if (context?.submissionIdentity) {
+              return message.metadata?.clientSubmissionId === context.submissionIdentity;
+            }
+            return message.content.trim() === variables.content.trim()
+              && (message.metadata?.kind === "user_guidance"
+                || message.metadata?.kind === "user_interrupt_guidance");
+          });
           if (!canonicalPresent) {
             return detailState;
           }
