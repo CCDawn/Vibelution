@@ -3,7 +3,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import type { SessionLlmModelOption } from "../../api/types";
 import { useAppI18n } from "../../i18n/useAppI18n";
-import { VButton, VIconButton, VInput, VNativeInput, VPopover, VStringSelect } from "../vui";
+import { VButton, VIconButton, VInput, VNativeInput, VPopover } from "../vui";
 import { ConversationModelControlTrigger } from "./ConversationModelControlTrigger";
 import styles from "./ConversationTurnModelControl.styles";
 
@@ -65,11 +65,6 @@ type ConversationTurnModelControlProps = {
   pending?: boolean;
   errorMessage?: string;
   onSave: (parameters: ConversationModelParameters) => void;
-  /** Selectable dialogue models for the next turn; empty hides the picker. */
-  modelChoices?: { modelId: string; label: string }[];
-  /** Model pinned for the next turn; empty follows the Agent binding. */
-  selectedModelId?: string;
-  onSelectModel?: (modelId: string) => void;
 };
 
 export function ConversationTurnModelControl({
@@ -85,9 +80,6 @@ export function ConversationTurnModelControl({
   pending = false,
   errorMessage = "",
   onSave,
-  modelChoices = [],
-  selectedModelId = "",
-  onSelectModel,
 }: ConversationTurnModelControlProps) {
   const { lang } = useAppI18n({ domains: ["chat"] });
   const contextWindowErrorId = useId();
@@ -259,24 +251,6 @@ export function ConversationTurnModelControl({
       >
         <div className={styles.fields} data-testid="conversation-model-parameters-panel">
           <p className={styles.fullName} data-testid="conversation-model-full-name">{fullName}</p>
-          {modelChoices.length ? (
-            <div className={styles.field}>
-              <div className={styles.fieldHeader}>
-                <Layers className={styles.fieldIcon} size={14} aria-hidden="true" />
-                <output className={styles.fieldValue}>{zh ? "本轮模型" : "Model for this turn"}</output>
-              </div>
-              <VStringSelect
-                ariaLabel={zh ? "选择本轮模型" : "Choose the model for this turn"}
-                value={selectedModelId}
-                isDisabled={pending}
-                onValueChange={(value) => onSelectModel?.(value)}
-                options={[
-                  { value: "", label: zh ? "跟随 Agent 默认" : "Follow Agent default" },
-                  ...modelChoices.map((choice) => ({ value: choice.modelId, label: choice.label || choice.modelId })),
-                ]}
-              />
-            </div>
-          ) : null}
           {effortOptions.length ? (
             <div className={styles.field}>
               <div className={styles.fieldHeader}>
