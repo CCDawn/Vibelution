@@ -1183,6 +1183,19 @@ def submit_session_guidance(
                     break
 
         running = s._is_session_running(conversation_id)
+        # 会话级准入序号：drain 与前端按它解释"谁先提交"。journal sequence
+        # 仍是写入顺序；这个序号只表达操作人的提交顺序。
+        guidance_admission_sequence = 1
+        for _previous in s._load_session_conversation_events_cached(conversation_id):
+            if str(getattr(_previous, "event_type", "") or "").strip() != "turn_steer":
+                continue
+            _previous_payload = dict(getattr(_previous, "payload", None) or {})
+            if str(_previous_payload.get("disposition") or "").strip() != "admitted":
+                continue
+            guidance_admission_sequence = max(
+                guidance_admission_sequence,
+                int(_previous_payload.get("admissionSequence") or 0) + 1,
+            )
         signal = s._record_chat_next_state_signal(
             session_id=conversation_id,
             turn_id=active_turn_id,
@@ -1278,43 +1291,55 @@ def submit_session_guidance(
         from . import turn_steer
 
         steer_id = turn_steer.new_steer_id()
+        admitted_payload = {
+            "schema": turn_steer.TURN_STEER_SCHEMA,
+            "steerId": steer_id,
+            "delivery": turn_steer.DELIVERY_GUIDE,
+            "disposition": turn_steer.DISPOSITION_ADMITTED,
+            "targetTurnId": active_turn_id,
+            "content": guidance_text,
+            "admissionSequence": guidance_admission_sequence,
+        }
+        message_metadata = {
+            "kind": guidance_kind,
+            "source": "steer",
+            "guidanceMode": normalized_mode,
+            "turnSteerDelivery": "guide",
+            "turnId": active_turn_id,
+            "steerId": steer_id,
+            "clientSubmissionId": f"steer:{steer_id}",
+            "admissionSequence": guidance_admission_sequence,
+        }
         try:
-            turn_steer.record_admitted(
-                conversation_id,
-                steer_id=steer_id,
-                delivery=turn_steer.DELIVERY_GUIDE,
-                turn_id=active_turn_id,
-                content=guidance_text,
-            )
-        except Exception:
-            steer_id = ""
-        try:
-            s._append_session_conversation_event(
+            # 准入事实与用户消息同一批写入：半对事实会让引导失去可纳入的
+            # 身份，或留下一条没有对应消息的准入记录。
+            s._append_session_conversation_events_batch(
                 conversation_id,
                 active_turn_id,
-                s.EVENT_USER_MESSAGE,
-                status="recorded",
-                payload={
-                    "content": guidance_text,
-                    "attachments": guidance_attachments,
-                    "references": guidance_references,
-                    "metadata": {
-                        "kind": guidance_kind,
-                        "source": "steer",
-                        "guidanceMode": normalized_mode,
-                        "turnSteerDelivery": "guide",
-                        "turnId": active_turn_id,
-                        **({"steerId": steer_id} if steer_id else {}),
-                        **(
-                            {"clientSubmissionId": f"steer:{steer_id}"}
-                            if steer_id
-                            else {}
-                        ),
+                [
+                    {
+                        "event_type": turn_steer.EVENT_TURN_STEER,
+                        "status": turn_steer.DISPOSITION_ADMITTED,
+                        "payload": admitted_payload,
+                        "source": "turn_steer",
+                        "visible_in_model": False,
+                        "projection_kind": "turn_steer",
+                        "correlation_id": steer_id,
                     },
-                    "source": "steer",
-                },
-                source="submit_session_guidance",
-                visible_in_model=True,
+                    {
+                        "event_type": s.EVENT_USER_MESSAGE,
+                        "status": "recorded",
+                        "payload": {
+                            "content": guidance_text,
+                            "attachments": guidance_attachments,
+                            "references": guidance_references,
+                            "metadata": message_metadata,
+                            "source": "steer",
+                        },
+                        "source": "submit_session_guidance",
+                        "visible_in_model": True,
+                    },
+                ],
             )
             guidance_delivery = "guide"
         except TurnJournalPostTerminalWriteError:
@@ -1391,6 +1416,22 @@ def submit_session_guidance(
                     )
                 except Exception:
                     pass
+    else:
+        # 没有可插入的回合时，引导没有可纳入的身份。写空 turn_id 的 guidance
+        # 事件会让纳入判定永远看不到终态，只能悬挂；直接作为普通下一轮输入入队。
+        s.enqueue_session_queued_turn(
+            conversation_id,
+            content=guidance_text,
+            attachments=guidance_attachments,
+            references=guidance_references,
+            mental_model_enabled=None,
+            runtime_status_enabled=None,
+            turn_mode="",
+            write_intent=None,
+            client_submission_id="",
+            lang=lang,
+        )
+        guidance_delivery = "queue"
 
     if normalized_mode == "interrupt" and running:
         stopped = s.request_stop_session_turn(conversation_id, fast_ack=True)

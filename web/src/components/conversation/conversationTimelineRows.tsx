@@ -742,9 +742,11 @@ export function createConversationTimelineRows({
             const guidanceDeliveryText = guidanceDeliveryLabel(message, lang);
             const guidanceStatusLabel = guidanceState === "drained"
               ? (lang === "zh" ? "已纳入" : "Included")
-              : guidanceState === "pending"
-                ? (lang === "zh" ? "等待纳入" : "Waiting")
-                : (lang === "zh" ? "已接收" : "Received");
+              : guidanceState === "queued"
+                ? (lang === "zh" ? "已转下一轮" : "Moved to next")
+                : guidanceState === "pending"
+                  ? (lang === "zh" ? "等待纳入" : "Waiting")
+                  : (lang === "zh" ? "已接收" : "Received");
             const userAuthoredMessage = message.role === "user" && !agentInboxMessage;
             const isStreamingStatusPlaceholder = assistantTurnIsStreaming(message)
               && showResponseBlock

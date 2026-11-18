@@ -25,11 +25,16 @@ export function guidanceDeliveryLabel(
   return "";
 }
 
-export function guidanceDisplayState(message: ConversationMessage): "pending" | "drained" | "received" | "promoted" {
+export function guidanceDisplayState(message: ConversationMessage): "pending" | "drained" | "received" | "queued" | "promoted" {
   const submitted = positiveSequence(message.metadata?.guidanceSequence);
   const consumed = positiveSequence(message.metadata?.guidanceConsumedSequence);
   if (message.metadata?.guidanceState === "drained" && submitted && consumed && consumed > submitted) {
     return "drained";
+  }
+  // The current turn moved this input onto the next-turn queue. That is a
+  // settled answer for this row, not a row still waiting to be picked up.
+  if (message.metadata?.guidanceState === "queued") {
+    return "queued";
   }
   if (message.metadata?.guidanceState === "promoted") {
     return "promoted";

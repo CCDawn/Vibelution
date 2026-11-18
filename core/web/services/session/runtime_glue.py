@@ -393,6 +393,22 @@ def _append_session_conversation_event(
     )
 
 
+def _append_session_conversation_events_batch(
+    session_id: str,
+    turn_id: str,
+    event_specs: list[dict[str, Any]],
+) -> list[Any]:
+    """Append fact pairs that must not land separately through the journal bridge."""
+
+    s = _service()
+    return s._journal_bridge.append_session_conversation_events_batch(
+        session_id,
+        turn_id,
+        event_specs,
+        project_root=s.PROJECT_ROOT,
+    )
+
+
 def _append_session_runtime_notice(items: Any, notice: dict[str, Any]) -> list[dict[str, Any]]:
     s = _service()
     return s._normalize_session_runtime_notices([*list(items or []), notice])

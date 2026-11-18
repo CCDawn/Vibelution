@@ -816,6 +816,7 @@ from core.web.services.session.runtime_glue import (
     _ai_search_team_id_for_repair,
     _append_session_branch_rebase_event,
     _append_session_conversation_event,
+    _append_session_conversation_events_batch,
     _append_session_runtime_notice,
     _archived_agent_for_direct_session,
     _assistant_projection_text_key,

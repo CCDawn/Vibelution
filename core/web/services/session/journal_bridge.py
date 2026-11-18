@@ -23,6 +23,7 @@ from core.chat.conversation_ledger import (
 from core.chat.session_catalog import notify_session_catalog_dirty
 from core.chat.turn_journal import (
     TERMINAL_EVENTS,
+    append_turn_events,
     set_turn_transition_guard_hook,
 )
 
@@ -384,6 +385,69 @@ def append_session_conversation_event(
         raise
 
 
+def append_session_conversation_events_batch(
+    session_id: str,
+    turn_id: str,
+    event_specs: list[dict[str, Any]],
+    *,
+    project_root: Path | None = None,
+) -> list[Any]:
+    """Append several ledger events inside one journal lock section.
+
+    A guide admission and its user message must not land separately: half a
+    pair leaves a message nobody adopts, or an adoption for a row that does not
+    exist. Sequence allocation, post-terminal guards and cache invalidation stay
+    identical to sequential appends.
+    """
+
+    normalized_session_id = str(session_id or "").strip()
+    specs = [dict(spec) for spec in (event_specs or []) if isinstance(spec, dict)]
+    if not normalized_session_id or not specs:
+        return []
+    root = _resolve_project_root(project_root)
+    started_at = _perf_counter()
+    try:
+        events = append_turn_events(
+            root,
+            normalized_session_id,
+            str(turn_id or "").strip(),
+            specs,
+        )
+        invalidate_session_conversation_events_cache(normalized_session_id)
+        try:
+            sequence = latest_ledger_sequence(root, normalized_session_id)
+        except Exception:
+            sequence = 0
+        notify_session_catalog_dirty(
+            root,
+            normalized_session_id,
+            f"journal:{sequence}",
+        )
+        return list(events or [])
+    except Exception as exc:
+        try:
+            record_runtime_scene_event(
+                "conversation",
+                "conversation_ledger",
+                "conversation.ledger.append_failed",
+                level="warning",
+                outcome="failed",
+                message="Failed to append a chat conversation ledger event batch.",
+                fields={
+                    "sessionId": normalized_session_id,
+                    "turnId": str(turn_id or "").strip(),
+                    "eventCount": len(specs),
+                    "errorType": type(exc).__name__,
+                    "errorMessageLength": len(str(exc)),
+                    "durationMs": _elapsed_ms(started_at),
+                },
+                lifecycle=True,
+            )
+        except Exception:
+            pass
+        raise
+
+
 # Private aliases matching historical session_service names (module-direct use).
 _session_conversation_events_signature = session_conversation_events_signature
 _prune_session_conversation_events_cache_locked = prune_session_conversation_events_cache_locked
@@ -391,6 +455,7 @@ _invalidate_session_conversation_events_cache = invalidate_session_conversation_
 _load_session_conversation_events_cached = load_session_conversation_events_cached
 _session_ledger_sequence = session_ledger_sequence
 _append_session_conversation_event = append_session_conversation_event
+_append_session_conversation_events_batch = append_session_conversation_events_batch
 
 
 def _record_turn_transition_guard_scene_event(record: dict[str, Any]) -> None:

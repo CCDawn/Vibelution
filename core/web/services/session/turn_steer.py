@@ -16,6 +16,7 @@ Drain receipts reference the existing user event and locate its display boundary
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 from uuid import uuid4
 
@@ -339,7 +340,30 @@ def guidance_metadata_from_events(events: Any) -> dict[str, dict[str, Any]]:
         result[user_event_id].update(
             guidanceState="drained",
             guidanceConsumedSequence=receipt_sequence,
+            guidanceDrainedTurnId=turn_id,
         )
+    # A guide the current turn could not use moves itself onto the next-turn
+    # queue as a terminal transition. Without this the row keeps waiting
+    # forever whenever delivery_changed was written but promotion never
+    # followed (for example the next turn never starts).
+    for event in event_list:
+        if str(getattr(event, "event_type", "") or "") != EVENT_TURN_STEER:
+            continue
+        payload = dict(getattr(event, "payload", None) or {})
+        if payload.get("disposition") != DISPOSITION_DELIVERY_CHANGED:
+            continue
+        steer_id = str(payload.get("steerId") or "").strip()
+        if not steer_id:
+            continue
+        for event_id, guide in guides.items():
+            metadata = dict(getattr(guide, "payload", {}).get("metadata") or {})
+            if str(metadata.get("steerId") or "").strip() != steer_id:
+                continue
+            result[event_id].update(
+                guidanceState="queued",
+                guidanceDelivery=str(payload.get("delivery") or DELIVERY_QUEUE),
+                guidanceTargetTurnId=str(payload.get("targetTurnId") or "").strip(),
+            )
     # A guide the settled turn never drained is promoted onto the next-turn
     # queue. The original row stops being a live badge; the queued-turn message
     # is the visible copy, so the transcript never shows the same input twice.
@@ -425,6 +449,42 @@ def restore_guidance_display_messages(messages: list[dict[str, Any]], events: An
     return result
 
 
+_DRAIN_LOCKS: dict[str, Any] = {}
+_DRAIN_LOCKS_GUARD = threading.Lock()
+# Consumption is a session fact, not a worker fact: two workers of one session
+# must not hand the same guide to the model twice. A fresh worker in a new
+# process starts empty, which is exactly the restart replay we want.
+_CONSUMED_GUIDE_KEYS: dict[str, set[str]] = {}
+_CONSUMED_GUIDE_KEYS_LIMIT = 4096
+
+
+def _session_consumed_keys(session_id: str) -> set[str]:
+    key = str(session_id or "").strip()
+    with _DRAIN_LOCKS_GUARD:
+        keys = _CONSUMED_GUIDE_KEYS.get(key)
+        if keys is None:
+            keys = set()
+            _CONSUMED_GUIDE_KEYS[key] = keys
+        return keys
+
+
+def _drain_lock_for(session_id: str) -> Any:
+    """Return the per-session drain gate.
+
+    Two workers of one session can overlap: a settled turn's worker may not
+    have exited while the next turn's worker already polls. The read-decide-
+    write window of a drain must not interleave, or one guide reaches the
+    model twice.
+    """
+    key = str(session_id or "").strip()
+    with _DRAIN_LOCKS_GUARD:
+        lock = _DRAIN_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _DRAIN_LOCKS[key] = lock
+        return lock
+
+
 def drain_guidance_events(
     session_id: str,
     turn_id: str,
@@ -437,6 +497,22 @@ def drain_guidance_events(
     the text again, while an existing receipt must keep its original sequence.
     Receipt failure never drops guidance that the existing provider could deliver.
     """
+    with _drain_lock_for(session_id):
+        session_keys = _session_consumed_keys(session_id)
+        session_keys.update(consumed_keys or ())
+        if len(session_keys) > _CONSUMED_GUIDE_KEYS_LIMIT:
+            # 会话级的已消费集合只增不减；上限溢出时整体清空，代价是极端情况下
+            # 一次重放，换取内存有界。
+            session_keys.clear()
+        return _drain_guidance_events_locked(session_id, turn_id, events, session_keys)
+
+
+def _drain_guidance_events_locked(
+    session_id: str,
+    turn_id: str,
+    events: Any,
+    consumed_keys: set[str],
+) -> list[str]:
     event_list = list(events or [])
     receipt_metadata: dict[str, dict[str, Any]] | None = None
     guides: list[Any] = []
@@ -466,7 +542,8 @@ def drain_guidance_events(
         consumed_keys.add(key)
         if receipt_metadata is None:
             receipt_metadata = guidance_metadata_from_events(event_list)
-        if event_id and sequence and receipt_metadata.get(event_id, {}).get("guidanceState") != "drained":
+        receipt_state = receipt_metadata.get(event_id) if event_id else None
+        if event_id and sequence and (receipt_state or {}).get("guidanceState") != "drained":
             metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
             receipt = _payload(
                 steer_id=str(metadata.get("steerId") or event_id).strip(),
@@ -483,6 +560,35 @@ def drain_guidance_events(
                 pass
         pending.append(f"{_GUIDE_MODEL_PREAMBLE}{content}")
     return pending
+
+
+def guide_turn_is_live(session_id: str, turn_id: str) -> bool:
+    """Return whether a turn can still drain a guide.
+
+    A guide may only keep waiting while its turn is the executing turn. A turn
+    that died without a terminal event must not pin the badge forever: the
+    settle fallback treats it as finished and moves the input to the queue.
+    """
+    s = _service()
+    normalized_turn_id = str(turn_id or "").strip()
+    if not normalized_turn_id:
+        return False
+    try:
+        controller = s._get_session_turn_control(session_id)
+        if controller is not None and (
+            str(getattr(controller, "turn_id", "") or "").strip() == normalized_turn_id
+        ):
+            return True
+        for run in s.list_active_session_work_runs():
+            if (
+                str(run.get("sessionId") or "").strip() == str(session_id or "").strip()
+                and str(run.get("runId") or "").strip() == normalized_turn_id
+            ):
+                return True
+    except Exception:
+        # 活性查询失败不能把仍在跑的引导误转队列；保守视为存活。
+        return True
+    return False
 
 
 def fallback_pending_guides_to_queue(
@@ -519,7 +625,12 @@ def fallback_pending_guides_to_queue(
         event_id = str(getattr(event, "event_id", "") or "").strip()
         if not event_id:
             continue
-        if str((state.get(event_id) or {}).get("guidanceState") or "") != "unconfirmed":
+        guide_state = str((state.get(event_id) or {}).get("guidanceState") or "")
+        if guide_state not in {"unconfirmed", "pending"}:
+            continue
+        # A live turn still owns its next drain; only a finished turn is a
+        # stranded state that must move to the queue.
+        if guide_state == "pending" and guide_turn_is_live(session_id, turn_id):
             continue
         content = str(payload.get("content") or "").strip()
         if not content:
