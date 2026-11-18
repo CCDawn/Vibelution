@@ -826,8 +826,26 @@ describe("AgentSessionTabStrip two-stage close confirm", () => {
     expect(markup).toContain("评审");
     // The active session always keeps a real tab: "where am I" never needs a click.
     expect(markup).toContain("子任务标题");
-    // The owning chip is haloed so the group tells the same story.
-    expect(markup).toContain("agentSessionTabGroupHeaderActive");
+    // The chip no longer borrows the selection ring: "where am I" is the pinned
+    // tab's job, and the chip stays a colour-carrying label.
+    expect(markup).toContain('data-session-tab-group-header="ga"');
+    expect(markup).not.toContain("agentSessionTabGroupHeaderActive");
+  });
+
+  it("paints the group colour onto the chip instead of a bare dot", () => {
+    localStorage.setItem(
+      "vibelution.agentSessionTabGroups.v1",
+      JSON.stringify({
+        "agent-1": {
+          groups: [{ id: "ga", name: "评审", collapsed: false, color: "blue" }],
+          membership: { "session-child": "ga" },
+        },
+      }),
+    );
+    const markup = renderStrip();
+    // Tint utilities carry no class-name token, so assert on the colour itself.
+    expect(markup).toContain("hsl(212_72%_55%/0.16)");
+    expect(markup).not.toContain("agentSessionTabGroupHeaderActive");
   });
 
   it("hides the non-active members of a collapsed group", () => {

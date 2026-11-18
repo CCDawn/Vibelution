@@ -915,10 +915,7 @@ export function AgentSessionTabStrip({
       </ul>
     );
   };
-  const renderSessionTabGroupHeader = (
-    section: AgentSessionTabGroupSection,
-    containsActive: boolean,
-  ) => {
+  const renderSessionTabGroupHeader = (section: AgentSessionTabGroupSection) => {
     // The ungrouped bucket is the default surface: no header, no label, no chrome.
     if (section.ungrouped) {
       return null;
@@ -928,12 +925,16 @@ export function AgentSessionTabStrip({
     const aggregateTone = groupAggregateTone(section);
     const activeColor = sessionTabGroupColorFor(groupState, section.groupId);
     const groupDot = activeColor ? GROUP_DOT_CLASS[activeColor] : "";
+    // The chip itself carries the group colour. A 6px dot alone was too quiet to
+    // read as "the colour changed", and the accent ring it replaced made a group
+    // look identical to the selected session tab. Neutral groups stay unpainted
+    // so the default bucket keeps a flat surface.
+    const groupTint =
+      activeColor && activeColor !== "gray" ? GROUP_TINT_CLASS[activeColor] : "";
     const isOpen = groupIsOpen(section.groupId);
     const headerClassName = [
       styles.agentSessionTabGroupHeader,
-      // The accent ring says "the open session is in this group"; the group
-      // colour belongs on the dot instead of tinting the whole chip.
-      containsActive ? styles.agentSessionTabGroupHeaderActive : "",
+      groupTint,
       dropActive ? styles.agentSessionTabGroupHeaderDropTarget : "",
       isOpen ? styles.agentSessionTabGroupHeaderOpen : "",
     ].filter(Boolean).join(" ");
@@ -1277,7 +1278,7 @@ export function AgentSessionTabStrip({
             commitGroupDrop(section.groupId);
           }}
         >
-          {renderSessionTabGroupHeader(section, Boolean(pinnedSession))}
+          {renderSessionTabGroupHeader(section)}
           {section.ungrouped
             ? section.sessions.map((session) => renderSessionTab(session, section.groupId))
             : pinnedSession
