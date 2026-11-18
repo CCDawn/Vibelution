@@ -811,6 +811,69 @@ def _with_temporary_tool_grants(
     }
 
 
+def _with_extra_tool_policies(
+    policy: dict[str, Any],
+    extra_policy_ids: Iterable[Any],
+) -> dict[str, Any]:
+    """Union extra shared tool packages onto a base runtime policy copy.
+
+    ``extraToolPolicyIds`` keeps a shared base package while borrowing more
+    tools from another package, without copying the whole policy. The merge is
+    additive only: an empty allow-list stays empty, blocked names never enter
+    the result, an extra package can never remove a tool the base already
+    allows, and additions land in ``temporaryAllowedTools`` so the persisted
+    ToolPolicy remains the single writable source.
+    """
+
+    s = _service()
+    policy_ids = [
+        str(item or "").strip()
+        for item in list(extra_policy_ids or [])
+        if str(item or "").strip()
+    ]
+    if not policy_ids:
+        return policy
+    base_allowed = s._tool_name_list(policy.get("allowedTools") or [])
+    if not base_allowed:
+        return policy
+    try:
+        catalog = s._tool_policies(s.load_state())
+    except Exception as exc:
+        s._debug_logger.warning(
+            f"Failed to load extra tool policies {policy_ids}. "
+            f"error={type(exc).__name__}: {exc}",
+            tag="AGENT_TOOL_DIRECTORY",
+        )
+        return policy
+    sources = [
+        catalog[policy_id]
+        for policy_id in policy_ids
+        if isinstance(catalog.get(policy_id), dict)
+    ]
+    if not sources:
+        return policy
+    blocked = set(s._tool_name_list(policy.get("blockedTools") or []))
+    for source in sources:
+        blocked.update(s._tool_name_list(source.get("blockedTools") or []))
+    merged = list(base_allowed)
+    added: list[str] = []
+    for source in sources:
+        for tool in s._tool_name_list(source.get("allowedTools") or []):
+            if tool in blocked or tool in merged:
+                continue
+            merged.append(tool)
+            added.append(tool)
+    if not added:
+        return policy
+    return {
+        **policy,
+        "allowedTools": merged,
+        "temporaryAllowedTools": s._tool_name_list(
+            list(policy.get("temporaryAllowedTools") or []) + added
+        ),
+    }
+
+
 def _without_subagent_delegation_tools(policy: dict[str, Any], delegation_policy: dict[str, Any] | None) -> dict[str, Any]:
     s = _service()
     normalized_policy = s.normalize_delegation_policy(delegation_policy)
