@@ -426,15 +426,32 @@ export function useConversationTimelineFollow({
         atBottomRef.current = false;
         setIsAtBottom(false);
         lastTimelineScrollTopRef.current = restored.scrollTop;
-        // Sticky→full hydrate and virtual row measure can grow height after first paint.
-        window.requestAnimationFrame(() => {
+        // Sticky→full hydrate and virtual row measurement keep growing the
+        // content height for several frames after the switch. Re-applying the
+        // remembered offset only once let the viewport step down as each
+        // measured row arrived, which read as the timeline bouncing up and
+        // down. Hold the offset until the height stops changing (or the frame
+        // budget runs out) so the same row stays under the cursor.
+        let settleStableFrames = 0;
+        let settleLastHeight = -1;
+        let settleAppliedFrames = 0;
+        const settleRestoredScroll = () => {
           const nextTimeline = timelineRef.current;
           if (!nextTimeline || followLatestRef.current) {
             return;
           }
+          const height = nextTimeline.scrollHeight;
+          settleStableFrames = height === settleLastHeight ? settleStableFrames + 1 : 0;
+          settleLastHeight = height;
           const again = restoreSessionTimelineScroll(nextTimeline, saved);
           lastTimelineScrollTopRef.current = again.scrollTop;
-        });
+          settleAppliedFrames += 1;
+          if (settleStableFrames >= 2 || settleAppliedFrames >= 30) {
+            return;
+          }
+          window.requestAnimationFrame(settleRestoredScroll);
+        };
+        window.requestAnimationFrame(settleRestoredScroll);
         return;
       }
       scrollTimelineToBottom(timeline, { followLatest: true });
