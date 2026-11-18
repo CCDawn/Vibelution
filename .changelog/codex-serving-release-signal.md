@@ -1,0 +1,1 @@
+- **健康检查暴露产物陈旧信号**：`/api/health` 现在同时返回 `servingRelease`（进程启动时 pin 的产物）与 `activeRelease`（当前 `active.json` 指针），并用 `releaseStale` 标记两者不一致。重建前端后若未重启后端，可直接从 health 读出“需要重启”，不必再手动比对两份数据。
