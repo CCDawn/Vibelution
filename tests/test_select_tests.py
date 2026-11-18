@@ -639,6 +639,16 @@ def test_selector_matches_memory_cleanup_and_tool_registry_services():
     assert len(result["commands"]) == len(set(result["commands"]))
 
 
+@pytest.mark.parametrize(
+    "path", ["tools/Key_Tools.py", "core/web/services/tool_catalog.py"]
+)
+def test_selector_runs_full_tool_registry_checks_for_builtin_registration(path):
+    result = select_tests.select_tests([path], select_tests.load_matrix())
+
+    assert "tool-registry" in {rule["id"] for rule in result["matchedRules"]}
+    assert any("tests/test_tool_registry_service.py" in command for command in result["commands"])
+
+
 def test_selector_matches_web_runtime_routes_to_runtime_validation_commands():
     result = select_tests.select_tests(
         ["tests/test_web_runtime_routes.py"],

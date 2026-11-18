@@ -1079,6 +1079,17 @@ def test_main_worktree_finds_linked_main_worktree(
     assert gate.main_worktree(task_worktree, "main") == git_repo.resolve()
 
 
+def test_main_worktree_stays_at_primary_checkout_if_main_was_moved(
+    git_repo: Path, tmp_path: Path,
+) -> None:
+    git(git_repo, "branch", "-M", "main")
+    git(git_repo, "switch", "-c", "codex/root-misuse")
+    linked_main = tmp_path / "linked-main"
+    git(git_repo, "worktree", "add", str(linked_main), "main")
+
+    assert gate.main_worktree(linked_main, "main") == git_repo.resolve()
+
+
 def test_resolve_guard_script_prefers_current_and_supports_legacy_fallback(
     tmp_path: Path,
 ) -> None:

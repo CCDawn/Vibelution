@@ -140,19 +140,19 @@ const styles = {
   agentSessionTabGroupChevronCollapsed:
     "vui-routes-chatcodingroute agentSessionTabGroupChevronCollapsed !opacity-100",
   agentSessionTabGroupDot:
-    "vui-routes-chatcodingroute agentSessionTabGroupDot inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--fg-tertiary)]",
+    "vui-routes-chatcodingroute agentSessionTabGroupDot inline-block h-1.5 w-1.5 shrink-0 rounded-full",
   agentSessionTabGroupDotGray:
-    "vui-routes-chatcodingroute agentSessionTabGroupDotGray bg-[hsl(220_10%_55%)]",
+    "vui-routes-chatcodingroute agentSessionTabGroupDotGray !bg-[hsl(220_10%_55%)]",
   agentSessionTabGroupDotBlue:
-    "vui-routes-chatcodingroute agentSessionTabGroupDotBlue bg-[hsl(212_72%_55%)]",
+    "vui-routes-chatcodingroute agentSessionTabGroupDotBlue !bg-[hsl(212_72%_55%)]",
   agentSessionTabGroupDotGreen:
-    "vui-routes-chatcodingroute agentSessionTabGroupDotGreen bg-[hsl(148_55%_45%)]",
+    "vui-routes-chatcodingroute agentSessionTabGroupDotGreen !bg-[hsl(148_55%_45%)]",
   agentSessionTabGroupDotAmber:
-    "vui-routes-chatcodingroute agentSessionTabGroupDotAmber bg-[hsl(38_85%_52%)]",
+    "vui-routes-chatcodingroute agentSessionTabGroupDotAmber !bg-[hsl(38_85%_52%)]",
   agentSessionTabGroupDotViolet:
-    "vui-routes-chatcodingroute agentSessionTabGroupDotViolet bg-[hsl(268_60%_58%)]",
+    "vui-routes-chatcodingroute agentSessionTabGroupDotViolet !bg-[hsl(268_60%_58%)]",
   agentSessionTabGroupDotRose:
-    "vui-routes-chatcodingroute agentSessionTabGroupDotRose bg-[hsl(340_70%_56%)]",
+    "vui-routes-chatcodingroute agentSessionTabGroupDotRose !bg-[hsl(340_70%_56%)]",
   agentSessionTabGroupTintGray:
     "vui-routes-chatcodingroute bg-[hsl(220_10%_55%/0.16)] hover:bg-[hsl(220_10%_55%/0.24)]",
   agentSessionTabGroupTintBlue:

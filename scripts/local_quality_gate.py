@@ -882,14 +882,12 @@ def main_worktree(root: Path, base: str) -> Path:
     completed = run_process(["git", "worktree", "list", "--porcelain"], root)
     if completed.returncode != 0:
         raise RuntimeError(completed.stderr.strip() or "cannot list worktrees")
-    blocks = completed.stdout.strip().split("\n\n")
-    expected_branch = f"branch refs/heads/{base}"
-    for block in blocks:
-        lines = block.splitlines()
-        if expected_branch in lines:
-            path_line = next(line for line in lines if line.startswith("worktree "))
-            return Path(path_line.removeprefix("worktree ")).resolve()
-    return root.resolve()
+    # Git lists the primary worktree first. A linked checkout holding the base
+    # branch must never be substituted for the shared integration directory.
+    first = completed.stdout.splitlines()
+    if not first or not first[0].startswith("worktree "):
+        raise RuntimeError(f"cannot locate integration checkout for {base}")
+    return Path(first[0].removeprefix("worktree ")).resolve()
 
 
 def resolve_guard_script(candidates: Sequence[Path] | None = None) -> Path:

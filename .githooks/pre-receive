@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+# receive-pack runs in the Git directory, including for `git push .`.
+while read -r old_sha new_sha ref; do
+  if [ "$ref" = "refs/heads/main" ]; then
+    echo "[pre-receive] Refusing push to local main; use scripts/task_closeout.py for validated fast-forward integration." >&2
+    exit 1
+  fi
+done
