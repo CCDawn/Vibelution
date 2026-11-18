@@ -665,11 +665,25 @@ def _publish_session_detail_snapshot(session_id: str, *, detail: dict[str, Any] 
     # own active-turn layer, and only the settled pass changes what the row shows.
     settled = not s._is_session_running(session_id)
     if settled and not subscribers:
-        # No detail watcher to project from: send the bare "this row moved"
-        # frame and let the rail do one index read.
+        # No detail watcher to project from. The rail still gets the exact
+        # settled row: a bare "this row moved" frame costs every open window a
+        # full index read, so hydrate the projection once here and ship the
+        # same patch the watched path sends.
         from core.web.services.session import session_index_stream
 
-        session_index_stream.publish_session_index_delta(session_id, "upsert")
+        settled_detail = detail if detail is not None else s.get_session_detail(
+            session_id,
+            message_limit=s._SESSION_STREAM_DETAIL_MESSAGE_LIMIT,
+            transcript_scope=s._SESSION_STREAM_DETAIL_TRANSCRIPT_SCOPE,
+        )
+        if settled_detail is None:
+            session_index_stream.publish_session_index_delta(session_id, "upsert")
+            return
+        session_index_stream.publish_session_index_delta(
+            session_id,
+            "upsert",
+            patch=session_index_stream.index_patch_from_detail(settled_detail),
+        )
         return
     if not subscribers:
         return

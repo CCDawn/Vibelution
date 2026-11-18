@@ -1,0 +1,1 @@
+- Session rail rows now carry the settled status patch for background sessions, so a turn finishing outside the open session updates the list in place instead of forcing a full index re-read; the rail also keeps polling while the index stream is disconnected instead of freezing until the session is opened.

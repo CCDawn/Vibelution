@@ -966,7 +966,7 @@ export function ChatCodingRouteWorkbench() {
   useSessionIndexCrossWindowSync(queryClient);
   // The rail also follows the server's own index frames, so a turn settling in
   // another window (or another session) reaches this rail without a list read.
-  useSessionIndexEventStream(queryClient, { enabled: true });
+  const sessionIndexStreamConnected = useSessionIndexEventStream(queryClient, { enabled: true });
   // Transport visibility for the active-turn status note. `streamConnected`
   // stays tri-state: only a real reconnect loop reports false; route-settling
   // teardowns keep it undefined so the note never flashes a false drop.
@@ -1000,6 +1000,7 @@ export function ChatCodingRouteWorkbench() {
     sessionStreamAvailable,
     sessionStreamShouldConnect,
     sessionStreamConnected,
+    sessionIndexStreamConnected,
     groupStreamShouldConnect,
     groupStreamConnected,
     activeSessionId: activeSessionId || "",

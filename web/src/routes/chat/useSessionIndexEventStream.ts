@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 
 import { queryKeys } from "../../api/queryKeys";
@@ -163,10 +163,14 @@ export function shouldResyncIndexOnConnect(previousConnections: number): boolean
 export function useSessionIndexEventStream(
   queryClient: QueryClient,
   options: { enabled: boolean },
-): void {
+): boolean {
   const enabled = options.enabled;
+  // The rail's polling policy needs to know whether this socket is actually
+  // open: when it is down, no delta arrives for any background session.
+  const [connected, setConnected] = useState(false);
   useEffect(() => {
     if (!enabled || typeof window === "undefined") {
+      setConnected(false);
       return;
     }
     const controller = new AbortController();
@@ -191,6 +195,7 @@ export function useSessionIndexEventStream(
           await consumeGuardedEventStream({
             url: SESSION_INDEX_EVENTS_PATH,
             signal: controller.signal,
+            onOpen: () => setConnected(true),
             onFrame: (frame) => {
               const delta = parseSessionIndexDelta(frame.data);
               if (delta) {
@@ -201,6 +206,7 @@ export function useSessionIndexEventStream(
         } catch {
           // A dropped read is recoverable; the reconnect below owns recovery.
         }
+        setConnected(false);
         if (stopped) {
           return;
         }
@@ -212,6 +218,7 @@ export function useSessionIndexEventStream(
 
     return () => {
       stopped = true;
+      setConnected(false);
       if (reconnectTimer !== null) {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
@@ -219,4 +226,5 @@ export function useSessionIndexEventStream(
       controller.abort();
     };
   }, [enabled, queryClient]);
+  return connected;
 }

@@ -23,6 +23,13 @@ export type ChatLiveQueryPolicyInput = {
   sessionStreamShouldConnect: boolean;
   /** True only after EventSource onopen for the active direct session. */
   sessionStreamConnected: boolean;
+  /**
+   * True only after the global session-index rail stream opened. That stream is
+   * the only carrier for every session's row, so the index query may stop
+   * polling only while it is really open. Absent means "assume open" so older
+   * callers keep their previous behaviour.
+   */
+  sessionIndexStreamConnected?: boolean;
   groupStreamShouldConnect: boolean;
   /** True only after EventSource onopen for the active group room. */
   groupStreamConnected: boolean;
@@ -52,6 +59,11 @@ export function resolveChatLiveQueryPolicy(input: ChatLiveQueryPolicyInput): Cha
     && input.sessionStreamConnected
     && input.directSessionPanelActive,
   );
+  // The detail stream only covers the session it streams; the rail's global
+  // index stream is what carries every other row. Without it a background
+  // turn's settle never reaches the list, so polling has to stay on.
+  const sessionIndexRailOwnsIndexQuery =
+    directSessionStreamOwnsLiveQueries && input.sessionIndexStreamConnected !== false;
   const groupStreamOwnsLiveQueries = Boolean(
     input.sessionStreamAvailable
     && input.groupStreamShouldConnect
@@ -59,7 +71,7 @@ export function resolveChatLiveQueryPolicy(input: ChatLiveQueryPolicyInput): Cha
     && input.standardGroupRoomActive,
   );
   const directBackgroundMs =
-    input.directSessionBackgroundSyncActive && !directSessionStreamOwnsLiveQueries
+    input.directSessionBackgroundSyncActive && !sessionIndexRailOwnsIndexQuery
       ? ACTIVE_BACKGROUND_SYNC_POLL_MS
       : false;
   const groupBackgroundMs =
@@ -73,7 +85,7 @@ export function resolveChatLiveQueryPolicy(input: ChatLiveQueryPolicyInput): Cha
     groupStreamOwnsLiveQueries,
     sessionsRefetchInterval: resolvePollingInterval(
       input.chatPollingVisible,
-      directSessionStreamOwnsLiveQueries ? false : ACTIVE_INDEX_POLL_MS,
+      sessionIndexRailOwnsIndexQuery ? false : ACTIVE_INDEX_POLL_MS,
       { backgroundMs: directBackgroundMs },
     ),
     conversationsRefetchInterval: resolvePollingInterval(
