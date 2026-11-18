@@ -22,6 +22,7 @@ import {
   composerUploadedArtifactIds,
   markComposerAttachmentsUploading,
   needsComposerAttachmentUpload,
+  sessionReferenceId,
   uploadComposerAttachmentsSettled,
   type ComposerAttachmentUploadOutcome,
   type ComposerImageAttachment,
@@ -65,6 +66,7 @@ export type UseSubmitTurnWithAttachmentsInput = {
   ) => ComposerAttachmentUploadOutcome[];
   restorePendingStopAfterUploadFailure: (sessionId: string) => void;
   setSessionImageAttachments: Dispatch<SetStateAction<Record<string, ComposerImageAttachment[]>>>;
+  setSessionReferenceAttachments: Dispatch<SetStateAction<Record<string, SessionReferenceAttachment[]>>>;
   setSessionImageUploadPending: Dispatch<SetStateAction<Record<string, boolean>>>;
   setSessionComposerErrors: Dispatch<SetStateAction<Record<string, string>>>;
   setSessionDrafts: Dispatch<SetStateAction<Record<string, string>>>;
@@ -79,7 +81,7 @@ export type UseSubmitTurnWithAttachmentsInput = {
         attachmentIds?: string[];
         references?: SessionReferenceAttachment[];
       },
-      options?: { onError?: () => void },
+      options?: { onSuccess?: () => void; onError?: () => void },
     ) => void;
   };
 };
@@ -102,6 +104,7 @@ export function useSubmitTurnWithAttachments({
   retainOwnedComposerUploadOutcomes,
   restorePendingStopAfterUploadFailure,
   setSessionImageAttachments,
+  setSessionReferenceAttachments,
   setSessionImageUploadPending,
   setSessionComposerErrors,
   setSessionDrafts,
@@ -345,6 +348,31 @@ export function useSubmitTurnWithAttachments({
             references,
           },
           {
+            onSuccess: () => {
+              if (!isMountedRef.current) return;
+              // 引导已经把附件交给当前轮，composer 必须交还同一份所有权；
+              // 否则同一条图片会同时留在输入框和消息里。
+              const submittedImageIds = new Set(
+                submittedAttachments.map((attachment) => attachment.id),
+              );
+              if (submittedImageIds.size) {
+                setSessionImageAttachments((current) => ({
+                  ...current,
+                  [submittedSessionId]: (current[submittedSessionId] ?? []).filter(
+                    (attachment) => !submittedImageIds.has(attachment.id),
+                  ),
+                }));
+              }
+              if (references.length) {
+                const submittedReferenceIds = new Set(references.map(sessionReferenceId));
+                setSessionReferenceAttachments((current) => ({
+                  ...current,
+                  [submittedSessionId]: (current[submittedSessionId] ?? []).filter(
+                    (reference) => !submittedReferenceIds.has(sessionReferenceId(reference)),
+                  ),
+                }));
+              }
+            },
             onError: () => {
               if (isMountedRef.current) restoreAttachmentsAfterFailure();
             },

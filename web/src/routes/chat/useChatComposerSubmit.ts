@@ -544,6 +544,7 @@ export function useChatComposerSubmitActions({
     retainOwnedComposerUploadOutcomes,
     restorePendingStopAfterUploadFailure,
     setSessionImageAttachments,
+    setSessionReferenceAttachments,
     setSessionImageUploadPending,
     setSessionComposerErrors,
     setSessionDrafts,
