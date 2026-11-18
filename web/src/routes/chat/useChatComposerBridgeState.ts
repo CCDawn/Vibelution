@@ -95,6 +95,7 @@ export interface UseChatComposerBridgeStateParams {
     isPending: boolean;
     isSuccess?: boolean;
     data?: SessionDetail;
+    dataUpdatedAt?: number;
     variables?: { sessionId?: string; mode?: SessionGuidanceMode };
   };
   continueEnabled?: boolean;
@@ -205,9 +206,19 @@ export function useChatComposerBridgeState({
   const composerStopPending = (stopTurnMutation.isPending && stopMutationMatchesActiveSession) || sessionStopping;
   // While a stop is settling the composer names the hop it is waiting on, so a
   // long tool teardown reads as progress instead of a frozen "stopping".
-  const guidanceDeliveryNoticeText = sessionGuidanceMutation.isSuccess
-    ? guidanceDeliveryNotice(sessionGuidanceMutation.data?.guidanceDelivery, lang)
-    : "";
+  // A delivery receipt is one-shot: it speaks only for the session that
+  // submitted it, only while that turn still runs, and only briefly. A settled
+  // turn must not leave a stale "inserted" line in the composer.
+  const guidanceDeliveryNoticeAgeMs =
+    Date.now() - Number(sessionGuidanceMutation.dataUpdatedAt || 0);
+  const guidanceDeliveryNoticeText =
+    sessionGuidanceMutation.isSuccess
+    && guidanceMutationMatchesActiveSession
+    && sessionRunning
+    && guidanceDeliveryNoticeAgeMs >= 0
+    && guidanceDeliveryNoticeAgeMs <= 10_000
+      ? guidanceDeliveryNotice(sessionGuidanceMutation.data?.guidanceDelivery, lang)
+      : "";
   const stopStageGuidance = sessionStopping
     ? resolveStopStageLabel(detail?.stopStages, lang)
     : "";
