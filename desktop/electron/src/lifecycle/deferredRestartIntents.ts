@@ -38,6 +38,12 @@ export type FulfillDeferredRestartIntentInput = {
   now?: () => number;
   /** Management-only attachment may fulfil new requests without replaying old ones. */
   notBefore?: number;
+  /**
+   * Operator-initiated restarts must not queue behind running work. The caller
+   * decides per intent which requests may interrupt; self-evolution keeps its
+   * "restart when idle" promise, everything else runs now.
+   */
+  interruptActiveWorkFor?: (intent: DeferredRestartIntent) => boolean;
 };
 
 type IntentStatus = "pending" | "claimed" | "completed" | "failed" | "expired" | "superseded";
@@ -211,7 +217,19 @@ export async function fulfillDeferredRestartIntentOnce(
   if (!candidate) return noFreshIntent;
   const activeWorkCount = (await input.listActiveWork()).length;
   if (activeWorkCount > 0) {
-    return { status: "blocked", activeWorkCount };
+    if (input.interruptActiveWorkFor?.(candidate) !== true) {
+      return { status: "blocked", activeWorkCount };
+    }
+    // Explicit operator restarts stop the running work instead of waiting. The
+    // interrupted turns are recovered by the existing restart reconciliation,
+    // so this only records why the work was cut short.
+    recordIntentEvent(
+      input.workspaceRoot,
+      candidate,
+      "workbench.restart_intent_force_interrupt",
+      `Deferred restart interrupted ${activeWorkCount} active work run(s) at operator request.`,
+      { activeWorkCount }
+    );
   }
   // A newer lifecycle command can supersede or prune the selected request
   // during the asynchronous work read. Never claim a replacement by accident.

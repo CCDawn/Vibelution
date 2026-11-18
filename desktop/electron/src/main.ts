@@ -7441,6 +7441,10 @@ async function runDeferredRestartFulfillmentOnce(): Promise<void> {
       runtimeManagerDir: resolveRuntimeManagerDir(paths.workspaceRoot),
       notBefore: projectControlPlaneRecoveryNotBefore,
       listActiveWork: async () => (await listMainWorkbenchActiveWork()).activeWorkRuns,
+      // A person asking for a restart outranks a running task: only the
+      // self-evolution supervisor keeps waiting for idle.
+      interruptActiveWorkFor: (intent) =>
+        String((intent as Record<string, unknown>).requestedBy || "").trim().toLowerCase() !== "self_evolution",
       submitRestart: async () =>
         await orchestrateLauncherLifecycle("restart", { schemaVersion: 1, path: "restart" }, "forwarded")
     });
