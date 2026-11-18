@@ -44,3 +44,76 @@ describe("composer consumes the Session ownership contract", () => {
     expect(composer({ ...terminal, activeTurnId: "next" }).sessionBusy).toBe(true);
   });
 });
+
+describe("guidance delivery notice is a one-shot receipt", () => {
+  function noticeComposer(
+    patch: Partial<SessionDetail>,
+    guidance: {
+      isSuccess?: boolean;
+      data?: SessionDetail;
+      variables?: { sessionId?: string; mode?: "safe" | "interrupt" };
+      dataUpdatedAt?: number;
+    },
+  ) {
+    let result!: ChatComposerBridgeStateResult;
+    function Probe() {
+      result = useChatComposerBridgeState({
+        activeSessionId: "s",
+        sessionDrafts: { s: "" },
+        sessionFollowupQueues: {},
+        sessionComposerErrors: {},
+        sessionEditTargets: {},
+        sessionImageAttachments: {},
+        sessionReferenceAttachments: {},
+        sessionImageUploadPending: {},
+        detail: { id: "s", status: "ready", currentPhase: "ready", messages: [], ...patch } as SessionDetail,
+        agents: [],
+        modelImageInputSupportById: new Map(),
+        lang: "zh",
+        t: (key) => key,
+        submitTurnMutation: { isPending: false },
+        editResubmitMutation: { isPending: false },
+        regenerateMutation: { isPending: false },
+        stopTurnMutation: { isPending: false },
+        sessionGuidanceMutation: { isPending: false, ...guidance },
+        continueEnabled: true,
+      });
+      return null;
+    }
+    renderToString(<Probe />);
+    return result;
+  }
+
+  const receipt = {
+    isSuccess: true,
+    data: { guidanceDelivery: "guide" } as SessionDetail,
+    variables: { sessionId: "s", mode: "safe" as const },
+    dataUpdatedAt: Date.now(),
+  };
+
+  it("shows the receipt while the submitting turn still runs", () => {
+    const state = noticeComposer({ status: "running", activeTurnId: "t", currentPhase: "ready" }, receipt);
+    expect(state.conversationComposer.guidance).toContain("已插入当前 turn");
+  });
+
+  it("drops the receipt once the turn settled", () => {
+    const state = noticeComposer({ status: "ready", currentPhase: "ready" }, receipt);
+    expect(state.conversationComposer.guidance).not.toContain("已插入当前 turn");
+  });
+
+  it("does not carry the receipt into another session", () => {
+    const state = noticeComposer(
+      { status: "running", activeTurnId: "t", currentPhase: "ready" },
+      { ...receipt, variables: { sessionId: "other", mode: "safe" } },
+    );
+    expect(state.conversationComposer.guidance).not.toContain("已插入当前 turn");
+  });
+
+  it("expires the receipt after the one-shot window", () => {
+    const state = noticeComposer(
+      { status: "running", activeTurnId: "t", currentPhase: "ready" },
+      { ...receipt, dataUpdatedAt: Date.now() - 20_000 },
+    );
+    expect(state.conversationComposer.guidance).not.toContain("已插入当前 turn");
+  });
+});

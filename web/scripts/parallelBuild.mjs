@@ -31,3 +31,15 @@ if (failedLabel) {
   console.error(`parallel build failed at: ${failedLabel}`);
   process.exit(1);
 }
+
+// web/dist is the legacy compatibility tree. It feeds the installers, release
+// packaging, the E2E build helper and the bundle-budget gate, but the running
+// workbench serves an atomically published release under web/.vibelution-builds.
+// A green build here therefore does not change the served page; name that out
+// loud instead of letting a successful exit read as "the fix is live".
+console.log("");
+console.log("frontend build ok -> web/dist (legacy compatibility tree)");
+console.log("  consumed by: installer, release packaging, E2E build helper, check:bundle");
+console.log("  served at runtime: web/.vibelution-builds/release-* via the active pointer");
+console.log("  apply this change to the running workbench: Launcher restart");
+console.log("  inspect the served bytes: python -m core.launcher.frontend_build status");
