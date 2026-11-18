@@ -605,9 +605,11 @@ def fallback_pending_guides_to_queue(
     text would otherwise only live in the transcript, where the model never
     saw it. Queue it as a real next turn so the input is not lost.
 
-    Only ``unconfirmed`` state (the turn is terminal and no drain receipt
-    exists) is moved; ``pending`` turns are still running and their worker
-    owns the next drain. Failures are swallowed so settlement never breaks.
+    ``unconfirmed`` state is moved because the turn is terminal without a drain
+    receipt. ``pending`` is moved only when its turn is no longer live: a live
+    turn still owns its next drain. The sweep is session-wide so a row stranded
+    by an older dead turn cannot stay waiting forever. Failures are swallowed so
+    settlement never breaks.
     """
     s = _service()
     event_list = list(events or [])
@@ -616,7 +618,11 @@ def fallback_pending_guides_to_queue(
     for event in event_list:
         if str(getattr(event, "event_type", "") or "") != EVENT_USER_MESSAGE:
             continue
-        if str(getattr(event, "turn_id", "") or "").strip() != turn_id:
+        event_turn_id = str(getattr(event, "turn_id", "") or "").strip()
+        if event_turn_id and event_turn_id != turn_id and guide_turn_is_live(
+            session_id, event_turn_id
+        ):
+            # Another turn is still running; its worker owns the drain.
             continue
         payload = dict(getattr(event, "payload", None) or {})
         metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
@@ -630,7 +636,9 @@ def fallback_pending_guides_to_queue(
             continue
         # A live turn still owns its next drain; only a finished turn is a
         # stranded state that must move to the queue.
-        if guide_state == "pending" and guide_turn_is_live(session_id, turn_id):
+        if guide_state == "pending" and event_turn_id and guide_turn_is_live(
+            session_id, event_turn_id
+        ):
             continue
         content = str(payload.get("content") or "").strip()
         if not content:
@@ -640,7 +648,7 @@ def fallback_pending_guides_to_queue(
             record_delivery_changed(
                 session_id,
                 steer_id=steer_id,
-                turn_id=turn_id,
+                turn_id=event_turn_id or turn_id,
                 target_turn_id=turn_id,
                 content=content,
             )
