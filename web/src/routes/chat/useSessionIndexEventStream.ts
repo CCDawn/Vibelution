@@ -2,8 +2,10 @@ import { useEffect } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 
 import { queryKeys } from "../../api/queryKeys";
+import type { SessionSummary } from "../../api/types";
 import {
   removeSessionFromAgentSessionCaches,
+  updateAgentSessionSummaryCaches,
   updateSessionSummaryCaches,
 } from "../chatSessionIndexQuery";
 import { consumeGuardedEventStream } from "./guardedEventStream";
@@ -74,27 +76,38 @@ export function parseSessionIndexDelta(data: string): SessionIndexDelta | null {
   return delta;
 }
 
+function applySessionPatch(
+  sessions: SessionSummary[] | undefined,
+  sessionId: string,
+  patch: Record<string, unknown>,
+): SessionSummary[] | undefined {
+  if (!sessions) {
+    return sessions;
+  }
+  let changed = false;
+  const next = sessions.map((session) => {
+    if (session.id !== sessionId) {
+      return session;
+    }
+    changed = true;
+    return { ...session, ...patch } as typeof session;
+  });
+  // Reference-identical when the row is not on this page: the caches keep
+  // their previous value and no subscriber re-renders.
+  return changed ? next : sessions;
+}
+
 function patchSessionRow(
   queryClient: QueryClient,
   sessionId: string,
   patch: Record<string, unknown>,
 ): void {
-  updateSessionSummaryCaches(queryClient, (sessions) => {
-    if (!sessions) {
-      return sessions;
-    }
-    let changed = false;
-    const next = sessions.map((session) => {
-      if (session.id !== sessionId) {
-        return session;
-      }
-      changed = true;
-      return { ...session, ...patch } as typeof session;
-    });
-    // Reference-identical when the row is not on this page: the caches keep
-    // their previous value and no subscriber re-renders.
-    return changed ? next : sessions;
-  });
+  const apply = (sessions: SessionSummary[] | undefined) =>
+    applySessionPatch(sessions, sessionId, patch);
+  updateSessionSummaryCaches(queryClient, apply);
+  // The Agent tab strip keeps its own per-Agent cache; the rail must move
+  // there too, or a background session only updates after it is opened.
+  updateAgentSessionSummaryCaches(queryClient, apply);
 }
 
 function removeSessionRow(
