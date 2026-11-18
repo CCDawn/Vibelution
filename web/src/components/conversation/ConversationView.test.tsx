@@ -1212,13 +1212,15 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(conversationTimelineFollowSource).toContain("initializedSessionRef.current !== sessionId");
   });
 
-  it("resets react-virtual measurement when the conversation switches (ZCode parity)", () => {
-    // Row keys can degrade to an index fallback while a session wakes up, so two
-    // conversations would share one item-size cache entry. Switching session must
-    // drop the measurement cache before the per-session scroll restore runs,
-    // otherwise stale absolute offsets stack the new rows on top of each other.
-    expect(conversationViewSource).toContain("timelineMeasuredSessionRef.current === sessionId");
-    expect(conversationViewSource).toContain("timelineVirtualizer.measure();");
+  it("does not re-measure the whole timeline when the conversation switches (ZCode parity)", () => {
+    // The index fallback key is namespaced by session (asserted below), so two
+    // conversations can never share one item-size cache entry and a switch has
+    // nothing to clear. A synchronous `timelineVirtualizer.measure()` here only
+    // forced a full reflow before the first paint: measured on the running app
+    // it blocked the main thread for 1.5-1.8s and stretched a first visit to
+    // 2.6s of blank transcript. Mounted rows are corrected by measureElement.
+    expect(conversationViewSource).not.toContain("timelineVirtualizer.measure();");
+    expect(conversationViewSource).toContain("measureElement: measureConversationVirtualRow");
   });
 
   it("keeps react-virtual measurement and streaming paint free of per-render thrash", () => {
