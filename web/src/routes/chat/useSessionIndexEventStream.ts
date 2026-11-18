@@ -135,6 +135,15 @@ export function applySessionIndexDeltaToQueryClient(
 }
 
 /**
+ * A reconnect may have missed frames while the socket was down. The index
+ * stream does not replay, so every connection after the first one re-reads
+ * the rail once instead of trusting a delta we may never have seen.
+ */
+export function shouldResyncIndexOnConnect(previousConnections: number): boolean {
+  return previousConnections > 0;
+}
+
+/**
  * Keep the rail convergent from the server instead of from the window that ran
  * the turn. Disabled while the route is not showing a session list.
  */
@@ -155,8 +164,16 @@ export function useSessionIndexEventStream(
       reconnectTimer = setTimeout(resolve, SESSION_INDEX_RECONNECT_MS);
     });
 
+    let connections = 0;
+
     const run = async () => {
       while (!stopped) {
+        if (shouldResyncIndexOnConnect(connections)) {
+          // Frames dropped while this socket was down never come back, so the
+          // rail re-reads instead of waiting for the next manual index read.
+          void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+        }
+        connections += 1;
         try {
           await consumeGuardedEventStream({
             url: SESSION_INDEX_EVENTS_PATH,

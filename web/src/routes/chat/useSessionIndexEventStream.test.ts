@@ -5,6 +5,7 @@ import type { SessionSummary } from "../../api/types";
 import {
   applySessionIndexDeltaToQueryClient,
   parseSessionIndexDelta,
+  shouldResyncIndexOnConnect,
 } from "./useSessionIndexEventStream";
 
 function summary(id: string, overrides: Partial<SessionSummary> = {}): SessionSummary {
@@ -117,5 +118,15 @@ describe("applySessionIndexDeltaToQueryClient", () => {
     });
 
     expect(queryClient.getQueryData<SessionSummary[]>(["sessions"])).toBe(before);
+  });
+});
+
+describe("session index reconnect resync", () => {
+  it("does not resync on the first connection", () => {
+    expect(shouldResyncIndexOnConnect(0)).toBe(false);
+  });
+
+  it("resyncs after a reconnect so dropped frames are re-read", () => {
+    expect(shouldResyncIndexOnConnect(1)).toBe(true);
   });
 });

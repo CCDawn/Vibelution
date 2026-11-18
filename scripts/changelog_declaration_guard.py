@@ -1,9 +1,13 @@
 """Block product-facing commits that do not declare an unreleased change.
 
-Settlement only advances when the ``## Unreleased`` section actually changes.
-Without a guard, an undeclared merge looks identical to an already-settled one
-and is skipped in silence forever. This check makes that rule explicit at the
-only place every commit must pass: the pre-commit hook.
+Settlement only advances when the declaration text actually changes. Without a
+guard, an undeclared merge looks identical to an already-settled one and is
+skipped in silence forever. This check makes that rule explicit at the only
+place every commit must pass: the pre-commit hook.
+
+Declarations live in ``.changelog/<branch>.md`` by default so parallel tasks
+never contend for the single ``CHANGELOG.md`` file. Writing the line directly
+under ``## Unreleased`` stays supported for single-task work and for merges.
 
 Tests, docs and scripts stay free of the requirement so ordinary hygiene work
 does not inflate the version cadence.
@@ -18,19 +22,27 @@ from pathlib import Path
 from typing import Sequence
 
 CHANGELOG = "CHANGELOG.md"
+DECLARATION_DIR = ".changelog"
 UNRELEASED_HEADING = "## Unreleased"
 PRODUCT_PREFIXES = ("core/", "web/src/", "config/", "tools/", "agent.py")
-EXEMPT_PREFIXES = ("tests/", "docs/", "scripts/")
+EXEMPT_PREFIXES = ("tests/", "docs/", "scripts/", DECLARATION_DIR + "/")
 EXEMPT_SUFFIXES = (".md", ".txt", ".json", ".yaml", ".yml", ".lock")
 TEMPLATE = """\
-Add one line under "## Unreleased" in CHANGELOG.md, for example:
+Declare the change in one of two places.
 
-    ## Unreleased
-    ### Added
+Preferred: write the line in your own task file, no shared-file claim needed.
+
+    .changelog/<branch-with-dashes>.md
     - <what a user-visible change does and why>
 
-The version ledger settles exactly one change per distinct Unreleased edit, so
-an undeclared commit can never advance the version.
+Also accepted: add the line under "## Unreleased" in CHANGELOG.md.
+
+    ## Unreleased
+    - <what a user-visible change does and why>
+
+The version ledger settles exactly one change per distinct declaration, so an
+undeclared commit can never advance the version. ``scripts/changelog_rollup.py``
+folds task files into CHANGELOG.md before a merge.
 """
 
 
@@ -55,6 +67,9 @@ def is_product_path(path: str) -> bool:
         return False
     if normalized.endswith(EXEMPT_SUFFIXES):
         return False
+    name = normalized.rsplit("/", 1)[-1]
+    if ".test." in name or ".spec." in name:
+        return False
     return normalized.startswith(PRODUCT_PREFIXES)
 
 
@@ -69,7 +84,7 @@ def unreleased_section(text: str) -> str:
         return ""
     collected: list[str] = []
     for line in lines[start:]:
-        if line.startswith("## "):
+        if line.strip().startswith("## "):
             break
         collected.append(line)
     return "\n".join(collected)
@@ -100,8 +115,31 @@ def file_at(repo: Path, revision: str) -> str:
         return ""
 
 
+def current_branch(repo: Path) -> str:
+    try:
+        return _git(repo, "branch", "--show-current").strip()
+    except RuntimeError:
+        return ""
+
+
+def declaration_path_for_branch(branch: str) -> str:
+    slug = branch.strip().replace("\\", "/").replace("/", "-")
+    return f"{DECLARATION_DIR}/{slug}.md"
+
+
+def declaration_has_line(repo: Path, path: str) -> bool:
+    try:
+        text = _git(repo, "show", f":0:{path}")
+    except RuntimeError:
+        try:
+            text = (repo / path).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return False
+    return any(line.strip().startswith("-") for line in text.splitlines())
+
+
 def branch_already_declared(repo: Path) -> bool:
-    """True when this branch already added an Unreleased line versus main."""
+    """True when this branch already declared a change versus main."""
 
     try:
         merge_base = _git(repo, "merge-base", "main", "HEAD").strip()
@@ -109,7 +147,16 @@ def branch_already_declared(repo: Path) -> bool:
         return False
     if not merge_base:
         return False
-    return has_new_declaration(file_at(repo, merge_base), file_at(repo, "HEAD"))
+    if has_new_declaration(file_at(repo, merge_base), file_at(repo, "HEAD")):
+        return True
+    try:
+        diff = _git(repo, "diff", f"{merge_base}...HEAD", "--", DECLARATION_DIR)
+    except RuntimeError:
+        return False
+    return any(
+        line.startswith("+") and line[1:].strip().startswith("-")
+        for line in diff.splitlines()
+    )
 
 
 def evaluate(repo: Path) -> tuple[bool, str]:
@@ -117,15 +164,17 @@ def evaluate(repo: Path) -> tuple[bool, str]:
     product_paths = [path for path in staged if is_product_path(path)]
     if not product_paths:
         return True, ""
-    if CHANGELOG in staged:
-        if has_new_declaration(file_at(repo, "HEAD"), file_at(repo, ":0")):
-            return True, ""
-    elif branch_already_declared(repo):
+    if CHANGELOG in staged and has_new_declaration(file_at(repo, "HEAD"), file_at(repo, ":0")):
+        return True, ""
+    declaration = declaration_path_for_branch(current_branch(repo))
+    if declaration in staged and declaration_has_line(repo, declaration):
+        return True, ""
+    if branch_already_declared(repo):
         return True, ""
     listed = "\n".join(f"  - {path}" for path in product_paths[:12])
     return False, (
-        "[changelog-guard] this commit changes product code without a new "
-        f"'## Unreleased' line in {CHANGELOG}:\n{listed}\n\n{TEMPLATE}"
+        "[changelog-guard] this commit changes product code without a declaration:\n"
+        f"{listed}\n\n{TEMPLATE}"
     )
 
 
@@ -135,20 +184,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--suggest",
         action="store_true",
-        help="Print a ready-to-paste Unreleased line for the staged files.",
+        help="Print a ready-to-paste declaration line for the staged files.",
     )
     arguments = parser.parse_args(argv)
     repo = Path(arguments.repo).resolve()
     if arguments.suggest:
-        staged = staged_paths(repo)
-        product_paths = [path for path in staged if is_product_path(path)]
+        product_paths = [path for path in staged_paths(repo) if is_product_path(path)]
         if not product_paths:
-            print("changelog-guard: nothing staged that needs a declaration")
+            print("[changelog-guard] nothing staged that needs a declaration")
             return 0
+        branch = current_branch(repo) or "codex/<task-slug>"
+        target = declaration_path_for_branch(branch)
         scopes = sorted({path.split("/")[0] for path in product_paths})
-        print("Suggested line for CHANGELOG.md under '## Unreleased':")
+        print(f"Suggested line for {target}:")
         print()
-        print(f"- {'、'.join(scopes)}：<一句话说明这次改了什么、用户能感知到什么>")
+        print(f"- {"、".join(scopes)}：<一句话说明这次改了什么、用户能感知到什么>")
         return 0
     ok, detail = evaluate(repo)
     if ok:
