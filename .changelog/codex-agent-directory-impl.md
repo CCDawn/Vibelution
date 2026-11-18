@@ -1,0 +1,1 @@
+- tools：新增 agent_directory 工具，一次列出可发现的 Agent 及其对应会话，不必先知道 session id 才能联系对方。
