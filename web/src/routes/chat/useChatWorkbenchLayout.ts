@@ -329,7 +329,7 @@ export function useChatWorkbenchLayout({
   // radius would otherwise leave a notch where the two columns touch.
   const centerPaneClassName = `${centerOnFirstColumn
     ? `${styles.centerPane} ${styles.centerPaneOverlay}`
-    : `${styles.centerPane} ${styles.centerPaneDocked}${statusRailDocked ? " !rounded-tr-none" : ""}`}${sessionRowSpansRail ? ` ${styles.centerPaneBodyRow}` : ""}`;
+    : `${styles.centerPane} ${styles.centerPaneDocked}${statusRailDocked ? " centerPaneMeetsRail" : ""}`}${sessionRowSpansRail ? ` ${styles.centerPaneBodyRow}` : ""}`;
   // Critical: when docked status rail is collapsed, do NOT attach leftRail
   // (grid-column:5). A non-display:none item on column 5 creates implicit
   // grid tracks and a blank right strip after route remounts.
