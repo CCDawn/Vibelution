@@ -10,8 +10,7 @@ describe("ordinary Agent model authority", () => {
     const start = workbenchSource.indexOf("} = useChatComposerSubmitActions({");
     expect(start).toBeGreaterThan(0);
     const submitProps = workbenchSource.slice(start, workbenchSource.indexOf("\n  });", start));
-    // Guard is the session alone now: the finance surface no longer widens it.
-    expect(submitProps).toContain("turnModelSelection: activeSessionId ? turnModelSelections[activeSessionId] ?? null : null");
+    expect(submitProps).toContain("turnModelSelection: financeSurface && activeSessionId ? turnModelSelections[activeSessionId] ?? null : null");
   });
 
   it("displays the bound Agent model without requiring the full choice list", () => {
