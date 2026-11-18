@@ -10446,7 +10446,7 @@ def test_settle_active_work_records_chat_turn_resume_before_stop(monkeypatch):
 
     result = daemon._settle_active_work_for_lifecycle_stop()
 
-    assert calls == [{"replace": False}]
+    assert calls == [{"replace": False, "exclude_turn_ids": None}]
     assert result["closedEvolutionRuns"][0]["runId"] == "evo-live"
 
 

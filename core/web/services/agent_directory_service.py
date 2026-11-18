@@ -89,6 +89,7 @@ from .agent_directory.policies import (
     _tool_policies,
     _tool_policy_for_agent,
     _tool_policy_source_for_agent,
+    _with_extra_tool_policies,
     _with_temporary_tool_grants,
     _without_personal_memory_write_tools,
     _without_subagent_delegation_tools,
