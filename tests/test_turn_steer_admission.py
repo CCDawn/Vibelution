@@ -96,6 +96,15 @@ def test_busy_queue_admission_and_promotion_share_one_steer_id(tmp_path: Path, m
     class _BusyTurn:
         turn_id = "turn-busy"
 
+        def snapshot(self) -> dict:
+            return {
+                "turnId": "turn-busy",
+                "releasedToUser": False,
+                "stopRequested": False,
+                "stopRequestedAt": "",
+                "stopReason": "",
+            }
+
     monkeypatch.setattr(session_service, "_get_session_turn_control", lambda _session_id: _BusyTurn())
 
     row = queued_turns.enqueue_session_queued_turn(

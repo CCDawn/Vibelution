@@ -989,7 +989,6 @@ export function AgentSessionTabStrip({
               setGroupMenu({ groupId: section.groupId, x: event.clientX, y: event.clientY });
             }}
           >
-            {renderAgentSessionGroupStatus(groupToneCounts(section), lang)}
             {renaming ? (
               <span onPointerDown={(event) => event.stopPropagation()}>
                 <VNativeInput
@@ -1017,6 +1016,7 @@ export function AgentSessionTabStrip({
             ) : (
               <span className={styles.agentSessionTabGroupName}>{section.name}</span>
             )}
+            {renderAgentSessionGroupStatus(groupToneCounts(section), lang)}
             <span className={styles.agentSessionTabGroupCount}>{section.sessions.length}</span>
             <span
               className={[

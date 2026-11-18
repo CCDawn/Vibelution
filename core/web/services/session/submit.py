@@ -1139,6 +1139,7 @@ def submit_session_guidance(
     mode: str = "safe",
     attachment_ids: list[str] | None = None,
     references: list[dict[str, Any]] | None = None,
+    client_submission_id: str = "",
 ) -> dict:
     """Record operator guidance for a running turn, optionally interrupting it.
 
@@ -1290,7 +1291,9 @@ def submit_session_guidance(
     if active_turn_id:
         from . import turn_steer
 
-        steer_id = turn_steer.new_steer_id()
+        # 前端生成的身份优先：提交时的乐观行和这里的 journal 行必须共享
+        # 同一个 id，否则前端只能按文本猜回显，重复内容会画出两行。
+        steer_id = str(client_submission_id or "").strip() or turn_steer.new_steer_id()
         admitted_payload = {
             "schema": turn_steer.TURN_STEER_SCHEMA,
             "steerId": steer_id,
