@@ -2129,6 +2129,58 @@ export async function executeMainLineWorkbench(
       console.warn(`WORK_RUNS_SETTLE_ON_STOP_FAILED ${error instanceof Error ? error.message : String(error)}`);
     }
   };
+  // A crashed backend never reaches the verified-stop hook above, so its
+  // zombie "running" snapshots keep the guard refusing stop and queueing
+  // restarts behind a task no process can ever finish. Before the guard
+  // vetoes, this escape asks the deterministic lifecycle question: is every
+  // backend handle recorded in the launcher state verifiably gone? Only
+  // affirmative death evidence releases the veto — a missing registry, an
+  // unreadable state, or any live handle keeps it, so a genuinely running
+  // task is never released. Settlement reuses the same orphan reconciliation
+  // as a verified stop, then the guard is re-read from disk.
+  const escapeBlockedWorkOnDeadBackend = async (
+    operation: "stop" | "restart",
+    blocked: NonNullable<ReturnType<typeof blockLifecycleIfActiveWork>>
+  ): Promise<ReturnType<typeof blockLifecycleIfActiveWork>> => {
+    const pidAlive = input.pidAlive ?? knownPidIsAlive;
+    let state: WorkbenchBackendState;
+    try {
+      state = readState();
+    } catch {
+      return blocked;
+    }
+    const deadBackendPids = ["backendPid", "backendLaunchPid", "spawnPid"]
+      .map((key) => Math.trunc(Number(state[key] || 0)))
+      .filter((pid) => Number.isFinite(pid) && pid > 0);
+    if (deadBackendPids.length === 0 || deadBackendPids.some((pid) => pidAlive(pid))) {
+      return blocked;
+    }
+    console.warn(`WORK_RUNS_DEAD_BACKEND_ESCAPE operation=${operation} deadPids=${deadBackendPids.join(",")} `
+      + `blockedRuns=${blocked.activeWorkRuns.length}`);
+    try {
+      if (input.settleActiveWorkOnStop) {
+        if (recoverableChatTurnOwners) input.settleActiveWorkOnStop(input.workspaceRoot, recoverableChatTurnOwners);
+        else input.settleActiveWorkOnStop(input.workspaceRoot);
+      } else {
+        const settled = finalizeWorkRunsForStoppedBackend({ workspaceRoot: input.workspaceRoot, recoverableChatTurnOwners });
+        if (settled.settledRunIds.length > 0) {
+          console.warn(`WORK_RUNS_SETTLED_ON_DEAD_BACKEND count=${settled.settledRunIds.length} `
+            + `kinds=${JSON.stringify(settled.clearedIndexKinds)}`);
+        }
+      }
+    } catch (error) {
+      console.warn(`WORK_RUNS_DEAD_BACKEND_SETTLE_FAILED ${error instanceof Error ? error.message : String(error)}`);
+    }
+    let remaining: ReturnType<typeof blockLifecycleIfActiveWork>;
+    try {
+      remaining = blockLifecycleIfActiveWork(operation, await observeActiveWork());
+    } catch {
+      remaining = blocked; // A failed re-read never widens the release.
+    }
+    console.warn(`WORK_RUNS_DEAD_BACKEND_ESCAPE_RESULT operation=${operation} `
+      + `escaped=${remaining === null} remainingRuns=${remaining ? remaining.activeWorkRuns.length : 0}`);
+    return remaining;
+  };
   const pendingRetirement = getBackgroundWorkbenchRetirement(input.workspaceRoot);
   if (pendingRetirement?.status === "pending") {
     trackMainLineBackgroundWork(input.command, pendingRetirement.completion);
@@ -2165,7 +2217,10 @@ export async function executeMainLineWorkbench(
   if (operation === "stop" || operation === "force-stop" || operation === "shutdown") {
     const stopStartedAt = Date.now();
     if ((operation === "stop" || operation === "shutdown") && !input.interruptActiveWork) {
-      const blocked = blockLifecycleIfActiveWork("stop", await observeActiveWork());
+      let blocked = blockLifecycleIfActiveWork("stop", await observeActiveWork());
+      if (blocked) {
+        blocked = await escapeBlockedWorkOnDeadBackend("stop", blocked);
+      }
       if (blocked) {
         return {
           schemaVersion: 1,
@@ -2620,7 +2675,10 @@ export async function executeMainLineWorkbench(
   }
 
   if (operation === "restart" && !input.interruptActiveWork) {
-    const blocked = blockLifecycleIfActiveWork("restart", await observeActiveWork());
+    let blocked = blockLifecycleIfActiveWork("restart", await observeActiveWork());
+    if (blocked) {
+      blocked = await escapeBlockedWorkOnDeadBackend("restart", blocked);
+    }
     if (blocked) {
       const intent = queueDeferredRestartIntent(input.workspaceRoot, {
         reason: blocked.message,
