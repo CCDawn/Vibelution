@@ -4,6 +4,7 @@ import {
   buildComposerContextRingModel,
   formatTokensPerSecondValue,
   resolveComposerCacheState,
+  resolveAutoCompactThresholdTokens,
   resolveComposerContextLimit,
   resolveComposerContextUsage,
 } from "./composerContextModel";
@@ -215,7 +216,52 @@ describe("composerContextModel", () => {
       thresholdTokens: 620_000,
     });
   });
+  it("binds the countdown to the standard level that actually compacts", () => {
+    const levels = [
+      { level: "light", thresholdTokens: 153_600 },
+      { level: "standard", thresholdTokens: 204_800 },
+      { level: "deep", thresholdTokens: 230_400 },
+      { level: "emergency", thresholdTokens: 243_200 },
+    ];
+    // `light` performs no compaction; advertising it made 61% of 256K read "0% left".
+    expect(resolveAutoCompactThresholdTokens(levels)).toBe(204_800);
+    expect(resolveAutoCompactThresholdTokens([...levels].reverse())).toBe(204_800);
+    // A level set without `standard` still degrades to the smallest positive trigger.
+    expect(
+      resolveAutoCompactThresholdTokens([
+        { level: "deep", thresholdTokens: 230_400 },
+        { level: "light", thresholdTokens: 153_600 },
+      ]),
+    ).toBe(153_600);
+    expect(resolveAutoCompactThresholdTokens([])).toBeUndefined();
+    expect(
+      resolveAutoCompactThresholdTokens([
+        { level: "standard", thresholdTokens: 0 },
+      ]),
+    ).toBeUndefined();
+  });
+  it("keeps room visible at 61% of a 256K window instead of reporting zero", () => {
+    const model = buildComposerContextRingModel({
+      ...base,
+      usageUsed: 155_000,
+      usageLimit: 256_000,
+      autoCompactThresholdTokens: resolveAutoCompactThresholdTokens([
+        { level: "light", thresholdTokens: 153_600 },
+        { level: "standard", thresholdTokens: 204_800 },
+        { level: "deep", thresholdTokens: 230_400 },
+        { level: "emergency", thresholdTokens: 243_200 },
+      ]),
+    });
+    expect(model.autoCompact).toEqual({
+      remainingPercent: 19,
+      remainingTokens: 49_800,
+      remainingTokensLabel: "50K",
+      thresholdPercent: 80,
+      thresholdTokens: 204_800,
+    });
+  });
   it("degrades generation speed to no-data and formats observed values", () => {
+
     expect(
       buildComposerContextRingModel({ ...base }).generationTokensPerSecond,
     ).toBeNull();

@@ -263,7 +263,12 @@ import { useChatSessionRenameMenu } from "./useChatSessionRenameMenu";
 import { useChatAgentDirectoryActions } from "./useChatAgentDirectoryActions";
 import { useChatCliAgentTerminal } from "./useChatCliAgentTerminal";
 import { buildChatCacheDetailViewModel } from "./chatCacheDetailModel";
-import { buildComposerContextRingModel, resolveComposerContextLimit, resolveComposerContextUsage } from "./composerContextModel";
+import {
+  buildComposerContextRingModel,
+  resolveAutoCompactThresholdTokens,
+  resolveComposerContextLimit,
+  resolveComposerContextUsage,
+} from "./composerContextModel";
 import { useComposerCacheUsage } from "./useComposerCacheUsage";
 import { useChatCacheDetailDialog } from "./useChatCacheDetailDialog";
 import { useAgentPermissionPresetMutation } from "./useAgentPermissionPresetMutation";
@@ -1934,10 +1939,8 @@ export function ChatCodingRouteWorkbench() {
       cacheUsageObserved: lastCacheComposition?.cacheUsageObserved,
       cachedInputTokens: lastCacheComposition?.cachedInputTokens,
       cacheCreationInputTokens: lastCacheComposition?.cacheCreationInputTokens,
-      // Backend-owned auto-compression trigger (lowest configured level); read-only.
-      autoCompactThresholdTokens: compressionLevels.length
-        ? Math.min(...compressionLevels.map(level => level.thresholdTokens))
-        : undefined,
+      // Backend-owned full auto-compression trigger (`standard` level); read-only.
+      autoCompactThresholdTokens: resolveAutoCompactThresholdTokens(compressionLevels),
       autoCompactEnabled: runtimeCompression?.enabled,
       tokensPerSecond: detail?.llmUsage?.tokensPerSecond ?? null,
     });

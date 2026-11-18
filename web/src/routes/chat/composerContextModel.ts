@@ -77,6 +77,38 @@ export type ComposerContextRingModel = {
 /** Only surface the auto-compression countdown once little room is left (Claude Code paradigm). */
 export const AUTO_COMPACT_VISIBLE_REMAINING_PERCENT = 40;
 
+/** Compression level row as delivered by the runtime compression strategy. */
+export type ComposerCompressionLevelThreshold = {
+  level: string;
+  thresholdTokens: number;
+};
+
+/**
+ * Pick the threshold that actually triggers a full auto-compression.
+ *
+ * The backend gates `_should_automatically_compress` on the `standard` level; `light`
+ * is only a strategy grade that performs no compaction. Binding the countdown to the
+ * lowest row advertised a trigger that never fires (61% of a 256K window already read
+ * "0% left"), so `standard` is the only honest basis. Level sets without `standard`
+ * degrade to the smallest positive threshold.
+ */
+export function resolveAutoCompactThresholdTokens(
+  levels: readonly ComposerCompressionLevelThreshold[] | null | undefined,
+): number | undefined {
+  const rows = (levels ?? []).filter(
+    (row) => Number.isFinite(row.thresholdTokens) && row.thresholdTokens > 0,
+  );
+  if (!rows.length) {
+    return undefined;
+  }
+  const standard = rows.find((row) => row.level === "standard");
+  if (standard) {
+    return standard.thresholdTokens;
+  }
+  return Math.min(...rows.map((row) => row.thresholdTokens));
+}
+
+
 export function formatCompactTokenCount(value: number): string {
   const n = Math.max(0, Math.round(value));
   if (n >= 1_000_000) {
@@ -148,7 +180,7 @@ export function buildComposerContextRingModel(options: {
   cacheUsageObserved?: boolean;
   cachedInputTokens?: number;
   cacheCreationInputTokens?: number;
-  /** Backend-owned first auto-compression level threshold in tokens (read-only). */
+  /** Backend-owned full auto-compression trigger (`standard` level) in tokens (read-only). */
   autoCompactThresholdTokens?: number;
   autoCompactEnabled?: boolean;
   /** Provider-derived generation speed for the last call; null when unmeasurable. */
