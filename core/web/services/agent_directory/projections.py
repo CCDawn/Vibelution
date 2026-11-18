@@ -1171,6 +1171,10 @@ def active_agent_runtime(
         or ("supervised_conversation_harness" if normalized_supervised_role else ""),
     )
     tool_policy = s._effective_agent_tool_policy(tool_policy, delegation_policy)
+    tool_policy = s._with_extra_tool_policies(
+        tool_policy,
+        metadata.get("extraToolPolicyIds") if isinstance(metadata, dict) else (),
+    )
     policy_id = str(tool_policy.get("policyId") or tool_policy.get("id") or "")
     if policy_id.startswith("tool-"):
         from core.authorization.collaboration_mode import with_collaboration_controls
