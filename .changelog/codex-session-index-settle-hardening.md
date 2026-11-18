@@ -1,0 +1,1 @@
+- Settled index hydration no longer escapes into turn finalization: a projection failure while publishing the settled rail patch now degrades to the bare "this row moved" frame instead of raising from the turn-completion path, so a finished turn can never be reported as a crashed worker because its rail row could not be hydrated.
