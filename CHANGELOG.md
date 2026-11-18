@@ -2,7 +2,12 @@
 
 ## Unreleased
 
+### Fixed
+- 对话输入框在引导回执旁边不再重复提示排队；同一条引导输入只显示一行，未获服务端确认时不再标成「已接收」；被单行截断的工具命令悬停可看全文。
+
+
 ## 2.5.2 - 2026-11-17
+
 
 ### Changed
 - fix: keep inline message edit keystrokes in the composer draft store
@@ -30,6 +35,7 @@
 - fix(chat): separate session tabs from group chips by shape
 - feat(chat): persist guidance delivery and settle undrained steers
 - feat(guard): require an Unreleased line for product commits
+
 
 ## 2.0.1 - 2026-11-16
 

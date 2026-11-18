@@ -31,7 +31,12 @@ export function guidanceDisplayState(message: ConversationMessage): "pending" | 
   if (message.metadata?.guidanceState === "drained" && submitted && consumed && consumed > submitted) {
     return "drained";
   }
-  return message.metadata?.guidanceState === "pending" ? "pending" : "received";
+  if (message.metadata?.guidanceState === "pending") {
+    return "pending";
+  }
+  // An optimistic stand-in has no server acknowledgement yet, so it must not
+  // claim receipt; only a settled row may read as received.
+  return message.metadata?.optimistic === true ? "pending" : "received";
 }
 
 function guideBoundary(guide: Guide): number | undefined {

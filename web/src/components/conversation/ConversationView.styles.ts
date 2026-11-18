@@ -417,7 +417,7 @@ backToBottomButton:
   composerFieldCodex: composerFieldCodexShell,
   composerFieldDragActive: composerFieldDragActiveShell,
   composerGuidance:
-    "vui-components-conversationview composerGuidance min-w-0",
+    "vui-components-conversationview composerGuidance flex min-w-0 items-center gap-1.5",
   composerGuidanceIcon:
     "vui-components-conversationview composerGuidanceIcon min-w-0 shrink-0 text-[var(--fg-tertiary)]",
   composerReferenceChip:
