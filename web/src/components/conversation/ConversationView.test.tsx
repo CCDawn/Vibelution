@@ -2093,8 +2093,15 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
         guidanceSequence: 20, guidanceConsumedSequence: consumed,
       },
     }]);
-    expect(html).toContain(label);
-    expect(html).toContain(`data-conversation-guidance-status="${state === "unconfirmed" ? "received" : state}"`);
+    if (state === "drained") {
+      // A drained steer is ordinary transcript; the status chip is one-shot and
+      // must not survive as a permanent badge after the model consumed it.
+      expect(html).not.toContain(label);
+      expect(html).not.toContain("data-conversation-guidance-status");
+    } else {
+      expect(html).toContain(label);
+      expect(html).toContain(`data-conversation-guidance-status="${state === "unconfirmed" ? "received" : state}"`);
+    }
     expect(html).not.toContain("已执行");
   });
 
@@ -2118,7 +2125,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(html.indexOf("ORDER_BEFORE_GUIDE")).toBeGreaterThan(-1);
     expect(html.indexOf("ORDER_BEFORE_GUIDE")).toBeLessThan(html.indexOf("ORDER_GUIDANCE_INPUT"));
     expect(html.indexOf("ORDER_GUIDANCE_INPUT")).toBeLessThan(html.indexOf("ORDER_AFTER_GUIDE"));
-    expect(html).toContain("已纳入");
+    expect(html).not.toContain("已纳入");
     expect(html.match(/data-codex-process-work-status="true"[^>]*>已工作/g)).toHaveLength(1);
   });
 
