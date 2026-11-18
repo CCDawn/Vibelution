@@ -759,18 +759,12 @@ export const ConversationView = React.memo(function ConversationView({
     },
     [timelineVirtualizer],
   );
-  // 会话切换（Codex/ZCode parity）：行 key 在历史行上可能退化为按 index 的兜底 key，
-  // 两个会话的第 N 行会撞同一个测高缓存条目。切换 session 时先清空测量缓存并重排，
-  // 让随后的 per-session 滚动恢复（useConversationTimelineFollow）落在干净布局上，
-  // 否则旧会话的实测高度会把新内容按错误的绝对定位起点叠在一起（文字重叠）。
-  const timelineMeasuredSessionRef = useRef(sessionId);
-  useLayoutEffect(() => {
-    if (timelineMeasuredSessionRef.current === sessionId) {
-      return;
-    }
-    timelineMeasuredSessionRef.current = sessionId;
-    timelineVirtualizer.measure();
-  }, [sessionId, timelineVirtualizer]);
+  // 会话切换不清空测量缓存：行 key 已按会话隔离（getItemKey 的
+  // `timeline-row-${sessionId}-${index}` 兜底 + 真实 key 为 messageId），
+  // 跨会话不会复用同一个测高条目，所以全量 `measure()` 只剩开销：
+  // 实测它把切换后的主线程阻塞拖到 1.5s 以上，白屏延长到 2.6s。
+  // 新会话首帧按 estimateSize 排布，挂载行由 measureElement 的
+  // ResizeObserver 各自校正，收敛到真实高度即可。
   // Find-in-transcript（对话内查找）：状态、索引、导航、高亮与跳转全部在
   // useConversationFind 内，不跨 route 边界。
   const {
