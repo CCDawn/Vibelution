@@ -186,7 +186,8 @@ import {
   readRegistry,
   recordSpawnPid,
   upsert,
-  registerWorkbenchInstance
+  registerWorkbenchInstance,
+  sweepOrphanRegistryTemps
 } from "./lifecycle/instanceRegistryStore.js";
 import { reconcileOrphanedInstanceRegistry } from "./lifecycle/instanceRegistryRecovery.js";
 import { reconcileRegistryWithObservation } from "./lifecycle/instanceRegistryReconciler.js";
@@ -7390,6 +7391,10 @@ async function orchestrateLauncherApi(
 
 async function reclaimExpiredIsolatedStops(): Promise<void> {
   if (!projectControlPlaneAutomaticLifecycle) return;
+  // A writeRegistry that died between write and rename leaves a .<hex>.instances.json
+  // sibling behind; sweep those first so the registry stays the only snapshot this
+  // pass can read.
+  await sweepOrphanRegistryTemps(instancesRegistryPath());
   const result = await reconcileOrphanedInstanceRegistry({
     registryPath: instancesRegistryPath(),
     pythonPath: desktopPythonPath()
