@@ -1453,6 +1453,15 @@ def record_restart_resume_pending(
         return
     if not isinstance(snapshots, list):
         return
+    # Agent sessions run as ``agent_run`` snapshots, not ``chat_turn`` ones, so a
+    # restart that interrupted an Agent turn used to leave no marker at all.
+    # Their ``sourceRunId`` is the dialogue turn the journal can resume.
+    try:
+        agent_snapshots = _WORK_RUN_STORE.load_active_snapshots("agent_run")
+    except Exception:  # noqa: BLE001 - agent coverage is best effort
+        agent_snapshots = []
+    if not isinstance(agent_snapshots, list):
+        agent_snapshots = []
     excluded_turn_ids = {
         str(turn_id).strip() for turn_id in (exclude_turn_ids or set())
     } - {""}
@@ -1465,6 +1474,14 @@ def record_restart_resume_pending(
         if isinstance(snapshot, dict)
         and str(snapshot.get("runId") or "").strip() not in excluded_turn_ids
     ]
+    for snapshot in agent_snapshots:
+        if not isinstance(snapshot, dict):
+            continue
+        session_id = str(snapshot.get("sessionId") or "").strip()
+        turn_id = str(snapshot.get("sourceRunId") or "").strip()
+        if not session_id or not turn_id or turn_id in excluded_turn_ids:
+            continue
+        entries.append({"sessionId": session_id, "turnId": turn_id})
     restart_resume_pending.record_pending_restart_resume(
         _WORK_RUN_STORE, entries, replace=replace
     )
