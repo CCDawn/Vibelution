@@ -123,3 +123,26 @@ export function formatActiveWorkRunsDetail(
     .filter(Boolean)
     .join(" · ");
 }
+
+
+/**
+ * True when a workbench lifecycle request lost its response because the process
+ * answering it went away mid-flight.
+ *
+ * Restart is the one operation that legitimately kills its own responder: the
+ * launcher stops the backend before the HTTP reply can come back, so the
+ * browser reports a transport failure for a restart that did start. Callers use
+ * this to keep switching instead of reporting a failure the operator cannot act
+ * on. A control-plane-not-ready error is a different, deterministic case and
+ * must stay separated by the caller.
+ */
+export function isRestartConnectionInterrupted(error: unknown): boolean {
+  const name = error instanceof Error ? error.name : "";
+  if (name === "AbortError") {
+    return true;
+  }
+  const message = error instanceof Error ? `${name} ${error.message}` : String(error ?? "");
+  return /abort|failed to fetch|load failed|networkerror|network request failed|connection reset|connection abort|err_connection|socket hang up|empty response|terminated/i.test(
+    message,
+  );
+}
