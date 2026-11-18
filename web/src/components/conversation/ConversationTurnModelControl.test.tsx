@@ -129,7 +129,7 @@ describe("ConversationTurnModelControl", () => {
     });
   });
 
-  it("shows the Agent model and opens parameters with a turn model chooser", () => {
+  it("shows the Agent model and opens parameters without a model chooser", () => {
     const html = renderControl();
     expect(html).toContain(">gpt-5.6-luna<");
     expect(html).toContain('title="Luna 5.6"');
@@ -140,7 +140,7 @@ describe("ConversationTurnModelControl", () => {
     expect(html).not.toContain("data-override");
     expect(controlSource).toContain("contextWindow");
     expect(controlSource).toContain("reasoningEffort");
-    expect(controlSource).toContain("modelChoices");
+    expect(controlSource).not.toContain("modelChoices");
     expect(controlSource).not.toContain("onSelectionChange={onModel");
   });
 

@@ -80,7 +80,6 @@ import { ConversationRerunFileChoiceDialog } from "../../components/conversation
 import { ChatCodingWorkbenchDialogs } from "./ChatCodingWorkbenchDialogs";
 import { FollowupQueueTogglePauseContext } from "../../components/conversation/ConversationFollowupQueueBar";
 import { queryKeys } from "../../api/queryKeys";
-import { fetchAgentConfigWorkspace } from "../../api/agents";
 import { isFetchJsonHttpError } from "../../api/chat";
 import {
   AgentInstance,
@@ -2217,7 +2216,7 @@ export function ChatCodingRouteWorkbench() {
     mentalModelEnabledForNextTurn,
     runtimeStatusEnabledForNextTurn,
     // Ordinary Agent chat must never restore a legacy composer model override.
-    turnModelSelection: activeSessionId ? turnModelSelections[activeSessionId] ?? null : null,
+    turnModelSelection: financeSurface && activeSessionId ? turnModelSelections[activeSessionId] ?? null : null,
     resolvedEditTarget,
     activeEditTarget,
     composerDisabled: composerDisabledDuringModelParametersSave,
@@ -2248,34 +2247,10 @@ export function ChatCodingRouteWorkbench() {
       [activeSessionId]: enabled,
     }));
   }, [activeSessionId]);
-  const agentWorkspaceQuery = useQuery({
-    queryKey: queryKeys.agentConfigWorkspace(),
-    queryFn: () => fetchAgentConfigWorkspace({ includeRuntime: false }),
-    staleTime: 30_000,
-  });
-  const composerModelChoices = useMemo(() => {
-    const items = (agentWorkspaceQuery.data?.agentModelChoices ?? []) as Array<Record<string, unknown>>;
-    const seen = new Set<string>();
-    const result: Array<{ modelId: string; label: string }> = [];
-    for (const item of items) {
-      const modelId = String(item.modelId || item.modelRef || "").trim();
-      if (!modelId || seen.has(modelId)) continue;
-      seen.add(modelId);
-      result.push({ modelId, label: String(item.label || item.model || modelId) });
-    }
-    return result;
-  }, [agentWorkspaceQuery.data]);
-
   const sessionLlmOptions = sessionLlmOptionsQuery.data;
   const turnModelSelection = activeSessionId ? turnModelSelections[activeSessionId] ?? null : null;
   const agentModel = sessionLlmOptions?.model ?? null;
   const turnModelControl = activeSessionId ? {
-    modelChoices: composerModelChoices,
-    selectedModelId: turnModelSelection?.modelId ?? "",
-    onSelectModel: (modelId: string) => {
-      if (!activeSessionId) return;
-      setTurnModelSelectionForSession(activeSessionId, modelId ? { modelId } : null);
-    },
     sessionId: activeSessionId,
     agentId: sessionLlmOptions?.agentId,
     configRevision: sessionLlmOptions?.configRevision,
