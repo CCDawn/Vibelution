@@ -1469,6 +1469,28 @@ def record_restart_resume_pending(
     )
 
 
+def append_restart_resume_pending(session_id: str, turn_id: str) -> None:
+    """Record one restart-interrupted turn in the resume marker.
+
+    ``request_stop_session_turn`` calls this the moment a turn is interrupted
+    for a restart reason, so the marker no longer depends on which shutdown
+    step still happens to see a running snapshot.
+    """
+
+    from core.web.services.session import restart_resume_pending
+
+    session = str(session_id or "").strip()
+    turn = str(turn_id or "").strip()
+    if not session or not turn:
+        return
+    try:
+        restart_resume_pending.append_pending_restart_resume(
+            _WORK_RUN_STORE, [{"sessionId": session, "turnId": turn}]
+        )
+    except Exception:  # noqa: BLE001 - losing the marker only restores manual resume
+        return
+
+
 def shutdown_session_service(*, deadline: float) -> dict[str, Any]:
     """Drain accepted session/projection work using the lifespan deadline."""
 
