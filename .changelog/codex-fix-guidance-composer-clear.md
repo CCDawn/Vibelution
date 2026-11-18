@@ -1,1 +1,1 @@
-- 引导提交成功后，输入框里的图片和会话引用会跟着消息一起交还，不再出现同一条内容既在对话里又留在输入框的情况。
+- Guided inserts now hand image and reference attachments back to the composer, so the same message no longer appears in both the transcript and the input box.
