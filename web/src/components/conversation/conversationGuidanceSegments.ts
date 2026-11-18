@@ -25,11 +25,14 @@ export function guidanceDeliveryLabel(
   return "";
 }
 
-export function guidanceDisplayState(message: ConversationMessage): "pending" | "drained" | "received" {
+export function guidanceDisplayState(message: ConversationMessage): "pending" | "drained" | "received" | "promoted" {
   const submitted = positiveSequence(message.metadata?.guidanceSequence);
   const consumed = positiveSequence(message.metadata?.guidanceConsumedSequence);
   if (message.metadata?.guidanceState === "drained" && submitted && consumed && consumed > submitted) {
     return "drained";
+  }
+  if (message.metadata?.guidanceState === "promoted") {
+    return "promoted";
   }
   if (message.metadata?.guidanceState === "pending") {
     return "pending";

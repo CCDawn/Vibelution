@@ -75,6 +75,9 @@ def test_open_turn_guide_stays_one_model_visible_message(tmp_path: Path, monkeyp
     ]
     assert len(user_copies) == 1
     assert user_copies[0].payload["metadata"]["steerId"] == steer_events[0].payload["steerId"]
+    assert user_copies[0].payload["metadata"]["clientSubmissionId"] == (
+        f"steer:{steer_events[0].payload['steerId']}"
+    )
     assert session_service.list_session_queued_turns(session_id) == []
     visible = [
         item
@@ -286,3 +289,57 @@ def test_settled_turn_falls_back_undrained_guide_to_queue(tmp_path: Path, monkey
     assert len(changed) == 1
     assert changed[0].payload["delivery"] == "queue"
     assert changed[0].payload["fromDelivery"] == "guide"
+
+def test_promoted_guide_reports_promoted_state(tmp_path: Path, monkeypatch) -> None:
+    from core.chat.conversation_ledger import EVENT_TURN_STARTED, append_conversation_event
+    from core.web.services.session import turn_steer
+
+    session_id = "session-guidance-promoted"
+    turn_id = "turn-promoted"
+    guidance = "promote this guide"
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_schedule_session_queued_turn_drain", lambda _session_id: None)
+    _seed_submittable_sessions(tmp_path, [session_id])
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        turn_id,
+        EVENT_TURN_STARTED,
+        status="running",
+        visible_in_model=False,
+    )
+
+    class _OpenTurnControl:
+        turn_id = "turn-promoted"
+
+        def snapshot(self) -> dict:
+            return {
+                "turnId": turn_id,
+                "releasedToUser": False,
+                "stopRequested": False,
+                "stopRequestedAt": "",
+                "stopReason": "",
+            }
+
+    monkeypatch.setattr(session_service, "_get_session_turn_control", lambda _session_id: _OpenTurnControl())
+    monkeypatch.setattr(session_service, "_is_session_running", lambda _session_id: True)
+    submit.submit_session_guidance(session_id, guidance, mode="safe")
+    events = load_conversation_events(tmp_path, session_id)
+    steer_id = next(event.payload["steerId"] for event in events if event.event_type == EVENT_TURN_STEER)
+    turn_steer.record_promoted(
+        session_id,
+        steer_id=steer_id,
+        turn_id=turn_id,
+        delivery="queue",
+    )
+    events = load_conversation_events(tmp_path, session_id)
+    metadata = turn_steer.guidance_metadata_from_events(events)
+    guide_ids = [
+        event.event_id
+        for event in events
+        if event.event_type == EVENT_USER_MESSAGE and event.payload.get("content") == guidance
+    ]
+    assert len(guide_ids) == 1
+    row = metadata[guide_ids[0]]
+    assert row["guidanceState"] == "promoted"
+    assert row["guidanceDelivery"] == "queue"

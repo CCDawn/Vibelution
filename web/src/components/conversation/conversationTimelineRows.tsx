@@ -559,6 +559,12 @@ export function createConversationTimelineRows({
               if (!sourceMessage) {
                 return null;
               }
+              // A promoted steer already reached the transcript as the
+              // queued-turn message; keeping the old row would show the same
+              // input twice.
+              if (isSteerGuidanceMessage(sourceMessage) && guidanceDisplayState(sourceMessage) === "promoted") {
+                return null;
+              }
               const message = conversationCompressionTurnBody(sourceMessage);
               const rowIdentity = activeTimelineRowIdentities[index];
               const rowKey = rowIdentity?.rowKey ?? message.id;
@@ -1074,7 +1080,7 @@ export function createConversationTimelineRows({
                 identityAccessory={
                   isEditingMessage
                     ? <span className={styles.turnEditBadge}>{t("editMessage")}</span>
-                    : steerGuidanceMessage
+                    : steerGuidanceMessage && guidanceState !== "drained" && guidanceState !== "promoted"
                       ? (
                         <VChip data-conversation-guidance-status={guidanceState}>
                           {resolvedSafeGuidanceLabel}
