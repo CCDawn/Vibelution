@@ -339,3 +339,58 @@ def test_build_impact_chain_view_shows_dependents_and_tests(monkeypatch, tmp_pat
     assert "`core/prompt_manager/prompt_manager.py`" in rendered
     assert "`core/infrastructure/tool_executor.py`" in rendered
     assert "`tests/test_prompt_manager.py`" in rendered
+
+
+def test_extract_file_path_returns_none_for_outside_project(tmp_path, monkeypatch):
+    monkeypatch.setattr(cmb, "_resolve_project_root", lambda: tmp_path)
+    inside = tmp_path / "core" / "sample.py"
+    inside.parent.mkdir()
+    inside.write_text("", encoding="utf-8")
+
+    assert cmb.extract_file_path("write_file_tool", {"file_path": str(inside)}) == "core/sample.py"
+    assert cmb.extract_file_path(
+        "write_file_tool",
+        {"file_path": str(tmp_path.parent / "outside_script.py")},
+    ) is None
+
+
+def test_incremental_update_file_ignores_outside_project(tmp_path, monkeypatch):
+    monkeypatch.setattr(cmb, "_resolve_project_root", lambda: tmp_path)
+    map_path = tmp_path / "CODEBASE_MAP.md"
+    map_path.write_text("# map\n", encoding="utf-8")
+    monkeypatch.setattr(cmb, "_get_codebase_map_path", lambda: map_path)
+    outside = tmp_path.parent / "read_vitest_failures2.py"
+    outside.write_text('"""outside"""\n', encoding="utf-8")
+
+    assert cmb.incremental_update_file(str(outside)) is False
+    assert map_path.read_text(encoding="utf-8") == "# map\n"
+
+
+def test_on_file_modified_skips_outside_project(tmp_path, monkeypatch):
+    monkeypatch.setattr(cmb, "_resolve_project_root", lambda: tmp_path)
+    calls = []
+    monkeypatch.setattr(cmb, "incremental_update_file", lambda path: calls.append(path))
+
+    cmb.on_file_modified(str(tmp_path.parent / "outside_script.py"))
+
+    assert calls == []
+
+
+def test_on_file_modified_normalizes_inside_project_path(tmp_path, monkeypatch):
+    monkeypatch.setattr(cmb, "_resolve_project_root", lambda: tmp_path)
+    target = tmp_path / "core" / "mod.py"
+    target.parent.mkdir()
+    target.write_text("", encoding="utf-8")
+    seen = Event()
+    calls = []
+
+    def fake_update(path):
+        calls.append(path)
+        seen.set()
+
+    monkeypatch.setattr(cmb, "incremental_update_file", fake_update)
+
+    cmb.on_file_modified(str(target))
+
+    assert seen.wait(5)
+    assert calls == ["core/mod.py"]
