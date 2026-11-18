@@ -490,7 +490,7 @@ def drain_guidance_events(
     turn_id: str,
     events: Any,
     consumed_keys: set[str],
-) -> list[str]:
+) -> list[dict[str, Any]]:
     """Drain same-turn guidance while preserving its first durable UI boundary.
 
     Only the worker-local keys suppress model injection. A new worker can need
@@ -512,7 +512,7 @@ def _drain_guidance_events_locked(
     turn_id: str,
     events: Any,
     consumed_keys: set[str],
-) -> list[str]:
+) -> list[dict[str, Any]]:
     event_list = list(events or [])
     receipt_metadata: dict[str, dict[str, Any]] | None = None
     guides: list[Any] = []
@@ -526,7 +526,7 @@ def _drain_guidance_events_locked(
         metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
         if str(metadata.get("kind") or "").strip() in _GUIDANCE_KINDS:
             guides.append(event)
-    pending: list[str] = []
+    pending: list[dict[str, Any]] = []
     # Every unconsumed submission must reach the next request. A tail window
     # silently loses the oldest input when more than eight arrive between polls.
     for event in sorted(guides, key=lambda item: _sequence(getattr(item, "sequence", 0))):
@@ -543,22 +543,38 @@ def _drain_guidance_events_locked(
         if receipt_metadata is None:
             receipt_metadata = guidance_metadata_from_events(event_list)
         receipt_state = receipt_metadata.get(event_id) if event_id else None
+        metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+        steer_id = str(metadata.get("steerId") or event_id).strip()
+        # Injection anchor: a drained receipt must name the model message this
+        # guide became. Without it a later reader cannot tell "never injected"
+        # from "injected into the 3rd request", and a restart cannot prove which
+        # request already carried the steer.
+        injected_message_id = f"guidance-{steer_id or event_id or sequence}"
         if event_id and sequence and (receipt_state or {}).get("guidanceState") != "drained":
-            metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
             receipt = _payload(
-                steer_id=str(metadata.get("steerId") or event_id).strip(),
+                steer_id=steer_id,
                 delivery=DELIVERY_GUIDE,
                 disposition=DISPOSITION_DRAINED,
                 target_turn_id=turn_id,
             )
-            receipt.update(userMessageEventId=event_id, userMessageSequence=sequence)
+            receipt.update(
+                userMessageEventId=event_id,
+                userMessageSequence=sequence,
+                injectedMessageIds=[injected_message_id],
+            )
             try:
                 append_turn_steer_event(session_id, turn_id, receipt, correlation_id=event_id)
             except Exception:
                 # The journal bridge records the write failure. This auxiliary
                 # fact must not turn a working guidance path into dropped input.
                 pass
-        pending.append(f"{_GUIDE_MODEL_PREAMBLE}{content}")
+        pending.append(
+            {
+                "text": f"{_GUIDE_MODEL_PREAMBLE}{content}",
+                "injectedMessageId": injected_message_id,
+                "steerId": steer_id,
+            }
+        )
     return pending
 
 

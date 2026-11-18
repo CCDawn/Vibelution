@@ -1,0 +1,1 @@
+- A drained guidance receipt and the agent scene log now name the injected model message, so a later reader can tell which request already carried the steer.

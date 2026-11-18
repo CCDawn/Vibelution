@@ -115,3 +115,24 @@ def test_a_new_process_replays_after_restart(monkeypatch) -> None:
     turn_steer._CONSUMED_GUIDE_KEYS.clear()
 
     assert len(turn_steer.drain_guidance_events("session-restart", "turn-1", events, set())) == 1
+
+
+def test_drained_receipt_names_the_injected_message(monkeypatch) -> None:
+    receipts: list[tuple[dict, str]] = []
+
+    def _capture(_session_id, _turn_id, receipt, *, correlation_id=""):
+        receipts.append((dict(receipt), correlation_id))
+
+    monkeypatch.setattr(turn_steer, "append_turn_steer_event", _capture)
+    drained = turn_steer.drain_guidance_events("session-anchor", "turn-1", [_guide()], set())
+
+    assert len(drained) == 1
+    item = drained[0]
+    assert item["steerId"] == "steer-1"
+    assert item["injectedMessageId"] == "guidance-steer-1"
+    assert item["text"].endswith("check the queue contract")
+    assert receipts, "drained receipt must be written"
+    receipt, correlation = receipts[0]
+    assert correlation == "evt-guide"
+    assert receipt["userMessageEventId"] == "evt-guide"
+    assert receipt["injectedMessageIds"] == ["guidance-steer-1"]

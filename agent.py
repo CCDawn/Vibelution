@@ -5049,7 +5049,13 @@ class AgentRuntime:
         """
         self._turn_guidance_provider = provider
 
-    def _drain_turn_guidance_texts(self) -> List[str]:
+    def _drain_turn_guidance_items(self) -> List[tuple]:
+        """Return drained guidance as (text, injected message id) pairs.
+
+        The host may answer with plain strings (legacy provider contract) or
+        with anchored dicts that carry the id the journal receipt names. Both
+        shapes must work: an anchor-less provider still delivers its text.
+        """
         provider = getattr(self, "_turn_guidance_provider", None)
         if not callable(provider):
             return []
@@ -5057,26 +5063,38 @@ class AgentRuntime:
             items = provider()
         except Exception:
             return []
-        texts: List[str] = []
+        drained: List[tuple] = []
         for item in list(items or []):
-            text = str(item or "").strip()
+            injected = ""
+            if isinstance(item, dict):
+                text = str(item.get("text") or "").strip()
+                injected = str(item.get("injectedMessageId") or "").strip()
+            else:
+                text = str(item or "").strip()
             if text:
-                texts.append(text)
-        return texts
+                drained.append((text, injected))
+        return drained
 
     def _apply_turn_guidance_messages(self, messages: List[Any]) -> List[Any]:
-        texts = self._drain_turn_guidance_texts()
-        if not texts:
+        drained = self._drain_turn_guidance_items()
+        if not drained:
             return messages
+        texts = [text for text, _injected in drained]
+        injected_ids = [injected for _text, injected in drained if injected]
+        fields: Dict[str, Any] = {
+            "guidanceCount": len(texts),
+            "guidanceChars": sum(len(text) for text in texts),
+            "turnIdentity": str(getattr(self, "_active_turn_identity", "") or "").strip(),
+        }
+        if injected_ids:
+            # Mirrors turn_steer_drained.injectedMessageIds so the scene log and
+            # the journal receipt point at the same model messages.
+            fields["injectedMessageIds"] = injected_ids
         _record_agent_scene_event(
             "prompt",
             "agent.turn.guidance_injected",
             message="Operator guidance was injected into the running turn at the next iteration boundary.",
-            fields={
-                "guidanceCount": len(texts),
-                "guidanceChars": sum(len(text) for text in texts),
-                "turnIdentity": str(getattr(self, "_active_turn_identity", "") or "").strip(),
-            },
+            fields=fields,
         )
         return [*list(messages), *(build_chat_guidance_message(text) for text in texts)]
 
