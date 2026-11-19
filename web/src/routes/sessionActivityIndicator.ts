@@ -142,7 +142,12 @@ export function markSessionActivitySeen(sessionId: string, stamp: string) {
     next.splice(0, next.length - MAX_SEEN_STAMPS_PER_SESSION);
   }
   map[id] = next;
-  return writeSeenMap(map);
+  const wrote = writeSeenMap(map);
+  if (wrote) {
+    // Reading the row retires its live badge: the operator has seen it now.
+    clearSessionLiveCompletion(id);
+  }
+  return wrote;
 }
 
 export function markSessionActivitySnapshotsSeen(
@@ -182,6 +187,46 @@ export function hasPriorSessionActivitySeen(sessionId: string) {
     return false;
   }
   return seenStampsFor(readSeenMap(), id).length > 0;
+}
+
+/**
+ * Settles this window watched arrive on the index stream.
+ *
+ * ``hasPriorSessionActivitySeen`` below silences rows nobody has read so a cold
+ * start does not paint the whole history as unread. That silence must not cover
+ * a completion the server pushed while the operator was looking at another
+ * session: that row has never been opened, and the push is the only signal the
+ * rail will get. Tracking it separately keeps the two cases apart.
+ */
+const liveCompletionIds = new Set<string>();
+const LIVE_COMPLETION_LIMIT = 200;
+
+export function markSessionLiveCompletion(sessionId: string) {
+  const id = String(sessionId || "").trim();
+  if (!id || liveCompletionIds.has(id)) {
+    return;
+  }
+  liveCompletionIds.add(id);
+  if (liveCompletionIds.size > LIVE_COMPLETION_LIMIT) {
+    const oldest = liveCompletionIds.values().next().value;
+    if (oldest !== undefined) {
+      liveCompletionIds.delete(oldest);
+    }
+  }
+  toneCache.clear();
+}
+
+export function clearSessionLiveCompletion(sessionId: string) {
+  const id = String(sessionId || "").trim();
+  if (!id || !liveCompletionIds.delete(id)) {
+    return;
+  }
+  toneCache.clear();
+}
+
+export function hasSessionLiveCompletion(sessionId: string) {
+  const id = String(sessionId || "").trim();
+  return Boolean(id) && liveCompletionIds.has(id);
 }
 
 /** Resting state, independent of the previous Turn's result. */
@@ -267,7 +312,12 @@ function computeSessionActivityTone(
     if (isSessionActivitySeen(sessionId, stamp)) {
       return "none";
     }
-    if (!inboxPending && state.execution === "idle" && !hasPriorSessionActivitySeen(sessionId)) {
+    if (
+      !inboxPending
+      && state.execution === "idle"
+      && !hasPriorSessionActivitySeen(sessionId)
+      && !hasSessionLiveCompletion(sessionId)
+    ) {
       return "none";
     }
     return "completed";
@@ -296,6 +346,7 @@ function toneCacheKey(
     options?.isRuntimeRunning ? 1 : 0,
     options?.isOptimisticRunning ? 1 : 0,
     options?.isActive ? 1 : 0,
+    hasSessionLiveCompletion(String(session.id || "")) ? 1 : 0,
   ].join("\u0001");
 }
 
