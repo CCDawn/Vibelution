@@ -1,5 +1,6 @@
 """Apply task-level local consent at the existing final execution gate."""
 import re
+from pathlib import Path
 
 from .policy import (LOCAL_REUSE_EVIDENCE_TOOL, LOCAL_RUNTIME_SOURCE_PREFIX, normal_development_call,
                      workspace_paths_allowed)
@@ -36,10 +37,28 @@ def _task_runtime(runtime):
         return None
 
 
+def _launcher_session_workspace(runtime):
+    """The Launcher assistant's own session is bounded by its session workspace."""
+    if not _native_launcher(runtime):
+        return None
+    from tools.shell_tools import get_workspace_root_override
+
+    workspace = get_workspace_root_override()
+    if workspace is None:
+        return None
+    try:
+        resolved = Path(workspace).resolve()
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return resolved if resolved.is_dir() else None
+
+
 def local_terminal_wait_allowed(runtime):
     """An active native task may wait until its command/deadline, not eight polls."""
     if not str(runtime.get("runtimeToolSource", "")).startswith(LOCAL_RUNTIME_SOURCE_PREFIX):
         return False
+    if _launcher_session_workspace(runtime) is not None:
+        return True
     _active_task(runtime)
     return True
 
@@ -69,7 +88,12 @@ def local_approval_policy(runtime, tool_name, args, requirement, permission_pres
         return approval_requirement(runtime, args), "request_approval"
     if not str(runtime.get("runtimeToolSource", "")).startswith(LOCAL_RUNTIME_SOURCE_PREFIX):
         return requirement, permission_preset
-    task = _active_task(runtime)
+    task = _task_runtime(runtime)
+    if task is None:
+        workspace = _launcher_session_workspace(runtime)
+        if workspace is None:
+            raise LocalTaskScopeError("本次派遣的工作区授权已失效，请结束任务并将结果交回个人助理。")
+        task = {"workspace": workspace, "profile": "workspace_write"}
     workspace = task["workspace"]
     if not workspace_paths_allowed(tool_name, args, workspace):
         raise LocalTaskScopeError("工具路径超出本次派遣的工作区，请使用任务工作区内的路径。")
