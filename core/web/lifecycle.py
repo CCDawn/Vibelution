@@ -583,6 +583,35 @@ async def _run_session_recovery_after_first_frame(
     return await startup_jobs.run_sync(worker_name, callback, stop_keyword=stop_keyword)
 
 
+def _resume_restart_marker_sessions_on_startup() -> object:
+    """Resume restart-marked turns without the first-frame prewarm gate."""
+
+    from .services.session.startup_recovery import resume_restart_pending_sessions_now
+
+    return resume_restart_pending_sessions_now()
+
+
+async def _run_restart_marker_resume_after_directory(
+    directory_ready: asyncio.Task[Any],
+    startup_jobs: StartupJobGroup,
+) -> Any:
+    """Resume restart-marked turns as soon as the session store is open.
+
+    The full sweep deliberately waits for the prewarm gate; a restart marker
+    does not. The operator restarted mid-turn and should not watch a stopped
+    conversation for the whole gate duration.
+    """
+
+    await asyncio.shield(directory_ready)
+    if startup_jobs.should_stop():
+        raise asyncio.CancelledError
+    return await startup_jobs.run_sync(
+        "startup-session-resume-marker-worker",
+        _resume_restart_marker_sessions_on_startup,
+        stop_keyword="should_stop",
+    )
+
+
 async def _run_config_workspace_prewarm_after_routes_ready(
     app: FastAPI | None, *, startup_jobs: StartupJobGroup | None = None
 ) -> dict[str, Any]:
@@ -872,6 +901,15 @@ async def web_workbench_lifespan(app: FastAPI | None):
             app, startup_directory_task, startup_jobs,
             _recover_hypothesis_command_attempts_on_startup,
             worker_name="startup-command-attempt-recovery-worker",
+        ),
+    )
+    # Restart-marked resumes run as soon as the store is open: the full sweep
+    # below waits for the prewarm gate, and a turn interrupted by a restart
+    # must not wait minutes for idle-history prewarm to drain.
+    startup_jobs.start_async(
+        "startup-session-resume-marker",
+        _run_restart_marker_resume_after_directory(
+            startup_directory_task, startup_jobs
         ),
     )
     # Session startup recovery sweep (interrupted turns + queue drain). Kept

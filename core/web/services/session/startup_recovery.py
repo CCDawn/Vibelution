@@ -1466,6 +1466,55 @@ def _merge_recovery_summaries(target: dict[str, Any], parts: list[dict[str, Any]
             target["stopped"] = True
 
 
+def resume_restart_pending_sessions_now() -> dict[str, Any]:
+    """Resume the turns a restart marker names, before first-frame prewarm.
+
+    The full sweep waits for the prewarm gate so bulk repair stays behind
+    first-frame reads. A restart-interrupted turn has nothing to gain from that
+    wait: the marker already names the exact sessions and turns, and the
+    operator is looking at a stopped conversation while the gate drains.
+    Resume those sessions here, right after the store opens; the later sweep
+    retries whatever this pass could not finish.
+    """
+
+    summary = _new_summary()
+    summary["trigger"] = "backend_startup_restart_marker"
+    summary["durationMs"] = 0
+    s = _service()
+    try:
+        restart_pending_map = _load_restart_resume_pending(s)
+    except Exception:  # noqa: BLE001 - a failed marker read keeps the later sweep
+        summary["errorCount"] += 1
+        return summary
+    if not restart_pending_map:
+        return summary
+    companion_session_ids = _companion_session_ids(s)
+    if companion_session_ids is None:
+        summary["skipped"] = "companion_scope_unavailable"
+        return summary
+    pending_turn_ids = {
+        turn_id for turn_ids in restart_pending_map.values() for turn_id in turn_ids
+    }
+    for session_id in list(restart_pending_map):
+        if _shutdown_requested(None):
+            break
+        _recover_session_on_startup(
+            s,
+            session_id,
+            companion_session_ids=companion_session_ids,
+            summary=summary,
+            active_turn_session_ids=set(restart_pending_map),
+            pending_turn_ids=pending_turn_ids,
+            pending_session_turn_ids=restart_pending_map,
+        )
+    logger.info(
+        "Restart-marker resume before prewarm: scanned=%s resumed=%s",
+        summary.get("scannedSessionCount"),
+        summary.get("resumedCount"),
+    )
+    return summary
+
+
 def recover_interrupted_session_turns_on_startup(
     *, should_stop: Callable[[], bool] | None = None
 ) -> dict[str, Any]:
