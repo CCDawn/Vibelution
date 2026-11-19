@@ -20,7 +20,7 @@ from typing import Any, Callable
 from core.logging import debug as _debug_logger
 
 # Local default for signature evaluation (facade remains SSOT).
-RUNTIME_SCENE_RETENTION_LIMIT = 30
+RUNTIME_SCENE_RETENTION_LIMIT = 10
 RUNTIME_SCENE_RETENTION_MAX_BYTES = 1024 * 1024 * 1024
 
 

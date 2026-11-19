@@ -34,8 +34,8 @@ def _write_scene(root: Path, project_root: Path, index: int) -> Path:
 @pytest.mark.parametrize(
     ("delete_error", "remove_before_error", "expected_kept_count"),
     [
-        (PermissionError, False, 31),
-        (FileNotFoundError, True, 30),
+        (PermissionError, False, 11),
+        (FileNotFoundError, True, 10),
     ],
 )
 def test_runtime_scene_list_read_does_not_prune_and_explicit_enforce_survives_delete_races(
@@ -48,7 +48,7 @@ def test_runtime_scene_list_read_does_not_prune_and_explicit_enforce_survives_de
     runtime_scene_root = tmp_path / "logs" / "runtime_scenes"
     runtime_scene_root.mkdir(parents=True)
     oldest_scene = _write_scene(runtime_scene_root, tmp_path, 0)
-    for index in range(1, 31):
+    for index in range(1, 11):
         _write_scene(runtime_scene_root, tmp_path, index)
 
     launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
@@ -99,7 +99,7 @@ def test_runtime_scene_list_read_does_not_prune_and_explicit_enforce_survives_de
         response = client.get("/api/logs/runtime-scenes")
 
     assert response.status_code == 200, response.text
-    assert len(response.json()) == 31
+    assert len(response.json()) == 11
     assert delete_attempts == []
     assert retention_results == []
     assert oldest_scene.exists()
