@@ -8526,7 +8526,16 @@ async function handleMainLineLaunchRequest(
     // Provenance stays exactly as the caller declared it: a forwarded launch
     // request must keep its join semantics, and an operator command already
     // carries the interrupt authority this path relies on.
-    const result = await orchestrateLauncherLifecycle(executionOperation, { schemaVersion: 1, path: command }, provenance,
+    // A CLI-issued restart through the launch-request lane is an operator
+    // decision: the native shim only opens that lane for an explicit local
+    // command, and a missing lifecycle source means nothing forwarded it.
+    // Runtime Manager forwards always carry a lifecycle source and stay
+    // "forwarded", so their automatic restarts keep the active-work guard.
+    const effectiveProvenance: LauncherLifecycleProvenance =
+      provenance === "operator" && executionOperation === "restart"
+        ? "operator-restart"
+        : provenance;
+    const result = await orchestrateLauncherLifecycle(executionOperation, { schemaVersion: 1, path: command }, effectiveProvenance,
       undefined, undefined, false, undefined, { ...metadata, launchRequestOperation: operation, receipt });
     if (!result.accepted) {
       receipt.failed(result.code || "lifecycle_rejected", result.message || "Launcher 拒绝了生命周期请求。");
