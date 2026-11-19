@@ -27,7 +27,9 @@ import json
 import logging
 import os
 import re
+import shutil
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -385,6 +387,10 @@ def _resolve_file_logging_enabled() -> bool:
         return True
 
 
+# 清理孤儿 payload 目录时跳过的宽限期：给并发进程正在写的会话留出余量。
+PAYLOAD_PRUNE_GRACE_SECONDS = 3600.0
+
+
 class ConversationLogger:
     """
     实时对话记录器 - 将 LLM 对话记录到文件
@@ -640,9 +646,10 @@ class ConversationLogger:
         return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
     def cleanup_old_conversations(self, keep_recent: int = 5) -> int:
-        """清理旧的 conversation jsonl 文件，只保留最近 N 个会话（与 TranscriptLogger 对称）。"""
+        """清理旧的 conversation jsonl 与孤儿 payload 目录，只保留最近 N 个会话。"""
         pattern = os.path.join(self._log_dir, "conversation_*.jsonl")
         files = sorted(glob.glob(pattern), key=os.path.getmtime, reverse=True)
+        retained_files = list(files[:keep_recent])
 
         deleted_count = 0
         for file_path in files[keep_recent:]:
@@ -650,13 +657,58 @@ class ConversationLogger:
                 os.remove(file_path)
                 deleted_count += 1
             except Exception:
-                pass
+                # 删除失败的会话仍然有对应 payload，不能当成孤儿清理。
+                retained_files.append(file_path)
 
-        if deleted_count > 0:
+        removed_payloads = self._prune_orphan_payloads(retained_files)
+
+        if deleted_count > 0 or removed_payloads > 0:
             from core.logging import debug as _debug_logger
-            _debug_logger.info(f"[ConversationLogger] 已清理 {deleted_count} 个旧 conversation 文件")
+            _debug_logger.info(
+                f"[ConversationLogger] 已清理 {deleted_count} 个旧 conversation 文件、"
+                f"{removed_payloads} 个孤儿 payload 目录"
+            )
 
         return deleted_count
+
+    def _prune_orphan_payloads(self, retained_files: list[str]) -> int:
+        """删除不再对应任何保留会话文件的 payload 目录。
+
+        payload 目录按 session_id 命名，会话文件形如
+        ``conversation_<session_id>__<label>.jsonl`` 或 ``conversation_<session_id>.jsonl``。
+        这里用前缀匹配而不再解析文件名，避免 session_id 自身含分隔符时误删保留会话。
+        """
+        payload_root = Path(self._log_dir) / "payloads"
+        if not payload_root.is_dir():
+            return 0
+
+        retained_stems = [Path(item).name[: -len(".jsonl")] for item in retained_files if item]
+        try:
+            candidates = [child for child in payload_root.iterdir() if child.is_dir()]
+        except OSError:
+            return 0
+
+        stale_before = time.time() - PAYLOAD_PRUNE_GRACE_SECONDS
+        removed = 0
+        for child in candidates:
+            name = child.name
+            if name == self._session_id:
+                continue
+            prefix = f"conversation_{name}"
+            if any(stem == prefix or stem.startswith(f"{prefix}__") for stem in retained_stems):
+                continue
+            try:
+                if child.stat().st_mtime > stale_before:
+                    # 另一个进程可能正在写这个会话，留给下一轮清理。
+                    continue
+            except OSError:
+                continue
+            try:
+                shutil.rmtree(child)
+                removed += 1
+            except OSError:
+                continue
+        return removed
 
     def _activate_default(self) -> None:
         """未显式 start_session 时，懒激活进程级默认会话，避免日志被静默丢弃。"""
