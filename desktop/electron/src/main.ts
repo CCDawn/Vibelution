@@ -8536,6 +8536,11 @@ async function handleMainLineLaunchRequest(
       provenance === "operator" && executionOperation === "restart"
         ? "operator-restart"
         : provenance;
+    if (effectiveProvenance !== provenance) {
+      // Forensic trail: a local operator restart was granted interrupt
+      // authority over active work (operator -> operator-restart).
+      console.warn(`LAUNCH_REQUEST_PROVENANCE_UPGRADE operation=${executionOperation} declared=${provenance} effective=${effectiveProvenance}`);
+    }
     const result = await orchestrateLauncherLifecycle(executionOperation, { schemaVersion: 1, path: command }, effectiveProvenance,
       undefined, undefined, false, undefined, { ...metadata, launchRequestOperation: operation, receipt });
     if (!result.accepted) {

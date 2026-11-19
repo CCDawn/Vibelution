@@ -14,10 +14,12 @@ describe("operator restart interrupt intent", () => {
     );
     expect(anchor).toBeGreaterThanOrEqual(0);
 
-    const window = mainSource.slice(anchor, anchor + 400);
+    const window = mainSource.slice(anchor, anchor + 700);
     expect(window).toContain('? "operator-restart"');
     expect(window).toContain("effectiveProvenance");
     expect(window).toContain("orchestrateLauncherLifecycle(executionOperation");
+    // The upgrade leaves a forensic console.warn trail behind.
+    expect(window).toContain("LAUNCH_REQUEST_PROVENANCE_UPGRADE");
   });
 
   it("keeps operator-restart as the proven interrupt signal", () => {

@@ -161,10 +161,19 @@ export function resolveSingleInstanceProvenance(value: unknown): SingleInstanceL
   if (value.lifecycle.provenance === "forwarded") {
     return "forwarded";
   }
-  // A bare CLI `restart` is not an interactive approval to interrupt work.
-  // The workbench/Launcher UI reaches restart through the IPC route, which
-  // keeps operator semantics; CLI restarts queue behind active tasks instead
-  // of silently killing them, so an agent shell cannot impersonate a click.
+  // An operator envelope means the second instance itself observed no Runtime
+  // Manager forwarding marker (a missing lifecycle source means nothing
+  // forwarded it), so this is a person typing a local command. The restart
+  // they asked for keeps operator semantics and the lifecycle lane upgrades it
+  // to operator-restart: an explicit local request outranks a running task and
+  // goes through interrupt-save-restart instead of being rejected by the
+  // active-work guard. Runtime Manager forwards always carry a lifecycle
+  // source, resolve to "forwarded" above, and keep the guard.
+  if (value.lifecycle.provenance === "operator") {
+    return "operator";
+  }
+  // Legacy envelopes without a provenance field cannot prove their origin, so
+  // their restart commands keep the conservative forwarded downgrade.
   return value.lifecycle.command.trim().toLowerCase() === "restart" ? "forwarded" : "operator";
 }
 
