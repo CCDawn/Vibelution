@@ -34,7 +34,7 @@ export type FulfillDeferredRestartIntentInput = {
   workspaceRoot: string;
   runtimeManagerDir: string;
   listActiveWork: () => readonly unknown[] | Promise<readonly unknown[]>;
-  submitRestart: () => Promise<{ accepted: boolean; code?: string; message?: string }>;
+  submitRestart: (interruptActiveWork: boolean) => Promise<{ accepted: boolean; code?: string; message?: string }>;
   now?: () => number;
   /** Management-only attachment may fulfil new requests without replaying old ones. */
   notBefore?: number;
@@ -216,10 +216,11 @@ export async function fulfillDeferredRestartIntentOnce(
   const candidate = fresh[0];
   if (!candidate) return noFreshIntent;
   const activeWorkCount = (await input.listActiveWork()).length;
-  if (activeWorkCount > 0) {
-    if (input.interruptActiveWorkFor?.(candidate) !== true) {
-      return { status: "blocked", activeWorkCount };
-    }
+  const interruptActiveWork = activeWorkCount > 0 && input.interruptActiveWorkFor?.(candidate) === true;
+  if (activeWorkCount > 0 && !interruptActiveWork) {
+    return { status: "blocked", activeWorkCount };
+  }
+  if (interruptActiveWork) {
     // Explicit operator restarts stop the running work instead of waiting. The
     // interrupted turns are recovered by the existing restart reconciliation,
     // so this only records why the work was cut short.
@@ -267,7 +268,7 @@ export async function fulfillDeferredRestartIntentOnce(
   }
   let result: { accepted: boolean; code?: string; message?: string };
   try {
-    result = await input.submitRestart();
+    result = await input.submitRestart(interruptActiveWork);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     settleDeferredRestartIntent({

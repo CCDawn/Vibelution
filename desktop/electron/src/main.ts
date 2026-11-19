@@ -7455,8 +7455,9 @@ async function runDeferredRestartFulfillmentOnce(): Promise<void> {
       // self-evolution supervisor keeps waiting for idle.
       interruptActiveWorkFor: (intent) =>
         String((intent as Record<string, unknown>).requestedBy || "").trim().toLowerCase() !== "self_evolution",
-      submitRestart: async () =>
-        await orchestrateLauncherLifecycle("restart", { schemaVersion: 1, path: "restart" }, "forwarded")
+      submitRestart: async (interruptActiveWork) =>
+        await orchestrateLauncherLifecycle("restart", { schemaVersion: 1, path: "restart" },
+          interruptActiveWork ? "operator-restart" : "forwarded")
     });
   } catch (error: unknown) {
     console.warn(error instanceof Error ? error.message : String(error));
