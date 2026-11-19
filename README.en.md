@@ -7,13 +7,17 @@
   <a href="https://github.com/CCDawn/Vibelution/actions/workflows/ci.yml"><img src="https://github.com/CCDawn/Vibelution/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License MIT"></a>
   <a href="https://github.com/CCDawn/Vibelution/releases"><img src="https://img.shields.io/github/v/release/CCDawn/Vibelution" alt="GitHub release"></a>
-  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey" alt="Platform Windows macOS Linux">
+  <img src="https://img.shields.io/badge/platform-Windows%20desktop%20%C2%B7%20macOS%2FLinux%20browser-lightgrey" alt="Platform: Windows desktop · macOS/Linux browser">
 </p>
 
 <p align="center">
   <a href="README.md">中文</a> · English<br>
   <a href="#start">Quick start</a> · <a href="#features">Feature tour</a> · <a href="docs/guides/first-conversation.en.md">First conversation</a> · <a href="docs/README.md">Documentation</a><br>
-  Local workbench &nbsp; / &nbsp; Local or cloud models
+  A local-first AI Agent workbench for Windows desktop: Agents collaborate, knowledge grows, and your data stays local.
+</p>
+
+<p align="center">
+  Why we build Vibelution: to keep everyday work on your machine — planning, development, and review go to Agents with distinct roles, discussions and artifacts accumulate into traceable knowledge, and your data stays on your own computer.
 </p>
 
 <p align="center">
@@ -50,7 +54,7 @@ Assign planning, development, and review to different Agents. See their responsi
 <a id="start"></a>
 ## Start your first conversation
 
-Start with the **Windows desktop workbench**. Install Python 3.11+ (3.12 recommended), Node.js 22.12+, and Git, then run in PowerShell:
+Start with the **Windows desktop workbench**. Install Python 3.11+ (3.12 recommended), Node.js 22.12+ (24.x verified, 25+ not yet supported), Git, and VS 2022 Build Tools (C++ workload; install commands in the [Windows installation guide](docs/guides/install-windows.en.md)), then open a new PowerShell window and run:
 
 ```powershell
 git clone https://github.com/CCDawn/Vibelution.git
@@ -64,7 +68,13 @@ powershell -ExecutionPolicy Bypass -File scripts/install_windows.ps1
 
 [First conversation →](docs/guides/first-conversation.en.md) · [Windows installation and troubleshooting](docs/guides/install-windows.en.md) · [macOS](docs/guides/install-macos.md) (Chinese for now) · [Linux](docs/guides/install-linux.md) (Chinese for now)
 
-macOS and Linux use the browser workbench. Installation currently requires the runtimes above; a portable installer is still planned. The workbench runs locally. Cloud model requests are sent to the selected provider and may incur charges.
+Besides the Windows desktop workbench, macOS and Linux use the browser workbench. After cloning the repository, run in a terminal (Python, Node.js, and Git are still required; a portable installer is planned):
+
+```sh
+bash scripts/install_posix.sh
+```
+
+The [macOS installation guide](docs/guides/install-macos.md) (Chinese) records a 2026-09 verified run on macOS 26 (Apple Silicon), covering dependency installation, the frontend build, and start/stop and health checks. The workbench runs locally; see the [FAQ](#faq) for where data and requests go.
 
 <a id="team-interface"></a>
 ## The actual team canvas
@@ -173,6 +183,29 @@ Continue everyday conversations in character scenes. Configure identity, schedul
 
 [Virtual-human plugin](core/agent_plugins/virtual_human_life/README.md)
 
+<a id="faq"></a>
+## FAQ
+
+**Where is my data stored?**
+
+Sessions, knowledge, and configuration stay on your machine; only when a cloud model is configured are requests sent to the selected provider and may incur charges; local models never leave your machine. See [local model monitoring](docs/ops/local-model-monitor.md).
+
+**How do I upgrade?**
+
+See the [changelog](CHANGELOG.md) for version changes. Pull the latest code and re-run the installation script for your platform; the script is idempotent and safe to re-run. Steps: [Windows](docs/guides/install-windows.en.md) · [macOS](docs/guides/install-macos.md) · [Linux](docs/guides/install-linux.md).
+
+**How does the desktop workbench differ from the browser workbench?**
+
+The Windows desktop workbench provides an Electron desktop shell and the desktop floating window; macOS and Linux currently use a headless launcher plus browser access and do not provide a desktop shell. Features like the floating window require the Windows desktop workbench.
+
+**Who owns the virtual-human characters and assets?**
+
+Character names and third-party assets belong to their respective rights holders, and the code license does not grant rights to third-party character assets. See [media sources and notes](docs/assets/readme/README.md).
+
+**Are simulated finance accounts live trading?**
+
+No. Simulated accounts and historical backtests are not live trading, and broker trade execution is not included. Market data and research require the relevant services, data, and model configuration.
+
 ## Configure the workbench your way
 
 | Supporting capability | Purpose |
@@ -188,6 +221,18 @@ Continue everyday conversations in character scenes. Configure identity, schedul
 ## Documentation and participation
 
 [Contributing](CONTRIBUTING.md) · [Documentation map](docs/README.md) · [Interactive architecture map](docs/architecture/index.html) (offline single file, about 14 MB; download and open in a browser) · [Testing guide](tests/README.md) · [Changelog](CHANGELOG.md) · [Report an issue](https://github.com/CCDawn/Vibelution/issues) · [Security](SECURITY.md)
+
+Roadmap and work in progress: [Issues](https://github.com/CCDawn/Vibelution/issues) · [Changelog](CHANGELOG.md) (the top "Unreleased" section tracks ongoing changes)
+
+<p align="center">
+  <a href="https://github.com/CCDawn/Vibelution/graphs/contributors">
+    <img src="https://contrib.rocks/image?repo=CCDawn/Vibelution" alt="Contributors">
+  </a>
+</p>
+
+<p align="center">
+  <img src="https://api.star-history.com/svg?repos=CCDawn/Vibelution&type=Date" alt="Star History">
+</p>
 
 Related projects: [briefbound-skills](https://github.com/CCDawn/briefbound-skills) · [Codex-Dynamic-Skin](https://github.com/CCDawn/Codex-Dynamic-Skin) · [harmony-codex](https://github.com/CCDawn/harmony-codex) · [pc-touchpad](https://github.com/CCDawn/pc-touchpad)
 

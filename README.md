@@ -7,13 +7,17 @@
   <a href="https://github.com/CCDawn/Vibelution/actions/workflows/ci.yml"><img src="https://github.com/CCDawn/Vibelution/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License MIT"></a>
   <a href="https://github.com/CCDawn/Vibelution/releases"><img src="https://img.shields.io/github/v/release/CCDawn/Vibelution" alt="GitHub release"></a>
-  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey" alt="Platform Windows macOS Linux">
+  <img src="https://img.shields.io/badge/platform-Windows%20%E6%A1%8C%E9%9D%A2%20%C2%B7%20macOS%2FLinux%20%E6%B5%8F%E8%A7%88%E5%99%A8-lightgrey" alt="Platform: Windows 桌面 · macOS/Linux 浏览器">
 </p>
 
 <p align="center">
   中文 · <a href="README.en.md">English</a><br>
   <a href="#start">快速开始</a> · <a href="#features">功能导览</a> · <a href="docs/guides/first-conversation.md">第一次对话</a> · <a href="docs/README.md">文档</a><br>
-  本地工作台 &nbsp; / &nbsp; 本地或云端模型
+  Windows 桌面优先的本地 AI Agent 工作台：让 Agent 协作，让知识延续，数据留在本机。
+</p>
+
+<p align="center">
+  为什么做 Vibelution：让日常工作留在本机完成——规划、开发与评审交给各司其职的 Agent，讨论与产物沉淀为可追溯的知识，数据保存在你自己的电脑上。
 </p>
 
 <p align="center">
@@ -64,7 +68,13 @@ powershell -ExecutionPolicy Bypass -File scripts/install_windows.ps1
 
 [第一次对话 →](docs/guides/first-conversation.md) · [Windows 安装与排错](docs/guides/install-windows.md) · [macOS](docs/guides/install-macos.md) · [Linux](docs/guides/install-linux.md)
 
-macOS / Linux 使用浏览器工作台。当前安装需要上述运行环境，便携安装包仍在规划中。工作台在本机运行；使用云端模型时，请求会发给所选服务商，并可能产生费用。
+除 Windows 桌面工作台外，macOS / Linux 使用浏览器工作台。克隆仓库后在终端执行（同样需要 Python、Node.js 与 Git；便携安装包仍在规划中）：
+
+```sh
+bash scripts/install_posix.sh
+```
+
+[macOS 安装指南](docs/guides/install-macos.md)记录了 2026-09 在 macOS 26（Apple Silicon）实测通过，覆盖依赖安装、前端构建、启动/停止与健康检查。工作台在本机运行；数据与请求去向见[常见问题](#faq)。
 
 <a id="team-interface"></a>
 ## 团队画布的实际界面
@@ -173,6 +183,29 @@ macOS / Linux 使用浏览器工作台。当前安装需要上述运行环境，
 
 [虚拟人插件](core/agent_plugins/virtual_human_life/README.md)
 
+<a id="faq"></a>
+## 常见问题
+
+**数据存在哪里？**
+
+会话、知识与配置保存在本机；仅当配置云端模型时，请求会发给所选服务商并可能产生费用；本地模型全程不出本机。详见[本地模型监控](docs/ops/local-model-monitor.md)。
+
+**如何升级？**
+
+版本变化见[更新记录](CHANGELOG.md)。重新拉取代码后重跑对应平台的安装脚本即可，脚本幂等、可重复执行；步骤见 [Windows](docs/guides/install-windows.md) · [macOS](docs/guides/install-macos.md) · [Linux](docs/guides/install-linux.md) 安装指南。
+
+**桌面工作台和浏览器工作台有什么区别？**
+
+Windows 桌面工作台提供 Electron 桌面壳与桌面浮窗；macOS / Linux 目前通过 headless 启动器加浏览器访问，不提供桌面壳。桌面浮窗等功能需要 Windows 桌面工作台。
+
+**虚拟人角色与素材的权利归谁？**
+
+角色名称与第三方素材的权利归各自权利人所有，代码许可证不授予第三方角色素材的权利；展示素材来源见[素材说明](docs/assets/readme/README.md)。
+
+**金融模拟账户是实盘交易吗？**
+
+不是。模拟账户与历史回测不等于实盘交易，当前不包含券商交易执行；行情与研究需要相应服务、数据和模型配置。
+
 ## 按你的方式配置工作台
 
 | 配套能力 | 用途 |
@@ -188,6 +221,18 @@ macOS / Linux 使用浏览器工作台。当前安装需要上述运行环境，
 ## 文档与参与
 
 [贡献指南](CONTRIBUTING.md) · [文档地图](docs/README.md) · [交互式架构地图](docs/architecture/index.html)（离线单文件约 14MB，下载后用浏览器打开） · [测试指南](tests/README.md) · [更新记录](CHANGELOG.md) · [反馈问题](https://github.com/CCDawn/Vibelution/issues) · [安全问题](SECURITY.md)
+
+路线图与进行中工作：[Issues](https://github.com/CCDawn/Vibelution/issues) · [更新记录](CHANGELOG.md)（顶部 Unreleased 为进行中的变更）
+
+<p align="center">
+  <a href="https://github.com/CCDawn/Vibelution/graphs/contributors">
+    <img src="https://contrib.rocks/image?repo=CCDawn/Vibelution" alt="贡献者">
+  </a>
+</p>
+
+<p align="center">
+  <img src="https://api.star-history.com/svg?repos=CCDawn/Vibelution&type=Date" alt="Star History">
+</p>
 
 相关项目：[briefbound-skills](https://github.com/CCDawn/briefbound-skills) · [Codex-Dynamic-Skin](https://github.com/CCDawn/Codex-Dynamic-Skin) · [harmony-codex](https://github.com/CCDawn/harmony-codex) · [pc-touchpad](https://github.com/CCDawn/pc-touchpad)
 
