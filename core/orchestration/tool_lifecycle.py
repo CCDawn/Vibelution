@@ -293,6 +293,7 @@ class ToolLifecycleBridge:
         tool_name = _tool_call_name(call)
         tool_args = _tool_call_args(call)
         tool_call_id = _tool_call_id(call) or None
+        started_at = perf_counter()
 
         _debug_logger.tool_start(tool_name, tool_args)
 
@@ -380,6 +381,7 @@ class ToolLifecycleBridge:
                 str(result),
                 status=status,
                 tool_call_id=tool_call_id,
+                duration_ms=max(0.0, (perf_counter() - started_at) * 1000.0),
             )
             _debug_logger.tool_result(tool_name, str(result), success=execution_success)
         else:
@@ -389,6 +391,7 @@ class ToolLifecycleBridge:
                 "",
                 status="error",
                 tool_call_id=tool_call_id,
+                duration_ms=max(0.0, (perf_counter() - started_at) * 1000.0),
             )
             _debug_logger.warning(f"[警告] {tool_name} 返回 None", tag="TOOL")
 

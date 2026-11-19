@@ -382,7 +382,8 @@ def test_inherited_subagent_session_appends_to_parent_log_with_actor_metadata(tm
     assert lines[2]["type"] == "subagent_stream"
     assert lines[2]["actor"] == "subagent"
     assert lines[2]["content"] == "<think>先看日志</think>"
-    assert lines[-1]["type"] == "session_detach"
+    assert lines[-2]["type"] == "session_detach"
+    assert lines[-1]["type"] == "session_summary"
 
 
 def test_external_request_api_writes_external_request(tmp_path):
