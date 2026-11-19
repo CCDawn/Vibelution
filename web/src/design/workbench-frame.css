@@ -41,12 +41,6 @@
     overflow: hidden !important;
   }
 
-  /* Docked right rail: the pane keeps its three rounded corners but must meet
-     the rail flush, so the shared corner is squared off. Specificity has to
-     beat the .vui-workbench-pane radius rule above. */
-  [data-vui="workbench-frame"] .vui-workbench-pane.centerPaneMeetsRail {
-    border-top-right-radius: 0 !important;
-  }
   [data-vui="workbench-frame"] > [data-vui-page="workspace"] {
     border: 0;
     border-radius: 0;

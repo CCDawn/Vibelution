@@ -326,10 +326,11 @@ export function useChatWorkbenchLayout({
     || responsiveLayout.mode === "mobile"
     || !indexRailEnabled;
   // A docked rail meets the center pane at a hard edge. The pane's own top-right
-  // radius would otherwise leave a notch where the two columns touch.
+  // The pane keeps its own radius while the rail is docked: opening the rail
+  // must not reshape anything outside the rail column.
   const centerPaneClassName = `${centerOnFirstColumn
     ? `${styles.centerPane} ${styles.centerPaneOverlay}`
-    : `${styles.centerPane} ${styles.centerPaneDocked}${statusRailDocked ? " centerPaneMeetsRail" : ""}`}${sessionRowSpansRail ? ` ${styles.centerPaneBodyRow}` : ""}`;
+    : `${styles.centerPane} ${styles.centerPaneDocked}`}${sessionRowSpansRail ? ` ${styles.centerPaneBodyRow}` : ""}`;
   // Critical: when docked status rail is collapsed, do NOT attach leftRail
   // (grid-column:5). A non-display:none item on column 5 creates implicit
   // grid tracks and a blank right strip after route remounts.

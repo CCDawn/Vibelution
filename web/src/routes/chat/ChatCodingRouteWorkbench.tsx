@@ -2817,9 +2817,13 @@ export function ChatCodingRouteWorkbench() {
   });
   openSessionRouteRef.current = openDirectSessionRoute;
   const handleOpenDirectSession = useCallback((sessionId: string, options?: { telemetrySource?: string }) => {
+    // Route first: dock cleanup may re-select a rail tab, and a trailing
+    // cleanup writes the route a second time. That extra write parks the live
+    // stream and replays the transcript, which users see as the tab strip
+    // flickering between groups.
+    openDirectSessionRoute(sessionId, options);
     paneDock.undockSession(sessionId);
     paneDock.dismissCenter();
-    openDirectSessionRoute(sessionId, options);
   }, [openDirectSessionRoute, paneDock.dismissCenter, paneDock.undockSession]);
 
   useDesktopConversationAttention({
