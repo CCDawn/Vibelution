@@ -1160,3 +1160,20 @@ def test_marker_turn_resumes_even_when_the_journal_tail_looks_settled(
     assert summary["resumedCount"] == 1
     assert [call["content"] for call in submit_calls] == [ORIGINAL_PROMPT]
     assert submit_calls[0]["turn_mode"] == "hot_restart_resume"
+
+
+def test_restart_marker_resume_now_ignores_the_prewarm_gate(
+    recovery_env, tmp_path, submit_calls
+) -> None:
+    """The early pass resumes a marker turn without waiting for the sweep."""
+
+    _seed_conversation(tmp_path)
+    _seed_interrupted_turn(tmp_path)
+    restart_resume_pending.record_pending_restart_resume(
+        recovery_env, [{"sessionId": SESSION_ID, "turnId": ORIGINAL_TURN_ID}]
+    )
+
+    summary = startup_recovery.resume_restart_pending_sessions_now()
+
+    assert summary["resumedCount"] == 1
+    assert [call["content"] for call in submit_calls] == [ORIGINAL_PROMPT]
