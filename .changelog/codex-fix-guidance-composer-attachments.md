@@ -1,0 +1,1 @@
+- A guidance insert now clears the staged images and references it just consumed instead of leaving them in the composer.

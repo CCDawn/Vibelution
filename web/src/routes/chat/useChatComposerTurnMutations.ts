@@ -1298,6 +1298,10 @@ export function useChatComposerTurnMutations({
       clearLiveComposerDraftIfEquals(variables.sessionId, variables.content);
       clearRegisteredComposerDraft(variables.sessionId, variables.content);
       removeStoredSessionDraft(variables.sessionId);
+      // A guidance insert consumes the composer exactly like a normal submit:
+      // leaving the staged images behind makes the next send carry them twice.
+      setSessionImageAttachments((current) => clearSessionImageAttachments(current, variables.sessionId));
+      setSessionReferenceAttachments((current) => clearSessionReferenceAttachments(current, variables.sessionId));
       // The optimistic guidance row is only a stand-in for the row the server
       // echoes back. Keep it while that row is still missing, but drop it as
       // soon as it lands: the two never share an id, so any id-based reconcile
