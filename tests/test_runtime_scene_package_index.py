@@ -1045,17 +1045,18 @@ def test_runtime_scene_list_read_keeps_all_packages_and_explicit_enforce_prunes_
     result = runtime_scene_service._enforce_runtime_scene_retention()
 
     remaining_dirs = sorted(path.name for path in root.iterdir() if path.is_dir())
-    assert result["deletedCount"] == 5
-    assert len(remaining_dirs) == 30
+    assert result["deletedCount"] == 25
+    assert len(remaining_dirs) == 10
     assert not (root / "20260501T000000Z__scene-00").exists()
     assert not (root / "20260501T000100Z__scene-01").exists()
     assert not (root / "20260501T000400Z__scene-04").exists()
-    assert (root / "20260501T000500Z__scene-05").exists()
+    assert not (root / "20260501T002400Z__scene-24").exists()
+    assert (root / "20260501T002500Z__scene-25").exists()
     assert (root / "20260501T003400Z__scene-34").exists()
     assert other_log.exists()
 
 
-def test_runtime_scene_explicit_enforce_protects_current_package_inside_thirty_total(tmp_path, monkeypatch):
+def test_runtime_scene_explicit_enforce_protects_current_package_inside_ten_total(tmp_path, monkeypatch):
     root = tmp_path / "logs" / "runtime_scenes"
     current_dir = _write_runtime_scene_for_retention(root, tmp_path, 0, status="running")
     for index in range(1, 32):
@@ -1079,17 +1080,17 @@ def test_runtime_scene_explicit_enforce_protects_current_package_inside_thirty_t
     result = runtime_scene_service._enforce_runtime_scene_retention()
 
     remaining_dirs = sorted(path.name for path in root.iterdir() if path.is_dir())
-    assert result["deletedCount"] == 2
+    assert result["deletedCount"] == 22
     assert result["protectedCount"] == 1
-    assert len(remaining_dirs) == 30
+    assert len(remaining_dirs) == 10
     assert current_dir.exists()
     assert not (root / "20260501T000100Z__scene-01").exists()
     assert not (root / "20260501T000200Z__scene-02").exists()
-    assert (root / "20260501T000300Z__scene-03").exists()
+    assert (root / "20260501T002300Z__scene-23").exists()
     assert (root / "20260501T003100Z__scene-31").exists()
     retention_events = (current_dir / "events" / "runtime_manager.jsonl").read_text(encoding="utf-8")
     assert "runtime_scene.retention.pruned" in retention_events
-    assert "scene-01" in retention_events
+    assert "scene-22" in retention_events
 
 
 def test_runtime_scene_status_defaults_to_running_until_ended(tmp_path, monkeypatch):

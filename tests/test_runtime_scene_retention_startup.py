@@ -45,14 +45,14 @@ def test_startup_retention_prunes_oldest_beyond_limit(tmp_path, monkeypatch):
 
     result = enforce_runtime_scene_retention_on_startup()
 
-    assert result.get("deletedCount") == 5
-    assert result.get("keptCount") == 30
+    assert result.get("deletedCount") == 25
+    assert result.get("keptCount") == 10
     remaining = _remaining_scene_names(tmp_path)
     seed_remaining = [name for name in remaining if "__scene-" in name]
-    assert len(seed_remaining) == 30
+    assert len(seed_remaining) == 10
     assert "20260518T120000Z__scene-00" not in seed_remaining
-    assert "20260518T120000Z__scene-04" not in seed_remaining
-    assert "20260518T120000Z__scene-05" in seed_remaining
+    assert "20260518T120000Z__scene-24" not in seed_remaining
+    assert "20260518T120000Z__scene-25" in seed_remaining
     assert "20260518T120000Z__scene-34" in seed_remaining
 
 

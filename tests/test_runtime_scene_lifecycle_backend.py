@@ -264,13 +264,13 @@ def test_startup_wiring_opens_scene_quickly_then_retention_preserves_current_sce
     assert len(remaining_before_retention) == 36
 
     retention = runtime_scene_query._enforce_runtime_scene_retention()
-    assert retention["deletedCount"] == 6
-    assert retention["keptCount"] == 30
+    assert retention["deletedCount"] == 26
+    assert retention["keptCount"] == 10
     remaining = sorted(item.name for item in _scene_root(tmp_path).iterdir() if item.is_dir())
-    assert len(remaining) == 30
+    assert len(remaining) == 10
     assert "20260518T120000Z__scene-00" not in remaining
-    assert "20260518T120000Z__scene-05" not in remaining
-    assert "20260518T120000Z__scene-06" in remaining
+    assert "20260518T120000Z__scene-25" not in remaining
+    assert "20260518T120000Z__scene-26" in remaining
     assert current_dir.name in remaining
 
 
