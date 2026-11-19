@@ -340,3 +340,44 @@ describe("pruneTerminalDeferredRestartIntents", () => {
     }
   });
 });
+it("hands the interrupt decision to submitRestart for operator intents", async () => {
+  const { root, runtimeManagerDir, intentsDir } = makeWorkspace();
+  try {
+    writeIntent(intentsDir, intentPayload());
+    const submitRestart = vi.fn().mockResolvedValue({ accepted: true });
+    const outcome = await fulfillDeferredRestartIntentOnce({
+      workspaceRoot: root,
+      runtimeManagerDir,
+      listActiveWork: async () => [{ kind: "chat_turn", runId: "run-1" }],
+      submitRestart,
+      interruptActiveWorkFor: (intent) =>
+        String((intent as Record<string, unknown>).requestedBy || "").trim().toLowerCase() !== "self_evolution",
+      now: () => NOW_MS
+    });
+    expect(outcome).toEqual({ status: "fulfilled", intentId: "intent_20260916T015900Z_aaaaaaaa" });
+    expect(submitRestart).toHaveBeenCalledWith(true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it("still waits for idle when the intent keeps its idle promise", async () => {
+  const { root, runtimeManagerDir, intentsDir } = makeWorkspace();
+  try {
+    writeIntent(intentsDir, intentPayload({ requestedBy: "self_evolution" }));
+    const submitRestart = vi.fn().mockResolvedValue({ accepted: true });
+    const outcome = await fulfillDeferredRestartIntentOnce({
+      workspaceRoot: root,
+      runtimeManagerDir,
+      listActiveWork: async () => [{ kind: "chat_turn", runId: "run-1" }],
+      submitRestart,
+      interruptActiveWorkFor: (intent) =>
+        String((intent as Record<string, unknown>).requestedBy || "").trim().toLowerCase() !== "self_evolution",
+      now: () => NOW_MS
+    });
+    expect(outcome).toEqual({ status: "blocked", activeWorkCount: 1 });
+    expect(submitRestart).not.toHaveBeenCalled();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
