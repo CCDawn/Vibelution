@@ -75,6 +75,10 @@ function segmentMessage(
     metadata: {
       ...source.metadata,
       ...(!last ? { kind: "guidance_work_segment" } : {}),
+      // A tail shell without items exists only after a guide was consumed.
+      // Inheriting the turn's pre-guide "queued" stage paints 排队中 under
+      // the guide that already landed, which reads as if it were still waiting.
+      ...(last && !turnItems.length ? { processStage: "running" } : {}),
       guidanceSegmentKey: key,
       guidanceSegmentIsLast: last,
     },
