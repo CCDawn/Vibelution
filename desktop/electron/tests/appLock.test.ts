@@ -155,19 +155,64 @@ describe("single-instance lifecycle envelope", () => {
     expect(resolveSingleInstanceProvenance(envelope)).toBe("operator");
   });
 
-  it("does not treat a bare CLI restart as an operator approval to interrupt work", () => {
+  it("keeps a bare CLI restart operator so the lifecycle lane can grant interrupt authority", () => {
     const envelope = createSingleInstanceEnvelope({ lifecycleCommand: "restart" });
-    // The envelope still records the raw intent; only the provenance downgrade
-    // keeps a shell-launched CLI restart from bypassing the active-work guard.
+    // A missing lifecycle source means nothing forwarded this launch: a person
+    // typed the restart locally, and per the operator-priority restart rule it
+    // keeps operator provenance. The lifecycle lane then upgrades it to
+    // operator-restart (interrupt-save-restart) instead of rejecting or
+    // queueing the request behind active work.
     expect(envelope.lifecycle).toEqual({ command: "restart", provenance: "operator" });
-    expect(resolveSingleInstanceProvenance(envelope)).toBe("forwarded");
-    expect(resolveSingleInstanceProvenance(createSingleInstanceEnvelope({ lifecycleCommand: "RESTART" }))).toBe("forwarded");
-    // Other bare CLI lifecycle commands keep their existing operator semantics.
-    expect(resolveSingleInstanceProvenance(createSingleInstanceEnvelope({ lifecycleCommand: "start" }))).toBe("operator");
-    expect(resolveSingleInstanceProvenance(createSingleInstanceEnvelope({ lifecycleCommand: "stop" }))).toBe("operator");
-    // An explicitly forwarded restart is unchanged.
+    expect(resolveSingleInstanceProvenance(envelope)).toBe("operator");
+    expect(resolveSingleInstanceProvenance(createSingleInstanceEnvelope({ lifecycleCommand: "RESTART" }))).toBe("operator");
+  });
+
+  it("keeps a Runtime Manager forwarded restart on the conservative forwarded semantics", () => {
+    // Runtime Manager forwards always carry a lifecycle source (or an explicit
+    // forwarding marker), so their automatic restarts keep the active-work
+    // guard: no interrupt authority for automated flows.
     expect(resolveSingleInstanceProvenance(createSingleInstanceEnvelope({
       lifecycleCommand: "restart",
+      lifecycleSource: "runtime_manager",
+      explicitlyForwarded: true
+    }))).toBe("forwarded");
+    expect(resolveSingleInstanceProvenance(createSingleInstanceEnvelope({
+      lifecycleCommand: "restart",
+      lifecycleReason: "auto_refresh",
+      explicitlyForwarded: true
+    }))).toBe("forwarded");
+    expect(resolveSingleInstanceProvenance(createSingleInstanceEnvelope({
+      lifecycleCommand: "restart",
+      lifecycleSource: "web_ui",
+      lifecycleReason: "web_restart_button",
+      lifecycleStopManager: false,
+      explicitlyForwarded: true
+    }))).toBe("forwarded");
+  });
+
+  it("keeps the conservative forwarded downgrade for legacy envelopes without provenance", () => {
+    // An old envelope that does not carry a provenance field cannot prove its
+    // origin, so its restart still queues behind active work.
+    expect(resolveSingleInstanceProvenance({
+      schemaVersion: 1,
+      kind: "vibelution-single-instance",
+      lifecycle: { command: "restart" }
+    })).toBe("forwarded");
+  });
+
+  it("leaves stop and non-restart lifecycle command semantics unchanged", () => {
+    // Bare CLI non-restart commands keep operator semantics.
+    expect(resolveSingleInstanceProvenance(createSingleInstanceEnvelope({ lifecycleCommand: "start" }))).toBe("operator");
+    expect(resolveSingleInstanceProvenance(createSingleInstanceEnvelope({ lifecycleCommand: "stop" }))).toBe("operator");
+    // Stop conservatively keeps its forwarded semantics under Runtime Manager
+    // forwarding - only restart gained operator interrupt authority.
+    expect(resolveSingleInstanceProvenance(createSingleInstanceEnvelope({
+      lifecycleCommand: "stop",
+      lifecycleSource: "runtime_manager",
+      explicitlyForwarded: true
+    }))).toBe("forwarded");
+    expect(resolveSingleInstanceProvenance(createSingleInstanceEnvelope({
+      lifecycleCommand: "rebuild-and-start",
       lifecycleSource: "runtime_manager",
       explicitlyForwarded: true
     }))).toBe("forwarded");

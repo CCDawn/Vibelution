@@ -1,0 +1,1 @@
+- closeout no longer leaves a silent publish gap on pending merged results: when cleanup fails and publish did not run (or was not requested), the result now carries explicit ``versionSync``/``push`` skipped markers and a ``next_action`` that names the ``--cleanup-only --publish`` recovery rerun.
