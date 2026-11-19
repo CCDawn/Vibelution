@@ -2040,7 +2040,7 @@ def test_session_detail_recovers_live_checkpoint_without_open_turn_started_event
     event_types = [event.event_type for event in events]
     assert event_types[-2:] == [EVENT_ASSISTANT_MESSAGE, EVENT_TURN_INTERRUPTED]
     assert events[-1].turn_id == "turn-checkpoint-only"
-    assert events[-1].payload["reason"] == "detail_loaded_after_restart"
+    assert events[-1].payload["reason"] == "process_restarted"
     assert not session_service._session_live_output_checkpoint_path("session-live").exists()
     messages = response.json()["messages"]
     assert any(
@@ -7795,7 +7795,7 @@ def test_session_turn_passes_draining_guidance_provider_to_continuation_loop(tmp
     assert callable(provider)
     live_turn = str(getattr(captured.get("turn_control"), "turn_id", "") or "").strip()
     assert len({event.event_id for event in steer_events_by_turn[live_turn]}) == 2
-    assert provider() == [guidance_text, guidance_text]
+    assert [item["text"] for item in provider()] == [guidance_text, guidance_text]
     assert provider() == []
 
 
@@ -9240,7 +9240,7 @@ def test_session_detail_reconciles_open_conversation_ledger_after_restart(tmp_pa
     assert any(
         event.event_type == EVENT_TURN_INTERRUPTED
         and event.turn_id == "turn-open"
-        and event.payload.get("reason") == "detail_loaded_after_restart"
+        and event.payload.get("reason") == "process_restarted"
         for event in events
     )
 

@@ -39,12 +39,15 @@ def _start(root: Path, monkeypatch) -> None:
 
 
 def _drain(root: Path, consumed: set[str] | None = None) -> list[str]:
-    return turn_steer.drain_guidance_events(
+    drained = turn_steer.drain_guidance_events(
         "session-a",
         "turn-a",
         load_conversation_events(root, "session-a"),
         consumed if consumed is not None else set(),
     )
+    # Provider answers with anchor-carrying dicts; these assertions are about
+    # which submissions are delivered and in what order.
+    return [item["text"] if isinstance(item, dict) else item for item in drained]
 
 
 def test_drain_receipts_follow_intervening_work_and_keep_identical_submissions(tmp_path, monkeypatch):
@@ -82,6 +85,10 @@ def test_new_worker_can_reinject_without_moving_the_first_drain_boundary(tmp_pat
     before = load_conversation_events(tmp_path, "session-a")
     first = turn_steer.guidance_metadata_from_events(before)[guide.event_id]
 
+    # Consumption is a session fact held in process memory, so only a restarted
+    # process may hand the same guide to the model again; the receipt boundary
+    # still must not move.
+    monkeypatch.setattr(turn_steer, "_CONSUMED_GUIDE_KEYS", {})
     assert _drain(tmp_path) == ["same guidance"]
     after = load_conversation_events(tmp_path, "session-a")
     assert len(after) == len(before)
