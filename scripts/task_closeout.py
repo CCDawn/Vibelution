@@ -668,6 +668,57 @@ def _schedule_post_merge_desktop_shell_prebuild(
         print(f"post-merge desktop shell prebuild failed: {str(error)[:200]}", file=sys.stderr)
 
 
+def _merged_changed_paths(main_root: Path, old_sha: str, merge_sha: str) -> list[str]:
+    """Return checkout-relative paths changed by ``old_sha..merge_sha``."""
+
+    result = subprocess.run(
+        ["git", "diff", "--name-only", f"{old_sha}..{merge_sha}"],
+        cwd=str(main_root),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError((result.stderr or "").strip()[:200] or "git diff failed")
+    return [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+
+
+def _publish_post_merge_frontend_build(
+    context: CloseoutContext,
+    *,
+    merge_sha: str,
+    old_sha: str,
+) -> None:
+    """After a merge that touched web/, publish the release a restart will serve.
+
+    The running backend pins the dist directory it resolved at startup, so a
+    rebuilt release cannot reach an open window by itself. Publishing here only
+    guarantees the next restart has the merged UI instead of the pre-merge one.
+    Best-effort by contract: a failure costs one bounded stderr line.
+    """
+
+    if os.environ.get("VIBELUTION_CLOSEOUT_DISABLE_POST_MERGE_PREBUILD", "").strip() == "1":
+        return
+    if not merge_sha or not old_sha or merge_sha == old_sha:
+        return
+    try:
+        changed = _merged_changed_paths(context.main_root, old_sha, merge_sha)
+        if not any(path.startswith("web/") for path in changed):
+            return
+        from core.launcher.frontend_build import ensure_frontend_build
+
+        payload = ensure_frontend_build(context.main_root)
+        release = str(payload.get("release") or payload.get("buildKey") or "").strip()
+        print(
+            f"post-merge frontend published: {release or 'unknown'}; restart the workbench to serve it",
+            file=sys.stderr,
+        )
+    except Exception as error:  # noqa: BLE001 - publishing must never fail closeout
+        print(f"post-merge frontend publish failed: {str(error)[:200]}", file=sys.stderr)
+
+
 def resolve_claim_identity(
     context: CloseoutContext,
     *,
@@ -1286,6 +1337,11 @@ def run_managed_closeout(
             )
             integration_released = True
             _schedule_post_merge_desktop_shell_prebuild(
+                context,
+                merge_sha=merge_sha,
+                old_sha=pre_merge_sha,
+            )
+            _publish_post_merge_frontend_build(
                 context,
                 merge_sha=merge_sha,
                 old_sha=pre_merge_sha,

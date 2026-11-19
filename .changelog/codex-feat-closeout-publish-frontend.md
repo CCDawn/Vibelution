@@ -1,0 +1,1 @@
+- closeout now publishes a fresh frontend release when the merged diff touches web/, so the next restart serves the merged UI instead of the pre-merge build.
