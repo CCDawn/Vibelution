@@ -277,3 +277,32 @@ def test_trusted_session_grant_covers_same_command_family(monkeypatch, _clean_ap
     assert outcome.allowed is True
     assert outcome.code == "approved_for_session"
     assert not tool_approvals.list_tool_approval_requests("session-a", status="pending")
+
+def test_launcher_session_runs_development_tools_without_task_grant(tmp_path, monkeypatch):
+    """The Launcher assistant's own session defaults to workspace tools."""
+    monkeypatch.setattr(consent, "_native_launcher", lambda runtime: True)
+    monkeypatch.setattr(consent, "_task_runtime", lambda runtime: None)
+    monkeypatch.setattr("tools.shell_tools.get_workspace_root_override", lambda: tmp_path)
+    runtime = {"runtimeToolSource": "launcher_assistant_task:inactive", "agentId": "launcher-assistant"}
+
+    assert consent.local_terminal_wait_allowed(runtime) is True
+    assert consent.local_approval_policy(
+        runtime, "exec_command",
+        {"cmd": "python -m pytest tests/test_local_assistant_consent.py", "cwd": str(tmp_path)},
+        ("on_request", "execute"), "auto_review",
+    ) == (None, "auto_review")
+    assert consent.local_approval_policy(
+        runtime, "exec_command",
+        {"cmd": "git push origin main", "cwd": str(tmp_path)},
+        ("on_request", "execute"), "auto_review",
+    ) == (("always", "execute"), "request_approval")
+
+
+def test_forged_launcher_session_still_requires_task_grant(monkeypatch):
+    monkeypatch.setattr(consent, "_native_launcher", lambda runtime: False)
+    monkeypatch.setattr(consent, "_task_runtime", lambda runtime: None)
+    with pytest.raises(consent.LocalTaskScopeError):
+        consent.local_approval_policy(
+            {"runtimeToolSource": "launcher_assistant_task:inactive"},
+            "exec_command", {"cmd": "python -m pytest"}, ("on_request", "execute"), "auto_review",
+        )
