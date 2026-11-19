@@ -367,6 +367,7 @@ def get_runtime_summary() -> dict:
         },
         "workbench": workbench,
         "workRuns": work_runs,
+        "runtimeTasks": {"running": _active_runtime_task_cards()},
         "lifecycleProof": lifecycle_proof,
     }
 
@@ -2028,6 +2029,23 @@ def _force_cancel_supervised_worktree_evolution_for_shutdown(reason: str) -> lis
     from . import supervised_worktree_evolution_service
 
     return list(supervised_worktree_evolution_service.force_cancel_active_supervised_worktree_runs_for_shutdown(reason))
+
+
+def _active_runtime_task_cards() -> list[dict[str, Any]]:
+    """Running runtime-task cards read from the same snapshot as work runs.
+
+    The title bar adds these to the work-run projection it already renders.
+    Fetching them from a second endpoint let the two land on different beats,
+    so the badge kept disagreeing with the menu built from the same data.
+    """
+
+    try:
+        from .runtime_task_query_service import default_query_service
+
+        return default_query_service().active_cards()
+    except Exception:
+        logger.debug("runtime task cards unavailable for summary", exc_info=True)
+        return []
 
 
 def _work_run_summary() -> dict[str, dict[str, dict | None]]:

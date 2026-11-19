@@ -1,0 +1,4 @@
+- 顶栏任务数改为单一数据源：`/api/runtime/summary` 的同一次快照同时携带 workRuns 与运行中 runtime task 卡片，前端只读这一个来源，不再把两个独立轮询的结果相加。
+- 移除主壳里第二个 `/api/runtime-tasks` 轮询（15 秒节奏、无后台刷新），任务开始或结束时不会再出现数字与自身下拉菜单对不上的那一个轮询间隔。
+- `/aux` 的任务面板仍走原有 `/api/runtime-tasks` 接口，行为不变。
+- 契约测试同步：`AppShell.layout.test.ts` 断言单一读取源，`AppShell.startup.test.tsx` 不再期望后台拉 `/api/runtime-tasks`。

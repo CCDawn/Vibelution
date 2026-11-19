@@ -87,6 +87,7 @@ class RuntimeSummaryResponse(BaseModel):
     runtimeManager: dict[str, Any] = Field(default_factory=dict)
     workbench: dict[str, Any] = Field(default_factory=dict)
     workRuns: dict[str, Any] = Field(default_factory=dict)
+    runtimeTasks: dict[str, Any] = Field(default_factory=dict)
     lifecycleProof: dict[str, Any] = Field(default_factory=dict)
 
 

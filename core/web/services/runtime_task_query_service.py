@@ -134,6 +134,22 @@ class RuntimeTaskQueryService:
             payload["running"] = []
         return payload
 
+    def active_cards(self) -> list[dict[str, Any]]:
+        """Running cards from the registry index, for the shell snapshot.
+
+        The shell renders one task number over work runs plus runtime tasks.
+        Serving these cards from ``/api/runtime/summary`` keeps both halves on
+        one beat; a second poller let the badge and its own menu disagree for a
+        whole interval whenever a task started or finished.
+        """
+
+        states = [
+            state
+            for state in self._store.active_task_states()
+            if not runtime_task_registry.is_terminal_status(str(state.get("status") or ""))
+        ]
+        return [self._card(state) for state in self._sorted_running(states)]
+
     # -- detail -----------------------------------------------------------
 
     def get_task(self, task_id: str) -> dict[str, Any] | None:

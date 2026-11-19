@@ -1,3 +1,4 @@
+import type { RuntimeTaskCard } from "../runtimeTasks";
 import type { DomainAvailability, FileContent, FileTreeNode, ModeAvailability, ProjectionEditContract, ProjectionSourceRef, SourceAuthorityRef } from "./shared";
 import type { ResetExecuteResponse, ResetPreviewResponse, ResetSummary } from "./config";
 
@@ -779,6 +780,7 @@ export type RuntimeSummary = {
     failureMessage: string;
   };
   workRuns: WorkRunSummary;
+  runtimeTasks?: { running?: RuntimeTaskCard[] };
   lifecycleProof: RuntimeLifecycleProof;
 };
 

@@ -314,16 +314,14 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("contentClassName={styles.activeWorkPopoverContent}");
     expect(shellSource).toContain("countedRuntimeTasks(activeWorkIndicator, shellRunningTasks)");
     expect(shellSource).toContain("projectTaskCount(activeWorkIndicator, shellRunningTasks)");
-    expect(shellSource).toContain("const shellRunningTasks = shellAuxTasksQuery.data?.running ?? [];");
+    // One count source: the runtime summary snapshot carries the running task
+    // cards, so the badge and the menu it opens can never land on two beats.
+    expect(shellSource).toContain("const shellRunningTasks = runtimeQuery.data?.runtimeTasks?.running ?? [];");
     expect(shellSource).not.toContain('openProjectUtilityRail("project_tasks")');
     expect(shellSource).not.toContain('projectUtilities.model.activeId === "project_tasks"');
     expect(shellSource).not.toContain('to="/aux"');
-    // Global active-only count source: revision-aware payload, gentle foreground
-    // beat, no background churn, cache entry distinct from /aux and session strips.
-    expect(shellSource).toContain('queryKeys.runtimeTasks("", "shell")');
-    expect(shellSource).toMatch(/listRuntimeTasksRevisionAware\(\s*\{\s*status: "active"\s*\}/);
-    expect(shellSource).toContain("refetchInterval: resolvePollingInterval(shellPollingVisible, 15_000)");
-    expect(shellSource).toContain("refetchIntervalInBackground: false");
+    expect(shellSource).not.toContain('queryKeys.runtimeTasks("", "shell")');
+    expect(shellSource).not.toContain("listRuntimeTasksRevisionAware");
     // /aux stops falling back to the app title in the return-navigation label.
     expect(shellSource).toContain('if (pathname.startsWith("/aux")) return auxCenterLabel;');
   });
@@ -398,7 +396,7 @@ describe("AppShell layout contract", () => {
     // Background chrome waits for route data; explicit lifecycle/menu actions
     // can still demand fresh state before the initial route has settled.
     expect(shellSource).toMatch(/queryKey: queryKeys\.runtimeSummary\(\),[\s\S]*?enabled: shellBackgroundReady \|\| lifecycleControlActive \|\| activeWorkOpen,/);
-    expect(shellSource).toMatch(/queryKeys\.runtimeTasks\("", "shell"\),[\s\S]*?enabled: shellOptionalReady \|\| activeWorkOpen,/);
+    // The shell no longer polls a second runtime-task list; /aux still owns that view.
     expect(shellSource).toContain("<CompanionDesktopAttention startupReady={shellOptionalReady}");
     expect(shellSource).toContain("startWorkbenchUiPreferencesSync({ deferHydration: true })");
   });

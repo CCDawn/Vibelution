@@ -30,7 +30,6 @@ import {
 import { fetchConfigBootstrap } from "../api/config";
 import { fetchGitStatus } from "../api/git";
 import { listProjectAgentBusTimeline } from "../api/projectAgentBus";
-import { listRuntimeTasksRevisionAware, type RuntimeTaskListPayload } from "../api/runtimeTasks";
 import { runtimeTaskMenuItem, type RuntimeTaskMenuItem } from "./runtimeTaskMenu";
 import {
   agentBroadcastEventTimeMs,
@@ -1269,25 +1268,6 @@ export function AppShell() {
     staleTime: 30_000,
     notifyOnChangeProps: ["data", "error", "isError", "isPending", "isSuccess", "isRefetchError"],
   });
-  // Aux-center running badge: a global active-only runtime-task list (the
-  // title-bar icon only reads running.length). The key reuses the existing
-  // runtimeTasks shape with a shell scope marker so this payload never shares
-  // a cache entry with the /aux all-status list (["runtime-tasks", kind, ""])
-  // or per-session strips (["runtime-tasks", "", sessionId]).
-  const shellAuxTasksQuery = useQuery({
-    queryKey: queryKeys.runtimeTasks("", "shell"),
-    queryFn: ({ signal }) =>
-      listRuntimeTasksRevisionAware(
-        { status: "active" },
-        queryClient.getQueryData<RuntimeTaskListPayload>(queryKeys.runtimeTasks("", "shell")),
-        signal,
-      ),
-    enabled: shellOptionalReady || activeWorkOpen,
-    refetchInterval: resolvePollingInterval(shellPollingVisible, 15_000),
-    refetchIntervalInBackground: false,
-    staleTime: 30_000,
-    notifyOnChangeProps: ["data", "error", "isError", "isPending", "isSuccess", "isRefetchError"],
-  });
   const [agentBroadcastReadAtMs, setAgentBroadcastReadAtMs] = useState<number | null>(() => readStoredAgentBroadcastReadAtMs());
   useEffect(() => { if (projectUtilities.readAtMs > 0) setAgentBroadcastReadAtMs((current) => Math.max(current ?? 0, projectUtilities.readAtMs)); }, [projectUtilities.readAtMs]);
   const agentBroadcastLatestEvent = useMemo(() => {
@@ -1523,7 +1503,8 @@ export function AppShell() {
   const activeWorkIndicator = deriveActiveWorkIndicator(runtimeQuery.data, lang);
   const activeWorkUnavailable = !runtimeQuery.data && (backendHealthQuery.isError || configQuery.isError || runtimeQuery.isError);
   const activeWorkLoading = !runtimeQuery.data && !activeWorkUnavailable;
-  const shellRunningTasks = shellAuxTasksQuery.data?.running ?? [];
+  // Both halves of the badge come from this one summary snapshot.
+  const shellRunningTasks = runtimeQuery.data?.runtimeTasks?.running ?? [];
   const taskMenuRuntimeTasks = countedRuntimeTasks(activeWorkIndicator, shellRunningTasks);
   const activeWorkCountDisplay = activeWorkUnavailable ? "—" : activeWorkLoading ? "…" : String(projectTaskCount(activeWorkIndicator, shellRunningTasks));
   const activeWorkStaleFailures = activeWorkIndicator?.staleFailures ?? [];

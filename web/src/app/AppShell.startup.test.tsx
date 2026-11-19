@@ -202,7 +202,7 @@ describe("Workbench initial route priority", () => {
     await waitForRouteCommit(() => expect(container!.querySelector('[data-testid="initial-route"]')).not.toBeNull());
     expect(container.querySelector('[data-testid="initial-route"]')?.textContent).toBe("loading");
     const background = [
-      "/api/runtime/summary", "/api/runtime-tasks", "/api/workbench/ui-preferences",
+      "/api/runtime/summary", "/api/workbench/ui-preferences",
       "/api/agent-plugins/virtual-human-life/companion-activity", "/api/runtime/browser-telemetry",
       "/api/personal-assistant/human-attention",
     ];
