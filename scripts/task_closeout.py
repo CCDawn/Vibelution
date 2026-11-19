@@ -3,8 +3,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -15,6 +18,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from core.platform_version.ledger import resolve_ledger_path
 from scripts import git_claim_guard as claim_guard
 from scripts import git_hook_install as hook_install
 from scripts import local_quality_gate as gate
@@ -24,6 +28,11 @@ INTEGRATION_RETRY_DELAY_SECONDS = 0.5
 CLEANUP_RETRY_SECONDS = 2.0
 CLEANUP_RETRY_DELAY_SECONDS = 0.2
 STALE_RETRY_SCHEMA_VERSION = 1
+# Exit code for "the merge is authoritative but publishing the version
+# projection (sync commit, tag, release or push) failed". Distinct from 2
+# (cleanup pending) so callers can tell merge-ok/publish-failed from
+# merge-failed without parsing the JSON body.
+MERGED_PUBLISH_PENDING_EXIT_CODE = 3
 # Upper bound for the per-file lines attached to a dirty_main outcome. A
 # stray session can leave dozens of edits in main; the attribution must stay
 # bounded evidence, not an unbounded dump of ``git status``.
@@ -55,6 +64,7 @@ TASK_OWNED_EPHEMERAL_PATHS = (
 CloseoutStatus = Literal[
     "merged_clean",
     "merged_cleanup_pending",
+    "merged_publish_pending",
     "integration_claim_conflict",
     "validation_failed",
     "failed",
@@ -92,6 +102,14 @@ class ManagedCloseoutResult:
     next_action: str = ""
     errors: list[str] = field(default_factory=list)
     failures: list[FailureDetail] = field(default_factory=list)
+    # Non-blocking observations: version projection consistency findings that
+    # must never stop the merge by themselves.
+    warnings: list[str] = field(default_factory=list)
+    # Post-merge version automation. ``versionSync`` carries the
+    # settle+project+tag+release outcome, ``push`` the independent push
+    # outcome; a failed push never invalidates the merged state above.
+    versionSync: dict[str, Any] = field(default_factory=dict)
+    push: dict[str, Any] = field(default_factory=dict)
 
 
 class ManagedCloseoutError(RuntimeError):
@@ -719,6 +737,250 @@ def _publish_post_merge_frontend_build(
         print(f"post-merge frontend publish failed: {str(error)[:200]}", file=sys.stderr)
 
 
+# -- Post-merge version projection automation (development-standard §15) ----
+
+
+def check_version_projection_consistency(
+    root: Path,
+    *,
+    ledger_path: Path | str | None = None,
+) -> list[str]:
+    """Advisory VERSION projection findings; never raises, never blocks.
+
+    The three projection files must agree with each other. When the ledger is
+    readable it is compared too, but only as a warning: a settled version may
+    legitimately run ahead of the files until the post-merge sync projects it.
+    An unreadable ledger skips the ledger comparison entirely.
+    """
+
+    warnings: list[str] = []
+    values: dict[str, str] = {}
+    version_path = root / "VERSION"
+    try:
+        values["VERSION"] = version_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        warnings.append("version_projection_missing_file: VERSION")
+    for name, path in (
+        ("web/package.json", root / "web" / "package.json"),
+        ("web/package-lock.json", root / "web" / "package-lock.json"),
+    ):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            values[name] = str(payload.get("version", ""))
+        except (OSError, json.JSONDecodeError):
+            warnings.append(f"version_projection_missing_file: {name}")
+    distinct = {value for value in values.values() if value}
+    if len(distinct) > 1:
+        listed = ", ".join(f"{name}={value}" for name, value in sorted(values.items()))
+        warnings.append(f"version_projection_mismatch: {listed}")
+    try:
+        from core.platform_version.ledger import VersionLedger
+
+        tail = VersionLedger(root, ledger_path=ledger_path).tail()
+    except (OSError, ValueError):
+        return warnings
+    version = values.get("VERSION", "")
+    if tail is not None and version and tail.version != version:
+        warnings.append(
+            f"version_projection_behind_ledger: VERSION {version}, ledger tail "
+            f"{tail.version} (the post-merge sync projects it; informational)"
+        )
+    return warnings
+
+
+def _tag_exists(main_root: Path, tag: str) -> bool:
+    completed = gate.run_process(
+        ["git", "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}"],
+        main_root,
+    )
+    return completed.returncode == 0
+
+
+def _create_boundary_tag(main_root: Path, boundary: dict[str, Any], sha: str) -> dict[str, Any]:
+    """Create the annotated ``vX.Y.0`` tag at the sync commit (idempotent)."""
+
+    tag = str(boundary.get("tag") or "")
+    if not re.fullmatch(r"v\d+\.\d+\.0", tag) or len(sha) != 40:
+        return {"ok": False, "tag": tag, "error": "invalid_boundary_payload"}
+    if _tag_exists(main_root, tag):
+        return {"ok": True, "tag": tag, "existed": True}
+    completed = gate.run_process(
+        ["git", "tag", "-a", tag, sha, "-m", tag],
+        main_root,
+    )
+    if completed.returncode != 0:
+        return {
+            "ok": False,
+            "tag": tag,
+            "error": _bounded_error(completed.stderr or completed.stdout),
+        }
+    return {"ok": True, "tag": tag, "existed": False}
+
+
+def _create_github_release(main_root: Path, boundary: dict[str, Any], sha: str) -> dict[str, Any]:
+    """Publish the release whose notes are the crossed range's CHANGELOG text."""
+
+    tag = str(boundary.get("tag") or "")
+    if shutil.which("gh") is None:
+        return {"ok": False, "tag": tag, "error": "gh_cli_unavailable"}
+    notes = str(boundary.get("notes") or "").strip() or tag
+    handle = tempfile.NamedTemporaryFile(
+        "w", suffix="-release-notes.md", encoding="utf-8", delete=False,
+    )
+    try:
+        handle.write(notes + "\n")
+        handle.close()
+        completed = gate.run_process(
+            [
+                "gh", "release", "create", tag,
+                "--title", tag,
+                "--notes-file", handle.name,
+                "--target", sha,
+            ],
+            main_root,
+        )
+    finally:
+        try:
+            os.unlink(handle.name)
+        except OSError:
+            pass
+    if completed.returncode != 0:
+        return {
+            "ok": False,
+            "tag": tag,
+            "error": _bounded_error(completed.stderr or completed.stdout),
+        }
+    return {"ok": True, "tag": tag}
+
+
+def push_origin_main(main_root: Path, *, tags: Sequence[str] = ()) -> dict[str, Any]:
+    """Push ``main`` (fast-forward only, never forced) plus boundary tags.
+
+    Plain ``git push`` refuses a non-fast-forward, so a diverged remote fails
+    here with the merge result untouched and authoritative.
+    """
+
+    payload: dict[str, Any] = {"ok": True, "main": {}, "tags": {}}
+    completed = gate.run_process(["git", "push", "origin", "main"], main_root)
+    payload["main"] = {
+        "ok": completed.returncode == 0,
+        "error": "" if completed.returncode == 0 else _bounded_error(completed.stderr or completed.stdout),
+    }
+    if not payload["main"]["ok"]:
+        payload["ok"] = False
+    for tag in tags:
+        completed = gate.run_process(["git", "push", "origin", f"refs/tags/{tag}"], main_root)
+        payload["tags"][tag] = {
+            "ok": completed.returncode == 0,
+            "error": "" if completed.returncode == 0 else _bounded_error(completed.stderr or completed.stdout),
+        }
+        if not payload["tags"][tag]["ok"]:
+            payload["ok"] = False
+    return payload
+
+
+def publish_version_projection(
+    context: CloseoutContext,
+    *,
+    integration_claim_id: str,
+    push_remote: bool = True,
+    ledger_path: Path | str | None = None,
+) -> dict[str, Any]:
+    """Settle + project the version on ``main``, then publish it.
+
+    Never raises: every failure is recorded in the payload, because the merge
+    that already happened stays authoritative regardless of what publishing
+    does. The sync commit is created under the still-live integration lease
+    (the main-update permit requires it); tag, release and push only run when
+    ``push_remote`` is set (the ``--no-push`` offline escape).
+    """
+
+    payload: dict[str, Any] = {
+        "ok": False,
+        "sync": {},
+        "tag": {},
+        "release": {},
+        "push": {},
+        "errors": [],
+    }
+    try:
+        from scripts.sync_platform_version_projections import sync_version_projections
+
+        payload["sync"] = sync_version_projections(
+            context.main_root,
+            ledger_path=ledger_path,
+            integration_claim_id=integration_claim_id,
+        )
+    except Exception as error:  # noqa: BLE001 - publish must never fail the merge
+        payload["sync"] = {"ok": False, "errors": [_bounded_error(error)]}
+    if not payload["sync"].get("ok"):
+        payload["errors"].append("version_sync_failed")
+        return payload
+    if not push_remote:
+        payload["push"] = {"ok": True, "skipped": True}
+        payload["ok"] = True
+        return payload
+    boundary = payload["sync"].get("boundary")
+    sync_sha = str(payload["sync"].get("commitSha") or "")
+    tags: list[str] = []
+    if boundary:
+        tag_result = _create_boundary_tag(context.main_root, boundary, sync_sha)
+        payload["tag"] = tag_result
+        if tag_result.get("ok"):
+            tags = [str(tag_result["tag"])]
+        else:
+            payload["errors"].append("boundary_tag_failed")
+    push = push_origin_main(context.main_root, tags=tags)
+    payload["push"] = push
+    if not push.get("ok"):
+        payload["errors"].append("push_failed")
+    if boundary and tags and payload["push"].get("main", {}).get("ok"):
+        release = _create_github_release(context.main_root, boundary, sync_sha)
+        payload["release"] = release
+        if not release.get("ok"):
+            payload["errors"].append("release_failed")
+    payload["ok"] = not payload["errors"]
+    return payload
+
+
+def _publish_summaries(publish_payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Split one publish payload into the ``versionSync`` and ``push`` result fields."""
+
+    if not publish_payload:
+        return {}, {}
+    sync = dict(publish_payload.get("sync") or {})
+    summary = {
+        "ok": bool(publish_payload.get("ok")),
+        "newVersion": str(sync.get("newVersion") or ""),
+        "commitSha": str(sync.get("commitSha") or ""),
+        "boundary": sync.get("boundary"),
+        "tag": publish_payload.get("tag") or {},
+        "release": publish_payload.get("release") or {},
+        "errors": list(publish_payload.get("errors") or []),
+    }
+    return summary, dict(publish_payload.get("push") or {})
+
+
+def _publish_pending_result(
+    publish_payload: dict[str, Any],
+    *,
+    next_action: str,
+    warnings: list[str] | None = None,
+) -> ManagedCloseoutResult:
+    sync_summary, push_summary = _publish_summaries(publish_payload)
+    return ManagedCloseoutResult(
+        status="merged_publish_pending",
+        exit_code=MERGED_PUBLISH_PENDING_EXIT_CODE,
+        merged=True,
+        retryable=True,
+        next_action=next_action,
+        errors=[f"version_publish_pending: {error}" for error in sync_summary.get("errors", [])],
+        warnings=warnings or [],
+        versionSync=sync_summary,
+        push=push_summary,
+    )
+
+
 def resolve_claim_identity(
     context: CloseoutContext,
     *,
@@ -976,11 +1238,32 @@ def run_cleanup_only(
     branch: str,
     agent_id: str,
     base: str = "main",
+    publish: bool = False,
+    push_remote: bool = True,
 ) -> ManagedCloseoutResult:
+    publish_payload: dict[str, Any] = {}
     try:
         context = resolve_cleanup_context(task_worktree, branch=branch, base=base)
         cleanup_task_resources(context, agent_id=agent_id)
         prune_coordination(context)
+        if publish:
+            claim_id = acquire_integration_claim_with_retry(
+                context,
+                agent_id=agent_id,
+            )
+            try:
+                publish_payload = publish_version_projection(
+                    context,
+                    integration_claim_id=claim_id,
+                    push_remote=push_remote,
+                )
+            finally:
+                release_claim(
+                    context,
+                    claim_id,
+                    status="completed" if publish_payload.get("ok") else "released",
+                    reason="version publish lease finished",
+                )
     except (OSError, RuntimeError, ValueError) as error:
         return _apply_dirty_main_attribution(
             ManagedCloseoutResult(
@@ -993,10 +1276,18 @@ def run_cleanup_only(
             ),
             error,
         )
+    if publish_payload and not publish_payload.get("ok", True):
+        return _publish_pending_result(
+            publish_payload,
+            next_action="rerun_cleanup_only_with_publish_from_main",
+        )
+    sync_summary, push_summary = _publish_summaries(publish_payload)
     return ManagedCloseoutResult(
         status="merged_clean",
         exit_code=0,
         merged=True,
+        versionSync=sync_summary,
+        push=push_summary,
     )
 
 
@@ -1072,6 +1363,8 @@ def run_managed_closeout(
     stale_retry_token: Path | str | None = None,
     integration_wait_seconds: float = INTEGRATION_WAIT_SECONDS,
     retain_worktree: bool = False,
+    publish: bool = False,
+    push_remote: bool = True,
 ) -> ManagedCloseoutResult:
     try:
         context = resolve_context(task_worktree, base=base, retain_worktree=retain_worktree)
@@ -1199,6 +1492,14 @@ def run_managed_closeout(
             errors=[_bounded_error(error)],
         )
 
+    # Advisory projection consistency: recorded on the result but never
+    # blocking. The ledger comparison is informational only — a settled
+    # version legitimately runs ahead of the files until the post-merge sync.
+    consistency_warnings = check_version_projection_consistency(
+        context.task_root,
+        ledger_path=resolve_ledger_path(context.main_root),
+    )
+
     if validation_result is not None:
         if (
             validation_result.errors == ["stale_main"]
@@ -1284,6 +1585,7 @@ def run_managed_closeout(
 
     integration_released = False
     merge_sha = ""
+    publish_payload: dict[str, Any] = {}
     result = ManagedCloseoutResult(status="failed", exit_code=1)
     try:
         verified = gate.verify_manifest(resolved_manifest, context.task_root, base)
@@ -1323,6 +1625,17 @@ def run_managed_closeout(
                 context,
                 integration_claim_id=integration_claim_id,
             )
+            # Version sync runs while the integration lease is still live: the
+            # sync commit moves main through a claim-bound permit. Its outcome
+            # (and the push outcome) is recorded on the result and can never
+            # invalidate the merge above.
+            publish_payload: dict[str, Any] = {}
+            if publish:
+                publish_payload = publish_version_projection(
+                    context,
+                    integration_claim_id=integration_claim_id,
+                    push_remote=push_remote,
+                )
             release_claim(
                 context,
                 claim_id,
@@ -1369,7 +1682,30 @@ def run_managed_closeout(
                     else "run_cleanup_only_from_main" if cleanup_errors else ""
                 ),
                 errors=cleanup_errors,
+                warnings=consistency_warnings,
+                versionSync=publish_payload.get("sync", {}),
+                push=publish_payload.get("push", {}),
             )
+            if publish_payload and not publish_payload.get("ok", True):
+                publish_summary, push_summary = _publish_summaries(publish_payload)
+                result.versionSync = publish_summary
+                result.push = push_summary
+                if cleanup_errors or retain_worktree:
+                    # Cleanup recovery stays the primary next action; the
+                    # publish debt is recorded alongside it and is finished by
+                    # rerunning cleanup-only with --publish.
+                    result.errors.append(
+                        "version_publish_pending: " + ", ".join(publish_summary.get("errors", []))
+                    )
+                else:
+                    result.status = "merged_publish_pending"
+                    result.exit_code = MERGED_PUBLISH_PENDING_EXIT_CODE
+                    result.retryable = True
+                    result.next_action = "rerun_cleanup_only_with_publish_from_main"
+                    result.errors = [
+                        f"version_publish_pending: {error}"
+                        for error in publish_summary.get("errors", [])
+                    ]
     except (OSError, RuntimeError, ValueError) as error:
         if merge_sha:
             status: CloseoutStatus = "merged_cleanup_pending"
@@ -1377,6 +1713,7 @@ def run_managed_closeout(
         else:
             status = "failed"
             exit_code = 1
+        publish_summary, push_summary = _publish_summaries(publish_payload)
         result = _apply_dirty_main_attribution(
             ManagedCloseoutResult(
                 status=status,
@@ -1387,6 +1724,9 @@ def run_managed_closeout(
                 retryable=bool(merge_sha),
                 next_action=("run_cleanup_only_from_main" if merge_sha else ""),
                 errors=[_bounded_error(error)],
+                warnings=consistency_warnings,
+                versionSync=publish_summary,
+                push=push_summary,
             ),
             error,
         )
@@ -1450,6 +1790,27 @@ def build_parser() -> argparse.ArgumentParser:
         default=INTEGRATION_WAIT_SECONDS,
         help="Bounded wait for the short integration lease without rerunning validation.",
     )
+    parser.add_argument(
+        "--publish",
+        action="store_true",
+        help=(
+            "With --cleanup-only: after cleanup, also settle/project the version "
+            "on main and push it (tag + release on cadence boundaries)."
+        ),
+    )
+    parser.add_argument(
+        "--no-publish",
+        action="store_true",
+        help="Skip the post-merge version sync chain entirely (no sync, tag, release or push).",
+    )
+    parser.add_argument(
+        "--no-push",
+        action="store_true",
+        help=(
+            "Run the version sync locally but skip every network step "
+            "(tag push, gh release, git push) for offline recovery."
+        ),
+    )
     return parser
 
 
@@ -1482,6 +1843,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 branch=args.branch,
                 agent_id=args.agent_id,
                 base=args.base,
+                publish=args.publish,
+                push_remote=not args.no_push,
             )
     else:
         result = run_managed_closeout(
@@ -1494,6 +1857,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             stale_retry_token=args.stale_retry_token,
             integration_wait_seconds=args.integration_wait_seconds,
             retain_worktree=args.retain_worktree,
+            publish=not args.no_publish,
+            push_remote=not args.no_push,
         )
     print(json.dumps(asdict(result), ensure_ascii=True))
     return result.exit_code

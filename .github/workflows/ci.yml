@@ -139,6 +139,27 @@ jobs:
       - name: Run Linux sandbox tests
         run: ./.venv/bin/python -m pytest tests/test_codex_sandbox_platform.py tests/test_codex_cli_sandbox.py -q
 
+  # Layered-gate member: runs on every push/PR like python-lint and
+  # linux-sandbox. A checkout has no platform-version ledger, so this only
+  # enforces repo-internal projection equality (VERSION == package.json ==
+  # package-lock.json); the closeout-side check compares the ledger too.
+  version-consistency:
+    name: Version Projection Consistency
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check VERSION matches package metadata
+        run: python scripts/check_version_projection_consistency.py
+
   web:
     name: Web
     runs-on: ubuntu-latest

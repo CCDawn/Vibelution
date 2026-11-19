@@ -718,28 +718,21 @@ Use `--force-with-lease` only when the user explicitly confirms remote overwrite
 
 ## 15. Version Discipline
 
-Make a version-impact judgment whenever closing a meaningful development round, reviewing Git changes, preparing a commit, submitting/pushing work, publishing, or draining the main merge queue.
+The platform version is a local evolution cadence, not a distributable release identity. The append-only platform-version ledger outside the checkout (`%LOCALAPPDATA%\Vibelution\projects\<workspace-hash>\platform-version\ledger.jsonl`, resolved by `core/platform_version/ledger.py`) is the single version authority. `VERSION`, `web/package.json`, `web/package-lock.json` and the released blocks of `CHANGELOG.md` are projections of that ledger; `core/version.py` reads `VERSION` (cached at import, so a new version needs a restart to serve).
 
-Ordinary task Agents report version impact but normally do not edit version files. Version files are release hot spots and should be changed only by the current mainline integration/release steward unless the user explicitly authorizes a scoped release task.
+Cadence (ratified): every merged, declared user-visible change settles exactly one small version (patch); five settle into one middle version (minor); ten middle versions collapse into one major version. Tests, docs-only edits, pure refactors and `scripts/` hygiene never settle, because they leave no `## Unreleased` line for the settler. The in-product settler (`core/platform_version/settler.py`) only appends to the ledger — it never commits, never rewrites `VERSION` and never touches `CHANGELOG.md`.
 
-Canonical version sources:
+Projection sync is automated; nobody edits version files by hand:
 
-- root `VERSION`;
-- `core/version.py` reads root `VERSION`;
-- `web/package.json`;
-- `web/package-lock.json`;
-- top entry of `CHANGELOG.md`.
+- `scripts/sync_platform_version_projections.py` settles any pending declaration through the same dedup rules as the settler (head SHA plus changelog digest, so a settlement the running product already recorded is never counted twice), rewrites the three projection files when the ledger tail differs, archives the consumed `## Unreleased` entries verbatim under `## <version> - <date>`, and commits everything as one atomic `release: record product version X.Y.Z` commit. Re-running it is a no-op, and the sync commit itself cannot re-settle (empty Unreleased plus digest dedup). `--dry-run` prints the plan without writing.
+- `scripts/task_closeout.py` runs the sync on `main` after every successful ff-only merge, while the integration lease is still live; the sync commit moves `main` through the claim-bound main-update permit path. This closes the projection gap at every merge, which is what keeps the drift gate (uncommitted `VERSION` counts as backend source drift) from ever firing on version churn.
+- On a cadence boundary (the tail crosses a minor or major edge), the closeout creates the annotated `vX.Y.0` tag at the sync commit, creates the GitHub release with the crossed range's CHANGELOG text as notes, then pushes `origin main` including the tag. Without a boundary it only pushes `main`.
+- Push policy: always a plain fast-forward, never forced. Sync, tag, release or push failures never invalidate the merge: closeout reports `merged_publish_pending` (exit code 3, with `versionSync` and `push` payloads) while the merge stays authoritative. Escapes: `--no-push` runs the local sync commit only (offline); `--no-publish` skips the whole chain; `--cleanup-only --publish` finishes publish debt after a failed publish. This standing automation authorizes only the version-sync push above; every other push, PR or release still needs explicit user authorization.
+- CI keeps the repo-internal projections equal (`version-consistency` job: `VERSION == web/package.json == web/package-lock.json`). CI has no ledger, so the closeout-side `version_projection_behind_ledger` finding is informational only — a settled version may legitimately run ahead of the files until the next sync projects it.
 
-Release bump commit must update all canonical mirrors together. If any cannot be updated, stop and report the release as blocked.
+Version-impact judgment: Agents no longer choose version numbers. A product-facing commit must declare one `## Unreleased` line (own file `.changelog/<branch>.md`, folded by `scripts/changelog_rollup.py`); the cadence settles it. Task handoff still reports whether the change is user-visible, but there is no hand-picked bump level and no release-steward edit of version files except in a declared emergency, which then goes through a sync-style atomic commit of all three projection files.
 
-Version judgment is release-package based:
-
-- `none`: docs-only, tests-only, memory-only, internal cleanup, narrow refactor, or no user-visible/release contract change;
-- `patch`: bug fixes, small polish, logging clarity, localized UX/message improvement, non-contract internal correction;
-- `minor`: compatible new or expanded capability, new workflow/control surface/API DTO/lifecycle state/runtime guarantee/supervision behavior/logging diagnosis capability, or a coherent bundle of related patch-level changes;
-- `major`: breaking API/data/operation contract, required migration, deleted/renamed core capability, changed safety/default behavior, changed rollback guarantee, or major lifecycle contract change.
-
-Vibelution is in the stable `1.x` line. Use SemVer strictly.
+Restart semantics: a `release: record product version …` sync commit advances `VERSION`, so a running backend keeps serving the old version (and reports drift-relative staleness) until restarted through the normal Launcher path (`restart` / top-bar, which stops tasks and saves state first). The automation does not schedule restarts; the operator restarts at their own cadence, or reserves a restart for the next active-work window.
 
 Task handoff must include version bump recommendation, capability domain, user-visible impact, compatibility impact, validation evidence, and whether it should be grouped with pending changes.
 
