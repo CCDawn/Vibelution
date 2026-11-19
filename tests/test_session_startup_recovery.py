@@ -1177,3 +1177,36 @@ def test_restart_marker_resume_now_ignores_the_prewarm_gate(
 
     assert summary["resumedCount"] == 1
     assert [call["content"] for call in submit_calls] == [ORIGINAL_PROMPT]
+
+
+def test_restart_marker_resume_records_a_scene_event(
+    recovery_env, tmp_path, submit_calls, monkeypatch
+) -> None:
+    """The pre-prewarm marker pass must leave structured evidence.
+
+    Without this event the only trace was an INFO log line that the runtime
+    log level filters out, so neither the operator nor a later investigation
+    could tell whether the marker had been consumed at all.
+    """
+
+    from core.web.services import session_service
+
+    events: list[tuple] = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)),
+        raising=False,
+    )
+    _seed_conversation(tmp_path)
+    _seed_interrupted_turn(tmp_path)
+    restart_resume_pending.record_pending_restart_resume(
+        recovery_env, [{"sessionId": SESSION_ID, "turnId": ORIGINAL_TURN_ID}]
+    )
+
+    summary = startup_recovery.resume_restart_pending_sessions_now()
+
+    assert summary["markerSessionCount"] == 1
+    assert summary["resumedCount"] == 1
+    assert summary["resumedSessionIds"] == [SESSION_ID]
+    assert any("marker_resume" in str(item) for item in events)

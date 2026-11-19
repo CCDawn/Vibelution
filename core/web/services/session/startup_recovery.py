@@ -1051,6 +1051,7 @@ def _resume_interrupted_turn(
     )
     s._publish_session_detail_snapshot(session_id)
     summary["resumedCount"] += 1
+    summary.setdefault("resumedSessionIds", []).append(session_id)
 
 
 def _latest_marker_turn_id(events: list[Any], marker_turn_ids: set[str]) -> str:
@@ -1481,17 +1482,25 @@ def resume_restart_pending_sessions_now() -> dict[str, Any]:
     summary["trigger"] = "backend_startup_restart_marker"
     summary["durationMs"] = 0
     s = _service()
+    started = s._perf_counter()
+
+    def _finish(payload: dict[str, Any]) -> dict[str, Any]:
+        payload["durationMs"] = int((s._perf_counter() - started) * 1000)
+        _record_marker_resume_scene_event(s, payload)
+        return payload
+
     try:
         restart_pending_map = _load_restart_resume_pending(s)
     except Exception:  # noqa: BLE001 - a failed marker read keeps the later sweep
         summary["errorCount"] += 1
-        return summary
+        return _finish(summary)
+    summary["markerSessionCount"] = len(restart_pending_map)
     if not restart_pending_map:
-        return summary
+        return _finish(summary)
     companion_session_ids = _companion_session_ids(s)
     if companion_session_ids is None:
         summary["skipped"] = "companion_scope_unavailable"
-        return summary
+        return _finish(summary)
     pending_turn_ids = {
         turn_id for turn_ids in restart_pending_map.values() for turn_id in turn_ids
     }
@@ -1512,7 +1521,7 @@ def resume_restart_pending_sessions_now() -> dict[str, Any]:
         summary.get("scannedSessionCount"),
         summary.get("resumedCount"),
     )
-    return summary
+    return _finish(summary)
 
 
 def recover_interrupted_session_turns_on_startup(
@@ -1656,6 +1665,38 @@ def recover_interrupted_session_turns_on_startup(
             with _SWEEP_LOCK:
                 _SWEEP_IN_FLIGHT = False
     return summary
+
+
+def _record_marker_resume_scene_event(s: Any, summary: dict[str, Any]) -> None:
+    """Bounded evidence that the restart marker was consumed before prewarm."""
+
+    try:
+        s.record_runtime_scene_event(
+            "conversation",
+            "startup_recovery",
+            "conversation.startup_recovery.marker_resume",
+            outcome="completed" if not summary.get("errorCount") else "degraded",
+            message="Restart-marker resume ran before the prewarm gate.",
+            fields={
+                "markerSessionCount": max(
+                    0, int(summary.get("markerSessionCount") or 0)
+                ),
+                "scannedSessionCount": max(
+                    0, int(summary.get("scannedSessionCount") or 0)
+                ),
+                "resumedCount": max(0, int(summary.get("resumedCount") or 0)),
+                "resumedSessionIds": [
+                    str(session_id)
+                    for session_id in (summary.get("resumedSessionIds") or [])
+                ][:10],
+                "skipped": str(summary.get("skipped") or ""),
+                "errorCount": max(0, int(summary.get("errorCount") or 0)),
+                "durationMs": max(0, int(summary.get("durationMs") or 0)),
+            },
+            lifecycle=True,
+        )
+    except Exception:  # noqa: BLE001 - diagnostics are best effort
+        return
 
 
 def _record_sweep_scene_event(s: Any, summary: dict[str, Any]) -> None:
