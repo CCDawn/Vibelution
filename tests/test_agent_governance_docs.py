@@ -43,7 +43,8 @@ def test_stable_core_keeps_prompt_budget_headroom() -> None:
         for spec in CORE_PROMPT_SPECS
     )
 
-    assert estimate_prompt_tokens(content) <= 5400
+    # 5650 = 原 5400 + 「完整掌握再动手」治理条款（COMMON 小节 + AGENTS 一条）预算。
+    assert estimate_prompt_tokens(content) <= 5650
 
 
 def test_global_governance_uses_root_agents_and_docs_standards():

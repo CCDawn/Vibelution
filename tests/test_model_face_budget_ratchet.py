@@ -90,20 +90,20 @@ from core.web.services import prompt_template_service
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 # ── 角色面常量 ────────────────────────────────────────────────────────────────
-# 实测 6134 tokens（PromptManager 默认 build 全文）；×1.05=6440.7 → 6450。
-DEFAULT_ROLE_PROMPT_TOKEN_CAP = 6_450
-# 实测 9038 tokens（快照块 7832 + 冻结三核心后的 PromptManager 面 1206，
-# 含 SESSION_FILE_REFERENCES）；×1.05=9489.9 → 取 9400（+4.0% 余量）。
-KNOWLEDGE_STEWARD_ROLE_PROMPT_TOKEN_CAP = 9_400
+# 实测 6832 tokens（PromptManager 默认 build 全文，含「完整掌握再动手」纪律条款）；×1.05=7173.6 → 7200。
+DEFAULT_ROLE_PROMPT_TOKEN_CAP = 7_200
+# 实测 9737 tokens（快照块含新增纪律条款 + 冻结三核心后的 PromptManager 面，
+# 含 SESSION_FILE_REFERENCES）；×1.05=10223.9 → 取 10300（+5.8% 余量）。
+KNOWLEDGE_STEWARD_ROLE_PROMPT_TOKEN_CAP = 10_300
 
 # 技能面已知上界：MAX_SKILL_CONTENT_CHARS=24000 chars，token 口径按 CJK 最坏
 # 情况（每 char 3 utf-8 bytes）估算，即 estimate_prompt_tokens("知" * 24000)。
 # 角色总量 = 角色面 + 技能面上界；扩技能预算会同时抬高这两条总量棘轮。
 SKILL_FACE_UPPER_BOUND_TOKENS = estimate_prompt_tokens("知" * MAX_SKILL_CONTENT_CHARS)
-# 实测 default 6134 + 18000 = 24134；×1.05=25340.7 → 25350。
-DEFAULT_ROLE_TOTAL_TOKEN_CAP = 25_350
-# 实测 steward 9038 + 18000 = 27038；×1.05=28389.9 → 取 28300（+4.7% 余量）。
-KNOWLEDGE_STEWARD_ROLE_TOTAL_TOKEN_CAP = 28_300
+# 实测 default 6832 + 18000 = 24832；×1.05=26073.6 → 26100。
+DEFAULT_ROLE_TOTAL_TOKEN_CAP = 26_100
+# 实测 steward 9737 + 18000 = 27737；×1.05=29123.9 → 取 29200（+5.3% 余量）。
+KNOWLEDGE_STEWARD_ROLE_TOTAL_TOKEN_CAP = 29_200
 
 # ── 工具面常量（bound_tools 口径：单工具 canonical JSON 字符数求和）──────────
 # default session agent 绑定面 = DEFAULT_SESSION_AGENT_ALLOWED_TOOLS ∩ Key_Tools，
@@ -180,18 +180,18 @@ def _bound_tools_schema_chars(tool_names: tuple[str, ...], *, profile_label: str
 
 
 def test_default_role_prompt_face_within_budget() -> None:
-    """default 角色面棘轮：三核心 + 默认章节全文不超 6450 tokens。"""
+    """default 角色面棘轮：三核心 + 默认章节全文不超 7200 tokens。"""
     face = _build_default_role_face()
     tokens = estimate_prompt_tokens(face)
     assert tokens <= DEFAULT_ROLE_PROMPT_TOKEN_CAP, (
         f"default role prompt face grew to {tokens} tokens "
-        f"(cap {DEFAULT_ROLE_PROMPT_TOKEN_CAP}, measured baseline 6134). "
+        f"(cap {DEFAULT_ROLE_PROMPT_TOKEN_CAP}, measured baseline 6832). "
         "Raise DEFAULT_ROLE_PROMPT_TOKEN_CAP in the same PR with the new measurement."
     )
 
 
 def test_knowledge_steward_role_prompt_face_within_budget() -> None:
-    """knowledge_steward 角色面棘轮：快照块 + 冻结核心后的运行面 ≤9400 tokens。
+    """knowledge_steward 角色面棘轮：快照块 + 冻结核心后的运行面 ≤10300 tokens。
 
     运行面保留 SESSION_FILE_REFERENCES（chat 会话输出约定），只排除
     stable-session 路径的 RUNTIME_LOG_INDEX。
@@ -200,7 +200,7 @@ def test_knowledge_steward_role_prompt_face_within_budget() -> None:
     tokens = estimate_prompt_tokens(face)
     assert tokens <= KNOWLEDGE_STEWARD_ROLE_PROMPT_TOKEN_CAP, (
         f"knowledge_steward role prompt face grew to {tokens} tokens "
-        f"(cap {KNOWLEDGE_STEWARD_ROLE_PROMPT_TOKEN_CAP}, measured baseline 9038). "
+        f"(cap {KNOWLEDGE_STEWARD_ROLE_PROMPT_TOKEN_CAP}, measured baseline 9737). "
         "Raise KNOWLEDGE_STEWARD_ROLE_PROMPT_TOKEN_CAP in the same PR with the new measurement."
     )
 
