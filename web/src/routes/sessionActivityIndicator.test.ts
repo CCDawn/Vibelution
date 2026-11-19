@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  clearSessionLiveCompletion,
+  hasSessionLiveCompletion,
   isSessionActivitySeen,
   markSessionActivitySeen,
   markSessionActivitySnapshotsSeen,
+  markSessionLiveCompletion,
   resolveAgentActivityTone,
   resolveSessionActivityTone,
   sessionActivityStamp,
@@ -226,5 +229,25 @@ describe("sessionActivityIndicator", () => {
       { id: "s-optimistic-approval", status: "ready", updatedAt: "t1" },
       { isOptimisticRunning: true, needsApproval: true },
     )).toBe("approval");
+  });
+});
+
+
+describe("live completion badges", () => {
+  it("lights a settle the operator never opened", () => {
+    const session = { id: "s-live-badge", status: "ready", taskSummary: "background reply" };
+    expect(resolveSessionActivityTone(session)).toBe("none");
+    markSessionLiveCompletion(session.id);
+    expect(resolveSessionActivityTone(session)).toBe("completed");
+    clearSessionLiveCompletion(session.id);
+  });
+
+  it("retires the live badge once the row is read", () => {
+    const session = { id: "s-live-badge-read", status: "ready", taskSummary: "reply" };
+    markSessionLiveCompletion(session.id);
+    expect(resolveSessionActivityTone(session)).toBe("completed");
+    markSessionActivitySeen(session.id, sessionActivityStamp(session));
+    expect(hasSessionLiveCompletion(session.id)).toBe(false);
+    expect(resolveSessionActivityTone(session)).toBe("none");
   });
 });

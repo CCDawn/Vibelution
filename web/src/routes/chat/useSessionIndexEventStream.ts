@@ -4,6 +4,11 @@ import type { QueryClient } from "@tanstack/react-query";
 import { queryKeys } from "../../api/queryKeys";
 import type { SessionSummary } from "../../api/types";
 import {
+  clearSessionLiveCompletion,
+  markSessionLiveCompletion,
+} from "../sessionActivityIndicator";
+import { resolveSessionActivity } from "../sessionActivityState";
+import {
   removeSessionFromAgentSessionCaches,
   updateAgentSessionSummaryCaches,
   updateSessionSummaryCaches,
@@ -97,11 +102,39 @@ function applySessionPatch(
   return changed ? next : sessions;
 }
 
+/**
+ * A patch that says the row stopped is a completion nobody has opened yet, so it
+ * has to outrank the first-paint silence. A patch that says the row started
+ * running again drops the mark: the next settle is a different completion.
+ */
+function syncLiveCompletion(sessionId: string, patch: Record<string, unknown>): void {
+  const text = (value: unknown) => (typeof value === "string" ? value : undefined);
+  const state = resolveSessionActivity({
+    status: text(patch.status),
+    currentPhase: text(patch.currentPhase),
+    lastTurnStatus: text(patch.lastTurnStatus),
+    terminalReason: text(patch.terminalReason),
+  });
+  if (state.execution === "settled" || state.execution === "idle") {
+    markSessionLiveCompletion(sessionId);
+    return;
+  }
+  if (
+    state.execution === "running"
+    || state.execution === "queued"
+    || state.execution === "stopping"
+    || state.execution === "paused"
+  ) {
+    clearSessionLiveCompletion(sessionId);
+  }
+}
+
 function patchSessionRow(
   queryClient: QueryClient,
   sessionId: string,
   patch: Record<string, unknown>,
 ): void {
+  syncLiveCompletion(sessionId, patch);
   const apply = (sessions: SessionSummary[] | undefined) =>
     applySessionPatch(sessions, sessionId, patch);
   updateSessionSummaryCaches(queryClient, apply);

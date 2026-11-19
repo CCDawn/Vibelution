@@ -1,0 +1,1 @@
+- Rail completion badges now light for a settle the index stream delivered while the operator was on another session: the "never read" silence in `sessionActivityIndicator` only suppresses first-paint history, and a live settle arriving through `/api/sessions/events` outranks it until the row is actually read. Starting a new turn on that row drops the mark again.
