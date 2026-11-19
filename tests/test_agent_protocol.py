@@ -250,8 +250,9 @@ def test_turn_guidance_provider_injects_user_message_once():
     assert len(updated) == 2
     assert updated[0] == messages[0]
     assert updated[1]["role"] == "user"
-    assert updated[1]["content"].startswith("## 运行中引导")
-    assert "不要动 Windows 启动路径" in updated[1]["content"]
+    # The injected copy is the operator text exactly as written: no section
+    # title and no wrapper sentence in front of it.
+    assert updated[1]["content"] == "不要动 Windows 启动路径"
     # Consumed guidance must not be injected again on the next iteration.
     assert agent._apply_turn_guidance_messages(updated) is updated
     assert len(drains) == 2

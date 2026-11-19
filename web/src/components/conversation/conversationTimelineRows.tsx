@@ -1082,14 +1082,7 @@ export function createConversationTimelineRows({
                 identityAccessory={
                   isEditingMessage
                     ? <span className={styles.turnEditBadge}>{t("editMessage")}</span>
-                    : steerGuidanceMessage && guidanceState !== "drained" && guidanceState !== "promoted"
-                      ? (
-                        <VChip data-conversation-guidance-status={guidanceState}>
-                          {resolvedSafeGuidanceLabel}
-                          {guidanceDeliveryText ? ` · ${guidanceDeliveryText}` : ""} · {guidanceStatusLabel}
-                        </VChip>
-                      )
-                      : null
+                    : null
                 }
                 metaActions={
                   <>

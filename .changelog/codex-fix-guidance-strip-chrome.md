@@ -1,0 +1,1 @@
+- Guided inserts keep only the operator text: the transcript chip and the model-facing wrapper are gone.

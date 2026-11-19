@@ -72,7 +72,7 @@ def build_chat_user_message(content: str) -> Dict[str, Any]:
     Chat 是真实对话入口，必须以 provider user role 进入 LLM payload。
     """
     title = _TITLES[RuntimeInputKind.CHAT_USER_MESSAGE]
-    return {"role": "user", "content": f"## {title}\n{content.strip()}"}
+    return {"role": "user", "content": content.strip()}
 
 
 def build_chat_user_multimodal_message(content: str, image_urls: list[str]) -> Dict[str, Any]:
@@ -96,8 +96,7 @@ def build_chat_guidance_message(content: str) -> Dict[str, Any]:
     操作者在 agent 运行中提交的引导必须以 provider user role 到达模型；
     注入点由宿主在 agent 迭代边界决定，这里只负责消息形状。
     """
-    title = _TITLES[RuntimeInputKind.CHAT_GUIDANCE_MESSAGE]
-    return {"role": "user", "content": f"## {title}\n{content.strip()}"}
+    return {"role": "user", "content": content.strip()}
 
 
 def build_supervised_evolution_request_message(content: str) -> Dict[str, Any]:

@@ -2072,19 +2072,18 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     ]);
 
     expect(html).toContain("这一轮先不要改代码，只汇报。");
-    expect(html).toContain("引导");
-    expect(html).toContain("已接收");
-    expect(html).toContain('data-conversation-guidance-status="received"');
+    // The transcript shows the operator text alone: no delivery or state chip.
+    expect(html).not.toContain("data-conversation-guidance-status");
+    expect(html).not.toContain("已接收");
     expect(html).not.toContain("已执行");
     expect(html.match(/aria-label="Edit and resend"/g)?.length).toBe(1);
-    expect(html).toContain('data-vui="chip"');
   });
 
   it.each([
-    ["pending", undefined, "等待纳入"],
-    ["drained", 30, "已纳入"],
-    ["unconfirmed", undefined, "已接收"],
-  ])("renders the durable guidance state %s without claiming model execution", (state, consumed, label) => {
+    ["pending", undefined],
+    ["drained", 30],
+    ["unconfirmed", undefined],
+  ])("keeps the durable guidance state %s out of the transcript chrome", (state, consumed) => {
     const html = renderConversation([{
       id: "guide-state", role: "user", content: "检查并行操作",
       timestamp: "2026-10-22T05:28:00Z",
@@ -2093,15 +2092,13 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
         guidanceSequence: 20, guidanceConsumedSequence: consumed,
       },
     }]);
-    if (state === "drained") {
-      // A drained steer is ordinary transcript; the status chip is one-shot and
-      // must not survive as a permanent badge after the model consumed it.
-      expect(html).not.toContain(label);
-      expect(html).not.toContain("data-conversation-guidance-status");
-    } else {
-      expect(html).toContain(label);
-      expect(html).toContain(`data-conversation-guidance-status="${state === "unconfirmed" ? "received" : state}"`);
-    }
+    // The card carries the operator text only; delivery and consumption state
+    // stay in the journal instead of becoming a permanent transcript badge.
+    expect(html).toContain("检查并行操作");
+    expect(html).not.toContain("data-conversation-guidance-status");
+    expect(html).not.toContain("等待纳入");
+    expect(html).not.toContain("已纳入");
+    expect(html).not.toContain("已接收");
     expect(html).not.toContain("已执行");
   });
 

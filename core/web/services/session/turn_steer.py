@@ -570,7 +570,7 @@ def _drain_guidance_events_locked(
                 pass
         pending.append(
             {
-                "text": f"{_GUIDE_MODEL_PREAMBLE}{content}",
+                "text": content,
                 "injectedMessageId": injected_message_id,
                 "steerId": steer_id,
             }
