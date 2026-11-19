@@ -1482,8 +1482,12 @@ def record_restart_resume_pending(
         if not session_id or not turn_id or turn_id in excluded_turn_ids:
             continue
         entries.append({"sessionId": session_id, "turnId": turn_id})
+    # A shutdown drain can run after every owner already stopped its turn, so an
+    # empty snapshot list only says nothing is running now; it is not evidence
+    # that this restart interrupted nothing. Keep whatever the stop path already
+    # appended instead of erasing it.
     restart_resume_pending.record_pending_restart_resume(
-        _WORK_RUN_STORE, entries, replace=replace
+        _WORK_RUN_STORE, entries, replace=replace if entries else False
     )
 
 

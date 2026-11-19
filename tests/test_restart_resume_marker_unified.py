@@ -144,3 +144,28 @@ def test_agent_run_respects_the_requester_exclusion(tmp_path, monkeypatch):
     )
 
     assert restart_resume_pending.load_pending_restart_resume(store) == {}
+
+
+def test_empty_shutdown_snapshot_keeps_the_marker_the_stops_wrote(tmp_path, monkeypatch):
+    """An empty drain snapshot must not erase turns the stop path recorded."""
+
+    from core.web.services import session_service
+
+    store = _store(tmp_path)
+    restart_resume_pending.record_pending_restart_resume(
+        store, [{"sessionId": "session-a", "turnId": "turn-1"}]
+    )
+
+    class _EmptyStore:
+        def __init__(self, root):
+            self.root = root
+
+        def load_active_snapshots(self, kind):
+            return []
+
+    monkeypatch.setattr(session_service, "_WORK_RUN_STORE", _EmptyStore(store.root))
+    session_service.record_restart_resume_pending(replace=True)
+
+    assert restart_resume_pending.load_pending_restart_resume(store) == {
+        "session-a": {"turn-1"},
+    }
