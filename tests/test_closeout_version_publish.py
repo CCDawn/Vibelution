@@ -520,3 +520,269 @@ def test_publish_failure_does_not_break_the_closeout_contract() -> None:
     assert cli.no_publish is False
     assert cli.no_push is False
     assert cli.publish is False
+
+
+LOCKED_DIR_ERROR = "task worktree: empty directory is still locked"
+
+
+def _stub_merged_pipeline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    cleanup_error: str | None,
+) -> None:
+    """Stub everything around merge/publish/cleanup so the publish contract
+    between them can be tested in isolation."""
+
+    main_root = tmp_path / "main"
+    task_root = tmp_path / "task"
+    main_root.mkdir(exist_ok=True)
+    task_root.mkdir(exist_ok=True)
+    manifest = tmp_path / "manifest.json"
+    monkeypatch.setattr(
+        closeout, "resolve_context", lambda *_args, **_kwargs: _context(main_root, tmp_path),
+    )
+    monkeypatch.setattr(
+        gate,
+        "run_closeout",
+        lambda *_args, **_kwargs: gate.GateResult(outcome="passed", exit_code=0, manifest_path=manifest),
+    )
+    monkeypatch.setattr(
+        gate,
+        "verify_manifest",
+        lambda *_args, **_kwargs: gate.GateResult(outcome="passed", exit_code=0, manifest_path=manifest),
+    )
+    monkeypatch.setattr(closeout, "merge_ff_only", lambda *_args, **_kwargs: "a" * 40)
+    monkeypatch.setattr(closeout, "release_claim", lambda *_args, **_kwargs: None)
+    if cleanup_error:
+        def _raise_cleanup(*_args, **_kwargs):
+            raise OSError(cleanup_error)
+
+        monkeypatch.setattr(closeout, "cleanup_task_resources", _raise_cleanup)
+    else:
+        monkeypatch.setattr(closeout, "cleanup_task_resources", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(closeout, "complete_agent", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(closeout, "prune_coordination", lambda *_args, **_kwargs: None)
+
+
+def _ok_publish_payload() -> dict:
+    return {
+        "ok": True,
+        "sync": {"ok": True, "newVersion": "2.0.1", "commitSha": "b" * 40, "boundary": None},
+        "tag": {},
+        "release": {},
+        "push": {"ok": True, "skipped": True},
+        "errors": [],
+    }
+
+
+def test_cleanup_failure_keeps_publish_fields_on_pending_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cleanup is the only debt here: publish already ran, so its fields must
+    stay on the pending result and the recovery must stay plain cleanup-only."""
+
+    _stub_merged_pipeline(tmp_path, monkeypatch, cleanup_error=LOCKED_DIR_ERROR)
+    monkeypatch.setattr(
+        closeout,
+        "publish_version_projection",
+        lambda *_args, **_kwargs: _ok_publish_payload(),
+    )
+
+    result = closeout.run_managed_closeout(
+        tmp_path / "task",
+        claim_id="claim-dev",
+        agent_id="agent-test",
+        integration_wait_seconds=0,
+        publish=True,
+        push_remote=False,
+    )
+
+    assert result.merged is True
+    assert result.status == "merged_cleanup_pending"
+    assert result.exit_code == 2
+    assert result.errors == [LOCKED_DIR_ERROR]
+    assert result.next_action == "run_cleanup_only_from_main"
+    assert result.versionSync["ok"] is True
+    assert result.versionSync["newVersion"] == "2.0.1"
+    assert result.push == {"ok": True, "skipped": True}
+    assert not any("version_publish_pending" in line for line in result.errors)
+
+
+def test_cleanup_failure_with_publish_debt_names_the_publish_rerun(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cleanup and publish both owe work: the next action must be the one
+    rerun that finishes both instead of a plain cleanup-only recovery."""
+
+    _stub_merged_pipeline(tmp_path, monkeypatch, cleanup_error=LOCKED_DIR_ERROR)
+    monkeypatch.setattr(
+        closeout,
+        "publish_version_projection",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "sync": {"ok": True, "newVersion": "2.0.1", "commitSha": "b" * 40, "boundary": None},
+            "tag": {},
+            "release": {},
+            "push": {"ok": False, "main": {"ok": False, "error": "network down"}, "tags": {}},
+            "errors": ["push_failed"],
+        },
+    )
+
+    result = closeout.run_managed_closeout(
+        tmp_path / "task",
+        claim_id="claim-dev",
+        agent_id="agent-test",
+        integration_wait_seconds=0,
+        publish=True,
+    )
+
+    assert result.status == "merged_cleanup_pending"
+    assert result.exit_code == 2
+    assert result.versionSync["ok"] is False
+    assert result.versionSync["errors"] == ["push_failed"]
+    assert any("version_publish_pending" in line for line in result.errors)
+    assert result.next_action == "rerun_cleanup_only_with_publish_from_main"
+
+
+def test_publish_not_attempted_is_recorded_explicitly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If publish never produced a payload on a merged run, the pending result
+    must say so with a skipped marker and a recoverable debt error."""
+
+    _stub_merged_pipeline(tmp_path, monkeypatch, cleanup_error=None)
+
+    def _raise_publish(*_args, **_kwargs):
+        raise RuntimeError("publish hook exploded")
+
+    monkeypatch.setattr(closeout, "publish_version_projection", _raise_publish)
+
+    result = closeout.run_managed_closeout(
+        tmp_path / "task",
+        claim_id="claim-dev",
+        agent_id="agent-test",
+        integration_wait_seconds=0,
+        publish=True,
+    )
+
+    assert result.merged is True
+    assert result.status == "merged_cleanup_pending"
+    assert result.exit_code == 2
+    assert result.versionSync == {"ok": False, "skipped_reason": "publish_not_attempted"}
+    assert result.push == {"ok": False, "skipped_reason": "publish_not_attempted"}
+    assert any("publish hook exploded" in line for line in result.errors)
+    assert "version_publish_pending: publish_not_attempted" in result.errors
+    assert result.next_action == "rerun_cleanup_only_with_publish_from_main"
+
+
+def test_no_publish_pending_result_stays_explicit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pending result without the automation requested must still name the
+    skip instead of returning silent empty fields."""
+
+    _stub_merged_pipeline(tmp_path, monkeypatch, cleanup_error=LOCKED_DIR_ERROR)
+
+    result = closeout.run_managed_closeout(
+        tmp_path / "task",
+        claim_id="claim-dev",
+        agent_id="agent-test",
+        integration_wait_seconds=0,
+    )
+
+    assert result.status == "merged_cleanup_pending"
+    assert result.versionSync == {"ok": False, "skipped_reason": "publish_not_requested"}
+    assert result.push == {"ok": False, "skipped_reason": "publish_not_requested"}
+    assert result.errors == [LOCKED_DIR_ERROR]
+    assert result.next_action == "run_cleanup_only_from_main"
+
+
+def test_cleanup_only_failure_keeps_publish_debt_explicit_and_recoverable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The documented recovery rerun must keep the publish debt visible when
+    cleanup itself fails, and finish it once cleanup succeeds."""
+
+    main_root = tmp_path / "main"
+    main_root.mkdir()
+    assert _run_git(main_root, "init").returncode == 0
+    _run_git(main_root, "config", "user.email", "publish@example.invalid")
+    _run_git(main_root, "config", "user.name", "Publish Test")
+    (main_root / "seed.txt").write_text("seed\n", encoding="utf-8")
+    _run_git(main_root, "add", ".")
+    _run_git(main_root, "commit", "-m", "seed")
+    _run_git(main_root, "branch", "-M", "main")
+    task_root = main_root / ".worktrees" / "test-task"
+    task_root.mkdir(parents=True)
+    monkeypatch.setattr(closeout, "prune_coordination", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(closeout.time, "sleep", lambda _seconds: None)
+
+    attempts: list[str] = []
+
+    def _flaky_cleanup(*_args, **_kwargs):
+        attempts.append("cleanup")
+        if len(attempts) == 1:
+            raise OSError(LOCKED_DIR_ERROR)
+
+    monkeypatch.setattr(closeout, "cleanup_task_resources", _flaky_cleanup)
+
+    # First cleanup-only --publish attempt: cleanup fails before publish runs,
+    # so the pending result must name the skipped publish and the rerun.
+    first = closeout.run_cleanup_only(
+        task_root,
+        branch="codex/test-task",
+        agent_id="agent-test",
+        publish=True,
+        push_remote=False,
+    )
+    assert first.status == "merged_cleanup_pending"
+    assert first.exit_code == 2
+    assert first.versionSync == {"ok": False, "skipped_reason": "publish_not_attempted"}
+    assert first.push == {"ok": False, "skipped_reason": "publish_not_attempted"}
+    assert first.next_action == "rerun_cleanup_only_with_publish_from_main"
+
+    # Recovery rerun finishes cleanup and publish together.
+    publish_calls: list[dict] = []
+
+    def _fake_publish(context, *, integration_claim_id, push_remote):
+        publish_calls.append({"claim": integration_claim_id, "push_remote": push_remote})
+        return _ok_publish_payload() | {"push": {"ok": True, "main": {"ok": True, "error": ""}, "tags": {}}}
+
+    monkeypatch.setattr(closeout, "publish_version_projection", _fake_publish)
+    monkeypatch.setattr(
+        closeout,
+        "_coordination_call",
+        lambda _context, *arguments, **_kwargs: (
+            {"claim": {"id": "claim-int"}} if arguments and arguments[0] == "claim" else {"agents": [], "claims": []}
+        ),
+    )
+
+    recovered = closeout.run_cleanup_only(
+        task_root,
+        branch="codex/test-task",
+        agent_id="agent-test",
+        publish=True,
+        push_remote=False,
+    )
+    assert recovered.status == "merged_clean"
+    assert recovered.exit_code == 0
+    assert recovered.versionSync["ok"] is True
+    assert publish_calls and publish_calls[0]["push_remote"] is False
+
+    # A plain cleanup-only failure (no --publish) records that publish was
+    # never requested instead of returning silent empty fields.
+    attempts.clear()
+
+    def _raise_cleanup_only(*_args, **_kwargs):
+        raise OSError(LOCKED_DIR_ERROR)
+
+    monkeypatch.setattr(closeout, "cleanup_task_resources", _raise_cleanup_only)
+    plain = closeout.run_cleanup_only(
+        task_root,
+        branch="codex/test-task",
+        agent_id="agent-test",
+    )
+    assert plain.status == "merged_cleanup_pending"
+    assert plain.versionSync == {"ok": False, "skipped_reason": "publish_not_requested"}
+    assert plain.next_action == "rerun_cleanup_only_from_main"

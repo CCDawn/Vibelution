@@ -108,6 +108,9 @@ class ManagedCloseoutResult:
     # Post-merge version automation. ``versionSync`` carries the
     # settle+project+tag+release outcome, ``push`` the independent push
     # outcome; a failed push never invalidates the merged state above.
+    # When publish did not run, these carry ``{"ok": False, "skipped_reason":
+    # ...}`` instead of being silently empty, so the publish debt stays
+    # visible on every non-clean merged result.
     versionSync: dict[str, Any] = field(default_factory=dict)
     push: dict[str, Any] = field(default_factory=dict)
 
@@ -961,6 +964,34 @@ def _publish_summaries(publish_payload: dict[str, Any]) -> tuple[dict[str, Any],
     return summary, dict(publish_payload.get("push") or {})
 
 
+def _skipped_publish_summaries(reason: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Explicit ``versionSync``/``push`` markers for a run where publish did not execute.
+
+    A merged result that stays pending must never leave the publish outcome
+    silent: an empty ``versionSync`` cannot be told apart from a lost one, so
+    every skip names its reason and the debt stays recoverable with
+    ``--cleanup-only --publish``.
+    """
+
+    marker = {"ok": False, "skipped_reason": reason}
+    return dict(marker), dict(marker)
+
+
+def _publish_debt_outstanding(version_sync: dict[str, Any] | None) -> bool:
+    """Whether a closeout result carries an unfinished version-publish debt.
+
+    True for a failed or not-attempted publish (the debt needs a
+    ``--cleanup-only --publish`` rerun); false for a settled publish, a
+    deliberate ``publish_not_requested`` skip, or legacy empty fields.
+    """
+
+    if not version_sync:
+        return False
+    if version_sync.get("skipped_reason") == "publish_not_requested":
+        return False
+    return not version_sync.get("ok", False)
+
+
 def _publish_pending_result(
     publish_payload: dict[str, Any],
     *,
@@ -1265,14 +1296,25 @@ def run_cleanup_only(
                     reason="version publish lease finished",
                 )
     except (OSError, RuntimeError, ValueError) as error:
+        if publish:
+            # Cleanup failed before publish could run, so the publish debt is
+            # still open: name the rerun that finishes cleanup and publish
+            # together instead of pointing at a plain cleanup-only recovery.
+            publish_summary, push_summary = _skipped_publish_summaries("publish_not_attempted")
+            next_action = "rerun_cleanup_only_with_publish_from_main"
+        else:
+            publish_summary, push_summary = _skipped_publish_summaries("publish_not_requested")
+            next_action = "rerun_cleanup_only_from_main"
         return _apply_dirty_main_attribution(
             ManagedCloseoutResult(
                 status="merged_cleanup_pending",
                 exit_code=2,
                 merged=True,
                 retryable=True,
-                next_action="rerun_cleanup_only_from_main",
+                next_action=next_action,
                 errors=[_bounded_error(error)],
+                versionSync=publish_summary,
+                push=push_summary,
             ),
             error,
         )
@@ -1670,8 +1712,20 @@ def run_managed_closeout(
                 prune_coordination(context)
             except (OSError, RuntimeError, ValueError) as error:
                 cleanup_errors.append(_bounded_error(error))
+            cleanup_pending = bool(cleanup_errors or retain_worktree)
+            if publish_payload:
+                sync_field = publish_payload.get("sync", {})
+                push_field = publish_payload.get("push", {})
+            elif cleanup_pending:
+                # A pending merged result must never leave the publish outcome
+                # silent: name why publish did not produce fields.
+                sync_field, push_field = _skipped_publish_summaries(
+                    "publish_not_attempted" if publish else "publish_not_requested"
+                )
+            else:
+                sync_field, push_field = {}, {}
             result = ManagedCloseoutResult(
-                status="merged_cleanup_pending" if cleanup_errors or retain_worktree else "merged_clean",
+                status="merged_cleanup_pending" if cleanup_pending else "merged_clean",
                 exit_code=2 if cleanup_errors else 0,
                 merged=True,
                 merge_sha=merge_sha,
@@ -1683,10 +1737,17 @@ def run_managed_closeout(
                 ),
                 errors=cleanup_errors,
                 warnings=consistency_warnings,
-                versionSync=publish_payload.get("sync", {}),
-                push=publish_payload.get("push", {}),
+                versionSync=sync_field,
+                push=push_field,
             )
-            if publish_payload and not publish_payload.get("ok", True):
+            if publish and not publish_payload:
+                # Defensive: publish was requested but produced no payload
+                # (publish_version_projection normally never raises). Keep the
+                # debt explicit so the recovery rerun finishes it.
+                result.errors.append("version_publish_pending: publish_not_attempted")
+                if cleanup_errors:
+                    result.next_action = "rerun_cleanup_only_with_publish_from_main"
+            elif publish_payload and not publish_payload.get("ok", True):
                 publish_summary, push_summary = _publish_summaries(publish_payload)
                 result.versionSync = publish_summary
                 result.push = push_summary
@@ -1697,6 +1758,10 @@ def run_managed_closeout(
                     result.errors.append(
                         "version_publish_pending: " + ", ".join(publish_summary.get("errors", []))
                     )
+                    if cleanup_errors:
+                        # One rerun from main finishes both debts, so the
+                        # recovery step must ask for --publish explicitly.
+                        result.next_action = "rerun_cleanup_only_with_publish_from_main"
                 else:
                     result.status = "merged_publish_pending"
                     result.exit_code = MERGED_PUBLISH_PENDING_EXIT_CODE
@@ -1713,7 +1778,21 @@ def run_managed_closeout(
         else:
             status = "failed"
             exit_code = 1
-        publish_summary, push_summary = _publish_summaries(publish_payload)
+        errors = [_bounded_error(error)]
+        if not publish_payload and merge_sha:
+            if publish:
+                # The merge is authoritative, but publish never ran: the debt
+                # must stay explicit so a cleanup-only --publish rerun can
+                # finish it instead of the loss staying invisible.
+                publish_summary, push_summary = _skipped_publish_summaries("publish_not_attempted")
+                errors.append("version_publish_pending: publish_not_attempted")
+                next_action = "rerun_cleanup_only_with_publish_from_main"
+            else:
+                publish_summary, push_summary = _skipped_publish_summaries("publish_not_requested")
+                next_action = "run_cleanup_only_from_main"
+        else:
+            publish_summary, push_summary = _publish_summaries(publish_payload)
+            next_action = "run_cleanup_only_from_main" if merge_sha else ""
         result = _apply_dirty_main_attribution(
             ManagedCloseoutResult(
                 status=status,
@@ -1722,8 +1801,8 @@ def run_managed_closeout(
                 merge_sha=merge_sha,
                 manifest_path=manifest_path_text,
                 retryable=bool(merge_sha),
-                next_action=("run_cleanup_only_from_main" if merge_sha else ""),
-                errors=[_bounded_error(error)],
+                next_action=next_action,
+                errors=errors,
                 warnings=consistency_warnings,
                 versionSync=publish_summary,
                 push=push_summary,
@@ -1745,7 +1824,13 @@ def run_managed_closeout(
                 result.exit_code = 2 if result.merged else 1
                 if result.merged:
                     result.retryable = True
-                    result.next_action = "run_cleanup_only_from_main"
+                    # Do not overwrite an outstanding publish debt with a
+                    # plain-cleanup recovery step.
+                    result.next_action = (
+                        "rerun_cleanup_only_with_publish_from_main"
+                        if _publish_debt_outstanding(result.versionSync)
+                        else "run_cleanup_only_from_main"
+                    )
     return result
 
 
