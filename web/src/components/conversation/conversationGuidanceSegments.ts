@@ -52,9 +52,7 @@ function guideBoundary(guide: Guide): number | undefined {
     return positiveSequence(guide.metadata?.guidanceConsumedSequence);
   }
   // Without a drain receipt this input has no confirmed execution boundary.
-  // It still belongs to its turn: returning undefined routes the row behind
-  // the assistant turn instead of leaving it wherever the array happened to
-  // place it, which used to paint a pending attach insert above earlier work.
+  // Keep it after current work even when a stop/failure settles the turn.
   return undefined;
 }
 
@@ -127,7 +125,8 @@ function splitTurn(source: AssistantConversationTurn, guides: Guide[]): Conversa
 export function projectGuidanceWorkSegments(messages: ConversationMessage[]): ConversationMessage[] {
   const guidesByTurn = new Map<string, Guide[]>();
   for (const message of messages) {
-    if (message.role !== "user" || !isSteerGuidanceMessage(message)) continue;
+    if (message.role !== "user" || !isSteerGuidanceMessage(message)
+      || !positiveSequence(message.metadata?.guidanceSequence)) continue;
     const turnId = guidanceTurnId(message);
     if (!turnId) continue;
     const guides = guidesByTurn.get(turnId) ?? [];

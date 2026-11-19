@@ -1,1 +1,1 @@
-- A guidance insert now clears the staged images and references it just consumed, and a guide without a drain receipt still sorts behind its turn instead of above earlier work.
+- A guidance insert now clears the staged images and references it just consumed instead of leaving them in the composer.
