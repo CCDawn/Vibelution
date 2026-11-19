@@ -142,7 +142,10 @@ export function projectGuidanceWorkSegments(messages: ConversationMessage[]): Co
     const guides = guidesByTurn.get(source.turnId);
     if (!guides?.length) continue;
     guides.sort((left, right) => Number(left.metadata?.guidanceSequence) - Number(right.metadata?.guidanceSequence));
-    const first = messages.find((message) => message === source || guides.includes(message as Guide))!;
+    // Anchor on the assistant turn itself: the guide row may sit anywhere
+    // in the array, and splitting from that slot would lift the guide above
+    // work that happened earlier in the same turn.
+    const first = source;
     replacements.set(first, splitTurn(source, guides));
     removed.add(source);
     guides.forEach((guide) => removed.add(guide));

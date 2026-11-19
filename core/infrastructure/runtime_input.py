@@ -72,7 +72,7 @@ def build_chat_user_message(content: str) -> Dict[str, Any]:
     Chat 是真实对话入口，必须以 provider user role 进入 LLM payload。
     """
     title = _TITLES[RuntimeInputKind.CHAT_USER_MESSAGE]
-    return {"role": "user", "content": content.strip()}
+    return {"role": "user", "content": f"## {title}\n{content.strip()}"}
 
 
 def build_chat_user_multimodal_message(content: str, image_urls: list[str]) -> Dict[str, Any]:
