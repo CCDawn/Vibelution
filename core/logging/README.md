@@ -27,6 +27,8 @@ from core.logging.logger import ConversationLogger
 - Runtime scene 事件：`logs/runtime_scenes/`（UTC ISO 事件流）
 - Transcript：workspace home `logs/transcripts/transcript_*.md`（人读展示，保留本地时间）
 - 时间戳：机器可读事件统一 **UTC ISO**（`2026-08-12T01:30:00.123+00:00`）；UI/展示层保留本地时间
+- 保留：conversation 与 transcript 各保留最近 5 个会话；`logs/conversations/payloads/<session_id>/` 里的溢出正文随会话文件同寿命回收，孤儿目录在下次清理时删除（最近 1 小时仍在写入的目录跳过，避免误删并发进程）
+- runtime scene：`logs/runtime_scenes/` 保留最近 30 个包，且总量不超过 1 GiB；超预算时从最旧的包开始删，当前/受保护包与最新包始终保留（见 `RUNTIME_SCENE_RETENTION_MAX_BYTES`）
 - `debug_*.log` 文件通道已停用（与 JSONL 重复），历史文件仍可经维护重置清理
 
 ## 关联与安全约定

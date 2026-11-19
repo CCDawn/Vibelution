@@ -4,6 +4,7 @@ from pathlib import Path
 
 from core.runtime_manager.scene_logging import enforce_runtime_scene_retention_on_startup
 from core.web.services import runtime_scene_service
+from core.web.services.runtime_scene import query as runtime_scene_query
 
 
 def _seed_scene(tmp_path: Path, index: int) -> Path:
@@ -76,3 +77,61 @@ def test_startup_retention_swallows_enforce_failure(tmp_path, monkeypatch):
     result = enforce_runtime_scene_retention_on_startup()
 
     assert result == {}
+
+
+def _seed_scene_with_payload(tmp_path: Path, index: int, payload_bytes: int) -> Path:
+    scene_dir = _seed_scene(tmp_path, index)
+    (scene_dir / "timeline.jsonl").write_bytes(b"x" * payload_bytes)
+    return scene_dir
+
+
+def test_retention_prunes_oldest_when_byte_budget_exceeded(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    for index in range(4):
+        _seed_scene_with_payload(tmp_path, index, 1024 * 1024)
+
+    budget = int(2.2 * 1024 * 1024)
+    result = runtime_scene_query._enforce_runtime_scene_retention(max_bytes=budget)
+
+    assert result["retentionMaxBytes"] == budget
+    assert result["deletedCount"] == 2
+    assert result["keptCount"] == 2
+    assert result["deletedBytes"] > 2 * 1024 * 1024
+    remaining = _remaining_scene_names(tmp_path)
+    assert "20260518T120000Z__scene-00" not in remaining
+    assert "20260518T120000Z__scene-01" not in remaining
+    assert "20260518T120000Z__scene-02" in remaining
+    assert "20260518T120000Z__scene-03" in remaining
+
+
+def test_retention_keeps_newest_package_even_over_byte_budget(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    for index in range(3):
+        _seed_scene_with_payload(tmp_path, index, 64 * 1024)
+    _seed_scene_with_payload(tmp_path, 3, 4 * 1024 * 1024)
+
+    result = runtime_scene_query._enforce_runtime_scene_retention(max_bytes=1024 * 1024)
+
+    assert _remaining_scene_names(tmp_path) == ["20260518T120000Z__scene-03"]
+    assert result["deletedCount"] == 3
+    assert result["keptBytes"] >= 4 * 1024 * 1024
+
+
+def test_retention_byte_budget_disabled_with_zero(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    for index in range(3):
+        _seed_scene_with_payload(tmp_path, index, 2 * 1024 * 1024)
+
+    result = runtime_scene_query._enforce_runtime_scene_retention(max_bytes=0)
+
+    assert result["retentionMaxBytes"] == 0
+    assert result["deletedCount"] == 0
+    assert len(_remaining_scene_names(tmp_path)) == 3
+
+
+def test_retention_reports_default_byte_budget(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+
+    result = runtime_scene_query._enforce_runtime_scene_retention()
+
+    assert result["retentionMaxBytes"] == runtime_scene_service.RUNTIME_SCENE_RETENTION_MAX_BYTES

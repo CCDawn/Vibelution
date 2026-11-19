@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,6 +21,7 @@ from core.logging import debug as _debug_logger
 
 # Local default for signature evaluation (facade remains SSOT).
 RUNTIME_SCENE_RETENTION_LIMIT = 30
+RUNTIME_SCENE_RETENTION_MAX_BYTES = 1024 * 1024 * 1024
 
 
 def _service():
@@ -69,12 +71,50 @@ def _closed_reconciliation_fields(fields: dict[str, Any]) -> bool:
     return observed_state == "closed" and desired_state == "closed" and not manager_running and backend_pid == 0 and browser_pid == 0
 
 
+def _runtime_scene_package_bytes(
+    scene_dir: Path,
+    *,
+    should_stop: Callable[[], bool] | None = None,
+) -> int:
+    """Sum file bytes inside one scene package without following directory links."""
+    total = 0
+    stack = [scene_dir]
+    while stack:
+        if should_stop is not None and should_stop():
+            return total
+        current = stack.pop()
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            stack.append(Path(entry.path))
+                        elif entry.is_file(follow_symlinks=False):
+                            total += int(entry.stat(follow_symlinks=False).st_size)
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    return total
+
+
+def _resolve_retention_max_bytes(s: Any, max_bytes: int | None) -> int:
+    """Resolve the byte budget; a broken value falls back to the local default."""
+    fallback = RUNTIME_SCENE_RETENTION_MAX_BYTES
+    raw = getattr(s, "RUNTIME_SCENE_RETENTION_MAX_BYTES", fallback) if max_bytes is None else max_bytes
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        return fallback
+
+
 def _enforce_runtime_scene_retention(
     max_packages: int = RUNTIME_SCENE_RETENTION_LIMIT,
     *,
+    max_bytes: int | None = None,
     should_stop: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
-    """Keep runtime scene packages bounded while preserving active evidence."""
+    """Keep runtime scene packages bounded by package count and total bytes."""
     s = _service()
     if should_stop is not None and should_stop():
         return {"stopped": True}
@@ -83,16 +123,32 @@ def _enforce_runtime_scene_retention(
         retention_limit = max(1, int(max_packages or s.RUNTIME_SCENE_RETENTION_LIMIT))
     except (TypeError, ValueError):
         retention_limit = s.RUNTIME_SCENE_RETENTION_LIMIT
+    retention_max_bytes = _resolve_retention_max_bytes(s, max_bytes)
     scene_dirs = s._scene_dirs()
     if should_stop is not None and should_stop():
         return {"stopped": True}
-    if len(scene_dirs) <= retention_limit:
+
+    scene_bytes: dict[Path, int] = {}
+    total_bytes = 0
+    for scene_dir in scene_dirs:
+        if should_stop is not None and should_stop():
+            return {"stopped": True}
+        size_bytes = _runtime_scene_package_bytes(scene_dir, should_stop=should_stop)
+        scene_bytes[scene_dir] = size_bytes
+        total_bytes += size_bytes
+
+    within_count_budget = len(scene_dirs) <= retention_limit
+    within_byte_budget = retention_max_bytes <= 0 or total_bytes <= retention_max_bytes
+    if within_count_budget and within_byte_budget:
         return {
             "retentionLimit": retention_limit,
+            "retentionMaxBytes": retention_max_bytes,
             "deletedCount": 0,
             "keptCount": len(scene_dirs),
             "protectedCount": 0,
             "deletedSceneIds": [],
+            "deletedBytes": 0,
+            "keptBytes": total_bytes,
         }
 
     current_scene_dir = s._safe_current_runtime_scene_dir_for_retention()
@@ -108,6 +164,7 @@ def _enforce_runtime_scene_retention(
                 "sceneId": s._scene_id(scene_dir, manifest),
                 "sortKey": s._runtime_scene_retention_sort_key(scene_dir, manifest),
                 "protected": s._is_runtime_scene_retention_protected(scene_dir, current_scene_dir),
+                "sizeBytes": scene_bytes.get(scene_dir, 0),
             }
         )
     if should_stop is not None and should_stop():
@@ -118,12 +175,29 @@ def _enforce_runtime_scene_retention(
     ordinary_items = [item for item in items if not item["protected"]]
     if should_stop is not None and should_stop():
         return {"stopped": True}
+
     keep_paths: set[Path] = {item["path"].resolve() for item in protected_items}
+    kept_bytes = sum(int(item["sizeBytes"]) for item in protected_items)
     ordinary_slots = max(0, retention_limit - len(keep_paths))
-    keep_paths.update(item["path"].resolve() for item in ordinary_items[:ordinary_slots])
+    kept_ordinary = 0
+    for item in ordinary_items:
+        if kept_ordinary >= ordinary_slots:
+            break
+        item_bytes = int(item["sizeBytes"])
+        over_byte_budget = (
+            retention_max_bytes > 0 and kept_bytes + item_bytes > retention_max_bytes
+        )
+        # The newest ordinary package always survives: a single oversized
+        # package must not wipe the whole retained window.
+        if over_byte_budget and kept_ordinary > 0:
+            break
+        keep_paths.add(item["path"].resolve())
+        kept_bytes += item_bytes
+        kept_ordinary += 1
     delete_items = [item for item in ordinary_items if item["path"].resolve() not in keep_paths]
 
     deleted_scene_ids: list[str] = []
+    deleted_bytes = 0
     deletion_error_counts: dict[str, int] = {}
     missing_scene_count = 0
     stopped = False
@@ -145,14 +219,19 @@ def _enforce_runtime_scene_retention(
                 missing_scene_count += 1
             continue
         deleted_scene_ids.append(str(item["sceneId"] or scene_dir.name))
+        deleted_bytes += int(item["sizeBytes"])
 
     kept_count = max(0, len(items) - len(deleted_scene_ids) - missing_scene_count)
+    kept_bytes_after = max(0, total_bytes - deleted_bytes)
     if deleted_scene_ids:
         s._record_runtime_scene_retention_pruned(
             retention_limit=retention_limit,
             kept_count=kept_count,
             protected_count=len(protected_items),
             deleted_scene_ids=deleted_scene_ids,
+            retention_max_bytes=retention_max_bytes,
+            kept_bytes=kept_bytes_after,
+            deleted_bytes=deleted_bytes,
         )
     if deletion_error_counts:
         error_summary = ", ".join(
@@ -166,10 +245,13 @@ def _enforce_runtime_scene_retention(
 
     result = {
         "retentionLimit": retention_limit,
+        "retentionMaxBytes": retention_max_bytes,
         "deletedCount": len(deleted_scene_ids),
         "keptCount": kept_count,
         "protectedCount": len(protected_items),
         "deletedSceneIds": deleted_scene_ids,
+        "deletedBytes": deleted_bytes,
+        "keptBytes": kept_bytes_after,
     }
     if stopped:
         result["stopped"] = True
@@ -242,6 +324,9 @@ def _record_runtime_scene_retention_pruned(
     kept_count: int,
     protected_count: int,
     deleted_scene_ids: list[str],
+    retention_max_bytes: int = 0,
+    kept_bytes: int = 0,
+    deleted_bytes: int = 0,
 ) -> None:
     s = _service()
     try:
@@ -254,10 +339,13 @@ def _record_runtime_scene_retention_pruned(
             outcome="succeeded",
             fields={
                 "retentionLimit": retention_limit,
+                "retentionMaxBytes": retention_max_bytes,
                 "keptCount": kept_count,
                 "protectedCount": protected_count,
                 "deletedCount": len(deleted_scene_ids),
                 "deletedSceneIds": deleted_scene_ids[:20],
+                "keptBytes": kept_bytes,
+                "deletedBytes": deleted_bytes,
             },
             lifecycle=True,
             allow_recent_completed=False,
