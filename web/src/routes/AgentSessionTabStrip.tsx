@@ -878,8 +878,8 @@ export function AgentSessionTabStrip({
                   onContextMenu(event, session);
                 }}
                 onPress={() => {
-                  onOpenDirectSession(session.id);
                   setGroupOpen(section.groupId, false);
+                  onOpenDirectSession(session.id);
                 }}
               >
                 {renderAgentSessionStatusSlot(groupSessionTone(session))}
