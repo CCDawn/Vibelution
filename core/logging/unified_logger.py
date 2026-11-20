@@ -138,18 +138,32 @@ class UnifiedLogger:
         # ConversationLogger: JSON 日志
         self._conversation.log_llm_request(messages, model=model, iteration=iteration)
 
-    def log_llm_response(self, content: str, raw_response: str = None,
-                         input_tokens: int = 0, output_tokens: int = 0, tool_call_count: int = 0):
+    def log_llm_response(
+        self,
+        content: str,
+        raw_response: str = None,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        tool_call_count: int = 0,
+        *,
+        model: str = None,
+        duration_ms: float = None,
+    ):
         """记录 LLM 的响应"""
         # value 级脱敏：响应与原始响应都可能回显凭据。
         content = redact_sensitive_text(content)
         raw_response = redact_sensitive_text(raw_response)
 
         # ConversationLogger: JSON 日志
-        self._conversation.log_llm_response(content, raw_response,
-                                            input_tokens=input_tokens,
-                                            output_tokens=output_tokens,
-                                            tool_call_count=tool_call_count)
+        self._conversation.log_llm_response(
+            content,
+            raw_response,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            tool_call_count=tool_call_count,
+            model=model,
+            duration_ms=duration_ms,
+        )
 
         # TranscriptLogger: Markdown 格式
         self._transcript.write_llm_response(content)
@@ -180,6 +194,7 @@ class UnifiedLogger:
         result: str = None,
         status: str = "success",
         tool_call_id: str = None,
+        duration_ms: float = None,
     ):
         """记录工具调用"""
         # value 级脱敏：工具参数与返回值是凭据最常出现的位置（safe_payload 的
@@ -188,7 +203,14 @@ class UnifiedLogger:
         result = redact_sensitive_text(result)
 
         # ConversationLogger: JSON 日志
-        self._conversation.log_tool_call(tool_name, args, result, status, tool_call_id=tool_call_id)
+        self._conversation.log_tool_call(
+            tool_name,
+            args,
+            result,
+            status,
+            tool_call_id=tool_call_id,
+            duration_ms=duration_ms,
+        )
 
         # TranscriptLogger: Markdown 格式
         self._transcript.write_tool_call(tool_name, args, result, status)

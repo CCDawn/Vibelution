@@ -264,7 +264,7 @@ def test_unified_logger_log_tool_call_redacts_args_and_result(monkeypatch: pytes
     monkeypatch.setattr(unified_logger_module.UnifiedLogger, "__init__", lambda self: None)
 
     class FakeConversation:
-        def log_tool_call(self, tool_name, args, result, status, tool_call_id=None):
+        def log_tool_call(self, tool_name, args, result, status, tool_call_id=None, duration_ms=None):
             captured.update(args=args, result=result)
 
     class FakeTranscript:

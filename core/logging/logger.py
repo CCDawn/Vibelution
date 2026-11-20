@@ -30,6 +30,7 @@ import re
 import shutil
 import threading
 import time
+import traceback as traceback_module
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -433,6 +434,12 @@ class ConversationLogger:
         self._turn_count = 0
         self._session_active = False
         self._activation_lock = threading.RLock()
+        self._write_counts: Dict[str, int] = {}
+        self._write_failure_count = 0
+        self._payload_failure_count = 0
+        self._llm_request_seq = 0
+        self._llm_request_started_at: Optional[float] = None
+        self._llm_request_model: Optional[str] = None
 
     def _apply_env_context(self):
         """从环境变量恢复跨进程日志上下文。"""
@@ -569,7 +576,11 @@ class ConversationLogger:
         safe_kind = "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in kind)[:48]
         turn_label = f"turn_{turn if turn is not None else 'session'}"
         path = payload_dir / f"{turn_label}_{safe_kind}.{ext}"
-        path.write_text(str(text or ""), encoding="utf-8")
+        try:
+            path.write_text(str(text or ""), encoding="utf-8")
+        except OSError:
+            self._payload_failure_count += 1
+            raise
         try:
             return str(path.relative_to(Path(self._log_dir)))
         except Exception:
@@ -741,8 +752,14 @@ class ConversationLogger:
             with open(self._get_session_file(), "a", encoding="utf-8") as f:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
                 f.flush()
+            self._record_write_success(str(record.get("type") or "unknown"))
         except Exception as e:
+            self._write_failure_count += 1
             _logger.warning("ConversationLogger write failed: %s", e)
+
+    def _record_write_success(self, record_type: str) -> None:
+        """按记录类型累计条数，供 session_summary 自检使用。"""
+        self._write_counts[record_type] = self._write_counts.get(record_type, 0) + 1
 
     def start_session(self, metadata: dict = None):
         """记录会话开始"""
@@ -846,12 +863,28 @@ class ConversationLogger:
             "model": model,
             "input_tokens": total_input_tokens,
         }
+        # 缓存往返锚点：响应侧据此补齐耗时、模型快照和配对序号。
+        self._llm_request_seq += 1
+        self._llm_request_started_at = time.perf_counter()
+        self._llm_request_model = model
         self._write(record)
 
-    def log_llm_response(self, response_content: str, raw_response: str = None,
-                         input_tokens: int = 0, output_tokens: int = 0, tool_call_count: int = 0):
-        """记录 LLM 的原始响应"""
+    def log_llm_response(
+        self,
+        response_content: str,
+        raw_response: str = None,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        tool_call_count: int = 0,
+        *,
+        model: str = None,
+        duration_ms: float = None,
+    ):
+        """记录 LLM 的原始响应，并补齐请求侧往返耗时与模型快照。"""
         effective_raw = raw_response if raw_response is not None else response_content
+        request_started_at = self._llm_request_started_at
+        if duration_ms is None and request_started_at is not None:
+            duration_ms = max(0.0, (time.perf_counter() - request_started_at) * 1000.0)
         record = {
             "type": "llm_response",
             "turn": self._turn_count,
@@ -860,7 +893,12 @@ class ConversationLogger:
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "tool_call_count": tool_call_count,
+            "model": model or self._llm_request_model,
+            "llm_seq": self._llm_request_seq if request_started_at is not None else None,
+            "duration_ms": round(duration_ms, 3) if duration_ms is not None else None,
         }
+        self._llm_request_started_at = None
+        self._llm_request_model = None
         record.update(
             self._pack_text_payload(
                 field_name="content",
@@ -889,6 +927,7 @@ class ConversationLogger:
         tool_result: str = None,
         status: str = "success",
         tool_call_id: str = None,
+        duration_ms: float = None,
     ):
         """记录工具调用"""
         record = {
@@ -899,6 +938,7 @@ class ConversationLogger:
             "tool_args_summary": summarize_tool_arguments(tool_args),
             "tool_call_id": tool_call_id,
             "status": status,
+            "duration_ms": round(duration_ms, 3) if duration_ms is not None else None,
         }
         if tool_result is not None:
             record.update(
@@ -953,14 +993,22 @@ class ConversationLogger:
         self._write(record)
 
     def log_error(self, error_type: str, error_msg: str, traceback: str = None, details: dict = None):
-        """记录错误"""
+        """记录错误；调用方未提供堆栈时，从当前异常上下文补齐。"""
+        resolved_traceback = traceback
+        if not resolved_traceback:
+            try:
+                candidate = traceback_module.format_exc()
+            except Exception:
+                candidate = ""
+            if candidate and "NoneType: None" not in candidate:
+                resolved_traceback = candidate
         record = {
             "type": "error",
             "turn": self._turn_count,
             "timestamp": self._timestamp(),
             "error_type": error_type,
             "error_msg": error_msg,
-            "traceback": traceback,
+            "traceback": resolved_traceback,
         }
         if details:
             record["details"] = details
@@ -1062,7 +1110,7 @@ class ConversationLogger:
         self._write(record)
 
     def end_session(self, summary: dict = None):
-        """记录会话结束"""
+        """记录会话结束，并附带写入自检摘要。"""
         record = {
             "type": "session_detach" if self._actor != "main" else "session_end",
             "timestamp": self._timestamp(),
@@ -1071,6 +1119,21 @@ class ConversationLogger:
             "summary": summary or {},
         }
         self._write(record)
+        self._write(self._build_session_summary_record())
+
+    def _build_session_summary_record(self) -> dict:
+        """汇总本次会话记录条数与失败计数，避免日志静默残缺。"""
+        counts = dict(sorted(self._write_counts.items()))
+        return {
+            "type": "session_summary",
+            "turn": self._turn_count,
+            "timestamp": self._timestamp(),
+            "session_id": self._session_id,
+            "record_count": sum(counts.values()),
+            "record_counts": counts,
+            "write_failures": self._write_failure_count,
+            "payload_failures": self._payload_failure_count,
+        }
 
     def new_session(self):
         """开始新的会话（生成新的 session_id）"""
