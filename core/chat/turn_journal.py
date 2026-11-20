@@ -15,6 +15,11 @@ from types import SimpleNamespace
 from typing import Any, Iterable
 from uuid import uuid4
 
+try:  # Optional accelerated parser; journal replay is a hot session-detail path.
+    import orjson as _orjson
+except ImportError:  # pragma: no cover - environments without the extra
+    _orjson = None
+
 from core.infrastructure import developer_sandbox
 from core.infrastructure.file_lock import locked_sidecar
 
@@ -25,6 +30,19 @@ from .model_messages import (
     _LogSet,
     normalize_model_messages,
 )
+
+
+def _loads_journal_line(raw: Any) -> Any:
+    """Parse one journal line, preferring the optional orjson accelerator.
+
+    Both parsers raise a ``ValueError`` subclass on malformed input, so callers
+    keep a single narrow ``except`` clause and the fallback stays byte-for-byte
+    compatible with the standard library.
+    """
+
+    if _orjson is not None:
+        return _orjson.loads(raw)
+    return json.loads(raw)
 
 
 SCHEMA_VERSION = 2
@@ -777,8 +795,8 @@ def _scan_terminal_turn_ids(path: Path) -> frozenset[str]:
                 if not raw:
                     continue
                 try:
-                    parsed = json.loads(raw)
-                except json.JSONDecodeError:
+                    parsed = _loads_journal_line(raw)
+                except (ValueError, UnicodeDecodeError):
                     continue
                 event = TurnJournalEvent.from_dict(parsed)
                 if (
@@ -852,8 +870,8 @@ def _scan_turn_transition_summaries(path: Path) -> dict[str, tuple[int, bool, st
                 if not raw:
                     continue
                 try:
-                    parsed = json.loads(raw)
-                except json.JSONDecodeError:
+                    parsed = _loads_journal_line(raw)
+                except (ValueError, UnicodeDecodeError):
                     continue
                 event = TurnJournalEvent.from_dict(parsed)
                 if event is None:
@@ -1079,8 +1097,8 @@ def _parse_journal_segment(
             parsed_offset = line_end
             continue
         try:
-            parsed = json.loads(text)
-        except (json.JSONDecodeError, UnicodeDecodeError):
+            parsed = _loads_journal_line(text)
+        except (ValueError, UnicodeDecodeError):
             continue
         event = TurnJournalEvent.from_dict(parsed)
         if event is None:
