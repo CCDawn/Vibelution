@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -611,11 +612,21 @@ def _assistant_timeline_events_by_turn(
     conversation_id: str,
     *,
     signature: tuple[Any, ...] | None = None,
+    turn_ids: Iterable[str] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     s = _service()
     normalized_session_id = str(conversation_id or "").strip()
     if not normalized_session_id:
         return {}
+    # A windowed transcript read only renders its own turns. Scoping the rebuild
+    # keeps a 40-message page from sanitizing every assistant item the journal
+    # ever stored. A scoped map is never written back to the shared snapshot.
+    scoped_turn_ids: set[str] | None = None
+    if turn_ids is not None:
+        scoped_turn_ids = {str(item or "").strip() for item in turn_ids}
+        scoped_turn_ids.discard("")
+        if not scoped_turn_ids:
+            return {}
     # The by-turn timeline projection is a pure function of the journal events,
     # so it joins the ledger projection snapshot cache: unchanged sessions skip
     # the full-journal scan + sanitize replay on every detail window read.
@@ -630,9 +641,11 @@ def _assistant_timeline_events_by_turn(
 
     cache_entry = _ledger_projection_cache_entry(normalized_session_id, signature)
     if cache_entry is not None and cache_entry.get("timeline_events_by_turn") is not None:
+        cached_by_turn = cache_entry["timeline_events_by_turn"]
         return {
             turn_id: list(items)
-            for turn_id, items in cache_entry["timeline_events_by_turn"].items()
+            for turn_id, items in cached_by_turn.items()
+            if scoped_turn_ids is None or turn_id in scoped_turn_ids
         }
     events_by_turn: dict[str, list[dict[str, Any]]] = {}
     tool_event_keys: dict[str, dict[str, int]] = {}
@@ -641,6 +654,9 @@ def _assistant_timeline_events_by_turn(
     for event in journal_events:
         if str(getattr(event, "event_type", "") or "").strip() != "assistant_item_committed":
             continue
+        turn_id = str(getattr(event, "turn_id", "") or "").strip()
+        if scoped_turn_ids is not None and turn_id not in scoped_turn_ids:
+            continue
         payload = dict(getattr(event, "payload", {}) or {})
         item_payload = dict(payload.get("item") or {})
         item_kind = str(payload.get("kind") or item_payload.get("kind") or "").strip().lower()
@@ -648,12 +664,13 @@ def _assistant_timeline_events_by_turn(
             "assistant",
             payload.get("text") or item_payload.get("text") or "",
         )
-        turn_id = str(getattr(event, "turn_id", "") or "").strip()
         if turn_id and item_kind == "commentary" and item_text:
             canonical_commentary_turn_ids.add(turn_id)
     for event in journal_events:
         turn_id = str(getattr(event, "turn_id", "") or "").strip()
         if not turn_id:
+            continue
+        if scoped_turn_ids is not None and turn_id not in scoped_turn_ids:
             continue
         event_type = str(getattr(event, "event_type", "") or "").strip()
         payload = dict(getattr(event, "payload", {}) or {})
@@ -715,13 +732,14 @@ def _assistant_timeline_events_by_turn(
         for turn_id, items in events_by_turn.items()
         if any(str(item.get("kind") or "") in {"assistant_text", "thought"} for item in items)
     }
-    _store_ledger_projection_cache_entry(
-        normalized_session_id,
-        signature,
-        timeline_events_by_turn={
-            turn_id: tuple(items) for turn_id, items in result.items()
-        },
-    )
+    if scoped_turn_ids is None:
+        _store_ledger_projection_cache_entry(
+            normalized_session_id,
+            signature,
+            timeline_events_by_turn={
+                turn_id: tuple(items) for turn_id, items in result.items()
+            },
+        )
     return result
 
 

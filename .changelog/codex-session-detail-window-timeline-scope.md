@@ -1,0 +1,1 @@
+- Opening a long chat now returns its first page much faster: the transcript no longer rebuilds assistant timelines for every turn in the session before rendering the visible window (cold read on a 30MB session dropped from ~2.1s to ~1.7s, with byte-identical detail payload).

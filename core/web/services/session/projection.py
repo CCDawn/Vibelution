@@ -2078,6 +2078,15 @@ def _normalize_messages(
     timeline_lang = s.get_web_language() if include_timeline else ""
     normalized_start_index = max(1, int(source_start_index or 1))
     normalized_transcript_scope = s._normalize_session_detail_transcript_scope(transcript_scope)
+    timeline_scope_turn_ids: set[str] | None = None
+    if include_timeline and normalized_transcript_scope == "window":
+        timeline_scope_turn_ids = {
+            turn_id
+            for raw_item in raw_items
+            if isinstance(raw_item, dict)
+            for turn_id in (s._message_turn_id(raw_item),)
+            if turn_id
+        }
     guidance_metadata: dict[str, dict[str, Any]] | None = None
     # Startup-recovery supersede marks (display-only): turns whose interrupted
     # partial was superseded by an auto-resume get metadata.recoverySuperseded
@@ -2218,7 +2227,10 @@ def _normalize_messages(
         include_assistant_text = True
         if include_timeline and role == "assistant" and turn_id:
             if ledger_events_by_turn is None:
-                ledger_events_by_turn = s._assistant_timeline_events_by_turn(conversation_id)
+                ledger_events_by_turn = s._assistant_timeline_events_by_turn(
+                    conversation_id,
+                    turn_ids=timeline_scope_turn_ids,
+                )
             ordered_timeline_events = ledger_events_by_turn.get(turn_id) or []
             if ordered_timeline_events and timeline_target_indices.get(turn_id) == index:
                 timeline_feedback_events = s._filter_redundant_assistant_timeline_events(

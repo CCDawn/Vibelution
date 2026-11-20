@@ -1058,7 +1058,9 @@ def test_session_window_reuses_one_active_branch_for_all_turns(tmp_path, monkeyp
     # Isolate the two detail/stat normalizations from replay, timeline and live
     # projections, which have their own legitimate branch consumers.
     monkeypatch.setattr(session_service, "_ledger_visible_messages_for_session", lambda _: raw)
-    monkeypatch.setattr(session_service, "_assistant_timeline_events_by_turn", lambda _: {})
+    monkeypatch.setattr(
+        session_service, "_assistant_timeline_events_by_turn", lambda *_a, **_k: {}
+    )
     monkeypatch.setattr(session_service, "_build_live_output_message", lambda _: None)
     monkeypatch.setattr(session_service, "_assistant_turn_header_fields", lambda *a, **k: {})
     calls = []
