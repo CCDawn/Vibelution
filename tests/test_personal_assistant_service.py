@@ -1001,7 +1001,7 @@ def _set_budget_knob(monkeypatch, value):
 
 
 def test_policy_budget_reads_config_knob_with_default_and_fallback(monkeypatch):
-    assert service.current_policy()["maxCallsPerTurn"] == 16
+    assert service.current_policy()["maxCallsPerTurn"] == 0
     _set_budget_knob(monkeypatch, 24)
     assert service.current_policy()["maxCallsPerTurn"] == 24
 
@@ -1011,7 +1011,7 @@ def test_policy_budget_reads_config_knob_with_default_and_fallback(monkeypatch):
         raise RuntimeError("config unavailable")
 
     monkeypatch.setattr(settings_module, "get_config", broken)
-    assert service.current_policy()["maxCallsPerTurn"] == 16
+    assert service.current_policy()["maxCallsPerTurn"] == 0
 
 
 def test_provisioned_policy_uses_configured_budget(personal_env, monkeypatch):
@@ -1168,7 +1168,7 @@ def test_budget_config_fallback_logs_warning(monkeypatch, caplog):
 
     monkeypatch.setattr(settings_module, "get_config", broken)
     with caplog.at_level("WARNING", logger="core.web.services.personal_assistant_service"):
-        assert service.current_policy()["maxCallsPerTurn"] == 16
+        assert service.current_policy()["maxCallsPerTurn"] == 0
     assert any("personal_assistant_max_calls_per_turn" in record.message for record in caplog.records)
 
 
@@ -1427,3 +1427,16 @@ def test_settings_get_returns_null_for_missing_or_archived_assistant(personal_en
     assert service.get_personal_assistant_settings()["settings"]["displayName"] == "个人助理"
     directory.update_agent_instance(row["agentId"], status="archived")
     assert service.get_personal_assistant_settings() == {"settings": None}
+
+def test_zero_tool_budget_means_unlimited(monkeypatch):
+    """0 是显式无限制，不得被旧实现回落到默认 16。"""
+
+    class _Chat:
+        personal_assistant_max_calls_per_turn = 0
+
+    class _Config:
+        web_chat = _Chat()
+
+    monkeypatch.setattr("config.settings.get_config", lambda: _Config())
+    assert service._max_calls_per_turn() == 0
+    assert service.current_policy()["maxCallsPerTurn"] == 0

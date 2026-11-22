@@ -44,7 +44,7 @@ DEFAULT_PREFERENCES = {
     "showCompletion": True,
     "idleMessage": "",
 }
-DEFAULT_MAX_CALLS_PER_TURN = 16
+DEFAULT_MAX_CALLS_PER_TURN = 0
 _LEGACY_TOOLS = (
     "personal_assistant_overview_tool",
     "personal_assistant_manage_tool",
@@ -124,7 +124,7 @@ def _max_calls_per_turn() -> int:
             exc_info=True,
         )
         return DEFAULT_MAX_CALLS_PER_TURN
-    return value if value >= 1 else DEFAULT_MAX_CALLS_PER_TURN
+    return value if value >= 0 else DEFAULT_MAX_CALLS_PER_TURN
 
 
 def current_policy() -> dict:

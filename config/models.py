@@ -1062,10 +1062,10 @@ class WebChatConfig(BaseModel):
         description="已退役兼容字段：Web Chat 连续推进轮数不由该字段控制；本字段不参与运行时决策",
     )
     personal_assistant_max_calls_per_turn: int = Field(
-        default=16,
-        ge=1,
+        default=0,
+        ge=0,
         le=256,
-        description="个人助理工具策略每回合最多工具调用次数（POLICY maxCallsPerTurn）",
+        description="个人助理工具策略每回合最多工具调用次数（POLICY maxCallsPerTurn）；0 表示无限制",
     )
 
 
