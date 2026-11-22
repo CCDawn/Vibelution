@@ -157,7 +157,6 @@ export function createCodexTranscriptCellRenderers({
           <ConversationLazyThoughtBody
             text={fullText}
             streaming={isLive}
-            className={styles.codexTranscriptReasoningBody}
             contentItemId={input.contentItemId}
             turnId={input.turnId}
             loadThoughtBody={loadThoughtBody}

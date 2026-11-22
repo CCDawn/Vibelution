@@ -19,14 +19,12 @@ export type ThoughtBodyLoader = (
 export function ConversationLazyThoughtBody({
   text,
   streaming,
-  className,
   contentItemId,
   turnId,
   loadThoughtBody,
 }: {
   text: string;
   streaming: boolean;
-  className?: string;
   contentItemId?: string;
   turnId?: string;
   loadThoughtBody?: ThoughtBodyLoader;
@@ -51,10 +49,6 @@ export function ConversationLazyThoughtBody({
     };
   }, [contentItemId, turnId, loadThoughtBody]);
   return (
-    <ThoughtScrollBody
-      text={fullBody || text}
-      streaming={streaming}
-      className={className}
-    />
+    <ThoughtScrollBody text={fullBody || text} streaming={streaming} />
   );
 }
