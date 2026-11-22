@@ -407,12 +407,17 @@ class _SessionJournalProjection:
             raise ValueError("Journal projection belongs to a different session")
         if self._signature is None:
             self._signature = tuple(_service()._session_conversation_events_signature(session_id))
+        # An empty journal path means the signature carries no identity at all:
+        # caching on it would let one projection answer another session read.
+        cacheable = bool(self._signature[0])
         cache_key = (session_id, self._signature, turn_id)
-        cached = _turn_item_cache_get(cache_key)
-        if cached is not None:
-            return cached
+        if cacheable:
+            cached = _turn_item_cache_get(cache_key)
+            if cached is not None:
+                return cached
         items, order = self._project_turn(session_id, turn_id)
-        _turn_item_cache_put(cache_key, items, order)
+        if cacheable:
+            _turn_item_cache_put(cache_key, items, order)
         return items, order
 
     def _project_turn(self, session_id: str, turn_id: str) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
