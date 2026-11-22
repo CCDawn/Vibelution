@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from core.version import get_product_version
 from .control import WebControlGuardMiddleware, control_token_payload, ensure_control_source, trusted_control_origins
 from .lifecycle import web_workbench_lifespan
+from .middleware.asset_compression import AssetOnlyGZipMiddleware
 from .middleware.runtime_scene_api import RuntimeSceneApiEventMiddleware
 from .middleware.wait_for_routes import WaitForWebRoutesMiddleware
 from .route_bootstrap import ensure_web_routes_registered
@@ -65,6 +66,8 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(WebControlGuardMiddleware)
     app.add_middleware(RuntimeSceneApiEventMiddleware)
+    # Compress only hash-named frontend assets: API JSON and SSE stay uncompressed.
+    app.add_middleware(AssetOnlyGZipMiddleware)
     app.add_middleware(WaitForWebRoutesMiddleware)
 
     # Pin the release and backend identity at process construction time.  The
