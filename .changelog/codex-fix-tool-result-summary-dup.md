@@ -1,0 +1,1 @@
+- 工具结果不再把同一段摘要写两遍进会话 journal：`tool_result` 只保留 `result`，工具预览仍由 `tool_call_started` 承载，读取侧统一回退到 `result`。大型会话因此少存约 3.49 MB/会话，打开和回放更快。

@@ -1513,7 +1513,6 @@ def _capture_session_ui_stream(
             "status": status,
             "feedbackSequence": capture._latest_tool_feedback_sequence,
             "arguments": data.get("args") if isinstance(data.get("args"), dict) else {},
-            "summary": summary,
             "result": result,
             "error": error,
             "durationMs": data.get("durationMs") or data.get("duration_ms"),
@@ -1521,6 +1520,11 @@ def _capture_session_ui_stream(
         }
         if call_id:
             tool_call_payload["callId"] = call_id
+        if event.name == s.EventNames.TOOL_START:
+            # The started event carries the short human preview. The result event
+            # would only repeat "result" verbatim, and every reader already falls
+            # back to it, so the duplicate copy stays out of the journal.
+            tool_call_payload["summary"] = summary
         s._copy_tool_result_fact_fields(fact_fields, tool_call_payload)
         _append_capture_journal_event(
             session_id,

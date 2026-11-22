@@ -276,7 +276,7 @@ def _slim_codex_transcript_for_window_payload(
         for tool_call in raw_tool_calls[:40]:
             if not isinstance(tool_call, dict):
                 continue
-            summary = str(tool_call.get("summary") or tool_call.get("detail") or "").strip()
+            summary = str(tool_call.get("summary") or tool_call.get("detail") or tool_call.get("result") or "").strip()
             if len(summary) > 240:
                 summary = f"{summary[:240]}…"
             slim_tool_calls.append(
