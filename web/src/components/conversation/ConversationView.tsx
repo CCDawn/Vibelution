@@ -1670,6 +1670,12 @@ export const ConversationView = React.memo(function ConversationView({
               style={{
                 height: timelineVirtualizer.getTotalSize(),
                 position: "relative",
+                // ZCode pins this on the virtual host rather than the scroll
+                // container: this host is the element whose height jumps when
+                // measured rows replace estimates, so excluding its subtree
+                // from scroll anchoring stops a session switch from dragging
+                // the viewport while heights are still converging.
+                overflowAnchor: "none",
               }}
             >
             {timelineRowPlan
