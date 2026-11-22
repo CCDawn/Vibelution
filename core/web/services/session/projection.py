@@ -346,6 +346,53 @@ class _SessionListBuildResult:
     published_signature: tuple[Any, ...] | None = None
 
 
+# Turn-item projection is the dominant cost of one detail read: every request
+# re-folds the whole active journal and re-projects each turn from scratch.
+# Reuse the projected pair across requests keyed by the journal signature, which
+# moves on every append, so an entry can never outlive the file it came from.
+# Both sides deep-copy because callers merge message metadata into the items.
+_TURN_ITEM_CACHE_MAX_ENTRIES = 4096
+_TURN_ITEM_CACHE_LOCK = threading.Lock()
+_TURN_ITEM_CACHE: dict[tuple[str, tuple[Any, ...], str], tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]] = {}
+_TURN_ITEM_CACHE_ORDER: list[tuple[str, tuple[Any, ...], str]] = []
+
+
+def _turn_item_cache_get(
+    key: tuple[str, tuple[Any, ...], str],
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]] | None:
+    with _TURN_ITEM_CACHE_LOCK:
+        entry = _TURN_ITEM_CACHE.get(key)
+        if entry is None:
+            return None
+        try:
+            _TURN_ITEM_CACHE_ORDER.remove(key)
+        except ValueError:
+            pass
+        _TURN_ITEM_CACHE_ORDER.append(key)
+        items, order = entry
+        return deepcopy(items), deepcopy(order)
+
+
+def _turn_item_cache_put(
+    key: tuple[str, tuple[Any, ...], str],
+    items: list[dict[str, Any]],
+    order: dict[str, dict[str, Any]],
+) -> None:
+    with _TURN_ITEM_CACHE_LOCK:
+        if key not in _TURN_ITEM_CACHE:
+            _TURN_ITEM_CACHE_ORDER.append(key)
+        _TURN_ITEM_CACHE[key] = (deepcopy(items), deepcopy(order))
+        while len(_TURN_ITEM_CACHE_ORDER) > _TURN_ITEM_CACHE_MAX_ENTRIES:
+            victim = _TURN_ITEM_CACHE_ORDER.pop(0)
+            _TURN_ITEM_CACHE.pop(victim, None)
+
+
+def _clear_turn_item_cache() -> None:
+    with _TURN_ITEM_CACHE_LOCK:
+        _TURN_ITEM_CACHE.clear()
+        _TURN_ITEM_CACHE_ORDER.clear()
+
+
 @dataclass
 class _SessionJournalProjection:
     """One read's derived active paths; never retained across detail requests."""
@@ -353,10 +400,22 @@ class _SessionJournalProjection:
     session_id: str
     _items_events_by_turn: dict[str, list[Any]] | None = field(default=None, init=False)
     _order_events_by_turn: dict[str, list[Any]] = field(default_factory=dict, init=False)
+    _signature: tuple[Any, ...] | None = field(default=None, init=False)
 
     def for_turn(self, session_id: str, turn_id: str) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
         if session_id != self.session_id:
             raise ValueError("Journal projection belongs to a different session")
+        if self._signature is None:
+            self._signature = tuple(_service()._session_conversation_events_signature(session_id))
+        cache_key = (session_id, self._signature, turn_id)
+        cached = _turn_item_cache_get(cache_key)
+        if cached is not None:
+            return cached
+        items, order = self._project_turn(session_id, turn_id)
+        _turn_item_cache_put(cache_key, items, order)
+        return items, order
+
+    def _project_turn(self, session_id: str, turn_id: str) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
         from core.chat.turn_journal import fold_active_events, _session_turn_items_from_active_events
         from .turn_steer import _display_item_order_provenance_from_active_events, _sequence
 
