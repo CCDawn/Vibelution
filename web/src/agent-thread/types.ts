@@ -55,6 +55,9 @@ export type AgentThoughtPart = {
    */
   createdAt?: string;
   updatedAt?: string;
+  /** Canonical body was bounded for transport; fetch it by id on expand. */
+  contentTruncated?: boolean;
+  contentLength?: number;
 };
 
 export type AgentMentalSnapshot = {

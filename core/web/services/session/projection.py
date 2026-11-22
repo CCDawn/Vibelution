@@ -1411,8 +1411,72 @@ def _build_session_detail_from_summary(
     active_leaf_id, active_branch_id = s._session_branch_metadata(conversation["id"])
     detail["activeLeafId"] = active_leaf_id
     detail["activeBranchId"] = active_branch_id
+    _slim_historical_turn_item_payloads(detail)
     return detail
 
+
+# Reasoning text is the single largest block of a detail payload and the
+# transcript renders it collapsed by default. The newest turns keep full text
+# so the live view never pays a second round trip; older turns carry a bounded
+# preview plus the original length, and the reader fetches the rest per item.
+_TURN_ITEM_FULL_TEXT_TURNS = 3
+_TURN_ITEM_TEXT_PREVIEW_CHARS = 400
+
+
+def _slim_historical_turn_item_payloads(detail: dict[str, Any]) -> None:
+    """Bound historical reasoning bodies; recent turns stay untouched."""
+
+    messages = detail.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return
+    turn_ids: list[str] = []
+    for message in messages:
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            continue
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        turn_id = str(metadata.get("turnId") or message.get("turnId") or "").strip()
+        if turn_id:
+            turn_ids.append(turn_id)
+    keep_full = set(turn_ids[-_TURN_ITEM_FULL_TEXT_TURNS:])
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        items = message.get("turnItems")
+        if not isinstance(items, list) or not items:
+            continue
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        turn_id = str(metadata.get("turnId") or message.get("turnId") or "").strip()
+        if turn_id and turn_id in keep_full:
+            continue
+        for item in items:
+            if not isinstance(item, dict) or item.get("type") != "reasoning":
+                continue
+            value = item.get("text")
+            if not isinstance(value, str) or len(value) <= _TURN_ITEM_TEXT_PREVIEW_CHARS:
+                continue
+            item["text"] = value[:_TURN_ITEM_TEXT_PREVIEW_CHARS] + chr(8230)
+            item["contentTruncated"] = True
+            item["contentLength"] = len(value)
+
+
+def get_session_turn_item(
+    session_id: str,
+    turn_id: str,
+    item_id: str,
+) -> dict[str, Any] | None:
+    """Re-project one turn item at full length for the on-demand reader."""
+
+    normalized_session_id = str(session_id or "").strip()
+    normalized_turn_id = str(turn_id or "").strip()
+    target = str(item_id or "").strip()
+    if not normalized_session_id or not normalized_turn_id or not target:
+        return None
+    projection = _SessionJournalProjection(normalized_session_id)
+    items, _order = projection.for_turn(normalized_session_id, normalized_turn_id)
+    for item in items:
+        if target in {str(item.get("itemId") or ""), str(item.get("id") or "")}:
+            return dict(item)
+    return None
 
 def _build_session_summary(
     conversation: dict[str, Any],

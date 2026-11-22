@@ -24,6 +24,8 @@ import {
   ThoughtScrollBody,
   ThoughtStreamingSummary,
 } from "./conversationThoughtUnits";
+import { ConversationLazyThoughtBody } from "./conversationLazyThoughtBody";
+import type { ThoughtBodyLoader } from "./conversationLazyThoughtBody";
 import { stripAnsiArtifacts } from "./conversationAnsiSanitize";
 import { SHORT_THOUGHT_MAX_CHARS } from "./thoughtExpansionPolicy";
 import styles from "./ConversationView.styles";
@@ -44,6 +46,8 @@ export type CodexTranscriptCellRenderersDeps = {
   toggleSection: (messageId: string, section: string, defaultExpanded: boolean) => void;
   /** Reuse the owning conversation's Markdown renderer for public narration. */
   renderProgressText?: (text: string, streaming: boolean) => ReactNode;
+  /** Fetch a bounded thought body by canonical item id when the reader expands it. */
+  loadThoughtBody?: ThoughtBodyLoader;
 };
 
 /**
@@ -57,6 +61,7 @@ export function createCodexTranscriptCellRenderers({
   getExpansionState,
   toggleSection,
   renderProgressText,
+  loadThoughtBody,
 }: CodexTranscriptCellRenderersDeps) {
   /**
    * Collapsible thinking lane (ZCode reasoning parity): the row stays visible
@@ -79,6 +84,9 @@ export function createCodexTranscriptCellRenderers({
       settledDurationSeconds?: number;
       presentation?: "flow";
       expanded?: boolean;
+      /** Canonical id of a body that was bounded on the wire. */
+      contentItemId?: string;
+      turnId?: string;
     },
   ) {
     // Narration lanes render plain text only: terminal SGR artifacts from
@@ -145,7 +153,16 @@ export function createCodexTranscriptCellRenderers({
             </span>
           </span>
         </VButton>
-        {expanded ? <ThoughtScrollBody text={fullText} streaming={isLive} className={styles.codexTranscriptReasoningBody} /> : null}
+        {expanded ? (
+          <ConversationLazyThoughtBody
+            text={fullText}
+            streaming={isLive}
+            className={styles.codexTranscriptReasoningBody}
+            contentItemId={input.contentItemId}
+            turnId={input.turnId}
+            loadThoughtBody={loadThoughtBody}
+          />
+        ) : null}
       </section>
     );
   }
@@ -196,6 +213,8 @@ export function createCodexTranscriptCellRenderers({
       cellId: cell.id,
       sectionId: reasoningExpansionSectionId(cell),
       text: fullText,
+      contentItemId: cell.contentItemId,
+      turnId: "turnId" in message ? message.turnId : "",
       status: cell.status,
       tone: cell.tone,
       phase: cell.phase,

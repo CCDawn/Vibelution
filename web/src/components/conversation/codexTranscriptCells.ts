@@ -58,6 +58,10 @@ export type CodexTranscriptCell = {
   originType?: CodexTranscriptCellOriginType;
   /** Reasoning cells only: settled server-derived thinking seconds (see conversationThoughtDuration.ts). */
   settledDurationSeconds?: number;
+  /** Bounded historical body: rendered on expand via the item reader. */
+  contentItemId?: string;
+  contentTruncated?: boolean;
+  contentLength?: number;
 };
 
 export type CodexTranscriptCellBuildOptions = {
@@ -187,6 +191,9 @@ function cellsFromTimelineItems(
           operationIds: [...item.sourceOperationIds],
           sourceItemId: item.id,
           settledDurationSeconds: item.settledDurationSeconds,
+          contentItemId: item.contentItemId,
+          contentTruncated: item.contentTruncated,
+          contentLength: item.contentLength,
         };
       }
       if (item.kind === "assistant_text") {

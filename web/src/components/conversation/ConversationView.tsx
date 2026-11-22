@@ -23,7 +23,7 @@ import type {
 } from "../../agent-thread/types";
 import { fetchJson } from "../../api/client";
 import { fetchConfigBootstrap } from "../../api/config";
-import { fetchSessionMessageCuration, isFetchJsonHttpError, setSessionMessageCuration } from "../../api/chat";
+import { fetchSessionMessageCuration, fetchSessionTurnItem, isFetchJsonHttpError, setSessionMessageCuration } from "../../api/chat";
 import { queryKeys } from "../../api/queryKeys";
 import { VScrollRegion, VStateSurface } from "../../components/vui";
 import { useAppI18n } from "../../i18n/useAppI18n";
@@ -1177,6 +1177,10 @@ export const ConversationView = React.memo(function ConversationView({
   } = createCodexTranscriptCellRenderers({
     lang, t, getExpansionState, toggleSection,
     renderProgressText: (text, streaming) => renderAssistantTranscriptResponseText(text, streaming),
+    loadThoughtBody: async (turnId, itemId, options) => {
+      const response = await fetchSessionTurnItem(sessionId, turnId, itemId, options);
+      return response.item.type === "reasoning" ? response.item.text : "";
+    },
   });
 
   const {

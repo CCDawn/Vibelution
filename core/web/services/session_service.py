@@ -993,6 +993,7 @@ from core.web.services.session.export_html import export_session_html
 from core.web.services.session.projection import (
     list_sessions,
     get_session_detail,
+    get_session_turn_item,
     get_active_session_detail,
     get_active_session_summary,
     _build_session_detail,

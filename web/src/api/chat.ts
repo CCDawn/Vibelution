@@ -18,6 +18,7 @@ import type { SessionReferenceAttachment,
   SessionExportHtmlPayload,
   SessionExportHtmlResponse,
   SessionGuidanceMode,
+  SessionTurnItem,
   SessionLlmOptions,
   SessionMessageCurationAction,
   SessionMessageCurationMutationResponse,
@@ -299,6 +300,17 @@ export function fetchSessionDetail(
     signal: options.signal,
   });
 }
+
+export function fetchSessionTurnItem(
+  sessionId: string,
+  turnId: string,
+  itemId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<{ item: SessionTurnItem }> {
+  const path = `/api/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}/items/${encodeURIComponent(itemId)}`;
+  return fetchJson<{ item: SessionTurnItem }>(path, { signal: options.signal });
+}
+
 
 export function createChatSession(
   payload: {

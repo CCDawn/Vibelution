@@ -19,6 +19,10 @@ export type AgentMessageThoughtTimelineItem = {
    * thinking time); absent when no segment carried canonical stamps.
    */
   settledDurationSeconds?: number;
+  /** Canonical turn-item id when the body was bounded on the wire. */
+  contentItemId?: string;
+  contentTruncated?: boolean;
+  contentLength?: number;
 };
 
 export type AgentMessageAssistantTextTimelineItem = {
@@ -158,6 +162,9 @@ function timelineItemsFromOperations(
           defaultExpanded: isRunningStatus(operation.status),
           sourceOperationIds: [operation.id],
           settledDurationSeconds: operation.settledDurationSeconds,
+          contentItemId: operation.contentItemId,
+          contentTruncated: operation.contentTruncated,
+          contentLength: operation.contentLength,
         });
       }
       continue;
@@ -216,6 +223,8 @@ function timelineItemsFromServer(
       if (!text) {
         continue;
       }
+      const sourceOperationId = String((item.sourceOperationIds || item.operationIds || [])[0] || "");
+      const sourceOperation = sourceOperationId ? operationsById.get(sourceOperationId) : undefined;
       items.push({
         id: item.id || `timeline-thought-${items.length + 1}`,
         kind: "thought",
@@ -224,6 +233,9 @@ function timelineItemsFromServer(
         preview: String(item.preview || firstParagraphPreview(text)).trim(),
         defaultExpanded: Boolean(item.defaultExpanded) || status === "running",
         sourceOperationIds: [...(item.sourceOperationIds || item.operationIds || [])],
+        contentItemId: sourceOperation?.contentItemId,
+        contentTruncated: sourceOperation?.contentTruncated,
+        contentLength: sourceOperation?.contentLength,
       });
       continue;
     }

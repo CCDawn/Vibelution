@@ -46,6 +46,10 @@ export type AgentMessageOperation = {
   sequence?: number;
   timestamp?: string;
   relatedThoughtSequence?: number;
+  /** Canonical turn-item id behind a bounded thought body. */
+  contentItemId?: string;
+  contentTruncated?: boolean;
+  contentLength?: number;
 };
 
 export type AgentMessageOperationLabels = {
@@ -154,6 +158,9 @@ function agentThoughtPartToOperation(
     summary: compactPreview(part.summary || text),
     durationSeconds: null,
     settledDurationSeconds: settledThoughtDurationSeconds(part.createdAt, part.updatedAt) ?? undefined,
+    contentItemId: part.contentTruncated ? part.id : undefined,
+    contentTruncated: part.contentTruncated,
+    contentLength: part.contentLength,
     resultPreview: text,
     sequence: numberOrNull(part.sequence) ?? undefined,
     timestamp: part.timestamp,

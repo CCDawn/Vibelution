@@ -650,6 +650,9 @@ type SessionTurnItemBase = {
   summary?: string;
   diagnosticSummary?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
+  /** Historical bodies are bounded on the wire; refetch by itemId on expand. */
+  contentTruncated?: boolean;
+  contentLength?: number;
 };
 
 export type AgentMessageTurnItem = SessionTurnItemBase & {

@@ -95,6 +95,7 @@ from core.web.services.session_service import (
     get_active_session_summary,
     get_session_budget_parameters_view,
     get_session_detail,
+    get_session_turn_item,
     get_session_llm_options,
     get_session_message_curation,
     list_child_sessions,
@@ -1441,6 +1442,17 @@ def session_rewind_apply(session_id: str, payload: SessionRewindApplyPayload) ->
             },
         ) from exc
 
+
+@router.get(
+    "/sessions/{session_id}/turns/{turn_id}/items/{item_id}",
+)
+def session_turn_item(session_id: str, turn_id: str, item_id: str) -> dict:
+    """Return one turn item at full length for a collapsed-body reader."""
+
+    item = get_session_turn_item(session_id, turn_id, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Turn item not found")
+    return {"item": item}
 
 @router.post(
     "/sessions/{session_id}/stop",
