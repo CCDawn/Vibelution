@@ -1003,6 +1003,26 @@ def compress_turn_messages(
         f"({current_tokens} -> {after_tokens}) | {combined_reason[:60]}",
         "INFO",
     )
+    # 单文件可读：压缩结果同时进会话诊断 JSONL 与 Markdown 回放，
+    # 不必再跨到 turn_journal 才能确认某一轮到底压了多少、为什么压。
+    try:
+        from core.unified_logger import logger as _conversation_diag_logger
+
+        _conversation_diag_logger.log_compression(
+            current_tokens,
+            after_tokens,
+            token_saved,
+            details={
+                "level": level.value,
+                "reason": combined_reason,
+                "effective": compression_effective,
+                "trigger_source": resolved_trigger_source,
+                "effectiveness_ratio": round(float(effectiveness_ratio), 4),
+                "effectiveness_threshold": round(float(effectiveness_threshold), 4),
+            },
+        )
+    except Exception:
+        pass
     if not compression_effective:
         ui.add_log(
             f"[压缩] 收益不足 | saved={effectiveness_ratio:.1%} "

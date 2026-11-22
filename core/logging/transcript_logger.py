@@ -500,9 +500,29 @@ session: {self._session_id}
 """
         self._enqueue_write(content_md)
 
-    def write_compression(self, before_tokens: int, after_tokens: int, saved_tokens: int):
+    def write_compression(
+        self,
+        before_tokens: int,
+        after_tokens: int,
+        saved_tokens: int,
+        details: dict = None,
+    ):
         """写入上下文压缩记录"""
         ratio = (saved_tokens / before_tokens * 100) if before_tokens > 0 else 0
+        extra_lines = ""
+        if details:
+            facts = []
+            level = str(details.get("level") or "").strip()
+            if level:
+                facts.append(f"- 级别: {level}")
+            effective = details.get("effective")
+            if effective is not None:
+                facts.append("- 是否生效: " + ("是" if effective else "否"))
+            reason = str(details.get("reason") or "").strip()
+            if reason:
+                facts.append(f"- 原因: {reason[:200]}")
+            if facts:
+                extra_lines = "\n" + "\n".join(facts)
 
         content_md = f"""
 
@@ -510,7 +530,7 @@ session: {self._session_id}
 
 | 压缩前 | 压缩后 | 节省 |
 |--------|--------|------|
-| {before_tokens} | {after_tokens} | {ratio:.1f}% ({saved_tokens} tokens) |
+| {before_tokens} | {after_tokens} | {ratio:.1f}% ({saved_tokens} tokens) |{extra_lines}
 
 """
         self._enqueue_write(content_md)

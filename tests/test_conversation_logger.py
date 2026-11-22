@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import hashlib
+import importlib
 import json
 import os
 from pathlib import Path
@@ -20,6 +21,13 @@ def _retire_transcript_writer_after_test():
         logger.shutdown(timeout=1.0)
     transcript_logger_module._transcript_logger = None
     TranscriptLogger._instance = None
+
+
+@pytest.fixture(autouse=True)
+def _pin_file_logging_enabled(monkeypatch):
+    """Keep the JSONL sink on; the operator log.file_enabled must not decide test outcomes."""
+    logger_module = importlib.import_module("core.logging.logger")
+    monkeypatch.setattr(logger_module, "_resolve_file_logging_enabled", lambda: True)
 
 
 def _fresh_logger(tmp_path: Path) -> ConversationLogger:

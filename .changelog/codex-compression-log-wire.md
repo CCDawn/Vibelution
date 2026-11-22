@@ -1,0 +1,1 @@
+- 压缩诊断补上 JSONL 与 Markdown 两个通道：`compress_turn_messages` 现在把压缩前/后/节省 token、级别、原因、是否生效一并写进 conversation 日志与回放文档，排查压缩问题时不必再跨到 turn_journal 关联。

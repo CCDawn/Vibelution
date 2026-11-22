@@ -968,7 +968,13 @@ class ConversationLogger:
         }
         self._write(record)
 
-    def log_compression(self, before_tokens: int, after_tokens: int, saved_tokens: int):
+    def log_compression(
+        self,
+        before_tokens: int,
+        after_tokens: int,
+        saved_tokens: int,
+        details: dict = None,
+    ):
         """记录上下文压缩"""
         record = {
             "type": "compression",
@@ -979,6 +985,8 @@ class ConversationLogger:
             "saved_tokens": saved_tokens,
             "ratio": f"{(saved_tokens / before_tokens * 100):.1f}%" if before_tokens > 0 else "0%",
         }
+        if details:
+            record["details"] = dict(details)
         self._write(record)
 
     def log_action(self, action: str, details: dict = None):

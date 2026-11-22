@@ -217,12 +217,24 @@ class UnifiedLogger:
 
     # ==================== 特殊事件 ====================
 
-    def log_compression(self, before_tokens: int, after_tokens: int, saved_tokens: int):
+    def log_compression(
+        self,
+        before_tokens: int,
+        after_tokens: int,
+        saved_tokens: int,
+        details: dict = None,
+    ):
         """记录上下文压缩"""
+        # value 级脱敏：压缩原因可能内联模型输出片段。
+        details = redact_sensitive_values(details) if details else None
         # ConversationLogger: JSON 日志
-        self._conversation.log_compression(before_tokens, after_tokens, saved_tokens)
+        self._conversation.log_compression(
+            before_tokens, after_tokens, saved_tokens, details=details
+        )
         # TranscriptLogger: Markdown 格式
-        self._transcript.write_compression(before_tokens, after_tokens, saved_tokens)
+        self._transcript.write_compression(
+            before_tokens, after_tokens, saved_tokens, details=details
+        )
 
     def log_action(self, action: str, details: dict = None):
         """记录特殊动作（restart/hibernated/skip 等）"""
