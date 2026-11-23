@@ -36,6 +36,7 @@ def test_native_personal_tools_persist_own_affairs_and_private_memory_across_pro
         os.environ['LANGCHAIN_TRACING'] = 'false'
         from core.assistant_runtime import native
         from core.web.services import agent_directory_service as directory, personal_affairs_service
+        from core.web.services.personal_assistant_service import DEV_TOOLS
         from core.web.services.agent_directory import episodic_memory
         from tools.Key_Tools import create_key_tools
         root = Path(os.environ['VIBELUTION_ASSISTANT_NATIVE_ROOT']).resolve()
@@ -47,7 +48,7 @@ def test_native_personal_tools_persist_own_affairs_and_private_memory_across_pro
             aid, sid = identity['agentId'], identity['directSessionId']
             tools = {tool.name: tool for tool in create_key_tools()}
             assert expected <= tools.keys()
-            assert set(directory.get_agent(aid)['toolPolicy']['allowedTools']) == expected
+            assert set(directory.get_agent(aid)['toolPolicy']['allowedTools']) == expected | set(DEV_TOOLS)
             # These are the canonical descriptors, not same-named Launcher actions.
             assert tools['personal_affairs_tool'].func.__module__ == 'tools.personal_affairs_tools'
             assert set(tools['compress_context_tool'].args) == {'reason'}
