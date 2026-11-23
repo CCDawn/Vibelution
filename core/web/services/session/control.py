@@ -595,15 +595,29 @@ def request_stop_session_turn(
             },
         )
     if queued_turn_cancelled or controller_was_restored:
+        # 内存收尾必须同步：前端要立刻可以再发送，停止阶段也要立刻释放。
+        s._set_session_running(conversation_id, False, turn_id=controller.turn_id)
+        controller.mark_released_to_user()
+        # 排队路径同步 settle：阶段登记随终态一并释放，不留给投影。
+        _clear_session_stop_stages(conversation_id, stop_turn_id)
+        if fast_ack:
+            # 中断快照落盘与投影发布会随 transcript 规模线性变慢，而交互式
+            # stop 已经拿到停止确认；落盘交给后台线程，HTTP 不再等投影重建。
+            _persist_interrupted_snapshot_async(
+                s, conversation_id, stop_snapshot, lang=lang
+            )
+            return {
+                "id": conversation_id,
+                "currentPhase": "stopping",
+                "stopRequested": True,
+                "stopRequestedAt": str(stop_snapshot.get("stopRequestedAt") or ""),
+                "activeTurnId": str(stop_snapshot.get("turnId") or controller.turn_id),
+            }
         s._persist_session_interrupted_snapshot(
             conversation_id,
             stop_snapshot,
             lang=lang,
         )
-        s._set_session_running(conversation_id, False, turn_id=controller.turn_id)
-        controller.mark_released_to_user()
-        # 排队路径同步 settle：阶段登记随终态一并释放，不留给投影。
-        _clear_session_stop_stages(conversation_id, stop_turn_id)
     else:
         # settle 归 worker 所有（provider abort 或下一个协作检查点）：武装
         # 停止收尾 watchdog 作为总上界兜底。fast_ack 语义不变——这里只是
@@ -635,6 +649,33 @@ def request_stop_session_turn(
         "stopRequested": True,
         "activeTurnId": str(stop_snapshot.get("turnId") or controller.turn_id),
     }
+
+
+def _persist_interrupted_snapshot_async(
+    s: Any, session_id: str, snapshot: dict[str, Any], *, lang: str
+) -> None:
+    """Persist a stopped snapshot off the stop request's critical path.
+
+    ``_persist_session_interrupted_snapshot`` rewrites the transcript snapshot
+    and republishes the session projection, both of which grow with transcript
+    size. An interactive stop already holds its acknowledgement, so the write
+    runs on a daemon thread. A new turn that starts first wins: the stale
+    interrupted snapshot must not overwrite the fresher one.
+    """
+
+    def _run() -> None:
+        try:
+            if s._is_session_running(session_id):
+                return
+            s._persist_session_interrupted_snapshot(session_id, snapshot, lang=lang)
+        except Exception:  # noqa: BLE001 - stop was already acknowledged
+            _LOGGER.warning(
+                "Interrupted snapshot persist failed for %s", session_id
+            )
+
+    threading.Thread(
+        target=_run, name="session-stop-persist", daemon=True
+    ).start()
 
 
 def _cascade_stop_descendant_runtime_tasks(

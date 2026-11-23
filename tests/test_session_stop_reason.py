@@ -523,3 +523,61 @@ def test_restart_harvest_times_out_only_the_wedged_turn(monkeypatch):
     statuses = {row["sessionId"]: row["status"] for row in result}
     assert statuses["session-fast"] == "stopped"
     assert statuses["session-wedged"] == "timeout"
+
+
+def test_queued_stop_fast_ack_returns_before_the_snapshot_persist(
+    running_control, monkeypatch
+):
+    """排队 turn 取消时 fast_ack 不再等中断快照落盘。"""
+
+    controller, _signals, _events = running_control
+    persisted = threading.Event()
+    running_probe = {"calls": 0}
+
+    def _running(_session_id):
+        running_probe["calls"] += 1
+        return running_probe["calls"] == 1
+
+    monkeypatch.setattr(session_service, "_is_session_running", _running)
+    monkeypatch.setattr(session_service, "_cancel_queued_session_turn", lambda *args: True)
+    monkeypatch.setattr(session_service, "_set_session_running", lambda *args, **kwargs: None)
+    monkeypatch.setattr(controller, "mark_released_to_user", lambda: None)
+    monkeypatch.setattr(control, "_clear_session_stop_stages", lambda *args: None)
+    monkeypatch.setattr(
+        session_service,
+        "_persist_session_interrupted_snapshot",
+        lambda *args, **kwargs: persisted.set(),
+    )
+
+    result = control.request_stop_session_turn("session-stop", fast_ack=True, cascade=False)
+
+    assert result["currentPhase"] == "stopping"
+    assert result["stopRequested"] is True
+    assert persisted.wait(5), "background snapshot persist never ran"
+
+
+def test_queued_stop_without_fast_ack_still_persists_synchronously(
+    running_control, monkeypatch
+):
+    """内部调用方保持同步语义：返回时快照已经落盘。"""
+
+    controller, _signals, _events = running_control
+    persisted = []
+
+    def _persist(*_args, **_kwargs):
+        persisted.append(True)
+        return {"id": "session-stop"}
+
+    monkeypatch.setattr(session_service, "_cancel_queued_session_turn", lambda *args: True)
+    monkeypatch.setattr(session_service, "_set_session_running", lambda *args, **kwargs: None)
+    monkeypatch.setattr(controller, "mark_released_to_user", lambda: None)
+    monkeypatch.setattr(control, "_clear_session_stop_stages", lambda *args: None)
+    monkeypatch.setattr(session_service, "_persist_session_interrupted_snapshot", _persist)
+    monkeypatch.setattr(session_service, "get_session_detail", lambda _sid: {"id": _sid})
+    monkeypatch.setattr(
+        session_service, "_publish_session_detail_snapshot", lambda *args, **kwargs: None
+    )
+
+    control.request_stop_session_turn("session-stop", fast_ack=False, cascade=False)
+
+    assert persisted == [True]
