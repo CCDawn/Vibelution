@@ -1,6 +1,77 @@
 # Changelog
 
 ## Unreleased
+- tools：新增 agent_directory 工具，一次列出可发现的 Agent 及其对应会话，不必先知道 session id 才能联系对方。
+- fix: Agent 会话的中断 turn 也写入续跑标记，重启后自动接上
+- 个人助理重启后继续核对原任务回执，CLI 子任务补发已完成结果，已授权的项目 Agent 可查询联系人、发送消息并在原会话收取回复。
+- 修复 Windows CLI Agent 的终端启动竞态，命令启动前先纳入终端进程组，关闭时统一结束子进程。
+- 个人助理的派单工具可正常使用，工具策略里尚未注册的可选救援工具不再阻塞已有权限。
+- **自动压缩倒计时对齐真实触发档**：面板原先把 `contextCompression.strategy.levels` 的最低档（`light`，0.6）当作自动压缩线，但 `light` 只参与策略分级、不执行任何压缩，导致 256K 窗口用到 155K（61%）就显示「0%」；现在绑定后端 `_should_automatically_compress` 实际使用的 `standard` 档（0.8），同一状态显示约 19%（≈50K），仅在档位集合缺少 `standard` 时回退到最小正阈值。图例文案同步更新。
+- 压缩诊断补上 JSONL 与 Markdown 两个通道：`compress_turn_messages` 现在把压缩前/后/节省 token、级别、原因、是否生效一并写进 conversation 日志与回放文档，排查压缩问题时不必再跨到 turn_journal 关联。
+- closeout now publishes a fresh frontend release when the merged diff touches web/, so the next restart serves the merged UI instead of the pre-merge build.
+- closeout no longer leaves a silent publish gap on pending merged results: when cleanup fails and publish did not run (or was not requested), the result now carries explicit ``versionSync``/``push`` skipped markers and a ``next_action`` that names the ``--cleanup-only --publish`` recovery rerun.
+- A guidance insert now clears the staged images and references it just consumed instead of leaving them in the composer.
+- Guided inserts now hand image and reference attachments back to the composer, so the same message no longer appears in both the transcript and the input box.
+- A guide submitted after its turn ended is no longer re-queued, so one input can no longer appear as two rows.
+- A drained guidance receipt and the agent scene log now name the injected model message, so a later reader can tell which request already carried the steer.
+- 引导消息不再永久停在「等待纳入」：本轮无法纳入时明确显示「已转下一轮」，会话空闲时提交的引导直接进入下一轮。
+- 历史里由已结束回合遗留的引导行，会在该会话下一次回合结算时被清扫到下一轮队列。
+- A guided insert now carries one client submission id from composer to journal, so the optimistic row is claimed by id instead of guessed by text.
+- 撤销「结算时自动把未纳入引导重新入队」，避免同一条引导在时间线里出现两条、输入框又显示一遍排队提示
+- A mid-turn guide now splits its turn at the guide sequence instead of lifting the row above work that ran earlier.
+- `splitTurn` 在引导被消费后会保留一个空的 running tail shell，等待下一步工作；这个 tail 原先继承 turn 在引导之前的 `queued` stage，导致刚插入的引导下方显示"排队中"，读起来像是引导还在排队。
+- 现在空 tail shell 固定用 `running` stage：引导已纳入当前轮，tail 表达的是"继续处理"，不是"还在排队"。有内容的 segment 行为不变。
+- 验证：`conversationGuidanceSegments.test.ts` 与 `ConversationView.test.tsx` 163 项通过；`npx tsc -b` 通过。
+- A turn that ends in a session you are not viewing now stops its spinner and status immediately instead of waiting for you to open that session.
+- 修复思考栏只显示一两行：进度解说不再吞掉更长的思考内容，跨通道重叠仅在近似重复（较短一侧达到较长一侧 90%）时才去重。
+- Session rail rows now carry the settled status patch for background sessions, so a turn finishing outside the open session updates the list in place instead of forcing a full index re-read; the rail also keeps polling while the index stream is disconnected instead of freezing until the session is opened.
+- 工具结果不再把同一段摘要写两遍进会话 journal：`tool_result` 只保留 `result`，工具预览仍由 `tool_call_started` 承载，读取侧统一回退到 `result`。大型会话因此少存约 3.49 MB/会话，打开和回放更快。
+- fix: hot restarts now write the restart-resume marker so startup recovery auto-resumes interrupted sessions, excluding the requester own turn.
+- fix: 关闭阶段的空快照不再清空重启续跑标记
+- Launcher 个人助理会话现在默认挂载开发工具（shell、文件编辑、测试、Git 读取），以会话工作区为边界走正常审批；无任务授权或伪造来源仍被拒绝。
+- 个人助理工具调用预算默认改为无上限（maxCallsPerTurn=0），配置读取也把 0 当作显式无限制而不是回落到 16。
+- Rail completion badges now light for a settle the index stream delivered while the operator was on another session: the "never read" silence in `sessionActivityIndicator` only suppresses first-paint history, and a live settle arriving through `/api/sessions/events` outranks it until the row is actually read. Starting a new turn on that row drops the mark again.
+- 日志补齐 LLM 往返耗时、响应侧模型快照、请求配对序号与错误堆栈兜底，并在会话结束时写入条数与失败计数自检摘要，让「慢在哪、响应错配、日志残缺」可以直接从落盘 JSONL 读出，而不是靠时间戳猜。
+- Runtime scene 保留窗口从 30 个包收紧到 10 个，配合字节预算进一步压低单机日志占用上限
+- fix: 日志保留补上两处容量缺口——会话清理同时回收孤儿 payload 目录，runtime scene 在 30 个包之外增加 1 GiB 总字节上限。
+- fix: CLI 发起的工作台重启现在按「操作员明确要求」处理，会中断正在运行的任务而不是排队等空闲；Runtime Manager 自动转发仍保持保护，被中断的任务沿用既有落盘记录，续跑语义不变。
+- signature 来自既有的 `session_conversation_events_signature`，包含文件路径、
+- 进缓存和出缓存都做深拷贝，因为调用方会把 message metadata 合并进拿到的 items。
+- 缓存有界（4096 项），按访问顺序淘汰。
+- Projection now bounds `reasoning.text` (400 chars) and `tool_call.input` /
+- `GET /api/sessions/{id}/turns/{turnId}/items/{itemId}` re-projects one turn at
+- The web transcript passes the canonical item id down to the reasoning cell and
+- feat: 核心提示词新增「完整掌握再动手」纪律，禁止丢三落四式碎片完成
+- web：左栏左上角改为 12px 圆角，与中栏卡片一致；右栏开关与其余三角保持不变。
+- 打开右侧面板时不再改动中栏形状：删除 `centerPaneMeetsRail` 把中栏右上角压平的规则与条件类，右栏停靠只影响它自己的那一列。
+- fix: 右栏停靠与浮层形态统一恢复 12px 圆角，左右面板各自成卡片；撤销此前的接缝压平，中栏右上角恢复圆角。
+- 重启不再因控制回复丢失而报「重启未确认」：请求期间连接断开时继续等待新工作台就绪并自动重载，只有真正等不到才提示重启超时。
+- fix: 重启标记里的会话在存储打开后立即恢复，不再等首帧预热门（实测拖到 10 分钟以上）
+- fix: 重启续跑快速通道写入结构化场景事件，可从日志确认是否命中
+- fix: 重启标记里的会话先于 journal 尾部判定恢复，被中断的会话不再等完整扫描
+- **健康检查暴露产物陈旧信号**：`/api/health` 现在同时返回 `servingRelease`（进程启动时 pin 的产物）与 `activeRelease`（当前 `active.json` 指针），并用 `releaseStale` 标记两者不一致。重建前端后若未重启后端，可直接从 health 读出“需要重启”，不必再手动比对两份数据。
+- 会话切换时，大型会话（约 30MB journal）首次打开更省一次解析开销：turn journal 逐行解析改用可选的 orjson 加速器，缺失时自动回退标准库 json，解码结果完全一致。
+- Opening a long chat now returns its first page much faster: the transcript no longer rebuilds assistant timelines for every turn in the session before rendering the visible window (cold read on a 30MB session dropped from ~2.1s to ~1.7s, with byte-identical detail payload).
+- Settled index hydration no longer escapes into turn finalization: a projection failure while publishing the settled rail patch now degrades to the bare "this row moved" frame instead of raising from the turn-completion path, so a finished turn can never be reported as a crashed worker because its rail row could not be hydrated.
+- Publish a running status patch to the session index stream when a session starts running, and apply index patches to the per-Agent tab cache so the rail updates without opening the session.
+- 修复 Agent 目录工具缺少元数据导致整个工具目录加载失败、会话回到「需要继续」的问题。
+- 内置工具注册改动自动验证完整目录。共享集成目录必须保持在 `main`，本地推送无法绕过验证流程更新 `main`。
+- 修复会话初始化时无法调用附加工具策略合并函数的问题，恢复正常回合执行。
+- Keep incremental codebase-map updates working when a file tool reports an absolute path outside the project; normalize to project-relative paths and ignore foreign paths.
+- Round the session tab strip leading corner so it stops reading as a square block above the conversation card.
+- Problem: the tab strip painted one white band across the centre pane and the
+- Change: the strip background is transparent and a gradient paints only the
+- Owner: web/src/routes/ChatCodingRoute.styles.ts, web/src/design/workbench-frame.css
+- Verification: closeout frontend contract; visual check after restart.
+- 会话切换后时间线不再上下闪动：两处滚动容器关闭浏览器 overflow-anchor，恢复位置改为等实测行高连续稳定后再停，而不是固定补一帧。
+- 顶栏任务数改为单一数据源：`/api/runtime/summary` 的同一次快照同时携带 workRuns 与运行中 runtime task 卡片，前端只读这一个来源，不再把两个独立轮询的结果相加。
+- 移除主壳里第二个 `/api/runtime-tasks` 轮询（15 秒节奏、无后台刷新），任务开始或结束时不会再出现数字与自身下拉菜单对不上的那一个轮询间隔。
+- `/aux` 的任务面板仍走原有 `/api/runtime-tasks` 接口，行为不变。
+- 契约测试同步：`AppShell.layout.test.ts` 断言单一读取源，`AppShell.startup.test.tsx` 不再期望后台拉 `/api/runtime-tasks`。
+- fix: 重启续跑标记统一由停止入口写入，任何关闭路径都不会再漏记被中断的会话
+- Keep the virtual timeline host out of the browser's scroll anchoring so a
+- 前端静态资源改为按内容哈希长缓存，并只对 /assets/* 启用 gzip，缩短首屏与路由切换的加载时间
+- 用户主动发起的重启现在以 operator-restart 身份中断正在运行的会话，而不是以 forwarded 身份无限排队；被中断的会话仍按既有重启恢复逻辑续跑，self-evolution 的“空闲再重启”保持不变。
 
 ## 3.0.3 - 2026-11-19
 - fix: 上下文面板的「距自动压缩还剩」改为绑定后端 `standard` 档真实触发线；此前取最低档 `light`（只是策略分级、不执行压缩），61% 的 256K 窗口就显示 0%，现在同一状态显示约 19%（≈50K）。
