@@ -1,1 +1,0 @@
-- Publish a running status patch to the session index stream when a session starts running, and apply index patches to the per-Agent tab cache so the rail updates without opening the session.

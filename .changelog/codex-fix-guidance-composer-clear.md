@@ -1,1 +1,0 @@
-- Guided inserts now hand image and reference attachments back to the composer, so the same message no longer appears in both the transcript and the input box.

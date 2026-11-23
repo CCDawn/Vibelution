@@ -1,1 +1,0 @@
-- **自动压缩倒计时对齐真实触发档**：面板原先把 `contextCompression.strategy.levels` 的最低档（`light`，0.6）当作自动压缩线，但 `light` 只参与策略分级、不执行任何压缩，导致 256K 窗口用到 155K（61%）就显示「0%」；现在绑定后端 `_should_automatically_compress` 实际使用的 `standard` 档（0.8），同一状态显示约 19%（≈50K），仅在档位集合缺少 `standard` 时回退到最小正阈值。图例文案同步更新。

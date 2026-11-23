@@ -1,1 +1,0 @@
-- A guided insert now carries one client submission id from composer to journal, so the optimistic row is claimed by id instead of guessed by text.

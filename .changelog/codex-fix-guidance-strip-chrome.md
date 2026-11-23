@@ -1,1 +1,0 @@
-- A mid-turn guide now splits its turn at the guide sequence instead of lifting the row above work that ran earlier.

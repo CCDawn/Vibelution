@@ -1,1 +1,0 @@
-- fix: hot restarts now write the restart-resume marker so startup recovery auto-resumes interrupted sessions, excluding the requester own turn.

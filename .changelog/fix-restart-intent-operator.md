@@ -1,1 +1,0 @@
-- 用户主动发起的重启现在以 operator-restart 身份中断正在运行的会话，而不是以 forwarded 身份无限排队；被中断的会话仍按既有重启恢复逻辑续跑，self-evolution 的“空闲再重启”保持不变。

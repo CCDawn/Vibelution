@@ -1,1 +1,0 @@
-- A guide submitted after its turn ended is no longer re-queued, so one input can no longer appear as two rows.

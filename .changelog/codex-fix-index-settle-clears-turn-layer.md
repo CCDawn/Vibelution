@@ -1,1 +1,0 @@
-- A turn that ends in a session you are not viewing now stops its spinner and status immediately instead of waiting for you to open that session.

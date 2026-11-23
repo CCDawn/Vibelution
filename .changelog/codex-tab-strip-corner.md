@@ -1,1 +1,0 @@
-- Round the session tab strip leading corner so it stops reading as a square block above the conversation card.
