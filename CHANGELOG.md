@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- The top bar now names the frontend release this page is actually running plus when the backend started, and marks a stale pointer or a legacy-tree fallback instead of leaving both to a log line.
 
 ## 3.1.2 - 2026-11-23
 - feat: 个人助理模型选择器把当前绑定模型与可用模型排到所属服务分组顶部，打开菜单即可确认当前选择，不必在长列表里滚动查找。
