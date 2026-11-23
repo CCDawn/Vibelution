@@ -2079,8 +2079,9 @@ def list_llm_provider_options(public_config: dict) -> list[dict[str, object]]:
                 "context_window": context_window,
                 "default_protocol": str(protocols.get("default") or ""),
                 "pinned_count": len(models) if isinstance(models, dict) else 0,
-                # Row-level enable switch: legacy configs without the key read as enabled.
-                "enabled": provider.get("enabled", True) is not False,
+                # Row-level enable switch: only an explicit `enabled = true`
+                # opts in; legacy configs without the key read as disabled.
+                "enabled": provider.get("enabled") is True,
             }
         )
     return options

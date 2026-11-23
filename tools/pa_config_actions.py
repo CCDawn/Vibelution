@@ -428,7 +428,7 @@ def _provider_models(config: dict, path: Path, args: ProviderModels, *, discover
         override = _at(provider, ("discovery", "models_url_override"), "")
         if override and provider.get("credential_ref", "none") != "none" and _origin(override) != _origin(provider["base_url"]):
             return _failure("credential_origin_blocked")
-        if provider.get("enabled", True) is not True:
+        if provider.get("enabled") is not True:
             return _failure("provider_disabled")
         from core.llm.provider_discovery.service import discover_provider_models
         discovered = discover_provider_models(config, args.provider_id,
@@ -509,7 +509,7 @@ def execute(action: str, parameters: dict, runtime: dict, governed: bool = False
                 return _failure("profile_model_required")
             if selected_id:
                 provider_id, _, model = _model(before, selected_id)
-                if model.get("enabled", True) is not True or _provider(before, provider_id).get("enabled", True) is not True:
+                if model.get("enabled") is not True or _provider(before, provider_id).get("enabled") is not True:
                     return _failure("model_unavailable")
             if args.target == "profile":
                 table = ("llm", "profiles", args.profile_id)

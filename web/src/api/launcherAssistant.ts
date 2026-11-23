@@ -25,6 +25,9 @@ export type LauncherOperatorProfile = {
 export type LauncherAssistantModelChoice = {
   modelId: string; label: string; providerLabel: string; isDefault: boolean;
   providerHealthy: boolean; missingApiKey: boolean; availability: string;
+  /** Row-level provider switch. Absent on legacy payloads; false means the
+   * operator must enable the provider before this model becomes selectable. */
+  providerEnabled?: boolean;
 };
 
 export type LauncherManagementPermission = { preset: AgentPermissionPreset; revision: number };

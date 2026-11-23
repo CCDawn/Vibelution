@@ -23,6 +23,7 @@ def _public_config() -> dict:
                     "credential_ref": "env:AI_PIXEL_API_KEY",
                     "auth_kind": "api_key",
                     "requires_credential": True,
+                    "enabled": True,
                     "protocols": {"default": "responses"},
                     "discovery": {"adapter": "openai_compatible"},
                     "models": {
@@ -355,6 +356,7 @@ def test_chatgpt_subscription_picker_uses_login_state_without_a_token(monkeypatc
         lambda: SimpleNamespace(status=lambda: {"connected": connected}),
     )
     provider = build_subscription_provider()
+    provider["enabled"] = True
     provider["models"]["gpt-6.1-sol-high"] = {
         "upstream_id": "gpt-6.1-sol", "label": "GPT-6.1-Sol (High)", "enabled": True,
     }
@@ -390,18 +392,19 @@ def test_disabled_provider_projects_unhealthy_channel_even_when_reachable(monkey
     assert len(by_ref) == 4
 
 
-def test_enabled_defaults_to_true_for_legacy_provider_without_key(monkeypatch):
+def test_enabled_defaults_to_false_for_legacy_provider_without_key(monkeypatch):
     monkeypatch.setenv("AI_PIXEL_API_KEY", "candidate-health-key")
 
     public_config, catalog = _with_provider_status("reachable")
-    assert "enabled" not in public_config["llm"]["providers"]["ai-pixel"]
+    public_config["llm"]["providers"]["ai-pixel"].pop("enabled", None)
     by_ref = {
         item["modelRef"]: item
         for item in agent_model_candidate_service.project_agent_model_candidates(
             public_config, catalog
         )
     }
-    assert by_ref["ai-pixel/gpt-5.6-luna"]["providerHealthy"] is True
+    assert by_ref["ai-pixel/gpt-5.6-luna"]["providerEnabled"] is False
+    assert by_ref["ai-pixel/gpt-5.6-luna"]["providerHealthy"] is False
 
 
 def test_list_candidates_reads_each_snapshot_once_and_never_exposes_secret(monkeypatch):

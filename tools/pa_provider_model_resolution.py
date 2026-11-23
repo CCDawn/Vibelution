@@ -189,8 +189,8 @@ def _pin_and_verify_fenced(provider_id: str, upstream_id: str, runtime: dict, *,
         if not identity_matches(latest):
             return conflict
         latest_provider, _, model = config_actions._model(latest, model_ref)
-        if (latest_provider != provider_id or model.get("enabled", True) is not True
-            or config_actions._provider(latest, provider_id).get("enabled", True) is not True):
+        if (latest_provider != provider_id or model.get("enabled") is not True
+            or config_actions._provider(latest, provider_id).get("enabled") is not True):
             return {**receipt, "ok": False, "status": "blocked", "error": "model_unavailable",
                     "nextAction": "review_existing_provider"}
     except Exception:
@@ -241,7 +241,7 @@ def resolve_model(parameters: dict, runtime: dict) -> dict:
         config = config_actions._read(path)
         provider = config_actions._provider(config, provider_id)
         configured = True
-        if provider.get("enabled", True) is not True:
+        if provider.get("enabled") is not True:
             return _failure(provider_id, "provider_disabled")
         target_failure = config_actions._provider_target_failure(provider)
         if target_failure:

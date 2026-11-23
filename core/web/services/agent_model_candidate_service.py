@@ -390,7 +390,7 @@ def _candidate(
     provider_channel_health = _provider_channel_health(
         provider_catalog,
         credential_compatibility,
-        provider_enabled=provider.get("enabled", True) is not False,
+        provider_enabled=provider.get("enabled") is True,
     )
     # Protocol-default reasoning for OpenAI Responses pins (same contract as pin/list projection).
     from config.llm_projection import _default_v2_reasoning_effort_defaults
@@ -430,6 +430,7 @@ def _candidate(
         "catalogStale": catalog_stale,
         "providerStatus": provider_channel_health["providerStatus"],
         "providerHealthy": provider_channel_health["providerHealthy"],
+        "providerEnabled": provider.get("enabled") is True,
         "verificationStatus": (
             "stale" if fingerprint_stale else str(verification.get("status") or "unverified")
         ),

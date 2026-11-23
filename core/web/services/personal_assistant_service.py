@@ -784,6 +784,13 @@ def _model_settings(agent: dict) -> dict:
                     "providerHealthy": (row or {}).get("providerHealthy") is not False,
                     "missingApiKey": bool((row or {}).get("missingApiKey")),
                     "availability": str((row or {}).get("availability") or ""),
+                    # Present only when the upstream catalogue states it: a
+                    # provider starts disabled, so the picker can offer the
+                    # explicit "enable it in model settings" reason.
+                    **(
+                        {"providerEnabled": bool((row or {}).get("providerEnabled"))}
+                        if "providerEnabled" in (row or {}) else {}
+                    ),
                 }
             )
     return {"currentModelId": current_model_id, "choices": choices}

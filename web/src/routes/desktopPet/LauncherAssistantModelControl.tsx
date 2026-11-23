@@ -28,6 +28,9 @@ export function launcherAssistantModelDisabledReason(
   choice: LauncherAssistantModelChoice,
   lang: "zh" | "en",
 ): string {
+  if (choice.providerEnabled === false) {
+    return lang === "zh" ? "此服务未启用，请在模型设置中开启" : "This provider is disabled; enable it in model settings";
+  }
   if (choice.missingApiKey) {
     return lang === "zh" ? "此服务尚未配置 API Key" : "This provider has no API key";
   }
