@@ -114,6 +114,10 @@
    a grey seam, so the seam looked cut in half at the tab row. Cut the same
    gutter out of the band and let the pane surfaces paint each segment. */
 [data-vui="workbench-frame"] .vui-routes-chatcodingroute.tabStrip {
+  /* The band must not carry its own white fill: the gradient below paints
+     the pane segments and leaves the gutter transparent, so a background
+     colour behind it would fill that gutter straight back in. */
+  background-color: transparent;
   background-image: linear-gradient(
     to right,
     transparent 0 var(--chat-workbench-gap, 4px),
