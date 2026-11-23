@@ -507,4 +507,28 @@ describe("useChatComposerSubmit object URL lifecycle", () => {
     expect(mutations.submitTurnMutation.mutate).not.toHaveBeenCalled();
     expect(objectUrlMocks.revoke).toHaveBeenCalledWith("blob:image-a");
   });
+
+  it("uploads a pasted image as soon as it lands in the tray", async () => {
+    apiMocks.uploadSessionImageAttachment.mockResolvedValue({ artifactId: "artifact-paste" });
+    const actionsRef = { current: null as UseChatComposerSubmitActionsResult | null };
+    const mounted = mount(
+      <Harness
+        queryClient={new QueryClient()}
+        mutations={makeMutations()}
+        initialAttachments={{ "session-a": [] }}
+        actionsRef={actionsRef}
+      />,
+    );
+    const image = new File(["image"], "paste.png", { type: "image/png" });
+
+    act(() => actionsRef.current?.handleAddComposerAttachments([image]));
+    await flushMicrotasks();
+
+    expect(apiMocks.uploadSessionImageAttachment).toHaveBeenCalledTimes(1);
+    const [sessionId, attachment] = apiMocks.uploadSessionImageAttachment.mock.calls[0]!;
+    expect(sessionId).toBe("session-a");
+    expect((attachment as { filename: string }).filename).toBe("paste.png");
+
+    await unmount(mounted.root, mounted.container);
+  });
 });

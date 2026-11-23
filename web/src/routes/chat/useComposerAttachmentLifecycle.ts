@@ -18,6 +18,7 @@ import {
   failedComposerAttachmentUploads,
   markComposerAttachmentsUploading,
   mergeComposerAttachmentsWithRejections,
+  needsComposerAttachmentUpload,
   uploadComposerAttachmentsSettled,
 } from "./chatComposerSubmitModel";
 import { clearSessionDetailStopping } from "../chatSessionState";
@@ -432,6 +433,7 @@ export function useComposerAttachmentActions({
       const attachmentSnapshot = attachmentSnapshotRef.current.sessionId === activeSessionId
         ? attachmentSnapshotRef.current.attachments
         : activeImageAttachments;
+      const existingAttachmentIds = new Set(attachmentSnapshot.map((attachment) => attachment.id));
       const mergePreview = mergeComposerAttachmentsWithRejections(attachmentSnapshot, accepted, {
         maxTotal: MAX_COMPOSER_IMAGE_ATTACHMENTS + MAX_COMPOSER_DOCUMENT_ATTACHMENTS,
         maxImages: MAX_COMPOSER_IMAGE_ATTACHMENTS,
@@ -446,6 +448,32 @@ export function useComposerAttachmentActions({
           [activeSessionId]: mergePreview.attachments,
         };
       });
+      // 粘贴即预上传：附件进 tray 就开始传，用户打字的时间足够传完；提交时
+      // needsComposerAttachmentUpload 已满足，消息不再等图片上传。
+      const added = mergePreview.attachments.filter(
+        (attachment) => !existingAttachmentIds.has(attachment.id) && needsComposerAttachmentUpload(attachment),
+      );
+      if (added.length) {
+        void (async () => {
+          setSessionImageAttachments((current) => ({
+            ...current,
+            [activeSessionId]: markComposerAttachmentsUploading(
+              current[activeSessionId] ?? [],
+              new Set(added.map((attachment) => attachment.id)),
+            ),
+          }));
+          const settledOutcomes = await uploadComposerAttachmentsSettled(activeSessionId, added);
+          if (!isMountedRef.current) {
+            return;
+          }
+          const uploadSessionId = resolveComposerSessionId(activeSessionId);
+          const outcomes = retainOwnedComposerUploadOutcomes(uploadSessionId, added, settledOutcomes);
+          setSessionImageAttachments((current) => ({
+            ...current,
+            [uploadSessionId]: applyComposerAttachmentUploadOutcomes(current[uploadSessionId] ?? [], outcomes),
+          }));
+        })();
+      }
     }
     const rejectedMessages = [
       rejected.length
