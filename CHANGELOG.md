@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+
+## 3.1.4 - 2026-11-23
 - perf: 排队 turn 停止先返回 stopping，中断快照改后台落盘
 
 ## 3.1.3 - 2026-11-23
