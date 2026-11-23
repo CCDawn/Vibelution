@@ -363,7 +363,11 @@ class SessionForkPayload(BaseModel):
 class SessionStopPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    turnId: str = Field(min_length=1, max_length=160)
+    # An empty turnId is a real caller: the composer stops a running turn it
+    # has no id for yet (its optimistic layer owns the paint while the server
+    # owns the live turn). Requiring min_length=1 rejected exactly that
+    # request with 422, so pressing stop before acceptance landed did nothing.
+    turnId: str = Field(default="", max_length=160)
 
 
 class SessionGuidancePayload(BaseModel):

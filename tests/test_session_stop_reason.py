@@ -622,3 +622,19 @@ def test_stop_with_nothing_queued_keeps_reading_the_detail(monkeypatch):
     result = control.request_stop_session_turn("session-stop", fast_ack=True, cascade=False)
 
     assert result == {"id": "session-stop"}
+
+
+def test_stop_payload_accepts_an_empty_turn_id():
+    """The composer stops turns it has no id for yet.
+
+    ``stopSessionTurn`` sends ``turnId: ""`` whenever the optimistic layer owns
+    the paint and the server owns the live turn. A min_length=1 constraint
+    answered that exact request with 422, so the button did nothing until an
+    acceptance arrived.
+    """
+
+    from core.web.routes.sessions import SessionStopPayload
+
+    assert SessionStopPayload().turnId == ""
+    assert SessionStopPayload(turnId="").turnId == ""
+    assert SessionStopPayload(turnId="turn-1").turnId == "turn-1"
