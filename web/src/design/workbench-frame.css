@@ -108,3 +108,19 @@
     [data-vui="workbench-frame"] { --vui-workbench-inset: 2px; }
   }
 }
+
+/* The tab strip is one white band above the panes, but the panes are separated
+   by the workbench gutter. Painting the band edge to edge left a white bar over
+   a grey seam, so the seam looked cut in half at the tab row. Cut the same
+   gutter out of the band and let the pane surfaces paint each segment. */
+[data-vui="workbench-frame"] .vui-routes-chatcodingroute.tabStrip {
+  background-image: linear-gradient(
+    to right,
+    transparent 0 var(--chat-workbench-gap, 4px),
+    var(--vui-surface-chat) var(--chat-workbench-gap, 4px)
+      calc(100% - var(--chat-right-pane-width, 0px) - var(--chat-workbench-gap, 4px)),
+    transparent calc(100% - var(--chat-right-pane-width, 0px) - var(--chat-workbench-gap, 4px))
+      calc(100% - var(--chat-right-pane-width, 0px)),
+    var(--vui-surface-chat) calc(100% - var(--chat-right-pane-width, 0px)) 100%
+  );
+}
