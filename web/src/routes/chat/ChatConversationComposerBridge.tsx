@@ -148,8 +148,8 @@ export function buildComposerImageInputGuidance(input: {
   const modelLabel = input.modelLabel || (input.lang === "zh" ? "当前模型" : "the current model");
   if (input.queuedUntilTurnEnds) {
     return input.lang === "zh"
-      ? "当前轮运行中：图片会随这条消息一起排队，本轮结束后自动发送。"
-      : "This turn is still running: the image queues with this message and sends automatically when the turn ends.";
+      ? "本轮运行中：图片会随发送一起排队，点发送后本轮结束即自动发出。"
+      : "This turn is still running: the image queues when you send; it goes out as soon as the turn ends.";
   }
   if (input.imageInputSupport === false) {
     return input.lang === "zh"
