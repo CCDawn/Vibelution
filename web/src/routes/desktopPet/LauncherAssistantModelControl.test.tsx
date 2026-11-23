@@ -129,6 +129,57 @@ describe("Launcher model toolbar control", () => {
     expect(onModelChange).not.toHaveBeenCalled();
   });
 
+  it("offers cross-provider available and recent views for long catalogues", async () => {
+    window.localStorage.clear();
+    const many: LauncherAssistantModelChoice[] = Array.from({ length: 10 }, (_, index) => ({
+      modelId: `model-${index}`,
+      label: `模型 ${index}`,
+      providerLabel: index % 2 === 0 ? "服务甲" : "服务乙",
+      isDefault: index === 0,
+      providerHealthy: true,
+      missingApiKey: false,
+      availability: "ready",
+    }));
+    const { trigger } = await renderControl({ choices: many });
+    await act(async () => trigger.click());
+    const headings = () => [...document.querySelectorAll<HTMLButtonElement>("button")]
+      .map(node => node.textContent || "");
+    expect(headings().some(text => text.includes("可用模型"))).toBe(true);
+    expect(headings().some(text => text.includes("最近使用"))).toBe(false);
+
+    await act(async () => optionContaining("模型 3")!.click());
+    await act(async () => trigger.click());
+
+    expect(headings().some(text => text.includes("最近使用"))).toBe(true);
+    expect(JSON.parse(window.localStorage.getItem("vibelution.launcherAssistant.recentModels") || "[]"))
+      .toContain("model-3");
+  });
+
+  it("keeps provider groups only while searching", async () => {
+    window.localStorage.clear();
+    const many: LauncherAssistantModelChoice[] = Array.from({ length: 10 }, (_, index) => ({
+      modelId: `model-${index}`,
+      label: `模型 ${index}`,
+      providerLabel: "服务甲",
+      isDefault: false,
+      providerHealthy: true,
+      missingApiKey: false,
+      availability: "ready",
+    }));
+    const { trigger } = await renderControl({ choices: many });
+    await act(async () => trigger.click());
+    const search = document.querySelector<HTMLInputElement>('input[aria-label="搜索模型"]')!;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(search, "模型 3");
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const headings = [...document.querySelectorAll<HTMLButtonElement>("button")]
+      .map(node => node.textContent || "");
+    expect(headings.some(text => text.startsWith("可用模型"))).toBe(false);
+    expect(headings.some(text => text.startsWith("最近使用"))).toBe(false);
+  });
+
   it("pins the bound model above catalogue order inside its provider group", async () => {
   const reordered = [
     { ...CHOICES[1], modelId: "next", label: "另一个模型" },

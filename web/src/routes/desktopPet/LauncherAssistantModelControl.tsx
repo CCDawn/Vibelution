@@ -24,7 +24,36 @@ const UNAVAILABLE_ASSISTANT_MODEL_STATES = new Set([
  * The Launcher menu keeps unusable rows visible so an operator learns why a
  * model cannot be picked instead of watching a dead row with no explanation.
  */
-export function launcherAssistantModelDisabledReason(
+export /** Cross-provider quick views stay hidden on short catalogues. */
+const QUICK_VIEW_MIN_CHOICES = 8;
+const RECENT_MODELS_STORAGE_KEY = "vibelution.launcherAssistant.recentModels";
+const RECENT_MODELS_LIMIT = 5;
+const USABLE_GROUP_KEY = "__usable__";
+const RECENT_GROUP_KEY = "__recent__";
+
+function readRecentModelIds(): string[] {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(RECENT_MODELS_STORAGE_KEY) || "[]");
+    return Array.isArray(parsed)
+      ? parsed.filter(item => typeof item === "string").slice(0, RECENT_MODELS_LIMIT)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberModelId(modelId: string): string[] {
+  const next = [modelId, ...readRecentModelIds().filter(item => item !== modelId)]
+    .slice(0, RECENT_MODELS_LIMIT);
+  try {
+    window.localStorage.setItem(RECENT_MODELS_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    // Private mode keeps only the in-memory order for this menu.
+  }
+  return next;
+}
+
+function launcherAssistantModelDisabledReason(
   choice: LauncherAssistantModelChoice,
   lang: "zh" | "en",
 ): string {
@@ -50,6 +79,7 @@ export function launcherAssistantModelGroups(
   query: string,
   currentModelId: string,
   currentModelDisplay: string,
+  recentModelIds: readonly string[] = [],
 ): ConversationModelCandidateGroup[] {
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const currentKnown = choices.some((choice) => choice.modelId === currentModelId);
@@ -67,6 +97,35 @@ export function launcherAssistantModelGroups(
         reason: lang === "zh" ? "不在当前可用模型目录中" : "Not in the available model catalogue",
       }],
     });
+  }
+  if (!normalizedQuery && choices.length >= QUICK_VIEW_MIN_CHOICES) {
+    const usable = choices.filter(choice => !launcherAssistantModelDisabledReason(choice, lang));
+    if (usable.length) {
+      groups.set(USABLE_GROUP_KEY, {
+        groupKey: USABLE_GROUP_KEY,
+        groupLabel: lang === "zh" ? "可用模型" : "Available models",
+        items: usable.map(choice => ({
+          key: choice.modelId,
+          label: (choice.label || choice.modelId).trim() || choice.modelId,
+          title: choice.modelId,
+        })),
+      });
+    }
+    const recent = recentModelIds
+      .map(id => choices.find(choice => choice.modelId === id))
+      .filter((choice): choice is LauncherAssistantModelChoice => Boolean(choice));
+    if (recent.length) {
+      groups.set(RECENT_GROUP_KEY, {
+        groupKey: RECENT_GROUP_KEY,
+        groupLabel: lang === "zh" ? "最近使用" : "Recently used",
+        items: recent.map(choice => ({
+          key: choice.modelId,
+          label: (choice.label || choice.modelId).trim() || choice.modelId,
+          title: choice.modelId,
+          reason: launcherAssistantModelDisabledReason(choice, lang) || undefined,
+        })),
+      });
+    }
   }
   for (const choice of choices) {
     const label = (choice.label || choice.modelId).trim() || choice.modelId;
@@ -122,16 +181,18 @@ export function LauncherAssistantModelControl({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [recentModelIds, setRecentModelIds] = useState<string[]>(readRecentModelIds);
   const zh = lang === "zh";
   const label = choices.find(choice => choice.modelId === modelId)?.label || modelDisplay;
   const locked = pending || selectionDisabled;
   const groups = useMemo(
-    () => launcherAssistantModelGroups(choices, lang, query, modelId, modelDisplay),
-    [choices, lang, modelDisplay, modelId, query],
+    () => launcherAssistantModelGroups(choices, lang, query, modelId, modelDisplay, recentModelIds),
+    [choices, lang, modelDisplay, modelId, query, recentModelIds],
   );
   const currentProviderLabel = (choices.find(choice => choice.modelId === modelId)?.providerLabel || "").trim();
   const defaultExpandedGroupKeys = [
     ...(choices.some(choice => choice.modelId === modelId) ? [] : ["__current__"]),
+    ...(choices.length >= QUICK_VIEW_MIN_CHOICES ? [RECENT_GROUP_KEY, USABLE_GROUP_KEY] : []),
     currentProviderLabel || "__unlabeled__",
   ];
   return <div className={styles.root} data-launcher-assistant-model-control>
@@ -145,7 +206,12 @@ export function LauncherAssistantModelControl({
         defaultExpandedGroupKeys={defaultExpandedGroupKeys}
         listLabel={zh ? "助理模型候选" : "Assistant model candidates"}
         searchLabel={zh ? "搜索模型" : "Search models"}
-        onSelect={(nextModelId) => { onModelChange(nextModelId); setOpen(false); setQuery(""); }}
+        onSelect={(nextModelId) => {
+          setRecentModelIds(rememberModelId(nextModelId));
+          onModelChange(nextModelId);
+          setOpen(false);
+          setQuery("");
+        }}
       />
       {onOpenSettings ? <div className={styles.actions}>
         <VButton variant="ghost" density="compact" isDisabled={pending}
