@@ -10,6 +10,7 @@ base_url = "https://relay.example/v1"
 auth_kind = "api_key"
 credential_ref = "env:VIBELUTION_LLM_PROVIDER_PIXEL_RELAY_API_KEY"
 requires_credential = true
+enabled = true
 
 [llm.providers.pixel_relay.protocols]
 default = "responses"
@@ -38,6 +39,7 @@ base_url = "http://127.0.0.1:8081/v1"
 auth_kind = "none"
 credential_ref = "none"
 requires_credential = false
+enabled = true
 
 [llm.providers.lab_llamacpp_a.protocols]
 default = "chat_completions"

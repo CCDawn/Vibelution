@@ -132,6 +132,10 @@ def add_llm_provider(
     if canonical_id in providers:
         raise ValueError(f"LLM provider already exists: {canonical_id}")
     providers[canonical_id] = copy.deepcopy(provider)
+    # A provider the operator adds through onboarding is an explicit
+    # choice: keep it usable immediately even though stored providers
+    # default to disabled until the operator opts in.
+    providers[canonical_id].setdefault("enabled", True)
     providers[canonical_id].setdefault("models", {})
     _validate_provider_registry(updated, previous=public_config)
     return updated

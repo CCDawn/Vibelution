@@ -358,7 +358,7 @@ def _provider_catalog(config: dict, args: Catalog) -> dict:
         origin = f"{scheme}://{display_host}" + (f":{port}" if port != (443 if scheme == "https" else 80) else "")
         rows.append({"providerId": provider_id, "label": label,
                      "origin": origin,
-                     "enabled": item.get("enabled", True) is True,
+                     "enabled": item.get("enabled") is True,
                      "credentialMode": "none" if item.get("credential_ref", "none") == "none" else "existing",
                      "modelCount": len(models) if isinstance(models, dict) else 0,
                      "modelIds": [f"{provider_id}/{key}" for key in list(models)[:10]] if isinstance(models, dict) else []})
