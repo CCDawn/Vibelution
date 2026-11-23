@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from core.infrastructure.owned_process import OwnedProcess
+from core.infrastructure.conpty_launch_gate import ConptyLaunchGate
 from core.infrastructure.windows_process_job import WindowsProcessJob
 from . import cli_agent_service
 from . import cli_agent_task_kernel
@@ -1607,41 +1608,29 @@ def _spawn_terminal_process(args: list[str], *, cwd: str, rows: int, cols: int) 
         term_key = next((key for key in env if key.upper() == "TERM"), "TERM")
         if str(env.get(term_key) or "").strip().lower() in {"", "dumb"}:
             env[term_key] = "xterm-256color"
-        job = WindowsProcessJob()
-        try:
-            process = PtyProcess.spawn(args, cwd=cwd, env=env, dimensions=(rows, cols))
-        except Exception:
+        with ConptyLaunchGate(args, env) as launch:
+            job = WindowsProcessJob()
             try:
-                job.close()
+                process = PtyProcess.spawn(launch.command, cwd=cwd, env=env, dimensions=(rows, cols))
             except Exception:
-                pass
-            raise
-        owner = _ConptyProcessOwner(process, job)
-        process._vibelution_terminal_process_owner = owner
-        if not owner.initial_adoption_complete:
-            owner_key = f"{owner.pid}:{id(owner):x}"
-            with _RUNTIMES_LOCK:
-                _PENDING_CONPTY_OWNERS[owner_key] = owner
-            cleanup_deadline = time.monotonic() + TERMINAL_SHUTDOWN_TIMEOUT_SECONDS
-            try:
-                owner.request_stop()
-                cleaned = owner.wait_until_stopped(cleanup_deadline) and owner.close(cleanup_deadline)
-            except Exception:
-                cleaned = False
-            if cleaned:
-                with _RUNTIMES_LOCK:
-                    if _PENDING_CONPTY_OWNERS.get(owner_key) is owner:
-                        _PENDING_CONPTY_OWNERS.pop(owner_key, None)
-            raise CliAgentTerminalError(
-                "TERMINAL_PROCESS_OWNERSHIP_FAILED",
-                (
-                    "CLI Agent terminal process ownership could not be confirmed; its process tree was retired."
-                    if cleaned
-                    else "CLI Agent terminal process ownership could not be confirmed; cleanup remains pending."
-                ),
-                details={"processId": owner.pid, "cleanupPending": not cleaned},
+                try:
+                    job.close()
+                except Exception:
+                    pass
+                raise
+            owner = _ConptyProcessOwner(process, job)
+            process._vibelution_terminal_process_owner = owner
+            if owner.initial_adoption_complete:
+                try:
+                    launch.release()
+                except OSError as error:
+                    raise _retire_failed_conpty_spawn(
+                        owner, "TERMINAL_PROCESS_START_FAILED", "CLI Agent terminal bootstrap could not start"
+                    ) from error
+                return process, "conpty"
+            raise _retire_failed_conpty_spawn(
+                owner, "TERMINAL_PROCESS_OWNERSHIP_FAILED", "CLI Agent terminal process ownership could not be confirmed"
             )
-        return process, "conpty"
     owner = OwnedProcess.spawn(
         args,
         cwd=cwd,
@@ -1658,6 +1647,26 @@ def _spawn_terminal_process(args: list[str], *, cwd: str, rows: int, cols: int) 
     process = owner.process
     process._vibelution_terminal_process_owner = owner
     return process, "pipe"
+
+
+def _retire_failed_conpty_spawn(owner: _ConptyProcessOwner, code: str, message: str) -> CliAgentTerminalError:
+    owner_key = f"{owner.pid}:{id(owner):x}"
+    with _RUNTIMES_LOCK:
+        _PENDING_CONPTY_OWNERS[owner_key] = owner
+    cleanup_deadline = time.monotonic() + TERMINAL_SHUTDOWN_TIMEOUT_SECONDS
+    try:
+        owner.request_stop()
+        cleaned = owner.wait_until_stopped(cleanup_deadline) and owner.close(cleanup_deadline)
+    except Exception:
+        cleaned = False
+    if cleaned:
+        with _RUNTIMES_LOCK:
+            if _PENDING_CONPTY_OWNERS.get(owner_key) is owner:
+                _PENDING_CONPTY_OWNERS.pop(owner_key, None)
+    suffix = "its process tree was retired" if cleaned else "cleanup remains pending"
+    return CliAgentTerminalError(
+        code, f"{message}; {suffix}.", details={"processId": owner.pid, "cleanupPending": not cleaned},
+    )
 
 
 def _is_windows_platform() -> bool:

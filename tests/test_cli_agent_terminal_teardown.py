@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import os
 import re
 import subprocess
@@ -39,6 +40,18 @@ def terminal_runtime_environment(monkeypatch, tmp_path):
     result = terminal_service.shutdown_cli_agent_terminal_sessions()
     assert result["closed"]
     assert not terminal_service._RUNTIMES
+
+
+@pytest.fixture
+def fake_conpty_launch_gate(monkeypatch):
+    releases = []
+
+    @contextmanager
+    def launch(args, env):
+        yield SimpleNamespace(command=args, release=lambda: releases.append(True))
+
+    monkeypatch.setattr(terminal_service, "ConptyLaunchGate", launch)
+    return releases
 
 
 def _make_runtime(tmp_path: Path, process, transport: str, session_id: str):
@@ -144,7 +157,7 @@ def test_root_exit_retires_descendant_holding_pipe_and_reader(terminal_runtime_e
 def test_conpty_runtime_is_closed_with_its_job_and_reader(terminal_runtime_environment):
     tmp_path = terminal_runtime_environment
     process, transport = terminal_service._spawn_terminal_process(
-        [sys.executable, "-c", "import time; time.sleep(60)"],
+        [sys.executable, "-c", "import time; print('CHILD-READY', flush=True); print(input().upper(), flush=True); time.sleep(60)"],
         cwd=str(tmp_path),
         rows=24,
         cols=80,
@@ -152,6 +165,15 @@ def test_conpty_runtime_is_closed_with_its_job_and_reader(terminal_runtime_envir
     assert transport == "conpty"
     runtime = _make_runtime(tmp_path, process, transport, "terminal-conpty-close")
     _publish_and_start(runtime)
+
+    def output_contains(message):
+        path = tmp_path / "runtime" / "transcripts" / "terminal-conpty-close.txt"
+        return path.exists() and message in path.read_text(encoding="utf-8")
+
+    assert _wait_until(lambda: output_contains("CHILD-READY"))
+    assert runtime.process_owner.job.active_count() >= 2
+    runtime.send_input("tested through conpty\r")
+    assert _wait_until(lambda: output_contains("TESTED THROUGH CONPTY"))
 
     result = terminal_service.shutdown_cli_agent_terminal_sessions()
 
@@ -167,7 +189,7 @@ def test_conpty_runtime_is_closed_with_its_job_and_reader(terminal_runtime_envir
     assert not process._thread.is_alive()
 
 
-def test_conpty_job_is_created_before_pty_process(monkeypatch):
+def test_conpty_job_is_created_before_pty_process(monkeypatch, fake_conpty_launch_gate):
     spawned = []
 
     class FakePtyProcess:
@@ -189,11 +211,14 @@ def test_conpty_job_is_created_before_pty_process(monkeypatch):
         )
 
     assert not spawned
+    assert not fake_conpty_launch_gate
 
 
 @pytest.mark.parametrize("term_key", ["TERM", "term", "TeRm"])
 @pytest.mark.parametrize("term_value", [None, "", " \t ", "dumb", "DuMb", "vt100", "xterm-256color"])
-def test_conpty_spawn_passes_a_capable_term_without_changing_parent_environment(monkeypatch, term_key, term_value):
+def test_conpty_spawn_passes_a_capable_term_without_changing_parent_environment(
+    monkeypatch, fake_conpty_launch_gate, term_key, term_value,
+):
     source_env = {"UPSTREAM_VALUE": "keep", "CI": "1", "NO_COLOR": "1"}
     if term_value is not None:
         source_env[term_key] = term_value
@@ -216,6 +241,7 @@ def test_conpty_spawn_passes_a_capable_term_without_changing_parent_environment(
 
     assert spawned is process
     assert transport == "conpty"
+    assert fake_conpty_launch_gate == [True]
     term_entries = [(key, value) for key, value in captured[0].items() if key.upper() == "TERM"]
     expected = term_value if term_value in {"vt100", "xterm-256color"} else "xterm-256color"
     assert term_entries == [(term_key if term_value is not None else "TERM", expected)]
@@ -251,7 +277,9 @@ def test_pipe_spawn_preserves_term_without_claiming_terminal_capabilities(monkey
     assert captured[0]["stdout"] == subprocess.PIPE
 
 
-def test_failed_conpty_adoption_keeps_known_tree_for_shutdown_retry(monkeypatch, terminal_runtime_environment):
+def test_failed_conpty_adoption_keeps_known_tree_for_shutdown_retry(
+    monkeypatch, terminal_runtime_environment, fake_conpty_launch_gate,
+):
     tmp_path = terminal_runtime_environment
     child_assignment_failures = 0
     forced_cleanup_failures = 0
@@ -356,6 +384,7 @@ def test_failed_conpty_adoption_keeps_known_tree_for_shutdown_retry(monkeypatch,
             [sys.executable, "-c", "pass"], cwd=str(tmp_path), rows=24, cols=80
         )
 
+    assert not fake_conpty_launch_gate
     assert len(terminal_service._PENDING_CONPTY_OWNERS) == 1
     owner_key, owner = next(iter(terminal_service._PENDING_CONPTY_OWNERS.items()))
     root_pid = owner.pid
