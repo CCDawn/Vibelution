@@ -581,3 +581,44 @@ def test_queued_stop_without_fast_ack_still_persists_synchronously(
     control.request_stop_session_turn("session-stop", fast_ack=False, cascade=False)
 
     assert persisted == [True]
+
+
+def test_stop_before_running_marker_cancels_the_queued_turn(monkeypatch):
+    """发送到 running 标记之间点停止必须取消排队 turn。
+
+    消息先落盘、turn 先进队列，之后才标记 running；这个窗口里若只回读
+    detail，停止请求会完全失效，排队 turn 仍会在 worker 空出后开跑。
+    """
+
+    cancelled: list[tuple[str, str]] = []
+    monkeypatch.setattr(session_service, "get_web_language", lambda: "zh")
+    monkeypatch.setattr(session_service, "_is_session_running", lambda _sid: False)
+    monkeypatch.setattr(
+        session_service,
+        "_cancel_queued_session_turn",
+        lambda sid, tid: cancelled.append((sid, tid)) or True,
+    )
+    monkeypatch.setattr(
+        session_service,
+        "get_session_detail",
+        lambda _sid: (_ for _ in ()).throw(AssertionError("detail read is unnecessary once the queue cancel wins")),
+    )
+
+    result = control.request_stop_session_turn("session-stop", fast_ack=True, cascade=False)
+
+    assert cancelled == [("session-stop", "")]
+    assert result["currentPhase"] == "stopped"
+    assert result["queuedTurnCancelled"] is True
+
+
+def test_stop_with_nothing_queued_keeps_reading_the_detail(monkeypatch):
+    """没有排队 turn 时保持原行为：回读并返回当前 detail。"""
+
+    monkeypatch.setattr(session_service, "get_web_language", lambda: "zh")
+    monkeypatch.setattr(session_service, "_is_session_running", lambda _sid: False)
+    monkeypatch.setattr(session_service, "_cancel_queued_session_turn", lambda *args: False)
+    monkeypatch.setattr(session_service, "get_session_detail", lambda sid: {"id": sid})
+
+    result = control.request_stop_session_turn("session-stop", fast_ack=True, cascade=False)
+
+    assert result == {"id": "session-stop"}

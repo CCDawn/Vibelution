@@ -508,6 +508,17 @@ def request_stop_session_turn(
         raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
 
     if not s._is_session_running(conversation_id):
+        # 发送到 running 标记之间有一个窗口：消息已经落盘、turn 已经进调度
+        # 队列，但会话还没被标记 running。此时只回读 detail 会让停止请求
+        # 完全失效——排队 turn 没被取消，worker 空出来照样开跑。先取消
+        # 排队 turn；空 turn_id 表示取消该会话全部排队项。
+        if s._cancel_queued_session_turn(conversation_id, ""):
+            return {
+                "id": conversation_id,
+                "currentPhase": "stopped",
+                "stopRequested": True,
+                "queuedTurnCancelled": True,
+            }
         detail = s.get_session_detail(conversation_id)
         if detail is None:
             raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
