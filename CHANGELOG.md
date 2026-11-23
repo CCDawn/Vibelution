@@ -3,6 +3,9 @@
 ## Unreleased
 - feat: 个人助理模型选择器在长目录下新增「可用模型」「最近使用」两个跨厂商分组，打开菜单即可直接选当前可用的模型，不必逐个展开厂商分组；搜索时仍只显示厂商分组，避免重复行。
 
+## 3.3.0 - 2026-11-23
+- Let the chat tab strip show the same pane gutter as the panes below it, so the
+
 ## 3.2.4 - 2026-11-23
 ---
 
