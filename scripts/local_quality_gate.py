@@ -913,6 +913,11 @@ def read_guard_status(project_root: Path) -> dict[str, object]:
     return loaded
 
 
+# CHANGELOG.md is the shared release ledger: the commit guard deliberately
+# never claims it, so closeout must not demand claim coverage for it either.
+SHARED_CLAIM_PATHS = frozenset({"changelog.md"})
+
+
 def normalize_scope(value: str) -> str:
     normalized = value.strip().replace("\\", "/").strip("/")
     return normalized.lower() or "."
@@ -950,8 +955,9 @@ def validate_claim(project_root: Path, claim_id: str, files: Sequence[str]) -> b
     if claim is None:
         return False
     scopes = claim.get("scopes", [])
+    claimable = [path for path in files if normalize_scope(path) not in SHARED_CLAIM_PATHS]
     return isinstance(scopes, list) and all(
-        any(scope_covers(str(scope), path) for scope in scopes) for path in files
+        any(scope_covers(str(scope), path) for scope in scopes) for path in claimable
     )
 
 
