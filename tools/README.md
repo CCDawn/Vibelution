@@ -62,6 +62,7 @@ Model 可见性
 | `research_knowledge_tools.py` | `research_knowledge_query_tool` | `test_research_knowledge_tools.py` |
 | `research_organization_tools.py` | `research_agent_creation_proposal_tool` · `research_communication_edge_proposal_tool` · `research_proposal_apply_tool` | `test_research_organization_tools.py` |
 | `agent_message_tools.py` | `agent_message_tool` | `test_agent_tool_contracts.py` |
+| `launcher_assistant_contact_tools.py` | `launcher_assistant_contact_tool`（原 Launcher 任务绑定的发现、异步联系及原请求回执；目录通过独立 contacts 卡片发现，不提供跨 profile Session 地址） | `test_launcher_assistant_contact.py` |
 | `agent_tool_governance_tools.py` | `agent_tool_permission_request_tool` | `test_tool_authorization_execution.py` |
 | `cli_agent_tools.py` | `cli_agent_run_tool` | `test_agent_protocol.py` |
 | `session_child_tools.py` | `create_child_session_tool` · `list_child_sessions_tool` | `test_agent_protocol.py` |

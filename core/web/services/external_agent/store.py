@@ -34,10 +34,10 @@ class ExternalAgentTaskConflictError(ExternalAgentTaskStoreError):
 _TRANSITIONS: dict[str, frozenset[str]] = {
     "queued": frozenset({"queued", "running", "failed", "cancelled", "cancelling"}),
     "running": frozenset(
-        {"running", "awaiting_approval", "succeeded", "failed", "cancelling"}
+        {"running", "awaiting_approval", "succeeded", "failed", "cancelled", "cancelling"}
     ),
     "awaiting_approval": frozenset(
-        {"awaiting_approval", "running", "succeeded", "failed", "cancelling"}
+        {"awaiting_approval", "running", "succeeded", "failed", "cancelled", "cancelling"}
     ),
     "cancelling": frozenset(
         {"cancelling", "cancelled", "timed_out", "stop_unconfirmed"}

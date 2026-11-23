@@ -137,6 +137,7 @@ MEDIUM_PERMISSION_TIER = "medium"
 HIGH_PERMISSION_TIER = "high"
 GENERATED_PERMISSION_TIER = "generated"
 EXPLICIT_ALLOW_TOOLS = {
+    "launcher_assistant_contact_tool",
     "personal_assistant_overview_tool",
     "personal_assistant_query_tool",
     "personal_assistant_manage_tool",
@@ -958,6 +959,13 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
     "personal_assistant_query_tool": {
         "category": "runtime_control",
         "capabilityTags": ["project_query", "read_only"],
+        "riskTags": [],
+        "permissionTier": LOW_PERMISSION_TIER,
+        "approval": "never",
+    },
+    "launcher_assistant_contact_tool": {
+        "category": "runtime_control",
+        "capabilityTags": ["agent_messaging", "task_bound_contact"],
         "riskTags": [],
         "permissionTier": LOW_PERMISSION_TIER,
         "approval": "never",

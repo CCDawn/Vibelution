@@ -130,7 +130,8 @@ class LauncherPatrol:
         for item in state["entries"]:
             if (not isinstance(item, dict) or not {"event", "token", "state", "createdAt"}.issubset(item)
                     or set(item) - {"event", "token", "state", "createdAt", "attempts", "cancelProof", "priorTurnId",
-                                   "history", "visibleReport", "escalation", "projectBinding", "acknowledged"}
+                                   "history", "visibleReport", "escalation", "projectBinding", "acknowledged",
+                                   "submissionStarted"}
                     or not isinstance(item["event"], dict) or not isinstance(item["token"], str)
                     or not _TOKEN.fullmatch(item["token"])
                     or item["state"] not in {"reserved", "accepted", "completed", "cancelled", "unknown", "observed",
@@ -144,6 +145,8 @@ class LauncherPatrol:
             if "visibleReport" in item and type(item["visibleReport"]) is not bool:
                 raise RuntimeError("patrol_state_invalid")
             if "acknowledged" in item and type(item["acknowledged"]) is not bool:
+                raise RuntimeError("patrol_state_invalid")
+            if "submissionStarted" in item and type(item["submissionStarted"]) is not bool:
                 raise RuntimeError("patrol_state_invalid")
             if "projectBinding" in item and (not isinstance(item["projectBinding"], str) or not _TOKEN.fullmatch(item["projectBinding"])):
                 raise RuntimeError("patrol_state_invalid")
@@ -423,6 +426,7 @@ class LauncherPatrol:
                 item = {"event": event, "token": token, "state": "reserved", "createdAt": observed,
                         "attempts": [observed], "projectBinding": self._project_binding(event["projectId"])}
                 self._state["entries"].append(item)
+            item["submissionStarted"] = False
             self._save()  # Commit before any native scheduling.
             self._active.add(token)
             self._submitting.add(token)
@@ -432,6 +436,9 @@ class LauncherPatrol:
             with native._session_command() as (_, sid):
                 if sid != self.session_id or not self.current(self.agent_id, 1, token):
                     raise RuntimeError("patrol_binding_changed")
+                with self._lock:
+                    item["submissionStarted"] = True
+                    self._save()
                 attempted = True
                 try:
                     result = submit_session_proactive_turn(session_id=sid, agent_id=self.agent_id,
@@ -533,6 +540,11 @@ class LauncherPatrol:
         triggers = [e for e in events if getattr(e, "event_type", "") == "internal_turn_trigger"
                     and getattr(e, "correlation_id", "") == token]
         if not starts and not triggers:
+            # Older reservations and submissions past the durable fence can
+            # have an unknown outcome. Only an explicit pre-call record is safe.
+            if item["state"] == "reserved" and item.get("submissionStarted") is False:
+                item.update(cancelProof="not_submitted", priorTurnId="")
+                return "cancelled_pre_admission"
             return "cancelled_pre_admission" if item["state"] == "cancelled_pre_admission" else "unknown"
         if len(starts) != 1 or len(triggers) != 1:
             return "unknown"

@@ -895,6 +895,11 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                                               "teamRuns": patrol.team_observation,
                                               "platform": patrol.platform_observation,
                                               "deliveryEscalations": patrol.delivery_escalations}
+                contacts = getattr(dispatch, "contacts", None)
+                if contacts is not None:
+                    # Keep contact polling after the task heartbeat and patrol.
+                    with suppress(Exception):
+                        await asyncio.wait_for(contacts.refresh(), timeout=3)
             except Exception:  # noqa: BLE001 - private backend data stays out of logs.
                 # Native IDs and credentials remain durable. A failed poll is
                 # not permission to repeat a task or cancel it.
@@ -931,6 +936,9 @@ def create_app(*, native, token: str, dispatch=None, main_control=None, history_
                 app.state.legacy_reminder_receipts = await asyncio.get_running_loop().run_in_executor(
                     legacy_reminder_executor, LegacyReminderReceipts, native.root / "legacy_reminder_receipts")
             if dispatch is not None and isinstance(native, NativeFacade):
+                from .contact_observer import AssistantTaskContacts
+                dispatch.contacts = AssistantTaskContacts(dispatch, native.assistant["agentId"],
+                                                          native.assistant["directSessionId"])
                 try:
                     patrol = await create_patrol(native.root, native.assistant["agentId"],
                                                  native.assistant["directSessionId"], dispatch)

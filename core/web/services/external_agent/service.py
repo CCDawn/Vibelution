@@ -1054,6 +1054,15 @@ class ExternalAgentTaskService:
             except Exception:
                 bound_task = ""
             if bound_task != record.get("taskId"):
+                # The project backend may have restarted after the Turn
+                # settled, before the gateway saved the task receipt. Restore
+                # the exact persisted outcome without restoring execution authority.
+                detail = self.dependencies.get_session_detail(
+                    session_id, message_limit=40, include_secondary=False,
+                )
+                terminal = self._observed_terminal_phase(record, detail, require_anchor=True)
+                if terminal:
+                    return self._settle_observed_turn(record, detail, terminal), []
                 return self._request_cancel(record, terminal_status="cancelled", reason_code="restart_authorization_required"), []
         try:
             self._require_eligible(
@@ -1103,27 +1112,50 @@ class ExternalAgentTaskService:
         phase = self._session_phase(detail)
         if phase in _RESUMABLE_PHASES:
             return self._continue_resumable_task(latest, detail), []
-        if phase in _TERMINAL_PHASES:
-            failed = phase in {"failed", "error"}
-            result_summary = self._result_summary(detail or {})
-            latest = self._transition(
-                latest["taskId"],
-                status="failed" if failed else "succeeded",
-                expected_revision=int(latest["revision"]),
-                reason_code="turn_failed" if failed else "turn_succeeded",
-                fields={
-                    "resultSummary": result_summary,
-                    "error": (
-                        {
-                            "code": "TURN_FAILED",
-                            "message": result_summary or "Agent turn failed.",
-                        }
-                        if failed
-                        else None
-                    ),
-                },
-            )
+        terminal = self._observed_terminal_phase(latest, detail)
+        if terminal:
+            latest = self._settle_observed_turn(latest, detail, terminal)
         return latest, []
+
+    def _settle_observed_turn(self, record, detail, status):
+        summary = self._result_summary(detail)
+        return self._transition(
+            record["taskId"],
+            status=status,
+            expected_revision=int(record["revision"]),
+            reason_code=f"turn_{status}",
+            fields={
+                "resultSummary": summary,
+                "error": (
+                    {"code": "TURN_FAILED", "message": summary or "Agent turn failed."}
+                    if status == "failed" else None
+                ),
+            },
+        )
+
+    @classmethod
+    def _observed_terminal_phase(cls, record, detail, *, require_anchor=False) -> str:
+        if not isinstance(detail, dict) or cls._session_running(detail):
+            return ""
+        phase = cls._session_phase(detail)
+        if phase not in _TERMINAL_PHASES:
+            return ""
+        # Native detail always carries the terminal anchor. A ready/idle
+        # Session with no exact settlement can be recovered from a stale
+        # running marker, or be displaying a previous continuation.
+        if require_anchor or "lastTurnTerminalTurnId" in detail:
+            if not record.get("turnId") or detail.get("lastTurnTerminalTurnId") != record["turnId"]:
+                return ""
+            phase = str(detail.get("terminalReason") or detail.get("lastTurnStatus") or phase).strip().lower()
+        elif phase in {"ready", "idle"}:
+            # Older projections have no Turn anchor. Preserve their result
+            # only when there is an actual assistant result.
+            return "succeeded" if cls._result_summary(detail) else ""
+        if phase in {"stopped", "stopped_by_user", "cancelled", "aborted"}:
+            return "cancelled"
+        if phase in {"failed", "error", "interrupted", "failed_provider", "failed_runtime", "superseded"}:
+            return "failed"
+        return "succeeded" if phase in {"success", "completed", "succeeded"} else ""
 
     def _continue_resumable_task(
         self,

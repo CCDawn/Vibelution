@@ -467,6 +467,8 @@ def test_get_continues_resumable_session_phase_before_succeeding(
     runtime.details[task["sessionId"]] = {
         "sessionId": task["sessionId"],
         "status": "ready",
+        "lastTurnTerminalTurnId": "turn-2",
+        "terminalReason": "success",
         "messages": [{"role": "assistant", "content": "任务完成。"}],
     }
     completed = service.get_task(owner_id="host-a", task_id=task["taskId"])

@@ -44,6 +44,61 @@ def test_restart_missing_binding_stops_task_without_managed_continuation(tmp_pat
     assert service.store.get_task(record["taskId"])["reasonCode"] == "restart_authorization_required_confirmed"
 
 
+@pytest.mark.parametrize(
+    ("reason", "status"),
+    [("success", "succeeded"), ("stopped_by_user", "cancelled"),
+     ("failed_provider", "failed"), ("aborted", "cancelled")],
+)
+@pytest.mark.parametrize("restarted", [False, True])
+def test_task_receipt_uses_exact_persisted_turn_outcome(tmp_path, reason, status, restarted):
+    runtime = FakeRuntime()
+    service = _service(tmp_path, runtime)
+    _enable_real_binding(service)
+    started = service.start_task(owner_id="owner", adapter_connection_id="connection", capabilities=set(),
+        agent_id="coder", task="bounded", permission_profile="read_only", client_request_id="terminal-test",
+        title="", runtime_revision="revision")
+    record = service.store.get_task(started["taskId"])
+    runtime.details[record["sessionId"]].update(
+        phase="ready", running=False, lastTurnTerminalTurnId=record["turnId"],
+        lastTurnStatus="ready", terminalReason=reason,
+        messages=[{"role": "assistant", "content": "Original task output"}],
+    )
+    if restarted:
+        unregister_external_session(task_id=record["taskId"], session_id=record["sessionId"], agent_id="coder")
+        service = _service(tmp_path, runtime)
+        _enable_real_binding(service)
+
+    receipt = service.get_task(owner_id="owner", task_id=record["taskId"])
+
+    assert receipt["status"] == status
+    assert receipt["resultSummary"] == "Original task output"
+    assert service.get_task(owner_id="owner", task_id=record["taskId"]) == receipt
+    assert len(runtime.submit_calls) == 1
+    assert runtime.stop_calls == []
+
+
+def test_task_receipt_does_not_use_another_turns_terminal_anchor(tmp_path):
+    runtime = FakeRuntime()
+    service = _service(tmp_path, runtime)
+    _enable_real_binding(service)
+    started = service.start_task(owner_id="owner", adapter_connection_id="connection", capabilities=set(),
+        agent_id="coder", task="bounded", permission_profile="read_only", client_request_id="wrong-anchor",
+        title="", runtime_revision="revision")
+    record = service.store.get_task(started["taskId"])
+    runtime.details[record["sessionId"]].update(
+        phase="ready", running=False, lastTurnTerminalTurnId="prev-turn",
+        lastTurnStatus="ready", terminalReason="success",
+        messages=[{"role": "assistant", "content": "Earlier task output"}],
+    )
+    try:
+        receipt = service.get_task(owner_id="owner", task_id=record["taskId"])
+        assert receipt["status"] == "running"
+        assert not receipt.get("resultSummary")
+        assert len(runtime.submit_calls) == 1
+    finally:
+        unregister_external_session(task_id=record["taskId"], session_id=record["sessionId"], agent_id="coder")
+
+
 @pytest.mark.parametrize("failure", ["submit", "persist"])
 def test_submit_exception_after_acceptance_retains_binding_until_stop_confirmation(tmp_path, failure):
     runtime = FakeRuntime()

@@ -39,7 +39,7 @@ def plan_project_scopes(actions: list[str]) -> dict[str, list[str]]:
     for name in actions:
         scopes = read_scopes(name)
         if scopes is None:
-            if name in ORIGINAL_REFERENCE_ACTIONS or name in {"agents", "dispatch", "dispatch_list", "receipt", "dispatch_write",
+            if name in ORIGINAL_REFERENCE_ACTIONS or name in {"agents", "dispatch", "dispatch_list", "receipt", "dispatch_write", "contact_requests", "contact_reply",
                     "task_session_cleanup_preview", "task_session_cleanup"}:
                 scopes = []
             elif name in ACTION_SCOPES:

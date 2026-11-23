@@ -81,11 +81,14 @@ def initialize_session_directory_on_startup(generation: int | None = None) -> ob
 
 
 def _reconcile_cli_agent_terminal_states_on_startup() -> object:
+    from .services.cli_agent_task_kernel import recover_pending_cli_agent_task_results_on_startup
     from .services.cli_agent_terminal_service import (
         reconcile_cli_agent_terminal_states_on_startup,
     )
 
-    return reconcile_cli_agent_terminal_states_on_startup(reason="backend_startup")
+    report = reconcile_cli_agent_terminal_states_on_startup(reason="backend_startup")
+    report["taskResultRecovery"] = recover_pending_cli_agent_task_results_on_startup()
+    return report
 
 
 def _recover_wakeable_agent_inbox_messages_on_startup() -> object:

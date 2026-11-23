@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.infrastructure.file_lock import cross_process_file_lock
+
 from . import cli_agent_protocols as protocols
 from . import cli_agent_service
 from . import runtime_task_registry as task_registry
@@ -23,13 +25,15 @@ WATCH_INTERVAL_SECONDS = 1.0
 # The watchdog reconciles the active-task index from a full directory scan
 # once per minute; every other tick reads only index-listed active tasks.
 _RECONCILE_EVERY_TICKS = 60
+_RESULT_RETRY_BASE_SECONDS = 5.0
+_RESULT_RETRY_MAX_SECONDS = 300.0
 
 ACTIVE_STATUSES = {"queued", "sent", "running"}
 TERMINAL_CLOSED_STATUSES = {"closed", "stopped", "exited", "stale"}
 
 _TASK_LOCK = threading.RLock()
-# Only callbacks currently awaiting their final decision are retained, never
-# historical terminal tasks. Access and removal share _TASK_LOCK with sealing.
+# Recoverable delivery intents, backed by each task's resultDeliveryState.
+# Access and removal share _TASK_LOCK with parent-stop notification sealing.
 _PENDING_FINALIZATIONS: dict[str, str] = {}
 _WATCHER_STARTED = False
 _WATCH_MTIME_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
@@ -279,6 +283,32 @@ def _ensure_watcher_started() -> None:
         pass
 
 
+def _restore_pending_finalizations() -> None:
+    # Only explicitly pending receipts are recoverable. Legacy terminal tasks
+    # have no durable acknowledgement, so replaying them could wake/charge twice.
+    for state in _task_store().iter_task_states():
+        if _result_delivery_pending(state):
+            _PENDING_FINALIZATIONS[str(state["taskId"])] = str(state.get("sourceSessionId") or "").strip()
+
+
+def recover_pending_cli_agent_task_results_on_startup() -> dict[str, Any]:
+    """Start receipt recovery without submitting or restarting any CLI child."""
+    with _TASK_LOCK:
+        _restore_pending_finalizations()
+        count = len(_PENDING_FINALIZATIONS)
+    if count:
+        _ensure_watcher_started()
+    return {"pendingResultCount": count}
+
+
+def _result_delivery_pending(state: dict[str, Any]) -> bool:
+    return (
+        state.get("kind") == task_registry.KIND_CLI_AGENT
+        and task_registry.is_terminal_status(str(state.get("status") or ""))
+        and state.get("resultDeliveryState") == "pending"
+    )
+
+
 def _watch_active_tasks() -> None:
     tick = 0
     while True:
@@ -290,6 +320,7 @@ def _watch_active_tasks() -> None:
                 # snapshots); every other tick reads only active tasks.
                 _WATCH_MTIME_CACHE.clear()
                 task_states = _task_store().reconcile_index()
+                _restore_pending_finalizations()
             else:
                 task_states = _task_store().active_task_states(mtime_cache=_WATCH_MTIME_CACHE)
             for task_state in task_states:
@@ -314,6 +345,17 @@ def _watch_active_tasks() -> None:
                     )
                 _persist_task_for_finalization(task_state)
                 finalized.append(dict(task_state))
+            queued_ids = {str(state.get("taskId") or "") for state in finalized}
+            for task_id in list(_PENDING_FINALIZATIONS):
+                if task_id in queued_ids:
+                    continue
+                state = _task_store().load_state(task_id)
+                if not _result_delivery_pending(state):
+                    _PENDING_FINALIZATIONS.pop(task_id, None)
+                    continue
+                next_attempt = _parse_iso_epoch(str(state.get("resultDeliveryNextAttemptAt") or ""))
+                if next_attempt is None or next_attempt <= now:
+                    finalized.append(state)
         for task_state in finalized:
             _finalize_task_result(task_state, reason=str(task_state.get("completionReason") or "watchdog"))
         tick += 1
@@ -412,37 +454,85 @@ def _complete_task_state(task_state: dict[str, Any], *, status: str, code: str, 
 
 def _persist_task_for_finalization(task_state: dict[str, Any]) -> None:
     """Persist a terminal result and register its callback before releasing the lock."""
+    task_state.setdefault("resultDeliveryState", "pending")
     _write_task_state(task_state)
     _PENDING_FINALIZATIONS[str(task_state["taskId"])] = str(task_state.get("sourceSessionId") or "").strip()
 
 
 def _finalize_task_result(task_state: dict[str, Any], *, reason: str) -> None:
+    task_id = str(task_state.get("taskId") or "").strip()
+    if not task_id:
+        return
+    # A separate per-task delivery lock serializes callbacks across processes
+    # without holding the task snapshot lock or _TASK_LOCK during Session I/O.
+    delivery_lock = _task_store().task_state_path(task_id).with_suffix(".delivery")
+    try:
+        with cross_process_file_lock(delivery_lock, timeout=0):
+            _deliver_task_result(task_state, reason=reason)
+    except TimeoutError:
+        # Another owner is delivering; its persisted pending/ack state wins.
+        return
+    except Exception as exc:
+        # A snapshot write/read failure must not kill the recovery watchdog.
+        # The durable pending intent remains available for a later attempt.
+        cli_agent_service._record_event(
+            "cli_agent.task.result_delivery_failed", outcome="failed",
+            fields={"taskId": task_id, "errorType": type(exc).__name__},
+        )
+
+
+def _deliver_task_result(task_state: dict[str, Any], *, reason: str) -> None:
     store = _task_store()
     # A completion copy may predate a parent stop. Preserve durable stop/seal
     # facts while serializing its decision and save with the owner stop helper.
     with _TASK_LOCK:
         task_id = str(task_state.get("taskId") or "").strip()
         latest = store.load_state(task_id)
-        task_state.update({
-            key: value for key, value in latest.items()
-            if key.startswith("notificationSealed") or key in {"cascadeStop", "stopInitiator", "stopRequestedAt"}
-        })
+        if latest.get("resultDeliveryState") in {"delivered", "dropped", "not_required"}:
+            _PENDING_FINALIZATIONS.pop(task_id, None)
+            return
+        next_attempt = _parse_iso_epoch(str(latest.get("resultDeliveryNextAttemptAt") or ""))
+        if next_attempt is not None and next_attempt > time.time():
+            return
+        outcome = ""
+        allowed = True
+
+        def prepare(current: dict[str, Any]) -> dict[str, Any]:
+            nonlocal allowed, outcome
+            task_state.update({
+                key: value for key, value in current.items()
+                if key.startswith(("notificationSealed", "resultDelivery"))
+                or key in {"cascadeStop", "stopInitiator", "stopRequestedAt"}
+            })
+            allowed = store.apply_completion_fencing(task_state)
+            if allowed and bool(task_state.get("notificationSealed")):
+                allowed = False
+                outcome = "sealed_dropped"
+                task_state.update({"notificationDropAuditedAt": _now_iso(),
+                                   "notificationDropDecision": "dropped", "notificationDropReason": "sealed"})
+            session_id = str(task_state.get("sourceSessionId") or "").strip()
+            if not allowed:
+                task_state["resultDeliveryState"] = "dropped"
+            else:
+                task_state["resultDeliveryState"] = "pending" if session_id else "not_required"
+            if task_state["resultDeliveryState"] == "pending":
+                attempts = int(task_state.get("resultDeliveryAttempts") or 0) + 1
+                delay = min(_RESULT_RETRY_MAX_SECONDS, _RESULT_RETRY_BASE_SECONDS * (2 ** min(attempts - 1, 10)))
+                task_state.update({
+                    "resultDeliveryAttempts": attempts,
+                    "resultDeliveryLastAttemptAt": _now_iso(),
+                    "resultDeliveryNextAttemptAt": datetime.fromtimestamp(time.time() + delay, timezone.utc).isoformat(),
+                })
+            return task_state
+
         # Rewind fencing and parent-stop sealing remain independent reasons
         # to drop completion delivery; each leaves its existing audit fields.
-        allowed = store.apply_completion_fencing(task_state)
-        outcome = ""
-        if allowed and bool(task_state.get("notificationSealed")):
-            allowed = False
-            outcome = "sealed_dropped"
-            task_state.update(
-                {
-                    "notificationDropAuditedAt": _now_iso(),
-                    "notificationDropDecision": "dropped",
-                    "notificationDropReason": "sealed",
-                }
-            )
-        store.save_state(task_state)
-        _PENDING_FINALIZATIONS.pop(task_id, None)
+        if store.update_task(task_id, prepare) is None:
+            return
+        if task_state["resultDeliveryState"] == "pending":
+            _PENDING_FINALIZATIONS[task_id] = str(task_state.get("sourceSessionId") or "").strip()
+        else:
+            _PENDING_FINALIZATIONS.pop(task_id, None)
     # Session events and notification delivery must stay outside _TASK_LOCK.
     if not allowed:
         cli_agent_service._record_event(
@@ -479,13 +569,24 @@ def _finalize_task_result(task_state: dict[str, Any], *, reason: str) -> None:
     try:
         from . import session_service
 
-        session_service.append_cli_agent_task_result_event(
+        receipt = session_service.append_cli_agent_task_result_event(
             session_id,
             task_result=_public_task_result(task_state, output_limit=int(task_state.get("outputLimit") or cli_agent_service.DEFAULT_OUTPUT_LIMIT)),
             wake_agent=True,
             wake_reason=reason,
         )
+        if not isinstance(receipt, dict):
+            raise RuntimeError("CLI parent Session did not acknowledge the result")
+        with _TASK_LOCK:
+            store.update_task(task_id, lambda current: {
+                **current, "resultDeliveryState": "delivered", "resultDeliveryAcknowledgedAt": _now_iso(),
+                "resultDeliveryNextAttemptAt": "", "resultDeliveryLastErrorType": "",
+            })
+            _PENDING_FINALIZATIONS.pop(task_id, None)
     except Exception as exc:
+        error_type = type(exc).__name__
+        with _TASK_LOCK:
+            store.update_task(task_id, lambda current: {**current, "resultDeliveryLastErrorType": error_type})
         cli_agent_service._record_event(
             "cli_agent.task.result_delivery_failed",
             outcome="failed",
@@ -493,7 +594,7 @@ def _finalize_task_result(task_state: dict[str, Any], *, reason: str) -> None:
                 "taskId": str(task_state.get("taskId") or ""),
                 "terminalSessionId": str(task_state.get("terminalSessionId") or ""),
                 "adapterId": str(task_state.get("adapterId") or ""),
-                "errorType": type(exc).__name__,
+                "errorType": error_type,
             },
         )
 

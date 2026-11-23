@@ -95,6 +95,11 @@ def local_approval_policy(runtime, tool_name, args, requirement, permission_pres
             raise LocalTaskScopeError("本次派遣的工作区授权已失效，请结束任务并将结果交回个人助理。")
         task = {"workspace": workspace, "profile": "workspace_write"}
     workspace = task["workspace"]
+    if tool_name == "launcher_assistant_contact_tool":
+        from .contact import valid_tool_call
+        if not task.get("taskId") or not valid_tool_call(args):
+            raise LocalTaskScopeError("个人助理联系仅允许当前原生任务的有界消息、发现和原请求回执。")
+        return None, permission_preset
     if not workspace_paths_allowed(tool_name, args, workspace):
         raise LocalTaskScopeError("工具路径超出本次派遣的工作区，请使用任务工作区内的路径。")
     if tool_name in {"cli_tool", "exec_command"}:

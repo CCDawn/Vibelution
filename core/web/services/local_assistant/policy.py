@@ -123,6 +123,7 @@ def local_runtime_tool_grants(permission_profile: str) -> tuple[str, ...]:
     external = set(external_runtime_tool_grants(permission_profile))
     desired = _READ_GRANTS + (_WRITE_GRANTS if permission_profile == "workspace_write" else ())
     names = [name for name in desired if name in external and _ordinary_metadata(name)]
+    names.append("launcher_assistant_contact_tool")
     if permission_profile == "workspace_write":
         names.append(LOCAL_REUSE_EVIDENCE_TOOL)
         names.extend(name for name in sorted(_CLI_TOOLS) if _ordinary_metadata(name))

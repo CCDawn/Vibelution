@@ -3132,6 +3132,18 @@ def _build_key_tools() -> List[BaseTool]:
         return _personal_assistant_overview_impl(offset=offset, limit=limit, team_id=team_id, flow_id=flow_id)
 
     @tool
+    def launcher_assistant_contact_tool(operation: str = "describe", request_id: str = "", content: str = "") -> str:
+        """Contact the Launcher assistant within this Agent's original active Launcher task.
+
+        describe returns authorization and observed availability. send queues up to 1000
+        characters with a stable request_id (max 64 safe characters); receipt checks that
+        same ID. Queued/undelivered/unknown never means received or replied. This tool
+        cannot access assistant history, dispatch work or choose a reply target.
+        """
+        from tools.launcher_assistant_contact_tools import launcher_assistant_contact_tool as contact
+        return contact(operation=operation, request_id=request_id, content=content)
+
+    @tool
     def personal_assistant_query_tool(resource: str = "index", operation: str = "list", object_id: str = "",
                                      query: str = "", path: str = "", offset: int = 0, limit: int = 20,
                                      line: int = 1, max_lines: int = 80) -> str:
@@ -4143,6 +4155,7 @@ def _build_key_tools() -> List[BaseTool]:
         financial_report_query_tool,
         personal_assistant_overview_tool,
         personal_assistant_query_tool,
+        launcher_assistant_contact_tool,
         personal_assistant_manage_tool,
         personal_assistant_platform_api_tool,
         personal_assistant_action_tool,

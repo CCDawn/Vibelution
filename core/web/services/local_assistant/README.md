@@ -33,6 +33,16 @@
 测试和构建会执行项目代码；这是任务授权策略，不是操作系统沙箱。私有凭据证明
 同一 OS 用户下的持有者，不声称能隔离该用户下任意恶意原生程序。
 
+`contact` 为原生 Launcher 任务增加有界的异步联系通道。`launcher_assistant_contact_tool`
+从后端拥有的 task→Agent→Session 关系验证身份；普通目录工具额外返回独立的 Launcher
+助理 contact 卡片，不伪造本项目 Agent 或 Session。未授权、近期观察在线与离线/未观察
+分别报告；通用非任务联系人授权尚未提供。任务授权包含该工具，但不改第三方、普通
+Agent 默认策略或显式禁用。Launcher 使用原任务 capability 和现有私有认证拉取请求，
+问题及回复经原生 kernel 落到精确 Session，不绕过唤醒策略。`undelivered`、
+`delivery_unknown`、`received`、`reply_unknown`、`replied` 是投递事实，不代表已读或业务完成。
+写入前预留未知状态；不确定结果不自动重放。每任务最多32条，每条最多1000字符。
+回归见 `tests/test_launcher_assistant_contact.py`；隔离原生 Session 验证不能替代正式 Launcher 或真实模型验收。
+
 回归入口为 `tests/test_local_assistant_*.py` 和
 `tests/test_launcher_assistant_authority.py`；实际模型开发验收由
 `scripts/acceptance_local_assistant_development.py` 使用隔离配置和数据执行。

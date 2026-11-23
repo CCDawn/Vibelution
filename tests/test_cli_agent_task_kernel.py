@@ -118,7 +118,7 @@ def test_terminal_output_completion_returns_semantic_segments(monkeypatch, tmp_p
 
     writes = []
     monkeypatch.setattr(cli_agent_terminal_service, "write_cli_agent_terminal_input", lambda _session_id, data: writes.append(data) or {})
-    monkeypatch.setattr(session_service, "append_cli_agent_task_result_event", lambda session_id, **kwargs: delivered.append((session_id, kwargs)))
+    monkeypatch.setattr(session_service, "append_cli_agent_task_result_event", lambda session_id, **kwargs: delivered.append((session_id, kwargs)) or {"id": "receipt"})
     terminal = {
         "terminalSessionId": "cli-term-two",
         "adapterId": "mimo_code",
@@ -169,7 +169,7 @@ def test_mimo_prompt_echo_completion_text_does_not_complete_task(monkeypatch, tm
     from core.web.services import cli_agent_terminal_service, session_service
 
     monkeypatch.setattr(cli_agent_terminal_service, "write_cli_agent_terminal_input", lambda _session_id, data: writes.append(data) or {})
-    monkeypatch.setattr(session_service, "append_cli_agent_task_result_event", lambda session_id, **kwargs: delivered.append((session_id, kwargs)))
+    monkeypatch.setattr(session_service, "append_cli_agent_task_result_event", lambda session_id, **kwargs: delivered.append((session_id, kwargs)) or {"id": "receipt"})
     terminal = {
         "terminalSessionId": "cli-term-three",
         "adapterId": "mimo_code",
@@ -207,7 +207,7 @@ def codex_task(monkeypatch, tmp_path):
     from core.web.services import cli_agent_terminal_service, session_service
 
     monkeypatch.setattr(cli_agent_terminal_service, "write_cli_agent_terminal_input", lambda _session_id, data: writes.append(data) or {})
-    monkeypatch.setattr(session_service, "append_cli_agent_task_result_event", lambda session_id, **kwargs: delivered.append((session_id, kwargs)))
+    monkeypatch.setattr(session_service, "append_cli_agent_task_result_event", lambda session_id, **kwargs: delivered.append((session_id, kwargs)) or {"id": "receipt"})
     terminal = {
         "terminalSessionId": "cli-term-codex-marker",
         "adapterId": "codex_code",
@@ -571,7 +571,7 @@ def test_mark_terminal_closed_marks_active_task_as_failed_and_completes_to_sessi
     monkeypatch.setattr(
         session_service,
         "append_cli_agent_task_result_event",
-        lambda session_id, **kwargs: delivered.append((session_id, kwargs)),
+        lambda session_id, **kwargs: delivered.append((session_id, kwargs)) or {"id": "receipt"},
     )
 
     terminal = {

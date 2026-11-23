@@ -285,6 +285,23 @@ class LocalAssistantBackendClient(ManagedAgentBackendClient):
     async def preview_task_cleanup(self, task_id: str) -> dict[str, Any]:
         return await self._request_cleanup(task_id, "cleanup/preview", {})
 
+    async def task_contacts(self, task_id: str, *, request_id: str = "", operation: str = "list",
+                            content: str = "") -> dict[str, Any]:
+        capability, namespace = await self._cleanup_capability(task_id)
+        if namespace != "local":
+            raise BackendClientError("Contact requires the original Launcher task.", code="CONTACT_NOT_AUTHORIZED")
+        path = _EXTERNAL_PREFIX + "tasks/" + quote(task_id, safe="") + "/contacts"
+        payload = None
+        if operation != "list":
+            if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", request_id) is None:
+                raise ValueError("Invalid contact request ID")
+            if operation not in {"delivery_unknown", "received", "reply"}:
+                raise ValueError("Invalid contact operation")
+            path += "/" + quote(request_id, safe="") + ("/reply" if operation == "reply" else "/delivery")
+            payload = {"content": content} if operation == "reply" else {"state": operation}
+        return await self._request_json("GET" if operation == "list" else "POST", path,
+            task_capability=capability, json_payload=payload, max_response_bytes=96 * 1024)
+
     async def cleanup_task(self, task_id: str, revision: int, fingerprint: str) -> dict[str, Any]:
         return await self._request_cleanup(task_id, "cleanup", {"revision": revision, "fingerprint": fingerprint})
 

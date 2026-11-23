@@ -39,6 +39,86 @@ router = APIRouter()
 router.include_router(external_agent.router, prefix="/local-assistant", dependencies=[Depends(_local_principal)])
 
 
+class ContactDeliveryPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    state: Literal["delivery_unknown", "received"]
+
+
+class ContactReplyPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    content: str = Field(min_length=1, max_length=1000)
+
+
+class ContactReceiptResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schemaVersion: Literal[1]
+    taskId: str = Field(min_length=1, max_length=160)
+    requestId: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+    state: Literal["undelivered", "delivery_unknown", "received", "reply_unknown", "replied"]
+    createdAt: float
+    untrustedContent: Literal[True]
+    businessCompletion: Literal["not_evaluated"]
+    reply: str | None = Field(default=None, max_length=1000)
+    changed: bool | None = None
+
+
+class ContactRequestResponse(ContactReceiptResponse):
+    content: str = Field(min_length=1, max_length=1000)
+    sourceAgentId: str = Field(min_length=1, max_length=160)
+    sourceSessionId: str = Field(min_length=1, max_length=160)
+
+
+class ContactPageResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schemaVersion: Literal[1]
+    taskId: str = Field(min_length=1, max_length=160)
+    contacts: list[ContactRequestResponse] = Field(max_length=32)
+
+
+def _contact_task(task_id, capability):
+    from core.web.services.local_assistant.contact import owned_task
+    return owned_task(route_service.get(), external_agent._require_header(capability, "external Agent task capability"), task_id)
+
+
+@router.get("/local-assistant/v1/external-agent/tasks/{task_id}/contacts", dependencies=[Depends(_local_principal)],
+            response_model=ContactPageResponse, response_model_exclude_none=True)
+def list_task_contacts(task_id: str, response: Response,
+    task_capability: Annotated[str, Header(alias=external_agent.TASK_CAPABILITY_HEADER)] = ""):
+    from core.web.services.local_assistant.contact import contacts_for_project
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        task = _contact_task(task_id, task_capability)
+        return contacts_for_project(route_service.get().project_root).pending(task)
+    except Exception as exc:
+        raise external_agent._handle_service_error(exc) from exc
+
+
+@router.post("/local-assistant/v1/external-agent/tasks/{task_id}/contacts/{request_id}/delivery", dependencies=[Depends(_local_principal)],
+             response_model=ContactReceiptResponse, response_model_exclude_none=True)
+def mark_task_contact_delivery(task_id: str, request_id: str, payload: ContactDeliveryPayload, response: Response,
+    task_capability: Annotated[str, Header(alias=external_agent.TASK_CAPABILITY_HEADER)] = ""):
+    from core.web.services.local_assistant.contact import contacts_for_project
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        task = _contact_task(task_id, task_capability)
+        return contacts_for_project(route_service.get().project_root).delivery(task, request_id, payload.state)
+    except Exception as exc:
+        raise external_agent._handle_service_error(exc) from exc
+
+
+@router.post("/local-assistant/v1/external-agent/tasks/{task_id}/contacts/{request_id}/reply", dependencies=[Depends(_local_principal)],
+             response_model=ContactReceiptResponse, response_model_exclude_none=True)
+def reply_task_contact(task_id: str, request_id: str, payload: ContactReplyPayload, response: Response,
+    task_capability: Annotated[str, Header(alias=external_agent.TASK_CAPABILITY_HEADER)] = ""):
+    from core.web.services.local_assistant.contact import contacts_for_project, deliver_reply
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        task = _contact_task(task_id, task_capability)
+        return contacts_for_project(route_service.get().project_root).reply(task, request_id, payload.content, deliver_reply)
+    except Exception as exc:
+        raise external_agent._handle_service_error(exc) from exc
+
+
 class CleanupResource(BaseModel):
     kind: str
     count: int

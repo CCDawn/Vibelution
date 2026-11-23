@@ -174,6 +174,7 @@ def agent_directory_tool(
                 entry["sessions"] = grouped.get(entry["agentId"], [])
 
     selected = filtered[:bounded_limit]
+    from tools.launcher_assistant_contact_tools import contact_card
     return json.dumps(
         {
             "ok": True,
@@ -182,6 +183,9 @@ def agent_directory_tool(
             "returned": len(selected),
             "sessionsAvailable": sessions_available,
             "agents": selected,
+            # A cross-profile contact has no project-local Agent/Session ID.
+            # Keep it outside the native directory counts and addressing.
+            "contacts": [contact_card()],
         },
         ensure_ascii=False,
     )

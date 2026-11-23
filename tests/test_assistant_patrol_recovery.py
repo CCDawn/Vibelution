@@ -2,13 +2,44 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
 
-from core.assistant_runtime import patrol
+from core.assistant_runtime import native, patrol
 from core.web.services.session import journal_bridge, proactive
 from tests.test_assistant_runtime_patrol import setup, journal_events
+
+
+def test_restarts_unsubmitted_original_receipt_only_once(setup, monkeypatch):
+    class HostExited(BaseException):
+        pass
+
+    root, row, dispatch = setup
+    owner = patrol.LauncherPatrol(root, "pa", "session", dispatch)
+    calls = []
+    monkeypatch.setattr(proactive, "submit_session_proactive_turn",
+                        lambda **kwargs: calls.append(kwargs["delivery_token"]) or {"accepted": True})
+
+    @contextmanager
+    def lost_host_before_admission():
+        raise HostExited
+        yield
+
+    with monkeypatch.context() as interrupted:
+        interrupted.setattr(native, "_session_command", lost_host_before_admission)
+        with pytest.raises(HostExited):
+            owner.inspect([row], now=10000)
+    token = owner._state["entries"][0]["token"]
+    assert calls == []
+    owner.close()
+
+    reopened = patrol.LauncherPatrol(root, "pa", "session", dispatch)
+    assert reopened.reconcile()["cancelled_pre_admission"] == 1
+    assert reopened.inspect([row], now=20000)["wake"] == "accepted"
+    assert reopened.inspect([row], now=30000)["wake"] == "none"
+    assert calls == [token]
 
 
 @pytest.mark.parametrize("terminal", ["turn_failed", "turn_interrupted"])
