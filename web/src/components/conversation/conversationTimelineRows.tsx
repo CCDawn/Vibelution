@@ -18,7 +18,7 @@ import {
   TerminalSquare,
   X,
 } from "lucide-react";
-import React, { useLayoutEffect, type RefObject } from "react";
+import React, { useLayoutEffect, useSyncExternalStore, type RefObject } from "react";
 
 import type {
   ConversationAttachment,
@@ -38,6 +38,7 @@ import {
 import { AgentMessageTurnView } from "./AgentMessageTurnView";
 import { AgentUserContentSectionView } from "./AgentUserContentSectionView";
 import type { AgentMessageSectionState } from "./agentMessageSections";
+import type { ComposerDraftStore } from "./composerDraftStore";
 import { buildAgentMessageRenderState, type AgentMessageRenderState } from "./agentMessageRenderState";
 import { buildAgentMessageTimelineItems } from "./agentMessageTimeline";
 import type { AgentMessageTimelineRowIdentity } from "./agentMessageTimelineRows";
@@ -158,7 +159,7 @@ const ConversationTurnRow = React.memo(function ConversationTurnRow({
 
 type ConversationUserInlineEditorProps = {
   lang: "zh" | "en";
-  value: string;
+  draftStore: ComposerDraftStore;
   onValueChange: (value: string) => void;
   onSubmit: () => void;
   onCancel: () => void;
@@ -196,7 +197,7 @@ function inlineEditorReferenceLabel(reference: SessionReferenceAttachment): stri
  */
 function ConversationUserInlineEditor({
   lang,
-  value,
+  draftStore,
   onValueChange,
   onSubmit,
   onCancel,
@@ -210,6 +211,15 @@ function ConversationUserInlineEditor({
   references,
   inputRef,
 }: ConversationUserInlineEditorProps) {
+  // The draft store owns the keystroke text. Subscribing here, instead of
+  // receiving a prop the session view only sees after the typing-pause
+  // mirror, keeps the controlled textarea from rolling every keystroke
+  // back to the previous draft.
+  const value = useSyncExternalStore(
+    draftStore.subscribe,
+    draftStore.getSnapshot,
+    draftStore.getSnapshot,
+  );
   // Auto-height within the max-height clamp: grow with the draft, scroll
   // internally once the cap is hit. Re-runs per value change.
   useLayoutEffect(() => {
@@ -218,7 +228,7 @@ function ConversationUserInlineEditor({
       return;
     }
     el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
+    el.style.height = `${Math.min(el.scrollHeight, 256)}px`;
   }, [inputRef, value]);
   const canSubmit = !disabled && !pending && Boolean(value.trim());
   return (
@@ -395,9 +405,10 @@ export type ConversationTimelineRowsDeps = {
   ) => Promise<void> | void;
   onOpenComposerContextDetail?: () => void;
   onCancelComposerMode?: () => void;
-  composerValue: string;
+  composerDraftStore: ComposerDraftStore;
   onComposerChange: (value: string) => void;
   composerDisabled: boolean;
+  composerSubmitPending?: boolean;
   composerError?: string;
   submitLabel?: string;
   cancelComposerModeLabel?: string;
@@ -480,9 +491,10 @@ export function createConversationTimelineRows({
   onForkSessionFromNode,
   onOpenComposerContextDetail,
   onCancelComposerMode,
-  composerValue,
+  composerDraftStore,
   onComposerChange,
   composerDisabled,
+  composerSubmitPending = false,
   composerError,
   submitLabel,
   cancelComposerModeLabel,
@@ -1261,12 +1273,12 @@ export function createConversationTimelineRows({
                   ) : editingUserMessage ? (
                     <ConversationUserInlineEditor
                       lang={lang}
-                      value={composerValue}
+                      draftStore={composerDraftStore}
                       onValueChange={onComposerChange}
                       onSubmit={handleSendAndFollowLatest}
                       onCancel={() => onCancelComposerMode?.()}
                       disabled={composerDisabled}
-                      pending={Boolean(editUserMessageDisabled)}
+                      pending={composerSubmitPending}
                       submitLabel={submitLabel?.trim() || t("saveAndRerunMessage")}
                       cancelLabel={cancelComposerModeLabel ?? t("cancelEditMessage")}
                       ariaLabel={editUserMessageLabel ?? t("editMessage")}

@@ -1348,7 +1348,7 @@ timeline:
   // The editor is the user bubble, not a form dropped next to it: same width,
   // radius, padding and sheen, with the accent border marking edit mode.
   turnInlineEditor:
-    "vui-components-conversationview turnInlineEditor grid w-full min-w-0 max-w-full gap-2 rounded-[12px] border border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-faint),var(--vui-surface-chat))] px-4 py-3 text-left shadow-[var(--vui-sheen)]",
+    "vui-components-conversationview turnInlineEditor grid w-full min-w-0 max-w-full gap-2 rounded-[12px] border border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash-faint),var(--vui-surface-chat))] px-3.5 py-2.5 text-left shadow-none",
   turnInlineEditorActions:
     "vui-components-conversationview turnInlineEditorActions flex min-w-0 flex-wrap items-center justify-end gap-1.5",
   turnInlineEditorChip:
@@ -1362,7 +1362,7 @@ timeline:
   turnInlineEditorChipThumb:
     "vui-components-conversationview turnInlineEditorChipThumb size-3.5 shrink-0 rounded-full object-cover",
   turnInlineEditorInput:
-    "vui-components-conversationview turnInlineEditorInput !min-h-16 max-h-64 resize-none overflow-y-auto !py-1.5 leading-5",
+    "vui-components-conversationview turnInlineEditorInput !min-h-0 max-h-64 resize-none overflow-y-auto !rounded-none !border-0 !bg-transparent !px-0 !py-0.5 !shadow-none focus-visible:!ring-0 leading-5",
   toolApprovalFallback:
     "toolApprovalFallback z-[6] min-w-0 w-full max-w-[min(44rem,100%)] shrink-0 justify-self-center px-2 pb-1.5 pt-0.5",
   turnError:

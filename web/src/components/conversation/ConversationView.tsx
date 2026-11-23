@@ -376,7 +376,10 @@ export const ConversationView = React.memo(function ConversationView({
       fallbackDraftStore.set(composerValueProp);
     }
   }, [composerValueProp, composerDraftStore, fallbackDraftStore]);
-  const composerValue = draftStore.getSnapshot();
+  // Nothing here subscribes to the draft: the composer island owns the live
+  // value, and the inline editor subscribes inside its own subtree, so a
+  // keystroke never re-renders the timeline. This view only forwards the
+  // store to the rows that need the live draft.
   // Callbacks need the draft that exists when they run, not the one captured
   // by the render that produced them.
   const readComposerValue = useCallback(
@@ -1496,9 +1499,10 @@ export const ConversationView = React.memo(function ConversationView({
     onForkSessionFromNode,
     onOpenComposerContextDetail,
     onCancelComposerMode,
-    composerValue,
+    composerDraftStore: draftStore,
     onComposerChange: handleComposerValueChange,
     composerDisabled,
+    composerSubmitPending,
     composerError,
     submitLabel,
     cancelComposerModeLabel,

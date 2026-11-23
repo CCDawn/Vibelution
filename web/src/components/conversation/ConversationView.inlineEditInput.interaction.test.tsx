@@ -140,4 +140,77 @@ describe("inline message edit input", () => {
 
     expect(textarea.value).toBe("Original prompt revised");
   });
+
+  it("keeps typing while the upstream draft is still waiting on the typing pause", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+    queryClient.setQueryData(queryKeys.configPublic(), { language: "zh" });
+    queryClient.setQueryData(["i18n", "dictionary-domains", "core,chat"], dictionary);
+    function Harness() {
+      // Mirrors the workbench: the prop only moves after the 400ms mirror, so
+      // keystrokes must survive on the store alone.
+      const store = useMemo(() => createComposerDraftStore("Original prompt"), []);
+      return (
+        <QueryClientProvider client={queryClient}>
+          <ConversationView
+            sessionId="session-inline-edit"
+            title="Session"
+            phase="ready"
+            messages={[
+              {
+                id: "message-user",
+                role: "user",
+                content: "Original prompt",
+                timestamp: "2026-05-22T00:00:00Z",
+              },
+            ]}
+            showHeader={false}
+            showSessionOverview={false}
+            showComposer
+            defaultFileContext="workspace"
+            composerDraftStore={store}
+            composerValue="Original prompt"
+            composerPlaceholder=""
+            composerDisabled={false}
+            composerPending={false}
+            composerActionMode="send"
+            editingMessageId="message-user"
+            editUserMessageDisabled={false}
+            onComposerChange={() => undefined}
+            onSubmit={() => undefined}
+            onEditUserMessage={() => undefined}
+          />
+        </QueryClientProvider>
+      );
+    }
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(<Harness />);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    let textarea: HTMLTextAreaElement | null = null;
+    for (let attempt = 0; attempt < 40 && !textarea; attempt += 1) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+      textarea = container.querySelector<HTMLTextAreaElement>(
+        '[data-conversation-inline-edit-input="1"]',
+      );
+    }
+    if (!textarea) {
+      throw new Error(`inline edit textarea not mounted: ${container.innerHTML.slice(0, 400)}`);
+    }
+    await act(async () => {
+      typeIntoTextarea(textarea as HTMLTextAreaElement, "Original prompt revised");
+    });
+    expect((textarea as HTMLTextAreaElement).value).toBe("Original prompt revised");
+    await act(async () => {
+      typeIntoTextarea(textarea as HTMLTextAreaElement, "Original prompt revised!");
+    });
+    expect((textarea as HTMLTextAreaElement).value).toBe("Original prompt revised!");
+  });
+
 });
