@@ -3,6 +3,7 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LauncherAssistantModelControl } from "./LauncherAssistantModelControl";
+import type { LauncherAssistantModelChoice } from "../../api/launcherAssistant";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -54,7 +55,8 @@ function optionContaining(text: string) {
 }
 
 async function renderControl(
-  options_: { selectionDisabled?: boolean; pending?: boolean; unknownCurrent?: boolean } = {},
+  options_: { selectionDisabled?: boolean; pending?: boolean; unknownCurrent?: boolean;
+    choices?: LauncherAssistantModelChoice[] } = {},
 ) {
   const onModelChange = vi.fn();
   const onOpenSettings = vi.fn();
@@ -66,7 +68,7 @@ async function renderControl(
       lang="zh"
       modelId={options_.unknownCurrent ? "previous" : "deepseek"}
       modelDisplay="当前对话模型"
-      choices={CHOICES}
+      choices={options_.choices ?? CHOICES}
       pending={options_.pending ?? false}
       selectionDisabled={options_.selectionDisabled ?? false}
       onModelChange={onModelChange}
@@ -127,7 +129,21 @@ describe("Launcher model toolbar control", () => {
     expect(onModelChange).not.toHaveBeenCalled();
   });
 
-  it("retains a current model absent from the catalogue and locks pending configuration", async () => {
+  it("pins the bound model above catalogue order inside its provider group", async () => {
+  const reordered = [
+    { ...CHOICES[1], modelId: "next", label: "另一个模型" },
+    { ...CHOICES[0], modelId: "deepseek", label: "DeepSeek V4.1 Flash · 官方" },
+    { ...CHOICES[2], modelId: "unavailable", label: "缺少密钥" },
+  ];
+  const { trigger } = await renderControl({ choices: reordered });
+  await act(async () => trigger.click());
+  const visible = options().map(node => node.textContent || "");
+  expect(visible[0]).toContain("DeepSeek V4.1 Flash");
+  expect(visible[1]).toContain("另一个模型");
+  expect(visible[2]).toContain("缺少密钥");
+});
+
+it("retains a current model absent from the catalogue and locks pending configuration", async () => {
     const { trigger } = await renderControl({ unknownCurrent: true });
     expect(trigger.textContent).toContain("当前对话模型");
     await act(async () => trigger.click());

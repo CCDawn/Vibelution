@@ -90,6 +90,16 @@ export function launcherAssistantModelGroups(
     group.items.push(row);
     groups.set(groupKey, group);
   }
+  for (const group of groups.values()) {
+    // Keep the bound model and usable rows at the top of each provider group.
+    // Catalogue order alone pushed the current model below the fold in large
+    // groups, so the menu opened on rows the operator could not use yet.
+    group.items.sort((left, right) => {
+      const selectedDelta = Number(right.key === currentModelId) - Number(left.key === currentModelId);
+      if (selectedDelta !== 0) return selectedDelta;
+      return Number(Boolean(left.reason)) - Number(Boolean(right.reason));
+    });
+  }
   return Array.from(groups.values());
 }
 
