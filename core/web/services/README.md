@@ -51,7 +51,7 @@
 | Research / Challenge Cup (`research`) | 5 |
 | Self / Supervised evolution (`evolution`) | 13 |
 | Runtime / runtime scene (`runtime`) | 4 |
-| Launcher / Reset (`launcher`) | 2 |
+| Launcher / Reset (`launcher`) | 3 |
 | Config / Provider / Model / Theme (`config`) | 7 |
 | Workbench contract / preferences (`workbench`) | 2 |
 | Git (`git`) | 1 |
@@ -198,6 +198,7 @@
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
 | `launcher_service.py` | Compatibility facade for the standalone Launcher service. | — | `launcher.py` | `test_launcher_status_live_observe.py`, `test_launcher_scene_control_log.py`, `test_vibelution_desktop_entry.py` |
+| `mobile_pairing_service.py` | Short-lived, single-use pairing codes for connecting a phone to a workbench instance. | — | `mobile_pairing.py` | — |
 | `reset_service.py` | Compatibility alias for Launcher-owned reset maintenance. | — | — | `test_reset_service.py`, `test_challenge_cup_reset_service.py` |
 
 ## Config / Provider / Model / Theme
