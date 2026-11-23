@@ -3,13 +3,18 @@ import json
 import sqlite3
 
 
-def contact_card():
-    """Public service identity, separately projected from local Agent rows."""
-    card = {"contact": "launcher_assistant", "displayName": "Launcher 个人助理", "kind": "external_contact",
+def public_contact_card():
+    """Service identity shared by native and MCP discovery."""
+    return {"contact": "launcher_assistant", "displayName": "Launcher 个人助理", "kind": "external_contact",
             "authorized": False, "availability": "not_authorized", "onlineStatus": "unknown",
             "tool": "launcher_assistant_contact_tool", "scope": "original_launcher_task",
             "requestPath": "请操作者通过 Launcher 向当前 Agent 派遣原生任务；通用项目联系人授权尚未提供。",
             "asynchronous": True}
+
+
+def contact_card():
+    """Resolve messaging authority only for the current native task."""
+    card = public_contact_card()
     try:
         from core.web.services import agent_directory_service as directory
         from core.web.services.local_assistant.consent import _task_runtime

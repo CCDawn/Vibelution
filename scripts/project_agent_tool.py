@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
+import tempfile
 import time
 from functools import partial
 from importlib import metadata as importlib_metadata
@@ -75,6 +77,19 @@ def build_parser() -> argparse.ArgumentParser:
         "mcp", help="Run the managed official-SDK MCP stdio server"
     )
     mcp_parser.add_argument("--project-root", type=Path, default=REPO_ROOT)
+    mcp_parser.add_argument("--assistant-peer-binding", type=Path,
+                            help="Private binding issued by the operator's assistant-peer-enroll command")
+    mcp_parser.add_argument("--assistant-peer-only", action="store_true",
+                            help="Expose only the paired assistant contact and no project task tools")
+
+    enroll_parser = sub.add_parser("assistant-peer-enroll", help="Enroll one local MCP connection with the Launcher assistant")
+    enroll_parser.add_argument("--profile-root", type=Path, required=True)
+    enroll_parser.add_argument("--peer-id", required=True)
+    enroll_parser.add_argument("--platform", required=True)
+
+    revoke_parser = sub.add_parser("assistant-peer-revoke", help="Revoke a paired assistant contact immediately")
+    revoke_parser.add_argument("--profile-root", type=Path, required=True)
+    revoke_parser.add_argument("--peer-id", required=True)
 
     self_check_parser = sub.add_parser(
         "self-check",
@@ -266,10 +281,56 @@ def _print(payload: dict[str, Any]) -> None:
     print(rendered)
 
 
+def _configure_assistant_peer(args: argparse.Namespace) -> int:
+    from core.assistant_runtime.migration_io import check_path
+    from core.assistant_runtime.peer_contacts import PeerContacts, PeerContactError
+
+    try:
+        profile = check_path(args.profile_root)
+        if not profile.is_dir():
+            raise ValueError("PEER_PROFILE_UNAVAILABLE")
+        contacts = PeerContacts(profile)
+        if args.command == "assistant-peer-revoke":
+            _print(contacts.revoke(args.peer_id))
+            return 0
+        grants = check_path(profile / "assistant_peer_grants", missing_ok=True)
+        grants.mkdir(mode=0o700, exist_ok=True)
+        check_path(grants)
+        credential = contacts.enroll(args.peer_id, args.platform)
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=grants, prefix="peer-",
+                                             suffix=".json", delete=False) as grant:
+                json.dump({"schemaVersion": 1, "peerId": args.peer_id, "credential": credential}, grant)
+                grant.flush()
+                os.fsync(grant.fileno())
+                binding = grant.name
+        except (OSError, ValueError):
+            contacts.revoke(args.peer_id)
+            raise
+        _print({"status": "enrolled", "peerId": args.peer_id, "bindingPath": binding})
+        return 0
+    except (OSError, ValueError) as exc:
+        _print({"status": "error", "code": exc.code if isinstance(exc, PeerContactError) else "PEER_BINDING_UNAVAILABLE"})
+        return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "mcp":
+        if args.assistant_peer_binding is not None:
+            from core.external_agent.assistant_peer import load_assistant_peer_binding
+            try:
+                peer = load_assistant_peer_binding(args.assistant_peer_binding)
+            except ValueError:
+                print("Launcher assistant peer binding is unavailable.", file=sys.stderr)
+                return 2
+            return mcp_main(project_root=args.project_root, assistant_peer=peer, contact_only=args.assistant_peer_only)
+        if args.assistant_peer_only:
+            print("--assistant-peer-only requires --assistant-peer-binding.", file=sys.stderr)
+            return 2
         return mcp_main(project_root=args.project_root)
+    if args.command in {"assistant-peer-enroll", "assistant-peer-revoke"}:
+        return _configure_assistant_peer(args)
 
     backend = ManagedAgentBackendClient(Path(args.project_root).resolve())
     try:

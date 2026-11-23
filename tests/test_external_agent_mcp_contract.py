@@ -118,6 +118,55 @@ def test_official_sdk_test_host_uses_create_no_window_for_stdio_child() -> None:
     assert "CREATE_NO_WINDOW" in source
 
 
+def test_mcp_discovers_launcher_assistant_without_a_project_agent_id_or_grant() -> None:
+    mcp_server = _mcp_server_module()
+
+    class Backend:
+        async def list_agents(self, *, limit: int = 50) -> dict[str, object]:
+            return {"status": "ok", "count": 1, "agents": [{"agentId": "coder"}]}
+
+    async def call_tool():
+        server = mcp_server.build_server(PROJECT_ROOT, backend=Backend())
+        return await server.call_tool("list_project_agents", {"limit": 1})
+
+    result = anyio.run(call_tool)
+    assert not result.is_error
+    assert result.structured_content == {
+        "status": "ok", "count": 1, "agents": [{"agentId": "coder"}],
+        "contacts": [{"contact": "launcher_assistant", "displayName": "Launcher 个人助理",
+                      "kind": "external_contact", "authorized": False,
+                      "availability": "not_authorized", "onlineStatus": "unknown"}],
+    }
+
+
+def test_launcher_contact_mcp_scope_and_revocation(tmp_path) -> None:
+    from core.assistant_runtime.peer_contacts import PeerContacts
+    from core.external_agent.assistant_peer import AssistantPeerBinding
+
+    contacts = PeerContacts(tmp_path)
+    credential = contacts.enroll("codex-test", "codex")
+    paired = AssistantPeerBinding(contacts, "codex-test", credential)
+    mcp_server = _mcp_server_module()
+
+    async def confirm():
+        server = mcp_server.build_contact_server(PROJECT_ROOT, paired)
+        assert [tool.name for tool in await server.list_tools()] == ["launcher_assistant_contact"]
+        visible = await server.call_tool("launcher_assistant_contact", {"operation": "describe"})
+        assert visible.structured_content["peerId"] == "codex-test"
+        assert visible.structured_content["authorized"] is True
+        accepted = await server.call_tool("launcher_assistant_contact", {
+            "operation": "send", "request_id": "hello", "content": "verification"})
+        assert accepted.structured_content["state"] == "queued"
+        contacts.revoke("codex-test")
+        revoked = await server.call_tool("launcher_assistant_contact", {
+            "operation": "receipt", "request_id": "hello"})
+        assert revoked.structured_content == {"status": "error", "code": "PEER_NOT_AUTHORIZED"}
+        assert credential not in repr(paired)
+        assert credential not in repr(visible) + repr(accepted) + repr(revoked)
+
+    anyio.run(confirm)
+
+
 def test_mcp_backend_business_error_is_structured_tool_error() -> None:
     mcp_server = _mcp_server_module()
     backend_client = importlib.import_module("core.external_agent.backend_client")
