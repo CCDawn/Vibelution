@@ -1,0 +1,1 @@
+- perf: 排队 turn 停止先返回 stopping，中断快照改后台落盘
