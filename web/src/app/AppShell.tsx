@@ -3209,7 +3209,7 @@ export function AppShell() {
             </div>
           </VPopover>
         ) : null}
-        <PlatformVersionBadge />
+        <PlatformVersionBadge health={backendHealthQuery.data} lang={lang} />
         </div>
         <div className={styles.activeWorkSlot} data-shell-group="active-work">
           <VPopover

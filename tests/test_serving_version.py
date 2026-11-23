@@ -162,3 +162,26 @@ def test_health_reports_pinned_serving_metadata_after_active_pointer_switch(monk
     assert payload["activeRelease"] == "release-second"
     assert payload["releaseStale"] is True
     assert payload["backendCodeFingerprint"]["dirtyTreeDigest"] == "digest-first"
+
+
+def test_serving_frontend_names_the_release_source_for_a_published_tree(tmp_path: Path) -> None:
+    release = _write_release(tmp_path, "release-live", "key-live")
+    _activate(tmp_path, release, "key-live")
+
+    captured = serving_version.resolve_serving_frontend(tmp_path)
+
+    assert captured["release"] == "release-live"
+    assert captured["source"] == frontend_build.SERVING_SOURCE_RELEASE
+    assert captured["fallbackReason"] == ""
+
+
+def test_serving_frontend_names_the_legacy_tree_instead_of_hiding_it(tmp_path: Path) -> None:
+    legacy = frontend_build.legacy_frontend_dist(tmp_path)
+    (legacy / "assets").mkdir(parents=True, exist_ok=True)
+    (legacy / "index.html").write_text("<html></html>", encoding="utf-8")
+
+    captured = serving_version.resolve_serving_frontend(tmp_path)
+
+    assert captured["source"] == frontend_build.SERVING_SOURCE_LEGACY_DIST
+    assert captured["fallbackReason"] == "active_release_missing"
+    assert captured["release"] == ""

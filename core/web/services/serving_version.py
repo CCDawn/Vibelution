@@ -57,11 +57,17 @@ def resolve_serving_frontend(project_root: Path | str) -> dict[str, Any]:
     from core.launcher.frontend_build import (
         active_release_path,
         frontend_releases_dir,
-        resolve_active_frontend_dist,
+        resolve_frontend_serving_target,
     )
 
     root = Path(project_root).resolve()
-    dist = resolve_active_frontend_dist(root).resolve()
+    # Resolve through the target payload rather than the bare dist path: the
+    # source and fallback reason are what let a page say "this is the legacy
+    # tree" instead of silently serving stale bytes as if it were a release.
+    target = resolve_frontend_serving_target(root)
+    dist = Path(str(target.get("dist") or "")).resolve()
+    serving_source = str(target.get("source") or "").strip()
+    fallback_reason = str(target.get("fallbackReason") or "").strip()
     try:
         provenance = json.loads((dist / ".vibelution-build.json").read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError):
@@ -91,6 +97,10 @@ def resolve_serving_frontend(project_root: Path | str) -> dict[str, Any]:
         "release": release,
         "dist": str(dist),
         "builtFromCommit": str(provenance.get("builtFromCommit") or provenance.get("sourceCommit") or "").strip(),
+        # How the served tree was chosen, and why it fell back. Without these a
+        # reader can only compare timestamps and guess.
+        "source": serving_source,
+        "fallbackReason": fallback_reason,
     }
 
 

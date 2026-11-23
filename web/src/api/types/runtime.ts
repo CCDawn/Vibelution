@@ -792,6 +792,18 @@ export type BackendHealth = {
   routesReady?: boolean;
   /** Readiness of the shell-facing route surface after a restart. */
   shellReady?: boolean;
+  /** Release this process pinned at startup; empty when nothing was published. */
+  servingRelease?: string;
+  /** Active pointer on disk; differs from servingRelease until a restart. */
+  activeRelease?: string;
+  /** A newer release is published but this process still serves the older one. */
+  releaseStale?: boolean;
+  /** "release" | "legacy-dist" | "missing" - how the served tree was chosen. */
+  servingSource?: string;
+  /** Why the served tree fell back; empty when a published release is served. */
+  servingFallbackReason?: string;
+  /** Backend process start, so a page can prove which process answered it. */
+  backendStartedAt?: string;
 };
 
 export type RuntimeControlResponse = {

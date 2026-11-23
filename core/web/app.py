@@ -112,6 +112,8 @@ def create_app() -> FastAPI:
         serving = serving_value if isinstance(serving_value, dict) else {}
         serving_frontend = serving.get("frontend") if isinstance(serving.get("frontend"), dict) else {}
         serving_release = str(serving_frontend.get("release") or "")
+        backend_value = serving.get("backend")
+        backend_meta = backend_value if isinstance(backend_value, dict) else {}
         # This process keeps serving the release it mounted at startup, so a newer
         # active.json changes nothing until the launcher restarts the backend.
         # Report the pointer alongside the pinned release: an empty servingRelease
@@ -147,6 +149,12 @@ def create_app() -> FastAPI:
             "servingRelease": serving_release,
             "activeRelease": active_release,
             "releaseStale": bool(active_release) and active_release != serving_release,
+            # Which tree is actually served, and why. A page that reports only a
+            # release name cannot tell "restart is missing" apart from "this is
+            # the compatibility fallback", so both are stated explicitly.
+            "servingSource": str(serving_frontend.get("source") or ""),
+            "servingFallbackReason": str(serving_frontend.get("fallbackReason") or ""),
+            "backendStartedAt": str(backend_meta.get("startedAt") or ""),
             "backendCodeFingerprint": serving.get("backend") or {},
         }
 
