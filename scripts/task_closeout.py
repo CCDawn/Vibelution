@@ -427,6 +427,49 @@ def _coordination_call(context: CloseoutContext, *arguments: str) -> dict[str, o
     return payload
 
 
+def _fold_pending_declarations(context: CloseoutContext) -> str:
+    """Fold declared ``.changelog`` entries into Unreleased before validation.
+
+    The platform version watcher only settles when ``## Unreleased`` has
+    content. A task that merges without rolling its declaration therefore
+    leaves the version badge stuck on the previous release. Declarations stay
+    on disk (``no_consume``) so a parallel task's claim is never touched; only
+    ``CHANGELOG.md`` changes, and that change is committed on the task branch.
+    """
+    repo = context.task_root
+    directory = repo / ".changelog"
+    if not directory.is_dir() or not any(directory.glob("*.md")):
+        return ""
+    from scripts.changelog_rollup import rollup
+
+    try:
+        preview = rollup(repo, dry_run=True, no_consume=True)
+    except (OSError, RuntimeError, ValueError) as error:
+        return f"changelog_rollup_preview_failed: {_bounded_error(error)}"
+    except SystemExit as error:
+        return f"changelog_rollup_unavailable: {error}"
+    if not int(preview.get("inserted") or 0):
+        return ""
+    try:
+        rollup(repo, no_consume=True)
+    except (OSError, RuntimeError, ValueError, SystemExit) as error:
+        return f"changelog_rollup_failed: {_bounded_error(error)}"
+    completed = gate.run_process(["git", "add", "--", "CHANGELOG.md"], repo)
+    if completed.returncode != 0:
+        return "changelog_rollup_add_failed: " + _bounded_error(
+            completed.stderr or completed.stdout
+        )
+    completed = gate.run_process(
+        ["git", "commit", "-m", "chore(changelog): fold pending declarations into unreleased"],
+        repo,
+    )
+    if completed.returncode != 0:
+        return "changelog_rollup_commit_failed: " + _bounded_error(
+            completed.stderr or completed.stdout
+        )
+    return ""
+
+
 def validate_development_claim(
     context: CloseoutContext,
     *,
@@ -1408,6 +1451,7 @@ def run_managed_closeout(
     publish: bool = False,
     push_remote: bool = True,
 ) -> ManagedCloseoutResult:
+    changelog_fold_warning = ""
     try:
         context = resolve_context(task_worktree, base=base, retain_worktree=retain_worktree)
         claim_id, agent_id = resolve_claim_identity(
@@ -1424,6 +1468,7 @@ def run_managed_closeout(
         if history_result is not None:
             return history_result
         validate_development_claim(context, claim_id=claim_id, agent_id=agent_id)
+        changelog_fold_warning = _fold_pending_declarations(context)
     except (OSError, RuntimeError, ValueError) as error:
         code = getattr(error, "code", "")
         expired_claim = code == "invalid_development_claim"
@@ -1736,7 +1781,11 @@ def run_managed_closeout(
                     else "run_cleanup_only_from_main" if cleanup_errors else ""
                 ),
                 errors=cleanup_errors,
-                warnings=consistency_warnings,
+                warnings=(
+                    [*consistency_warnings, changelog_fold_warning]
+                    if changelog_fold_warning
+                    else consistency_warnings
+                ),
                 versionSync=sync_field,
                 push=push_field,
             )
@@ -1803,7 +1852,11 @@ def run_managed_closeout(
                 retryable=bool(merge_sha),
                 next_action=next_action,
                 errors=errors,
-                warnings=consistency_warnings,
+                warnings=(
+                    [*consistency_warnings, changelog_fold_warning]
+                    if changelog_fold_warning
+                    else consistency_warnings
+                ),
                 versionSync=publish_summary,
                 push=push_summary,
             ),

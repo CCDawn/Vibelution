@@ -46,13 +46,15 @@ def section_bounds(lines: list[str]) -> tuple[int, int]:
     return start, end
 
 
-def rollup(repo: Path, *, dry_run: bool = False) -> dict[str, object]:
+def rollup(repo: Path, *, dry_run: bool = False, no_consume: bool = False) -> dict[str, object]:
     changelog = repo / CHANGELOG
     if not changelog.is_file():
         raise SystemExit(f"[changelog-rollup] {CHANGELOG} not found in {repo}")
     lines = changelog.read_text(encoding="utf-8").splitlines()
-    start, end = section_bounds(lines)
-    existing = {line.strip() for line in lines[start:end]}
+    _, end = section_bounds(lines)
+    # Whole-file dedupe: an entry already archived in a released section must
+    # not be folded again while its declaration file survives on disk.
+    existing = {line.strip() for line in lines}
 
     collected: list[str] = []
     sources: list[Path] = []
@@ -73,8 +75,9 @@ def rollup(repo: Path, *, dry_run: bool = False) -> dict[str, object]:
     lines[end:end] = collected
     if not dry_run:
         changelog.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
-        for path in sources:
-            path.unlink(missing_ok=True)
+        if not no_consume:
+            for path in sources:
+                path.unlink(missing_ok=True)
     return {"inserted": len(collected), "sources": [path.name for path in sources]}
 
 
@@ -86,9 +89,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="Report what would be folded in without writing files.",
     )
+    parser.add_argument(
+        "--no-consume",
+        action="store_true",
+        help="Keep declaration files on disk so a parallel task keeps its claim.",
+    )
     arguments = parser.parse_args(argv)
     repo = Path(arguments.repo).resolve()
-    result = rollup(repo, dry_run=arguments.dry_run)
+    result = rollup(repo, dry_run=arguments.dry_run, no_consume=arguments.no_consume)
     if not result["inserted"]:
         print("[changelog-rollup] nothing to fold")
         return 0
