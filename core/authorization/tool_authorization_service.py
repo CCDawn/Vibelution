@@ -1433,6 +1433,13 @@ def _role_policy_projection(*, agent: Mapping[str, Any], raw_policy: Any, regist
         metadata=metadata,
     ):
         return role_policy
+    if role_key == "personal_assistant" and isinstance(raw_policy, Mapping):
+        from core.infrastructure.native_runtime import is_launcher_assistant_process
+
+        if is_launcher_assistant_process():
+            from core.assistant_runtime.native import project_tool_policy
+
+            raw_policy = project_tool_policy(_coerce_text(agent.get("agentId")), raw_policy, registered_names)
     return normalize_legacy_tool_policy(
         raw_policy if isinstance(raw_policy, Mapping) else policy or None,
         registered_tool_names=registered_names,

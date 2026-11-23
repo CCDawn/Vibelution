@@ -11,6 +11,7 @@ import re
 import threading
 import time
 from collections import OrderedDict
+from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -77,6 +78,34 @@ _LEGACY_LAUNCHER_TOOLS = (
     "personal_affairs_tool", "append_personal_memory_tool", "supersede_personal_memory_tool",
     "search_agent_private_memory_tool", "compress_context_tool",
 )
+
+# These optional rescue tools shipped in the default policy before they had
+# runtime registrations. Keep the saved policy for a future registration.
+_OPTIONAL_RESCUE_TOOLS = frozenset({
+    "personal_assistant_git_tool",
+    "personal_assistant_startup_diagnosis_tool",
+})
+
+
+def project_tool_policy(agent_id: str, policy: Mapping[str, Any], registered_names: Sequence[str]) -> Mapping[str, Any]:
+    """Use the registered subset of optional tools for the native assistant."""
+    if not _STARTED or agent_id != _AGENT_ID:
+        return policy
+    unavailable = _OPTIONAL_RESCUE_TOOLS.difference(registered_names)
+    if not unavailable:
+        return policy
+    projected = dict(policy)
+    for field in ("allowedTools", "preferredTools"):
+        values = projected.get(field)
+        if isinstance(values, (list, tuple, set, frozenset)):
+            projected[field] = [name for name in values if str(name or "").strip() not in unavailable]
+    overrides = projected.get("approvalOverrides")
+    if isinstance(overrides, Mapping):
+        projected["approvalOverrides"] = {
+            name: mode for name, mode in overrides.items() if str(name).strip() not in unavailable
+        }
+    return projected
+
 
 # Launcher detail reads a bounded recent window, aligned with the native session
 # detail window ceiling (_SESSION_DETAIL_MESSAGE_WINDOW_MAX_LIMIT) and the

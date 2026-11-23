@@ -229,6 +229,7 @@ def test_native_bootstrap_uses_real_directory_and_keeps_custom_policy(tmp_path, 
         from core.web.services import session_service, agent_directory_service as directory
         from core.web.services.personal_assistant_service import DEV_TOOLS
         from core.web.services.session import directory_runtime
+        from core.authorization.tool_authorization_service import resolve_enforced_authorization
         from core.infrastructure.tool_executor import get_tool_executor
         executor = get_tool_executor()
         assert executor._resolve_timeout('personal_assistant_manage_tool', {}) == 30
@@ -265,6 +266,16 @@ def test_native_bootstrap_uses_real_directory_and_keeps_custom_policy(tmp_path, 
             agent = directory.get_agent(first['agentId'])
             assert agent['toolPolicy']['allowedTools'] == expected_tools
             assert agent['toolPolicy']['preferredTools'] == expected_tools
+            with directory.active_agent_runtime(first['agentId'], session_id=sid, turn_id='dispatch-policy') as runtime:
+                before = tuple(runtime['toolPolicy']['allowedTools'])
+                decision = resolve_enforced_authorization(runtime=runtime).decision
+                assert 'personal_assistant_action_tool' in decision.visible_tools, [
+                    reason for name, reason in decision.denied if name == 'personal_assistant_action_tool'
+                ]
+                assert 'personal_assistant_action_tool' in decision.executable_tools
+                assert 'personal_assistant_git_tool' not in decision.visible_tools
+                assert 'personal_assistant_startup_diagnosis_tool' not in decision.visible_tools
+                assert tuple(runtime['toolPolicy']['allowedTools']) == before
             assert 'project_id' in agent['taskProfile']['constraints']
             for capability in ('personal_affairs_tool', 'append_personal_memory_tool', 'supersede_personal_memory_tool', 'search_agent_private_memory_tool', 'compress_context_tool'):
                 assert capability in agent['taskProfile']['responsibilities']
@@ -297,6 +308,8 @@ def test_native_bootstrap_uses_real_directory_and_keeps_custom_policy(tmp_path, 
             assert native.shutdown()['closed']
             assert native.bootstrap(root)['assistant']['directSessionId'] == sid
             assert directory.get_agent(first['agentId'])['toolPolicy']['allowedTools'] == []
+            with directory.active_agent_runtime(first['agentId'], session_id=sid, turn_id='custom-empty') as runtime:
+                assert not resolve_enforced_authorization(runtime=runtime).decision.visible_tools
         finally:
             native.shutdown()
     """, config_text='[launcher.developer_mode]\nenabled = true\n' if developer_mode else '')
