@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Let the chat tab strip show the same pane gutter as the panes below it, so the
 
 ## 3.2.4 - 2026-11-23
 ---
