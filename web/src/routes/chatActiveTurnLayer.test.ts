@@ -17,6 +17,7 @@ import {
   runningToolStartedAtEpochMs,
   runningToolPaintKeys,
   settleActiveTurnLayerFromDetail,
+  settleActiveTurnLayerFromIndexFrame,
   toolStartToFirstPaintMs,
 } from "./chatActiveTurnLayer";
 
@@ -730,4 +731,105 @@ describe("chat active turn layer", () => {
     expect(isActiveTurnSettledByDetail(active, detail)).toBe(false);
   });
 });
+describe("settleActiveTurnLayerFromIndexFrame", () => {
+  function runningLayer(overrides: Partial<ActiveTurnLayerState> = {}): ActiveTurnLayerState {
+    return {
+      id: "session-1-active",
+      sessionId: "session-1",
+      turnId: "turn-1",
+      updatedAt: "2026-09-14T15:20:00Z",
+      status: "running",
+      turnItems: [],
+      ledgerSeq: 2,
+      ...overrides,
+    };
+  }
+
+  it("settles the local layer when the index frame names its own terminal turn", () => {
+    const layer = runningLayer();
+    const settled = settleActiveTurnLayerFromIndexFrame(layer, {
+      status: "ready",
+      currentPhase: "ready",
+      lastTurnStatus: "completed",
+      lastTurnTerminalTurnId: "turn-1",
+      updatedAt: "2026-09-14T15:21:00Z",
+    });
+    expect(settled?.status).toBe("completed");
+  });
+
+  it("marks a provider failure as failed instead of completed", () => {
+    const settled = settleActiveTurnLayerFromIndexFrame(runningLayer(), {
+      status: "failed",
+      currentPhase: "failed",
+      lastTurnStatus: "failed",
+      terminalReason: "failed_provider",
+      updatedAt: "2026-09-14T15:21:00Z",
+    });
+    expect(settled?.status).toBe("failed");
+  });
+
+  it("settles a receipt that cannot name its turn once its clock passes the layer", () => {
+    // Provider failures persist no terminal turn id, so the receipt clock is
+    // the only ordering evidence the background window ever receives.
+    const settled = settleActiveTurnLayerFromIndexFrame(runningLayer(), {
+      status: "failed",
+      currentPhase: "failed",
+      lastTurnStatus: "failed",
+      lastTurnTerminalTurnId: "",
+      terminalReason: "failed_provider",
+      updatedAt: "2026-09-14T15:21:00Z",
+    });
+    expect(settled?.status).toBe("failed");
+  });
+
+  it("keeps a newer local turn when an older receipt arrives late", () => {
+    const layer = runningLayer({ updatedAt: "2026-09-14T15:30:00Z" });
+    const kept = settleActiveTurnLayerFromIndexFrame(layer, {
+      status: "ready",
+      currentPhase: "ready",
+      lastTurnStatus: "completed",
+      lastTurnTerminalTurnId: "",
+      updatedAt: "2026-09-14T15:21:00Z",
+    });
+    expect(kept).toBe(layer);
+  });
+
+  it("keeps a newer local turn when a different turn settled", () => {
+    const layer = runningLayer({ turnId: "turn-2" });
+    const kept = settleActiveTurnLayerFromIndexFrame(layer, {
+      status: "ready",
+      currentPhase: "ready",
+      lastTurnStatus: "completed",
+      lastTurnTerminalTurnId: "turn-1",
+      updatedAt: "2026-09-14T15:21:00Z",
+    });
+    expect(kept).toBe(layer);
+  });
+
+  it("keeps the layer while the row is still executing", () => {
+    const layer = runningLayer();
+    const kept = settleActiveTurnLayerFromIndexFrame(layer, {
+      status: "running",
+      currentPhase: "running",
+      updatedAt: "2026-09-14T15:21:00Z",
+    });
+    expect(kept).toBe(layer);
+  });
+
+  it("ignores layers that already settled", () => {
+    const layer = runningLayer({ status: "completed" });
+    const kept = settleActiveTurnLayerFromIndexFrame(layer, {
+      status: "ready",
+      lastTurnStatus: "completed",
+      lastTurnTerminalTurnId: "turn-1",
+    });
+    expect(kept).toBe(layer);
+  });
+
+  it("returns undefined for a missing layer or patch", () => {
+    expect(settleActiveTurnLayerFromIndexFrame(undefined, { status: "ready" })).toBeUndefined();
+    expect(settleActiveTurnLayerFromIndexFrame(runningLayer(), undefined)).toBeDefined();
+  });
+});
+
 import * as canonicalActiveTurn from "./chatActiveTurnLayer";

@@ -1,5 +1,5 @@
 import type { ConversationMessage, SessionDetail, SessionStreamEvent, SessionTurnItem } from "../api/types";
-import { activityOutcome, sessionIsAtRest } from "./sessionActivityState";
+import { activityOutcome, resolveSessionActivity, sessionIsAtRest } from "./sessionActivityState";
 import {
   activeTurnProtocolTextLength,
   consolidateSessionTurnItemsV2,
@@ -418,6 +418,47 @@ export function settleActiveTurnLayerFromDetail(
   detail: SessionDetail | undefined,
 ): ActiveTurnLayerState | undefined {
   return isActiveTurnSettledByDetail(layer, detail) ? undefined : layer;
+}
+
+/**
+ * Settle a local optimistic layer from an index frame alone.
+ *
+ * The index stream is the only carrier that reaches a window which is not
+ * showing the session: with its detail stream closed, a background turn that
+ * already ended would otherwise keep the tab and rail spinner lit until the
+ * session is opened and the detail snapshot settles the layer.
+ *
+ * Only a terminal for *this* layer may settle it. A receipt that cannot name
+ * its turn (provider failures persist no terminal turn id) falls back to its
+ * own clock and fails closed, because a late frame from an earlier turn must
+ * never stop a newer local turn.
+ */
+export function settleActiveTurnLayerFromIndexFrame(
+  layer: ActiveTurnLayerState | undefined,
+  patch: Record<string, unknown> | undefined,
+): ActiveTurnLayerState | undefined {
+  if (!layer || !patch) return layer;
+  if (layer.status !== "pending" && layer.status !== "running") return layer;
+  const text = (value: unknown) => (typeof value === "string" ? value : "");
+  const state = resolveSessionActivity({
+    status: text(patch.status),
+    currentPhase: text(patch.currentPhase),
+    lastTurnStatus: text(patch.lastTurnStatus),
+    terminalReason: text(patch.terminalReason),
+  });
+  if (state.execution !== "settled") return layer;
+  const terminalTurnId = compactText(patch.lastTurnTerminalTurnId);
+  if (terminalTurnId) {
+    if (terminalTurnId !== compactText(layer.turnId)) return layer;
+  } else {
+    const receiptAt = Date.parse(text(patch.updatedAt) || text(patch.lastActive));
+    const layerAt = Date.parse(layer.updatedAt);
+    if (!Number.isFinite(receiptAt) || !Number.isFinite(layerAt)) return layer;
+    if (receiptAt < layerAt) return layer;
+  }
+  // The early return above already dropped every terminal layer, so this
+  // always changes status: the comparison it used to guard could not be true.
+  return { ...layer, status: state.outcome === "failed" ? "failed" : "completed" };
 }
 
 type OverlayReconcileItem = {

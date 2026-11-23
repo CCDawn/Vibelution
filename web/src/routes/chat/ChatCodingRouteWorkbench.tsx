@@ -162,6 +162,7 @@ import {
   isActiveTurnSettledByDetail,
   isActiveTurnSettledByMessages,
   setActiveTurnLayerForSession,
+  settleActiveTurnLayerFromIndexFrame,
 } from "../chatActiveTurnLayer";
 import {
   ActiveTurnLayersStoreProvider,
@@ -969,9 +970,26 @@ export function ChatCodingRouteWorkbench() {
   // window: a stream-owning window keeps its index poll off, so metadata flips
   // arrive through the storage-event channel as index invalidations.
   useSessionIndexCrossWindowSync(queryClient);
+  // A background turn settles through the index socket too: with its detail
+  // stream closed, nothing else would ever stop this window's optimistic layer.
+  const settleTurnLayersFromIndex = useCallback(
+    (sessionId: string, patch: Record<string, unknown>) => {
+      setActiveTurnLayersBySession((current) => {
+        const layer = current[sessionId];
+        const settled = settleActiveTurnLayerFromIndexFrame(layer, patch);
+        return settled === layer
+          ? current
+          : setActiveTurnLayerForSession(current, sessionId, settled);
+      });
+    },
+    [setActiveTurnLayersBySession],
+  );
   // The rail also follows the server's own index frames, so a turn settling in
   // another window (or another session) reaches this rail without a list read.
-  const sessionIndexStreamConnected = useSessionIndexEventStream(queryClient, { enabled: true });
+  const sessionIndexStreamConnected = useSessionIndexEventStream(queryClient, {
+    enabled: true,
+    onUpsertedPatch: settleTurnLayersFromIndex,
+  });
   // Transport visibility for the active-turn status note. `streamConnected`
   // stays tri-state: only a real reconnect loop reports false; route-settling
   // teardowns keep it undefined so the note never flashes a false drop.

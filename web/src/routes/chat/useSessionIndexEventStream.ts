@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 
 import { queryKeys } from "../../api/queryKeys";
@@ -195,9 +195,21 @@ export function shouldResyncIndexOnConnect(previousConnections: number): boolean
  */
 export function useSessionIndexEventStream(
   queryClient: QueryClient,
-  options: { enabled: boolean },
+  options: {
+    enabled: boolean;
+    /**
+     * Receives every upsert patch. A caller that also keeps local turn state
+     * settles it here: this socket is the only signal a background session has.
+     */
+    onUpsertedPatch?: (sessionId: string, patch: Record<string, unknown>) => void;
+  },
 ): boolean {
   const enabled = options.enabled;
+  // Held in a ref so a fresh callback identity never re-opens the socket.
+  const onUpsertedPatchRef = useRef(options.onUpsertedPatch);
+  useEffect(() => {
+    onUpsertedPatchRef.current = options.onUpsertedPatch;
+  }, [options.onUpsertedPatch]);
   // The rail's polling policy needs to know whether this socket is actually
   // open: when it is down, no delta arrives for any background session.
   const [connected, setConnected] = useState(false);
@@ -231,8 +243,12 @@ export function useSessionIndexEventStream(
             onOpen: () => setConnected(true),
             onFrame: (frame) => {
               const delta = parseSessionIndexDelta(frame.data);
-              if (delta) {
-                applySessionIndexDeltaToQueryClient(queryClient, delta);
+              if (!delta) {
+                return;
+              }
+              applySessionIndexDeltaToQueryClient(queryClient, delta);
+              if (delta.type === "session.upserted" && delta.patch) {
+                onUpsertedPatchRef.current?.(delta.sessionId, delta.patch);
               }
             },
           });
