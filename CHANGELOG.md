@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- feat: 服务厂商改为默认关闭，模型选择器只把已显式开启的厂商当作可用；操作者在模型设置里勾选需要的服务后再选模型，未启用的服务会在列表里标注原因而不是静默消失。
 
 ## 3.1.3 - 2026-11-23
 - The top bar now names the frontend release this page is actually running plus when the backend started, and marks a stale pointer or a legacy-tree fallback instead of leaving both to a log line.

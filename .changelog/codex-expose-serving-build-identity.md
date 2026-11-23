@@ -1,1 +1,0 @@
-- The top bar now names the frontend release this page is actually running plus when the backend started, and marks a stale pointer or a legacy-tree fallback instead of leaving both to a log line.
