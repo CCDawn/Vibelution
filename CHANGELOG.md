@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- perf: 图片附件进 tray 即后台上传，发送时不再等图；粘贴后无需等待即可发出
 
 ## 3.2.1 - 2026-11-23
 - fix: 发送到 running 标记之间点停止会真正取消排队 turn，不再静默返回状态
