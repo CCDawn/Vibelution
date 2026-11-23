@@ -383,15 +383,17 @@ def test_provider_options_expose_credential_state_without_reference_or_secret() 
 
 
 def test_provider_options_expose_enabled_switch_without_inventing_legacy_keys() -> None:
-    """Wave 2 row switch: disabled providers project enabled=False; legacy rows
-    without the key read as enabled and stay key-absent on disk."""
+    """Wave 2 row switch: operator-added providers are explicitly enabled;
+    legacy rows without the key project as disabled until the operator opts in."""
     base = {**_provider("none"), "auth_kind": "none", "requires_credential": False}
     config = add_llm_provider(_empty_v2(), "relay_a", base)
 
     # Legacy: no `enabled` key anywhere.
     options = list_llm_provider_options(config)
     assert options[0]["enabled"] is True
-    assert "enabled" not in config["llm"]["providers"]["relay_a"]
+    legacy = tomllib.loads(dumps_public_config(config, []))
+    legacy["llm"]["providers"]["relay_a"].pop("enabled", None)
+    assert list_llm_provider_options(legacy)[0]["enabled"] is False
 
     # Explicit disable flows through the registry mutation unchanged.
     disabled = update_llm_provider(config, "relay_a", {**base, "enabled": False})
@@ -403,10 +405,10 @@ def test_provider_options_expose_enabled_switch_without_inventing_legacy_keys() 
     assert list_llm_provider_options(reread)[0]["enabled"] is False
 
 
-def test_provider_config_schema_reads_legacy_entries_as_enabled() -> None:
+def test_provider_config_schema_reads_missing_entries_as_disabled() -> None:
     base = {**_provider("none"), "auth_kind": "none", "requires_credential": False}
     legacy = ProviderConfig.model_validate(base)
-    assert legacy.enabled is True
+    assert legacy.enabled is False
     disabled = ProviderConfig.model_validate({**base, "enabled": False})
     assert disabled.enabled is False
     # Non-boolean junk fails schema validation instead of coercing silently.
