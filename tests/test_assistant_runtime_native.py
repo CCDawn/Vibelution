@@ -227,15 +227,17 @@ def test_native_bootstrap_uses_real_directory_and_keeps_custom_policy(tmp_path, 
         from pathlib import Path
         from core.assistant_runtime import native
         from core.web.services import session_service, agent_directory_service as directory
+        from core.web.services.personal_assistant_service import DEV_TOOLS
         from core.web.services.session import directory_runtime
         from core.infrastructure.tool_executor import get_tool_executor
         executor = get_tool_executor()
         assert executor._resolve_timeout('personal_assistant_manage_tool', {}) == 30
         root = Path(os.environ['VIBELUTION_ASSISTANT_NATIVE_ROOT'])
-        expected_tools = ['personal_assistant_action_tool', 'personal_assistant_manage_tool',
+        legacy_tools = ['personal_assistant_action_tool', 'personal_assistant_manage_tool',
             'personal_affairs_tool', 'append_personal_memory_tool', 'supersede_personal_memory_tool',
-            'search_agent_private_memory_tool', 'compress_context_tool',
-            'personal_assistant_computer_observe_tool', 'personal_assistant_computer_action_tool']
+            'search_agent_private_memory_tool', 'compress_context_tool']
+        expected_tools = [*legacy_tools, 'personal_assistant_computer_observe_tool',
+            'personal_assistant_computer_action_tool', *DEV_TOOLS]
         original_create = directory.create_agent_instance
         def checked_create(**kwargs):
             assert kwargs['initial_tool_policy']['allowedTools'] == expected_tools
@@ -283,8 +285,9 @@ def test_native_bootstrap_uses_real_directory_and_keeps_custom_policy(tmp_path, 
             else:
                 raise AssertionError('runtime root switched')
             policy = directory.get_agent(first['agentId'])['toolPolicy']
-            old_tools = expected_tools[:-2]
-            directory.update_agent_instance(first['agentId'], tool_policy={**policy, 'allowedTools': old_tools, 'preferredTools': old_tools})
+            directory.update_agent_instance(first['agentId'], tool_policy={
+                **policy, 'allowedTools': legacy_tools, 'preferredTools': legacy_tools,
+            })
             assert native.shutdown()['closed']
             assert not directory_runtime.is_directory_store_open()
             second = native.bootstrap(root)['assistant']
