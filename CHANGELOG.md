@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+
+## 3.1.0 - 2026-11-23
 - tools：新增 agent_directory 工具，一次列出可发现的 Agent 及其对应会话，不必先知道 session id 才能联系对方。
 - fix: Agent 会话的中断 turn 也写入续跑标记，重启后自动接上
 - 个人助理重启后继续核对原任务回执，CLI 子任务补发已完成结果，已授权的项目 Agent 可查询联系人、发送消息并在原会话收取回复。
