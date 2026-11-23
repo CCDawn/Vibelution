@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- 个人助理重启后按原派单回执继续跟进，避免重跑已经派单的对话和产生额外模型用量。
+- Codex 等支持 MCP 的外部 Agent 可与 Launcher 个人助理双向发起消息、回复并核对原请求回执。
 
 ## 3.1.0 - 2026-11-23
 - tools：新增 agent_directory 工具，一次列出可发现的 Agent 及其对应会话，不必先知道 session id 才能联系对方。
