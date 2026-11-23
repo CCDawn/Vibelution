@@ -69,6 +69,33 @@ def test_unicode_offsets_and_original_reference_survive_new_turn(source):
     assert read.call_args.kwargs["source_ref"] == reference
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize("lost_ack", [False, True])
+async def test_startup_follows_the_exact_dispatch_source_even_when_ack_is_lost(source, tmp_path, lost_ack):
+    from tests.test_assistant_runtime_dispatch import ClientProbe, adapter
+
+    probe = ClientProbe()
+    probe.start_error = lost_ack
+    service = adapter(tmp_path, probe)
+    if lost_ack:
+        with pytest.raises(DispatchError) as failed:
+            await service.dispatch_from_source("project-a", agent_id="coder", dispatch_id="original",
+                                               runtime=RUNTIME, task_source={})
+        assert failed.value.code == "BACKEND_UNAVAILABLE"
+    else:
+        await service.dispatch_from_source("project-a", agent_id="coder", dispatch_id="original",
+                                           runtime=RUNTIME, task_source={})
+
+    # Launcher can read the reserved identity before its project registry arrives.
+    from core.assistant_runtime.dispatch import DispatchService
+    restarted = DispatchService(tmp_path / "profile", {})
+    assert restarted.managed_source_turns("assistant-a", "assistant-session") == {
+        ("assistant-session", "turn-a")}
+    assert restarted.managed_source_turns("different-agent", "assistant-session") == set()
+    assert restarted.managed_source_turns("assistant-a", "another-session") == set()
+    assert len([operation for operation, _ in probe.calls if operation == "start"]) == 1
+
+
 @pytest.mark.parametrize("change", ["selector", "hash", "offset", "identity", "extra"])
 def test_changed_selector_or_corrupt_reference_never_falls_back(source, change):
     _, reference = resolve(task_source={})

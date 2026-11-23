@@ -324,6 +324,47 @@ def test_interrupted_turn_is_resubmitted_with_status_line(
     assert state["resumedTurnId"] == RESUMED_TURN_ID
 
 
+@pytest.mark.parametrize("managed_session", [SESSION_ID, "other-session"])
+def test_only_owned_dispatch_source_skips_prompt_replay(
+    recovery_env, tmp_path, submit_calls, managed_session
+) -> None:
+    _seed_conversation(tmp_path)
+    _seed_interrupted_turn(tmp_path)
+    _seed_active_work_run(recovery_env)
+
+    summary = startup_recovery.recover_interrupted_session_turns_on_startup(
+        externally_managed_turns=frozenset({(managed_session, ORIGINAL_TURN_ID)})
+    )
+
+    if managed_session == SESSION_ID:
+        assert summary["externallyManagedTurnSkipCount"] == 1
+        assert summary["resumedCount"] == 0
+        assert submit_calls == []
+        assert _recovery_events(tmp_path) == []
+    else:
+        assert summary["externallyManagedTurnSkipCount"] == 0
+        assert summary["resumedCount"] == 1
+        assert len(submit_calls) == 1
+
+
+@pytest.mark.parametrize("native_submission", [True, False])
+def test_preupgrade_replay_inherits_the_dispatch_fence(recovery_env, tmp_path, submit_calls, native_submission):
+    _seed_conversation(tmp_path)
+    append_turn_event(tmp_path, SESSION_ID, RESUMED_TURN_ID, EVENT_TURN_STARTED, status="running")
+    append_turn_event(tmp_path, SESSION_ID, RESUMED_TURN_ID, EVENT_USER_MESSAGE,
+        correlation_id=f"resume:{ORIGINAL_TURN_ID}" if native_submission else "unrelated",
+        payload={"content": ORIGINAL_PROMPT, "source": "hot_restart_resume", "metadata": {
+            "kind": "hot_restart_resume", "recoverySource": "startup_sweep", "recoveredTurnId": ORIGINAL_TURN_ID}})
+    _seed_active_work_run(recovery_env, RESUMED_TURN_ID)
+
+    summary = startup_recovery.recover_interrupted_session_turns_on_startup(
+        externally_managed_turns=frozenset({(SESSION_ID, ORIGINAL_TURN_ID)})
+    )
+
+    assert summary["externallyManagedTurnSkipCount"] == int(native_submission)
+    assert len(submit_calls) == int(not native_submission)
+
+
 def test_recovery_status_line_projects_visible_assistant_message(
     recovery_env, tmp_path, submit_calls
 ) -> None:

@@ -168,7 +168,7 @@ def main():
             if server is not None:
                 server.should_exit = True
 
-        app = create_app(native=NativeFacade(root), token=token,
+        app = create_app(native=NativeFacade(root, dispatch=dispatch), token=token,
                          dispatch=dispatch, main_control=main_control, history_control=history_control, on_ready=publish_ready,
                          on_shutdown=request_shutdown)
         # Native SSE is intentionally long lived. Bound HTTP connection drain

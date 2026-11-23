@@ -36,7 +36,6 @@ def test_bootstrap_installs_complete_snapshot_without_reopening_gate(tmp_path, m
             assert len(sockets) == 1
     monkeypatch.setattr(uvicorn, "Server", Server)
     monkeypatch.setattr(host, "create_app", create_app)
-    monkeypatch.setattr(host, "NativeFacade", lambda root: SimpleNamespace(root=root))
     monkeypatch.setattr(assistant_host, "_seed_tokenizer_cache", lambda cache: None)
     monkeypatch.setenv("VIBELUTION_ASSISTANT_TOKEN", "private-test-token-that-is-long-enough")
     monkeypatch.delenv("VIBELUTION_ASSISTANT_MAIN_CONTROL", raising=False)
@@ -50,4 +49,5 @@ def test_bootstrap_installs_complete_snapshot_without_reopening_gate(tmp_path, m
     assert {key: str(value) for key, value in dispatch._projects.items()} == snapshot["projects"]
     assert dispatch._projects_suspended.is_set() is suspended
     assert captured["native"].root == tmp_path / "profile"
+    assert captured["native"]._dispatch is dispatch
     assert projects_file.read_text(encoding="utf-8") == json.dumps(snapshot)

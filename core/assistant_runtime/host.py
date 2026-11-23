@@ -510,8 +510,9 @@ def _model_image_input_support(agent_id: str) -> bool | None:
 class NativeFacade:
     """Bind the narrow host API to one immutable native assistant identity."""
 
-    def __init__(self, root):
+    def __init__(self, root, *, dispatch=None):
         self.root = root
+        self._dispatch = dispatch
         self.assistant = None
         # The three native reads below all serialize on native._LOCK. The
         # renderer's lightweight status poll can queue behind command holds.
@@ -527,7 +528,8 @@ class NativeFacade:
 
     def bootstrap(self):
         from . import native
-        result = native.bootstrap(self.root)
+        result = native.bootstrap(self.root, **(
+            {"managed_source_turns": self._dispatch.managed_source_turns} if self._dispatch is not None else {}))
         self.assistant = result["assistant"]
         with self._snapshot_lock:
             self._identity_generation += 1

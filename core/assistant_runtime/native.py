@@ -11,7 +11,7 @@ import re
 import threading
 import time
 from collections import OrderedDict
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -175,9 +175,10 @@ def _projection() -> dict[str, Any]:
     return result
 
 
-def bootstrap(root: Path | str) -> dict[str, Any]:
+def bootstrap(root: Path | str, *,
+              managed_source_turns: Callable[[str, str], frozenset[tuple[str, str]]] | None = None) -> dict[str, Any]:
     """Open one fixed native directory and explicitly provision its singleton."""
-    return _bootstrap(root, offline_migration=False)
+    return _bootstrap(root, offline_migration=False, managed_source_turns=managed_source_turns)
 
 
 def bootstrap_for_offline_migration(root: Path | str) -> dict[str, Any]:
@@ -200,7 +201,8 @@ def _configure_tool_budgets() -> None:
     configure_action_result_budget()
 
 
-def _bootstrap(root: Path | str, *, offline_migration: bool) -> dict[str, Any]:
+def _bootstrap(root: Path | str, *, offline_migration: bool,
+               managed_source_turns: Callable[[str, str], frozenset[tuple[str, str]]] | None = None) -> dict[str, Any]:
     global _STARTED, _SESSION_ID, _AGENT_ID, _OFFLINE_MIGRATION, _LIFECYCLE_GENERATION
     expected = assistant_native_root()
     requested = Path(root)
@@ -308,8 +310,11 @@ def _bootstrap(root: Path | str, *, offline_migration: bool) -> dict[str, Any]:
                 from core.web.services.session.startup_recovery import (
                     recover_interrupted_session_turns_on_startup,
                 )
-                # Ordinary startup retains its native recovery and queue drain.
-                recover_interrupted_session_turns_on_startup(should_stop=_STOP_REQUESTED.is_set)
+                # The dispatch observer follows already reserved tasks. Only
+                # other interrupted native turns need their prompts replayed.
+                turns = managed_source_turns(_AGENT_ID, _SESSION_ID) if managed_source_turns else frozenset()
+                recover_interrupted_session_turns_on_startup(
+                    should_stop=_STOP_REQUESTED.is_set, externally_managed_turns=turns)
             return _projection()
         except BaseException:
             _SESSION_ID = ""

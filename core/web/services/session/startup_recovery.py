@@ -127,6 +127,7 @@ def _new_summary() -> dict[str, Any]:
         "retryLimitSkipCount": 0,
         "companionSkipCount": 0,
         "noInterruptedTurnCount": 0,
+        "externallyManagedTurnSkipCount": 0,
         "noActiveTurnSkipCount": 0,
         "journalInterruptResumeCount": 0,
         "continuableResumeCount": 0,
@@ -901,6 +902,29 @@ def _append_recovery_status_line(
     )
 
 
+def _has_managed_turn_ancestor(events: list[Any], session_id: str, turn_id: str,
+                               managed: frozenset[tuple[str, str]]) -> bool:
+    if (session_id, turn_id) in managed:
+        return True
+    if not managed:
+        return False
+    # An upgrade can interrupt a recovery turn admitted by the old version.
+    # Follow only the native resubmission chain back to its durable source.
+    for event in reversed(events):
+        if event.event_type != EVENT_USER_MESSAGE or event.turn_id != turn_id:
+            continue
+        metadata = event.payload.get("metadata") or {}
+        parent = metadata.get("recoveredTurnId") if isinstance(metadata, dict) else None
+        if (not isinstance(parent, str) or not parent or event.payload.get("source") != "hot_restart_resume"
+                or metadata.get("kind") != "hot_restart_resume" or metadata.get("recoverySource") != "startup_sweep"
+                or event.correlation_id != f"resume:{parent}"):
+            return False
+        if (session_id, parent) in managed:
+            return True
+        turn_id = parent
+    return False
+
+
 def _resume_interrupted_turn(
     s: Any,
     session_id: str,
@@ -911,6 +935,7 @@ def _resume_interrupted_turn(
     should_stop: Callable[[], bool] | None = None,
     pending_turn_ids: set[str] | None = None,
     journal_interrupt_evidence: bool = False,
+    externally_managed_turns: frozenset[tuple[str, str]] = frozenset(),
 ) -> None:
     if _shutdown_requested(should_stop):
         return
@@ -925,6 +950,9 @@ def _resume_interrupted_turn(
         journal_interrupt_evidence=journal_interrupt_evidence,
     ):
         summary["noInterruptedTurnCount"] += 1
+        return
+    if _has_managed_turn_ancestor(events, session_id, open_turn_id, externally_managed_turns):
+        summary["externallyManagedTurnSkipCount"] += 1
         return
     prompt = _interrupted_turn_prompt(events, open_turn_id)
     attachment_ids = _interrupted_turn_attachment_ids(events, open_turn_id)
@@ -1084,6 +1112,7 @@ def _recover_session_on_startup(
     active_turn_session_ids: set[str] | None = None,
     pending_turn_ids: set[str] | None = None,
     pending_session_turn_ids: dict[str, set[str]] | None = None,
+    externally_managed_turns: frozenset[tuple[str, str]] = frozenset(),
 ) -> None:
     if _shutdown_requested(should_stop):
         return
@@ -1209,6 +1238,7 @@ def _recover_session_on_startup(
         should_stop=should_stop,
         pending_turn_ids=pending_turn_ids,
         journal_interrupt_evidence=journal_interrupt_evidence,
+        externally_managed_turns=externally_managed_turns,
     )
 
 
@@ -1218,6 +1248,7 @@ _SWEEP_COUNTER_FIELDS = (
     "retryLimitSkipCount",
     "companionSkipCount",
     "noInterruptedTurnCount",
+    "externallyManagedTurnSkipCount",
     "noActiveTurnSkipCount",
     "journalInterruptResumeCount",
     "continuableResumeCount",
@@ -1389,6 +1420,7 @@ def _run_session_candidates(
     pending_turn_ids: set[str],
     priority_session_ids: set[str] | None = None,
     pending_session_turn_ids: dict[str, set[str]] | None = None,
+    externally_managed_turns: frozenset[tuple[str, str]] = frozenset(),
 ) -> list[dict[str, Any]]:
     """Run one candidate per session, serially or on a staggered pool.
 
@@ -1413,6 +1445,7 @@ def _run_session_candidates(
                 active_turn_session_ids=active_turn_session_ids,
                 pending_turn_ids=pending_turn_ids,
                 pending_session_turn_ids=pending_session_turn_ids,
+                externally_managed_turns=externally_managed_turns,
             )
         except Exception as exc:  # noqa: BLE001 - one bad session never blocks startup
             local["errorCount"] += 1
@@ -1525,7 +1558,8 @@ def resume_restart_pending_sessions_now() -> dict[str, Any]:
 
 
 def recover_interrupted_session_turns_on_startup(
-    *, should_stop: Callable[[], bool] | None = None
+    *, should_stop: Callable[[], bool] | None = None,
+    externally_managed_turns: frozenset[tuple[str, str]] = frozenset(),
 ) -> dict[str, Any]:
     """Sweep only the sessions that may own a resumable turn.
 
@@ -1635,6 +1669,7 @@ def recover_interrupted_session_turns_on_startup(
             pending_turn_ids=restart_pending_turn_ids,
             priority_session_ids=resume_priority_session_ids,
             pending_session_turn_ids=restart_pending_map,
+            externally_managed_turns=externally_managed_turns,
         )
         summary["phaseCandidatesMs"] = int((time.perf_counter() - _phase_start) * 1000)
         _merge_recovery_summaries(summary, results)
@@ -1742,6 +1777,9 @@ def _record_sweep_scene_event(s: Any, summary: dict[str, Any]) -> None:
                 ),
                 "externalTaskSkipCount": max(
                     0, int(summary.get("externalTaskSkipCount") or 0)
+                ),
+                "externallyManagedTurnSkipCount": max(
+                    0, int(summary.get("externallyManagedTurnSkipCount") or 0)
                 ),
                 "activeTurnCandidateCount": (
                     -1

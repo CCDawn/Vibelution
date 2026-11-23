@@ -483,7 +483,8 @@ def test_cancelled_startup_waits_for_patrol_constructor_and_releases_owner(tmp_p
     monkeypatch.setattr(patrol, "LauncherPatrol", FakePatrol)
     monkeypatch.setattr(reminders, "LauncherReminders", Store)
     monkeypatch.setattr(legacy_reminder_receipts, "LegacyReminderReceipts", Store)
-    app = create_app(native=Owner(tmp_path), token="private-test-token", dispatch=object())
+    from core.assistant_runtime.dispatch import DispatchService
+    app = create_app(native=Owner(tmp_path), token="private-test-token", dispatch=DispatchService(tmp_path, {}))
 
     async def run():
         context = app.router.lifespan_context(app)

@@ -48,6 +48,10 @@ maintenance. Neither variant gives credentials to the model or renderer.
    references and bounded native receipts. Unknown outcomes are reconciled by
    their original IDs. Neither main nor the host becomes a second project task
    scheduler, Journal, transcript or source of successful completion.
+   At assistant startup, a reserved dispatch source in the assistant's own
+   Session is followed through its task receipt. The original prompt and any
+   native restart replay of that prompt are skipped by the automatic Session
+   recovery sweep. Other interrupted turns retain their usual recovery.
 5. Project start/stop/restart, native command queues, supervisor state and
    process recovery remain in Electron main. A separate closed lifecycle bridge
    may reuse the native engine with a context and queue per registered project.

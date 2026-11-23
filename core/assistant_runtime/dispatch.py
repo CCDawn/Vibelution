@@ -1257,6 +1257,24 @@ class DispatchService:
                 group.start_soon(project_batch, project_id, project_ids)
         return results
 
+    def managed_source_turns(self, agent_id: str, session_id: str) -> frozenset[tuple[str, str]]:
+        """Fence prompt replay once this exact source has a durable dispatch reference."""
+        from .task_source import SourceReference
+
+        turns = set()
+        for path in (self._root / "records").glob("*.json"):
+            try:
+                record = self._read(path.stem, require_authorized=False)
+                source = SourceReference.model_validate(record.get("sourceRef"))
+            except (DispatchError, ValueError):
+                continue
+            if (record.get("clientRequestId") == f"launcher-assistant:{path.stem}"
+                    and (source.agentId, source.sessionId) == (agent_id, session_id)):
+                # The reference is reserved before POST. Even without an ACK,
+                # the task observer can look it up using the original identity.
+                turns.add((session_id, source.turnId))
+        return frozenset(turns)
+
     def list_dispatches(self, project_id: str | None = None) -> list[dict[str, Any]]:
         """Return reference snapshots, never credentials or stored task prompts."""
         if project_id is not None:
