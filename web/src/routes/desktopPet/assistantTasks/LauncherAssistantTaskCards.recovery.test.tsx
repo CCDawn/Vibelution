@@ -6,6 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LauncherAssistantDispatch, LauncherAssistantStatus, LauncherAssistantTeamRun, LauncherAssistantTeamRunsPage } from "../../../api/launcherAssistant";
 import { LauncherNotificationProvider, useLauncherNotices, type LauncherNotice } from "../../../app/LauncherNotifications";
 import { LauncherAssistantTaskCards } from "./LauncherAssistantTaskCards";
+import { postBrowserTelemetry } from "../../../app/browserTelemetry";
+vi.mock("../../../app/browserTelemetry", async importOriginal => {
+const actual = await importOriginal<typeof import("../../../app/browserTelemetry")>();
+return { ...actual, postBrowserTelemetry: vi.fn() };
+});
 import { LauncherAssistantTaskSidebar } from "./LauncherAssistantTaskSidebar";
 import { LauncherTaskModelControls } from "./__fixtures__/LauncherTaskModelControls";
 import { useLauncherTasks, type LauncherTaskModel } from "./LauncherTaskContext";
@@ -91,6 +96,28 @@ afterEach(async () => {
 });
 
 describe("task progress recovery", () => {
+it("records one bounded telemetry event per failed feed read", async () => {
+invoke.mockImplementation(async (request: { operation: string }) => {
+if (request.operation === "status") return currentStatus;
+if (request.operation === "dispatches") throw new Error("bridge unavailable");
+if (request.operation === "teamRuns") return currentPage;
+throw new Error(`Unexpected mutation: ${request.operation}`);
+});
+await render();
+const dispatchFailures = vi.mocked(postBrowserTelemetry).mock.calls
+.filter(([payload]) => payload.fields?.operation === "dispatches");
+expect(dispatchFailures).toHaveLength(1);
+const [payload] = dispatchFailures[0];
+expect(payload.eventCode).toBe("assistant_read.failed");
+expect(payload.level).toBe("warning");
+expect(payload.fields?.hasData).toBe(false);
+expect(String(payload.fields?.error)).toContain("bridge unavailable");
+// Re-rendering with the same failure count must not duplicate the event.
+await settle();
+expect(vi.mocked(postBrowserTelemetry).mock.calls
+.filter(([event]) => event.fields?.operation === "dispatches")).toHaveLength(1);
+});
+
   it.each([
     { source: "dispatches", cached: false }, { source: "teamRuns", cached: false },
     { source: "dispatches", cached: true }, { source: "teamRuns", cached: true },
