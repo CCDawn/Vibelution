@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- fix: 个人助理的模型选择器不再列出未启用服务商的模型，只保留当前正在使用的那一行；列表为空时提示去模型设置开启服务。
 
 ## 3.4.1 - 2026-11-24
 - `web/src/routes/chat/useChatComposerTurnMutations.ts`：guidance onMutate 从会话缓存解析
