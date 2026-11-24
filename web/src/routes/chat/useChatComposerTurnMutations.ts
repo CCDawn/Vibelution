@@ -24,7 +24,6 @@ import { submitVirtualHumanConversationMessage } from "../../api/virtualHumanLif
 import { queryKeys } from "../../api/queryKeys";
 import type {
   ConversationAttachment,
-  ConversationMessage,
   SessionDetail,
   SessionGuidanceMode,
   SessionModelSelection,
@@ -69,7 +68,6 @@ import {
   type ComposerAttachmentUploadOutcome,
   type ComposerImageAttachment,
 } from "./chatComposerSubmitModel";
-import { assistantTurnIsInFlight } from "../chatTurnProtocol";
 import { loadTurnStatusTailConfig } from "./turnStatusTailModel";
 import {
   releaseSessionDraftRecoveryGuard,
@@ -1255,19 +1253,6 @@ export function useChatComposerTurnMutations({
       const submissionIdentity = String(variables.clientSubmissionId || "").trim()
         ? `steer:${String(variables.clientSubmissionId).trim()}`
         : "";
-      // 乐观行必须挂在当前活动轮上：没有 turnId 的 guidance 行不会被
-      // conversationLiveTailStartIndex 认成活动轮尾巴，它会落进虚拟化历史区，
-      // 于是这条「插入当前轮」的消息排在活动轮状态（思考中/任务卡）之前，
-      // 等服务端回显行落位再跳到后面。补上 turnId 后它和 in-flight 行同 turn，
-      // 从一开始就渲染在活动轮之后。
-      const cachedDetail = queryClient.getQueryData<SessionDetail>(queryKeys.session(variables.sessionId));
-      const lastInFlightAssistant = [...(cachedDetail?.messages ?? [])].reverse().find(
-        (message): message is Extract<ConversationMessage, { role: "assistant" }> =>
-          message.role === "assistant" && assistantTurnIsInFlight(message),
-      );
-      const activeTurnId = String(
-        cachedDetail?.activeTurnId || lastInFlightAssistant?.turnId || "",
-      ).trim();
       const optimisticMessage: UserConversationMessage = {
         id: optimisticGuidanceMessageId,
         role: "user",
@@ -1277,11 +1262,6 @@ export function useChatComposerTurnMutations({
           kind: variables.mode === "interrupt" ? "user_interrupt_guidance" : "user_guidance",
           source: "steer",
           guidanceMode: variables.mode,
-          ...(activeTurnId ? { turnId: activeTurnId } : {}),
-          // guidance 行的归位依赖一个正整数 sequence：没有它，projection 不会
-          // 把这一行当成本轮的插入行，而是按普通 user 行排在活动轮之前。
-          // 本地位取最大值，保证它排在当前轮所有已有插入行之后。
-          guidanceSequence: Number.MAX_SAFE_INTEGER,
           ...(submissionIdentity ? { clientSubmissionId: submissionIdentity } : {}),
           optimistic: true,
         },
