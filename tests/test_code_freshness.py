@@ -733,9 +733,31 @@ def test_resolve_code_freshness_fast_path_replays_cache_without_git(tmp_path: Pa
     assert len(calls) == calls_after_first, "unchanged HEAD+fingerprint must replay the cache with zero git calls"
     assert second == first
 
-    # schema must stay identically shaped on the replayed payload
-    assert set(second) == {"schemaVersion", "verdict", "backend", "frontend"}
-    assert set(second["backend"]) == {"available", "behind", "behindCount", "reason", "source", "running", "disk"}
+    # schema must stay identically shaped on the replayed payload. The layered
+    # fields are additive: the legacy panels keep their exact legacy keys, the
+    # backend panel grows only changedPathCounts/restartRequired/pathClassification,
+    # and desktopShell/layers/requiredAction are new top-level surfaces.
+    assert set(second) == {
+        "schemaVersion",
+        "verdict",
+        "backend",
+        "frontend",
+        "desktopShell",
+        "layers",
+        "requiredAction",
+    }
+    assert set(second["backend"]) == {
+        "available",
+        "behind",
+        "behindCount",
+        "changedPathCounts",
+        "restartRequired",
+        "pathClassification",
+        "reason",
+        "source",
+        "running",
+        "disk",
+    }
     assert set(second["backend"]["running"]) == {
         "head",
         "branch",
