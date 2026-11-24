@@ -154,7 +154,7 @@ const styles: Record<string, string> = {
   tabActive:
     `vui-routes-chatcodingroute tabActive min-w-0 ${vuiStateSelectedRowClass}`,
   tabStrip:
-    "vui-routes-chatcodingroute tabStrip min-w-0 flex h-[44px] min-h-[44px] items-center gap-1.5 overflow-hidden rounded-tl-[12px] bg-transparent px-2.5 py-0 max-[700px]:px-1.5",
+    "vui-routes-chatcodingroute tabStrip min-w-0 flex h-[44px] min-h-[44px] items-center gap-1.5 overflow-hidden rounded-tl-[12px] bg-vui-surface-chat px-2.5 py-0 max-[700px]:px-1.5",
   // Wide docked workbench: one session row across the center column and the right rail.
   // These overrides stay after the locked column classes so the stylesheet order is stable.
   sessionRowHost:
