@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import styles from "../ChatCodingRoute.styles";
 
 const chatDir = resolve(import.meta.dirname);
 
@@ -56,5 +57,13 @@ describe("ChatSessionWorkbenchShell geometry host", () => {
     expect(workbench).toContain("styles.sessionRowSpan");
     expect(workbench).toContain("hideTabList={sessionRowSpansRail}");
     expect(workbench).toContain("agentSessionTabs={stripSessions}");
+  });
+
+  it("joins the wide shared tab row and conversation body at the same leading edge", () => {
+    expect(styles.centerPane).toContain("mx-[var(--chat-workbench-gap)]");
+    expect(styles.sessionRowSpan).toContain("ml-[var(--chat-workbench-gap)]");
+    expect(styles.sessionRowSpan).toContain("rounded-tl-[var(--vui-workbench-radius)]");
+    expect(styles.tabStrip).not.toContain("rounded-tl");
+    expect(styles.centerPaneBodyRow).toContain("[&.vui-workbench-pane[data-vui-region=chat-conversation-center]]:!rounded-tl-none");
   });
 });

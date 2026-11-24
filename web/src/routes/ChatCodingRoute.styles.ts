@@ -43,7 +43,7 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute sectionEyebrowRow flex min-w-0 items-center gap-1",
   // Wave 6H dialog policy: viewport clamp only — not workbench pane-heights.,
   centerPane:
-    `${VUI_WORKBENCH_PANE_CLASS} vui-routes-chatcodingroute centerPane min-w-0 w-auto grid h-auto min-h-0 grid-rows-[auto_minmax(0,1fr)] mx-1 mb-1 overflow-hidden ${vuiChatFillClass} max-[700px]:!mx-0.5 max-[700px]:!mb-0.5`,
+    `${VUI_WORKBENCH_PANE_CLASS} vui-routes-chatcodingroute centerPane min-w-0 w-auto grid h-auto min-h-0 grid-rows-[auto_minmax(0,1fr)] mx-[var(--chat-workbench-gap)] mb-1 overflow-hidden ${vuiChatFillClass} max-[700px]:!mx-0.5 max-[700px]:!mb-0.5`,
   // Column placement is separate from the pane. The built stylesheet emits
   // grid-column:3 after grid-column:1, so both utilities on one node keep column 3.
   centerPaneDocked:
@@ -154,15 +154,16 @@ const styles: Record<string, string> = {
   tabActive:
     `vui-routes-chatcodingroute tabActive min-w-0 ${vuiStateSelectedRowClass}`,
   tabStrip:
-    "vui-routes-chatcodingroute tabStrip min-w-0 flex h-[44px] min-h-[44px] items-center gap-1.5 overflow-hidden rounded-tl-[12px] bg-vui-surface-chat px-2.5 py-0 max-[700px]:px-1.5",
+    "vui-routes-chatcodingroute tabStrip min-w-0 flex h-[44px] min-h-[44px] items-center gap-1.5 overflow-hidden bg-vui-surface-chat px-2.5 py-0 max-[700px]:px-1.5",
   // Wide docked workbench: one session row across the center column and the right rail.
   // These overrides stay after the locked column classes so the stylesheet order is stable.
   sessionRowHost:
     "vui-routes-chatcodingroute sessionRowHost !grid-rows-[44px_minmax(0,1fr)]",
   sessionRowSpan:
-    "vui-routes-chatcodingroute sessionRowSpan relative z-10 min-h-0 min-w-0 overflow-hidden [grid-column:3_/_6] [grid-row:1]",
+    "vui-routes-chatcodingroute sessionRowSpan relative z-10 ml-[var(--chat-workbench-gap)] min-h-0 min-w-0 overflow-hidden rounded-tl-[var(--vui-workbench-radius)] [grid-column:3_/_6] [grid-row:1]",
+  // Only the shared tab row above this pane owns the outer upper-left corner.
   centerPaneBodyRow:
-    "vui-routes-chatcodingroute centerPaneBodyRow ![grid-row:2] !grid-rows-[minmax(0,1fr)]",
+    "vui-routes-chatcodingroute centerPaneBodyRow ![grid-row:2] !grid-rows-[minmax(0,1fr)] [&.vui-workbench-pane[data-vui-region=chat-conversation-center]]:!rounded-tl-none",
   statusRailBodyRow:
     "vui-routes-chatcodingroute statusRailBodyRow ![grid-row:2]",
   indexRailSpanRows:
