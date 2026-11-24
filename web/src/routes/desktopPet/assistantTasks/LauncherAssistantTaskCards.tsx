@@ -11,6 +11,7 @@ import { LauncherTaskContext, usePublishLauncherTaskNotices, type TaskReviewRequ
 import { LauncherAssistantTaskSidebar } from "./LauncherAssistantTaskSidebar";
 import { readLauncherAssistantTaskSource } from "../launcherAssistantTaskReads";
 import { launcherNoticeReadFailed } from "../launcherAssistantPageNotices";
+import { postBrowserTelemetry } from "../../../app/browserTelemetry";
 import { createLauncherApprovalTarget, type LauncherApprovalTarget } from "../launcherAssistantApprovalTarget";
 
 const PAGE_SIZE=10;
@@ -288,7 +289,35 @@ export function LauncherAssistantTaskCards({onReview,onApproval,onOpenConversati
   loadingMore:teamRuns.isFetchingNextPage,selectedId:selected?.id??null,cleanableCount:cleanable.length,
   cleanupBusy:cleanup.busy,canCleanCompleted:cleanable.length>0||(teamEnabled&&Boolean(teamRuns.hasNextPage)),
   refresh,more,openTask,remove,cleanCompleted,reviewRequest:identityConfirmed&&reviewRequest?.identity===identity?reviewRequest:null};
- usePublishLauncherTaskNotices({...context,
+ // Read failures stay diagnosable: the compact notice only says "unavailable",
+// so record the first failure of each feed once per identity and failure count.
+// Recovery needs no event because the bounded probe resumes reads on its own.
+const reportedReadFailures = useRef(new Map<string, number>());
+useEffect(() => {
+const recordReadFailure = (operation: string, query: { isError: boolean; failureCount: number; data: unknown; error: unknown }) => {
+if (!query.isError) return;
+const key = `${identity}:${operation}`;
+if (reportedReadFailures.current.get(key) === query.failureCount) return;
+reportedReadFailures.current.set(key, query.failureCount);
+postBrowserTelemetry({
+phase: "assistant_read",
+eventCode: "assistant_read.failed",
+message: `Assistant ${operation} read failed`,
+level: "warning",
+fields: {
+operation,
+failureCount: query.failureCount,
+hasData: Boolean(query.data),
+identityConfirmed,
+error: (query.error instanceof Error ? `${query.error.name}: ${query.error.message}` : String(query.error ?? "")).slice(0, 240),
+},
+});
+};
+recordReadFailure("status", status);
+recordReadFailure("dispatches", dispatches);
+if (teamSupported) recordReadFailure("team-task-cards", teamRuns);
+}, [status.isError, status.failureCount, dispatches.isError, dispatches.failureCount, teamRuns.isError, teamRuns.failureCount, identityConfirmed, teamSupported]);
+usePublishLauncherTaskNotices({...context,
   unavailable:launcherNoticeReadFailed(status)||launcherNoticeReadFailed(dispatches),
   teamUnavailable:teamSupported&&launcherNoticeReadFailed(teamRuns),
  },lang);
