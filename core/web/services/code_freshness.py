@@ -921,31 +921,6 @@ def _inspect_unpackaged_shell_with_owner_gate(project_root: Path) -> dict[str, A
     }
 
 
-def _resolve_desktop_shell_kind(project_root: Path, owner_exe: str, *, packaged_installed: bool) -> str:
-    try:
-        from core.launcher.desktop_shell import (
-            packaged_desktop_exe,
-            unpackaged_electron_executable,
-        )
-    except ImportError:
-        return "unpackaged"
-    if owner_exe:
-        try:
-            if packaged_desktop_exe(project_root).resolve() == Path(owner_exe).resolve():
-                return "packaged"
-        except OSError:
-            pass
-        try:
-            electron_bin = unpackaged_electron_executable(project_root)
-            if electron_bin is not None and electron_bin.resolve() == Path(owner_exe).resolve():
-                return "unpackaged"
-        except OSError:
-            pass
-    # No owner record: keep the historical default (the launcher freshness has
-    # only ever judged the unpackaged checkout shell).
-    return "unpackaged"
-
-
 def _not_inspected_unpackaged_panel(project_root: Path) -> dict[str, Any]:
     """Placeholder unpackaged panel when the packaged shell governs instead.
 
