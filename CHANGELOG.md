@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- fix: 个人助理的助理状态、派遣任务、团队任务三类读取失败时各记录一条浏览器遥测（操作名、失败序号、是否有缓存、错误摘要），同一失败只记一次，便于下次定位「暂时查不到任务进度」的真实原因。
 
 ## 3.3.3 - 2026-11-24
 - Reverted the transparent/gradient tab strip band: the gradient depended on a pane-width
