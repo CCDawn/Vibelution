@@ -47,12 +47,11 @@ export function guidanceDisplayState(message: ConversationMessage): "pending" | 
   return message.metadata?.optimistic === true ? "pending" : "received";
 }
 
-function guideBoundary(guide: Guide): number | undefined {
-  if (guidanceDisplayState(guide) === "drained") {
-    return positiveSequence(guide.metadata?.guidanceConsumedSequence);
-  }
-  // Without a drain receipt this input has no confirmed execution boundary.
-  // Keep it after current work even when a stop/failure settles the turn.
+function guideBoundary(_guide: Guide): number | undefined {
+  // 产品决策（2026-11-24）：插入消息固定渲染在本轮工作内容之后。
+  // 旧实现按 drained 的 consumed 序列返回切分点，把一轮工作切成多段，
+  // 插入行被夹进工作节点之间，运行中的轮次看起来就是消息陷进了思考里。
+  // 现在一律返回 undefined：所有插入行都进 waiting，统一排在 turn 之后。
   return undefined;
 }
 
@@ -167,7 +166,11 @@ export function conversationLiveTailStartIndex(messages: ConversationMessage[]):
     const nextTurn = message.role === "assistant" ? message.turnId : guidanceTurnId(message);
     const live = assistantTurnIsInFlight(message);
     const waiting = isSteerGuidanceMessage(message) && guidanceDisplayState(message) === "pending";
-    if ((!live && !waiting) || !nextTurn || (turnId && turnId !== nextTurn)) break;
+    // 插入行属于它插入的那一轮，不能把 tail 截断在它身上：drained 的插入行
+    // 一旦 break，前面的活动轮就被算进虚拟化历史，渲染出来就是插入消息和
+    // 工作内容分处两个区域、顺序看着错乱。
+    const guide = isSteerGuidanceMessage(message);
+    if ((!live && !waiting && !guide) || !nextTurn || (turnId && turnId !== nextTurn)) break;
     turnId = nextTurn;
     hasLiveAssistant ||= live;
     index -= 1;

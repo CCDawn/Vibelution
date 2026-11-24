@@ -2102,7 +2102,7 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(html).not.toContain("已执行");
   });
 
-  it("renders completed work around guidance in the same order as the turn items", () => {
+  it("renders guidance after the completed work of the turn", () => {
     const html = renderConversation([
       {
         id: "ordered-answer", role: "assistant", turnId: "ordered-turn", status: "completed",
@@ -2120,8 +2120,9 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
       },
     ]);
     expect(html.indexOf("ORDER_BEFORE_GUIDE")).toBeGreaterThan(-1);
-    expect(html.indexOf("ORDER_BEFORE_GUIDE")).toBeLessThan(html.indexOf("ORDER_GUIDANCE_INPUT"));
-    expect(html.indexOf("ORDER_GUIDANCE_INPUT")).toBeLessThan(html.indexOf("ORDER_AFTER_GUIDE"));
+    // 产品决策（2026-11-24）：插入消息固定渲染在本轮工作内容之后。
+    expect(html.indexOf("ORDER_BEFORE_GUIDE")).toBeLessThan(html.indexOf("ORDER_AFTER_GUIDE"));
+    expect(html.indexOf("ORDER_AFTER_GUIDE")).toBeLessThan(html.indexOf("ORDER_GUIDANCE_INPUT"));
     expect(html).not.toContain("已纳入");
     expect(html.match(/data-codex-process-work-status="true"[^>]*>已工作/g)).toHaveLength(1);
   });
