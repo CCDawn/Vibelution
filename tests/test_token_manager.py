@@ -872,7 +872,12 @@ class TestEnhancedTokenCompressor:
         assert any("A9" in c for c in contents[-4:])
 
     def test_preserve_errors_moves_tool_call_pairs_whole(self):
-        """错误保留按 call+result 整组搬移，压缩结果不产生孤儿 tool 结果。"""
+        """错误保留按 call+result 整组搬移，压缩结果不产生孤儿 tool 结果。
+
+        去误标重写后错误判定只认结构性证据：这里用产品失败信封 [错误] 标记
+        失败结果；正文只有 failed/errors 字样的成功结果不再触发整组保留
+        （由 tests/test_error_group_retention.py 单独覆盖）。
+        """
         from langchain_core.messages import AIMessage, ToolMessage
         from core.orchestration.turn_compression import _tool_call_pairing_snapshot
 
@@ -881,7 +886,10 @@ class TestEnhancedTokenCompressor:
                 content="",
                 tool_calls=[{"name": "run_tests", "args": {}, "id": "call-err"}],
             ),
-            ToolMessage(content="pytest failed: 3 errors", tool_call_id="call-err"),
+            ToolMessage(
+                content="[错误] pytest failed: 3 errors",
+                tool_call_id="call-err",
+            ),
         ]
         messages.extend(
             AIMessage(content=f"step {i} " + ("x" * 400)) for i in range(6)

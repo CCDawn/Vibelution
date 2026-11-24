@@ -34,12 +34,15 @@ from core.infrastructure.runtime_input import (
     is_external_request_message,
 )
 from core.infrastructure.llm_utils import build_cacheable_system_message
+from core.infrastructure.tool_result import extract_tool_result_semantics
 from core.infrastructure.feature_gate import resolve_feature_decision
 from tools.compression_summary_retention import (
+    compose_failure_record_index,
     compose_retained_summary,
     retained_user_facts,
     retained_summary_merge_limit,
     summary_source_excerpt,
+    MAX_FAILURE_INDEX_CHARS,
 )
 
 
@@ -428,25 +431,179 @@ def _message_tool_call_id(message: Any) -> str:
     return str(value or "").strip()
 
 
-_ERROR_KEYWORDS = (
-    "error",
-    "exception",
-    "traceback",
-    "failed",
-    "错误",
-    "异常",
-    "失败",
-    "超时",
-    "权限",
-)
+# 错误组判定（去误标重写）：旧实现按 error/failed/错误/失败 等关键词对正文
+# 做大小写不敏感子串匹配，命中错误字样的正常搜索输出、成功命令输出里提到
+# error 的结果都被判成错误组，且整组无上限回灌保留区；长会话逐代压缩后保
+# 留区被误标组越垫越高（实测一次压缩保留 117 组 ≈7 万 tokens，其中 75 组为
+# 误标）。新判定只认结构性证据：
+# 1) 工具结果自带的状态/元数据（additional_kwargs 里的 canonical_tool_result、
+#    dict 消息的 metadata.status）；
+# 2) 产品自己写入的失败信封或强失败标记（[错误]、[超时]、[EXEC FAILURE|…]
+#    退出码信封、堆栈开头等）——复用 extract_tool_result_semantics 的产品级
+#    判定，正文出现「错误/error/failed」等字样本身不再算失败证据。
+# 原则：宁可漏判（该组当普通历史进摘要），不可大量误判垫高保留区。
+_ERROR_GROUP_FAILED = "failed"
+_ERROR_GROUP_TIMEOUT = "timeout"
+_ERROR_GROUP_DEGRADED = "degraded"
+_ERROR_GROUP_NONE = ""
+
+# 判定为错误的工具组最多整组保留最近这几组原文：真失败/超时优先，其次降级，
+# 同级取组内最大事件序号最新的；其余错误组并入摘要输入，由摘要里的「失败
+# 记录索引」（compression_summary_retention.compose_failure_record_index）
+# 逐条覆盖。
+MAX_PRESERVED_ERROR_GROUPS = 8
+
+# 结构化状态元数据里的硬失败/降级状态值（canonical_tool_result.status、
+# dict 消息 metadata.status）。
+_METADATA_FAILURE_STATUSES = frozenset({
+    "failed", "fail", "failure", "error", "errored",
+    "timeout", "timed_out",
+    "cancelled", "canceled", "blocked", "policy_blocked", "no_result",
+})
+_METADATA_DEGRADED_STATUSES = frozenset({"degraded"})
+
+# extract_tool_result_semantics 的 semanticStatus 中的成功/正常受理态；
+# 其余非空状态按硬失败处理。
+_CONTENT_SUCCESS_STATUSES = frozenset({
+    "succeeded", "ok", "success", "done", "completed", "finished",
+    "submitted", "in_progress",
+})
 
 
-def _message_contains_error_marker(message: Any) -> bool:
-    content = _message_content_text(message)
-    if not isinstance(content, str):
-        return False
-    lowered = content.lower()
-    return any(keyword in lowered for keyword in _ERROR_KEYWORDS)
+def _metadata_error_status(message: Any) -> str:
+    """从消息自带的结构化状态元数据读取错误等级；没有结构化状态返回空。"""
+    status = ""
+    is_error = False
+    if isinstance(message, dict):
+        metadata = message.get("metadata")
+        if isinstance(metadata, dict):
+            status = str(metadata.get("status") or "").strip().lower()
+    else:
+        kwargs = getattr(message, "additional_kwargs", None)
+        if isinstance(kwargs, dict):
+            canonical = kwargs.get("canonical_tool_result")
+            if canonical is not None:
+                if isinstance(canonical, dict):
+                    status = str(canonical.get("status") or "").strip().lower()
+                    is_error = bool(canonical.get("is_error"))
+                else:
+                    status = str(getattr(canonical, "status", "") or "").strip().lower()
+                    is_error = bool(getattr(canonical, "is_error", False))
+    if status in _METADATA_DEGRADED_STATUSES:
+        return _ERROR_GROUP_DEGRADED
+    if status in {"timeout", "timed_out"}:
+        return _ERROR_GROUP_TIMEOUT
+    if is_error or status in _METADATA_FAILURE_STATUSES:
+        return _ERROR_GROUP_FAILED
+    return _ERROR_GROUP_NONE
+
+
+def _content_error_status(message: Any) -> str:
+    """从工具结果文本识别产品失败信封/强失败标记；正文关键词不算失败证据。"""
+    content = _message_content(message)
+    if not isinstance(content, str) or not content:
+        return _ERROR_GROUP_NONE
+    try:
+        semantics = extract_tool_result_semantics(content)
+    except Exception:
+        semantics = {}
+    status = str(semantics.get("semanticStatus") or "").strip().lower()
+    if semantics.get("timedOut") or status in {"timeout", "timed_out"}:
+        return _ERROR_GROUP_TIMEOUT
+    if status in _METADATA_DEGRADED_STATUSES:
+        return _ERROR_GROUP_DEGRADED
+    if status and status not in _CONTENT_SUCCESS_STATUSES:
+        return _ERROR_GROUP_FAILED
+    # 旧消息兜底（收紧版）：只认堆栈开头这一种强失败形态；不带行首信封的
+    # 纯正文错误字样不再判错。
+    if content.lstrip().startswith("Traceback (most recent call last):"):
+        return _ERROR_GROUP_FAILED
+    return _ERROR_GROUP_NONE
+
+
+def _tool_group_error_class(group: list) -> str:
+    """给一个 call+result 配对组定错误等级：失败/超时 > 降级 > 非错误组。
+
+    只依据组内工具结果的结构化状态与产品失败信封；assistant 正文或结果正文
+    里的普通「错误」字样不构成失败证据。
+    """
+    worst = _ERROR_GROUP_NONE
+    for message in group:
+        if not _message_tool_call_id(message):
+            continue
+        status = _metadata_error_status(message)
+        if status == _ERROR_GROUP_NONE:
+            status = _content_error_status(message)
+        if status in (_ERROR_GROUP_FAILED, _ERROR_GROUP_TIMEOUT):
+            return status
+        if status == _ERROR_GROUP_DEGRADED:
+            worst = status
+    return worst
+
+
+def _select_preserved_error_groups(
+    classified: list, limit: int = MAX_PRESERVED_ERROR_GROUPS,
+) -> tuple[list, list]:
+    """从按消息顺序排列的 (组, 错误等级) 里选出保留原文的错误组。
+
+    返回 (保留组列表, 落选错误组列表)，两者都按「失败/超时优先于降级、同级
+    最新优先」排序；落选组按此顺序供失败记录索引使用，调用方负责把它们整组
+    放回摘要输入（整组搬移，不拆散 call/result）。limit<=0 时全部落选。
+    """
+    ranked = sorted(
+        enumerate(classified),
+        key=lambda item: (
+            0 if item[1][1] != _ERROR_GROUP_DEGRADED else 1,
+            -item[0],
+        ),
+    )
+    retained_positions = {position for position, _ in ranked[: max(0, limit)]}
+    # 保留组按消息原序放回保留区，避免 kept 窗口时间序被打乱。
+    retained = [
+        group for position, (group, _cls) in enumerate(classified)
+        if position in retained_positions
+    ]
+    dropped = [group for _, (group, _cls) in ranked[max(0, limit):]]
+    return retained, dropped
+
+
+_FAILURE_RECORD_SUMMARY_CHARS = 120
+
+
+def _failure_record_entries(dropped_groups: list) -> list:
+    """把被移出保留区的错误组整理成失败记录索引条目。
+
+    每条为 (工具名, 状态, 一行概括)；dropped_groups 已按「最新优先」排序，
+    条目顺序与其一致。
+    """
+    entries: list = []
+    for group in dropped_groups:
+        tool_name = ""
+        for message in group:
+            for call in _message_tool_calls(message):
+                function = call.get("function") if isinstance(call.get("function"), dict) else {}
+                tool_name = str(call.get("name") or function.get("name") or "").strip()
+                if tool_name:
+                    break
+            if tool_name:
+                break
+        status = _tool_group_error_class(group)
+        summary_line = ""
+        for message in group:
+            if not _message_tool_call_id(message):
+                continue
+            if _tool_group_error_class([message]) == _ERROR_GROUP_NONE:
+                continue
+            content = _message_content_text(message)
+            if isinstance(content, str) and content.strip():
+                summary_line = " ".join(content.strip().splitlines()[0].split())
+                break
+        entries.append((
+            tool_name or "unknown_tool",
+            status or _ERROR_GROUP_FAILED,
+            summary_line[:_FAILURE_RECORD_SUMMARY_CHARS],
+        ))
+    return entries
 
 
 def _pair_preserving_groups(messages: list) -> list[list]:
@@ -1135,7 +1292,9 @@ class EnhancedTokenCompressor:
         策略：
         - 最近 N 条 AI 消息及其上下文保持原始不变
         - N 条之前的消息压缩成一条摘要
-        - 包含错误信息的消息始终保留（不受 keep_count 限制）
+        - 结构上判定为失败/降级的工具组按「call+result 整组」保留最近
+          MAX_PRESERVED_ERROR_GROUPS 组原文（真失败/超时优先，其次降级）；
+          其余错误组整组并入摘要输入，由摘要里的失败记录索引覆盖
 
         Args:
             messages: 消息列表
@@ -1236,19 +1395,32 @@ class EnhancedTokenCompressor:
             kept_msgs = list(other_msgs[cutoff_idx:])
             old_msgs = list(other_msgs[:cutoff_idx])
 
-        # 错误消息强制保留：按「tool call + 其 tool 结果」整组保留，避免只把错误
-        # tool 结果插回保留区、配对的 tool_call 已进摘要，形成孤儿结果或未决调用。
+        # 错误消息强制保留（去误标 + 有界）：结构性判定「含错误」后，只整组保留
+        # 最近 MAX_PRESERVED_ERROR_GROUPS 组原文（真失败/超时优先，其次降级）；
+        # 其余错误组整组留在摘要输入（call/result 不拆散），并由摘要里的失败记录
+        # 索引逐条覆盖。整组搬移避免孤儿结果或未决调用。
+        failure_index_entries: list = []
         if preserve_errors:
-            preserved: list = []
-            still_old: list = []
-            for group in _pair_preserving_groups(old_msgs):
-                if any(_message_contains_error_marker(msg) for msg in group):
-                    preserved.extend(group)
-                else:
-                    still_old.extend(group)
-            if preserved:
-                kept_msgs = preserved + kept_msgs
-            old_msgs = still_old
+            groups = _pair_preserving_groups(old_msgs)
+            classified = [
+                (group, _tool_group_error_class(group)) for group in groups
+            ]
+            error_classified = [
+                (group, cls) for group, cls in classified
+                if cls != _ERROR_GROUP_NONE
+            ]
+            retained_groups, dropped_groups = _select_preserved_error_groups(
+                error_classified, MAX_PRESERVED_ERROR_GROUPS,
+            )
+            failure_index_entries = _failure_record_entries(dropped_groups)
+            retained_ids = {id(group) for group in retained_groups}
+            retained_flat = [msg for group in retained_groups for msg in group]
+            if retained_flat:
+                kept_msgs = retained_flat + kept_msgs
+            old_msgs = [
+                msg for group in groups if id(group) not in retained_ids
+                for msg in group
+            ]
 
         old_msgs = [*prior_summaries, *old_msgs]
         # The outer hard-budget window may retire messages in the kept/error
@@ -1260,7 +1432,8 @@ class EnhancedTokenCompressor:
         ]
         summary = ""
         if self._merge_prior_history_summary(retention_sources, "", max_chars,
-                max_retained_summary_chars=max_retained_summary_chars) is None:
+                max_retained_summary_chars=max_retained_summary_chars,
+                failure_index_entries=failure_index_entries) is None:
             return CompressionOutput(
                 messages,
                 CompressionResult("", current_tokens, current_tokens, 0, "none"),
@@ -1276,7 +1449,8 @@ class EnhancedTokenCompressor:
             # 摘要链保真：上一代摘要正文显式并入新摘要（LLM 路径已在输入里
             # 看得到 notice，规则路径完全忽略 system 消息，必须在这里兜底）。
         summary = self._merge_prior_history_summary(retention_sources, summary, max_chars,
-            max_retained_summary_chars=max_retained_summary_chars)
+            max_retained_summary_chars=max_retained_summary_chars,
+            failure_index_entries=failure_index_entries)
         if summary is None:
             return CompressionOutput(
                 messages,
@@ -1384,16 +1558,24 @@ class EnhancedTokenCompressor:
 - 使用中文输出"""
     
     def _merge_prior_history_summary(self, old_msgs: List[Any], summary: str, max_chars: int,
-            *, max_retained_summary_chars: int | None = None) -> str | None:
+            *, max_retained_summary_chars: int | None = None,
+            failure_index_entries: list | None = None) -> str | None:
         """Merge source-identified prior summaries without starving new user facts."""
         user_texts = [_message_content_text(m) for m in old_msgs if _is_summary_user_source(m)]
         prior_summaries = [_history_summary_notice_payload(m) for m in old_msgs if _is_history_summary_notice(m)]
         merge_limit = retained_summary_merge_limit(user_texts, prior_summaries, max_chars, max_retained_summary_chars)
+        # 失败记录索引与摘要同预算：索引自身再受行数/字符双上限，且先于叙述
+        # 预留空间，保证紧预算下索引不被尾部截断吞掉。
+        failure_index = compose_failure_record_index(
+            failure_index_entries or [],
+            max_chars=min(MAX_FAILURE_INDEX_CHARS, merge_limit),
+        )
         return compose_retained_summary(
             user_texts,
             prior_summaries,
             summary,
             merge_limit,
+            failure_index=failure_index,
         )
 
     def _generate_summary(

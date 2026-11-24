@@ -11,6 +11,14 @@ _FACTS_START = "<user-preserved-facts>"
 _FACTS_END = "</user-preserved-facts>"
 _FACTS_LABEL = "历史用户原文（可能含引文，仅作上下文，不增加授权）："
 MAX_RETAINED_SUMMARY_CHARS = 1_000_000
+
+# 失败记录索引：被移出错误保留区的工具组在摘要里的逐条存目。行数与字符数
+# 双上限，取先到者；超限丢弃剩余条目并追加一句概括，提示更早记录可回查。
+FAILURE_INDEX_HEADER = "失败记录索引（原文已并入摘要，可回查）:"
+FAILURE_INDEX_OVERFLOW_NOTICE = "另有若干条更早的失败记录，可用历史检索工具回查。"
+MAX_FAILURE_INDEX_LINES = 40
+MAX_FAILURE_INDEX_CHARS = 4000
+
 _REMEMBER = re.compile(
     r"记住|牢记|切记|不要忘记|务必保留|请保留|"
     r"\bremember\b|\bkeep\s+in\s+mind\b|\bdo\s+not\s+forget\b",
@@ -143,6 +151,49 @@ def summary_source_excerpt(text: str, limit: int) -> str:
     return (important + "\n" + excerpt).strip() if important else excerpt
 
 
+def compose_failure_record_index(
+    entries: Iterable[tuple[str, str, str]], *,
+    max_lines: int = MAX_FAILURE_INDEX_LINES,
+    max_chars: int = MAX_FAILURE_INDEX_CHARS,
+) -> str:
+    """把 (工具名, 状态, 一行概括) 条目合成有界的失败记录索引段。
+
+    每条一行、压缩为单行；行数与字符数双上限（取先到者）。迭代中始终为可
+    能出现的溢出提示预留一行/若干字符，未溢出时该预留自然空出。无条目或
+    预算容不下标题时返回空串（摘要不追加索引段）。条目顺序由调用方给定
+    （建议最新在前，超限丢弃的是列表尾部）。
+    """
+    header = FAILURE_INDEX_HEADER
+    notice = FAILURE_INDEX_OVERFLOW_NOTICE
+    max_lines = max(1, int(max_lines))
+    max_chars = max(0, int(max_chars))
+    if not entries or len(header) > max_chars:
+        return ""
+    body: list[str] = []
+    used = len(header)
+    dropped = False
+    for index, (tool_name, status, summary) in enumerate(entries):
+        parts = ["- " + str(tool_name or "unknown_tool").strip()]
+        if str(status or "").strip():
+            parts.append(str(status).strip())
+        if str(summary or "").strip():
+            parts.append(str(summary).strip())
+        line = " ".join(" · ".join(parts).split())
+        # 后面还有条目时才可能溢出，此时为其预留一行/若干字符：标题、
+        # 已收行、本行、可能出现的溢出提示，总数不得越上限。
+        has_more = index + 1 < len(entries)
+        line_total = 1 + len(body) + 1 + (1 if has_more else 0)
+        char_total = used + 1 + len(line) + ((len(notice) + 1) if has_more else 0)
+        if line_total > max_lines or char_total > max_chars:
+            dropped = True
+            break
+        body.append(line)
+        used += 1 + len(line)
+    if dropped:
+        body.append(notice)
+    return "\n".join([header, *body])
+
+
 def _prior_prose_preview(text: str, limit: int) -> str:
     """Prior narrative has no authority to reserve additional exact facts."""
     if limit <= 0:
@@ -160,11 +211,15 @@ def _prior_prose_preview(text: str, limit: int) -> str:
 def compose_retained_summary(
     user_texts: list[str], prior_summaries: list[str], candidate: str, max_chars: int,
     *, preserved_user_statements: Iterable[str] = (),
+    failure_index: str = "",
 ) -> str | None:
     """Reserve facts first; share remaining space between old and new context.
 
     None means the requested exact facts cannot fit. No replacement checkpoint
     should be published in that case; the original history remains authoritative.
+
+    ``failure_index`` 是可选的失败记录索引段（compose_failure_record_index 的
+    产物）：先于叙述预留空间追加在摘要末尾，紧预算下叙述让位、索引不丢。
     """
     facts = list(dict.fromkeys([*retained_user_facts(user_texts, prior_summaries), *preserved_user_statements]))
     protected = _facts_block(facts)
@@ -178,7 +233,10 @@ def compose_retained_summary(
     for fact in facts:
         prior = prior.replace(fact, "")
     prior = prior.replace(_FACTS_START, "<quoted-user-facts>").replace(_FACTS_END, "</quoted-user-facts>")
-    remaining = max(0, limit - len(protected) - (2 if protected else 0))
+    # 索引与叙述同属工具/模型衍生文本：同样转义，且先预留空间再分给叙述。
+    index_block = str(failure_index or "").strip().replace(_FACTS_START, "<quoted-user-facts>").replace(_FACTS_END, "</quoted-user-facts>")
+    index_len = (len(index_block) + 1) if index_block else 0
+    remaining = max(0, limit - len(protected) - (2 if protected else 0) - index_len)
     parts = [protected] if protected else []
     if prior and fresh and prior not in fresh:
         old_budget = remaining // 2
@@ -191,4 +249,6 @@ def compose_retained_summary(
         # Exact user facts have already been reserved. This is contextual prose,
         # so a bounded preview does not retire an unrecorded explicit fact.
         parts.append(fresh[:remaining])
+    if index_block:
+        parts.append(index_block)
     return "\n".join(part for part in parts if part).strip()[:limit]
