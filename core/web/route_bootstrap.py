@@ -184,6 +184,37 @@ def register_spa_routes(app: FastAPI, web_dist: Path | None = None) -> None:
         app.state.web_shell_error = ""
 
 
+def repin_web_shell(app: FastAPI, web_dist: Path) -> dict[str, Any]:
+    """Rebuild the pinned SPA shell routes onto a newly served release.
+
+    The startup pin (``app.state.serving_frontend_dist``) is deliberate: a
+    running backend must not follow the mutable active pointer for ordinary
+    requests, and re-calling :func:`register_spa_routes` alone would reuse the
+    existing route objects whose closures still capture the old dist.  The
+    frontend hot-switch is the single sanctioned mutation point: the caller
+    updates the pinned serving state, then this drops the old shell routes and
+    registers fresh ones whose closures capture the new dist, keeping the
+    catch-all behind every API route exactly like the original mount.
+    """
+    target_dist = Path(web_dist)
+    if not target_dist.is_dir():
+        raise RuntimeError(f"Serving frontend directory is unavailable: {target_dist}")
+    with _REGISTER_LOCK:
+        previous = getattr(app.state, "web_shell_routes", ())
+        if previous:
+            app.router.routes[:] = [
+                route for route in app.router.routes if route not in previous
+            ]
+        app.state.web_shell_routes = ()
+        register_spa_routes(app, web_dist=target_dist)
+    return {
+        "repinned": True,
+        "dist": str(target_dist),
+        "shellReady": bool(getattr(app.state, "web_shell_ready", False)),
+        "shellError": str(getattr(app.state, "web_shell_error", "") or ""),
+    }
+
+
 def _mark_routes_ready(app: FastAPI, *, error: str = "") -> None:
     app.state.web_routes_registered = True
     app.state.web_routes_error = str(error or "")

@@ -75,11 +75,49 @@ FRESHNESS_HEAD_DRIFT_TTL_SECONDS = 30.0
 # and immediately whenever HEAD or the fingerprint file changes.
 DIRTY_RECHECK_INTERVAL_SECONDS = 300.0
 
+# Buckets for the changed-path classification behind ``restartRequired``.  A
+# version-projection commit (closeout appends one per merge) moves HEAD without
+# touching runtime code, so "running HEAD != disk HEAD" alone must not demand a
+# restart.  Classification is conservative: anything unrecognized lands in the
+# ``backend`` bucket, which keeps requiring a restart.
+CHANGED_PATH_BUCKETS = ("frontend", "desktop_shell", "version_projection", "non_runtime", "backend")
+# The exact version-ledger projection set closeout writes (see the release
+# commit pattern in scripts/task_closeout.py and core.platform_version.ledger).
+VERSION_PROJECTION_PATHS = frozenset(
+    {
+        "CHANGELOG.md",
+        "VERSION",
+        "web/package.json",
+        "web/package-lock.json",
+    }
+)
+NON_RUNTIME_TOP_LEVEL_DIRS = frozenset({"tests", "docs", ".changelog", ".github"})
+
+# Restart-required actions for the layered verdict.  Priority is shell, then
+# backend, then frontend: a stale desktop shell makes every cheaper action
+# pointless, and a backend restart reloads the page anyway.
+REQUIRED_ACTION_NONE = "none"
+REQUIRED_ACTION_RELOAD_PAGE = "reload_page"
+REQUIRED_ACTION_RESTART_BACKEND = "restart_backend"
+REQUIRED_ACTION_REPLACE_SHELL = "replace_shell"
+
 _freshness_cache_lock = threading.Lock()
 # key -> {"at": monotonic, "observation": tuple, "response": dict}
 _freshness_cache: dict[str, dict[str, Any]] = {}
 # key -> {"at": monotonic, "head_text": str, "fingerprint": str, "dirty": dict}
 _dirty_summary_cache: dict[str, dict[str, Any]] = {}
+# (root_key, from_head, to_head) -> {"available": bool, "counts": dict}
+_changed_paths_cache: dict[tuple[str, str, str], dict[str, Any]] = {}
+_CHANGED_PATHS_CACHE_LIMIT = 8
+# desktopShell panel cache: observation key -> panel payload.  Keyed by the
+# cheap file stamps (HEAD text + bundle/asar mtimes), never by TTL alone, so a
+# rebuilt shell publishes immediately instead of within a TTL window.
+_desktop_shell_cache: dict[str, dict[str, Any]] = {}
+_DESKTOP_SHELL_CACHE_LIMIT = 4
+# (root_key, commit) -> exists.  Existence is monotonic per checkout; the cap
+# only bounds how long a "missing" answer can outlive a fetch that added it.
+_commit_exists_cache: dict[tuple[str, str], bool] = {}
+_COMMIT_EXISTS_CACHE_LIMIT = 64
 
 # Per-project-root single-flight gate: same-root concurrent full resolutions
 # share one compute.  Modeled on config_service._config_result_cache_single_flight
@@ -103,8 +141,26 @@ def reset_freshness_caches_for_tests() -> None:
     with _freshness_cache_lock:
         _freshness_cache.clear()
         _dirty_summary_cache.clear()
+        _changed_paths_cache.clear()
+        _desktop_shell_cache.clear()
+        _commit_exists_cache.clear()
     with _FRESHNESS_FLIGHT_LOCK:
         _FRESHNESS_FLIGHTS.clear()
+
+
+def invalidate_freshness_for_serving_change(project_root: Path | str) -> None:
+    """Drop cached verdicts after the serving frontend release changed.
+
+    The fingerprint rewrite already changes the file observation, but a failed
+    or skipped rewrite (storage fail-closed, read-only home) must not leave a
+    pre-switch verdict cached for the full fast-path TTL, so the switch path
+    calls this unconditionally after applying an in-memory repin.
+    """
+    prefix = _freshness_root_flight_key(project_root)
+    with _freshness_cache_lock:
+        for key in [key for key in _freshness_cache if key.startswith(prefix + "|")]:
+            _freshness_cache.pop(key, None)
+        _desktop_shell_cache.clear()
 
 
 def _freshness_root_flight_key(project_root: Path | str) -> str:
@@ -412,6 +468,136 @@ def _parse_behind_count(value: str) -> int | None:
     return parsed if parsed >= 0 else None
 
 
+def _normalize_changed_path(value: Any) -> str:
+    """Normalize one repo-relative path to forward-slash form for classification."""
+    text = str(value or "").strip().replace("\\", "/")
+    while text.startswith("./"):
+        text = text[2:]
+    return text.strip("/")
+
+
+def classify_changed_paths(paths: Any) -> dict[str, list[str]]:
+    """Bucket repo-relative changed paths by which runtime layer they affect.
+
+    Pure function: no git, no filesystem.  Order matters and is deliberate:
+    test files are non-runtime wherever they live (``web/src/x.spec.ts`` never
+    enters the built bundle and ``core/y.test.py`` never enters the running
+    process), then the exact version-ledger projections win over their parent
+    buckets, then the two known non-backend source surfaces, then the
+    non-runtime top-level directories.  Everything unrecognized is
+    conservative ``backend`` — an unknown path must keep demanding a restart.
+    """
+    buckets: dict[str, list[str]] = {bucket: [] for bucket in CHANGED_PATH_BUCKETS}
+    for raw in paths if isinstance(paths, (list, tuple, set)) else []:
+        normalized = _normalize_changed_path(raw)
+        if not normalized:
+            continue
+        name = normalized.rsplit("/", 1)[-1]
+        if ".test." in name or ".spec." in name:
+            buckets["non_runtime"].append(normalized)
+        elif normalized in VERSION_PROJECTION_PATHS:
+            buckets["version_projection"].append(normalized)
+        elif normalized.startswith("web/"):
+            buckets["frontend"].append(normalized)
+        elif normalized.startswith("desktop/electron/"):
+            buckets["desktop_shell"].append(normalized)
+        elif normalized.split("/", 1)[0] in NON_RUNTIME_TOP_LEVEL_DIRS:
+            buckets["non_runtime"].append(normalized)
+        else:
+            buckets["backend"].append(normalized)
+    return buckets
+
+
+def _empty_changed_path_counts() -> dict[str, int]:
+    return {bucket: 0 for bucket in CHANGED_PATH_BUCKETS}
+
+
+def _git_changed_paths_between(
+    project_root: Path | str, *, from_head: str, to_head: str
+) -> list[str] | None:
+    """Repo-relative paths changed between two commits, or None when git fails.
+
+    ``_capture_git_text`` cannot be reused here: an empty (but successful)
+    diff is a valid answer and must not be conflated with a git failure, so
+    this helper inspects the return code itself.
+    """
+    try:
+        result = run_git(
+            [*POLL_GIT_GLOBAL_ARGS, "diff", "--name-only", f"{from_head}..{to_head}"],
+            cwd=str(project_root),
+            timeout=GIT_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if int(result.returncode or 0) != 0:
+        return None
+    normalized = str(result.stdout or "").replace("\r\n", "\n").replace("\r", "\n")
+    return [line for line in normalized.split("\n") if line.strip()]
+
+
+def git_commit_exists(project_root: Path | str, commit: str) -> bool:
+    """True when the commit object exists in this repository.
+
+    Cached per (project root, commit): the switch gate asks this twice per
+    frontend-stale resolution, and existence is monotonic for a checkout's
+    lifetime.  A negative answer is only ever conservative here (the switch
+    gate refuses and falls back to a restart), and the small cap keeps a
+    long-lived process from pinning stale negatives forever.
+    """
+    candidate = str(commit or "").strip()
+    if not candidate:
+        return False
+    cache_key = (_freshness_root_flight_key(project_root), candidate)
+    with _freshness_cache_lock:
+        cached = _commit_exists_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    try:
+        result = run_git(
+            [*POLL_GIT_GLOBAL_ARGS, "rev-parse", "--verify", "--quiet", f"{candidate}^{{commit}}"],
+            cwd=str(project_root),
+            timeout=GIT_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    exists = int(result.returncode or 0) == 0
+    with _freshness_cache_lock:
+        if len(_commit_exists_cache) >= _COMMIT_EXISTS_CACHE_LIMIT:
+            _commit_exists_cache.clear()
+        _commit_exists_cache[cache_key] = exists
+    return exists
+
+
+def _changed_path_classification(
+    project_root: Path | str, *, from_head: str, to_head: str
+) -> dict[str, Any]:
+    """Classify the changed paths between two commits, cached per commit pair.
+
+    The diff for a given (from, to) pair is deterministic, so the cache needs
+    no TTL; the small cap only bounds memory across long-lived processes.
+    """
+    root_key = _freshness_root_flight_key(project_root)
+    cache_key = (root_key, str(from_head), str(to_head))
+    with _freshness_cache_lock:
+        cached = _changed_paths_cache.get(cache_key)
+        if cached is not None:
+            return copy.deepcopy(cached)
+    paths = _git_changed_paths_between(project_root, from_head=from_head, to_head=to_head)
+    if paths is None:
+        payload = {"available": False, "counts": _empty_changed_path_counts()}
+    else:
+        buckets = classify_changed_paths(paths)
+        payload = {
+            "available": True,
+            "counts": {bucket: len(paths_in_bucket) for bucket, paths_in_bucket in buckets.items()},
+        }
+    with _freshness_cache_lock:
+        if len(_changed_paths_cache) >= _CHANGED_PATHS_CACHE_LIMIT:
+            _changed_paths_cache.clear()
+        _changed_paths_cache[cache_key] = copy.deepcopy(payload)
+    return payload
+
+
 def fallback_snapshot_from_serving_metadata(serving_metadata: Any) -> dict[str, Any] | None:
     """Map the startup-pinned ``app.state.serving_metadata`` backend identity
     into a fingerprint-shaped snapshot.
@@ -550,12 +736,32 @@ def resolve_backend_freshness(
             },
             "disk": {"head": disk_head, "branch": disk_branch, **disk_dirty},
         }
+    # Layered restart decision: classify what actually changed between the
+    # running commit and disk HEAD.  Identical heads classify trivially (no
+    # diff, no restart).  An unavailable diff (missing commit, broken repo)
+    # degrades to the old behindCount signal and is reported as such via
+    # ``pathClassification`` instead of silently claiming confidence.
+    if running_head == disk_head:
+        classification: dict[str, Any] = {"available": True, "counts": _empty_changed_path_counts()}
+    else:
+        classification = _changed_path_classification(
+            root, from_head=running_head, to_head=disk_head
+        )
+    if bool(classification.get("available")):
+        restart_required = bool(int(classification["counts"].get("backend", 0)) > 0)
+        path_classification = "available"
+    else:
+        restart_required = bool((behind_count or 0) > 0)
+        path_classification = "unavailable"
     return {
         "available": True,
         "reason": "",
         "source": snapshot_source,
         "behind": running_head != disk_head or dirty_differs,
         "behindCount": behind_count,
+        "changedPathCounts": classification.get("counts") or _empty_changed_path_counts(),
+        "restartRequired": restart_required,
+        "pathClassification": path_classification,
         "running": {
             "head": running_head,
             "branch": str((running or {}).get("runningBranch") or "").strip(),
@@ -638,6 +844,464 @@ def resolve_frontend_freshness(*, project_root: Path | str) -> dict[str, Any]:
     }
 
 
+# --- desktop shell panel -----------------------------------------------------
+#
+# Single authority for "is the desktop shell current", shared by the combined
+# workbench verdict and the launcher freshness payload (``shellStale``).  The
+# unpackaged branch reproduces the launcher's historical owner gate exactly:
+# a raw stale inspection only counts when the recorded shell owner executable
+# is the checkout Electron binary, and a missing binary is an environment gap,
+# never a prompt.  The packaged shell governs only when there is positive
+# evidence (the owner executable is the packaged exe) that it is the shell the
+# user runs, so the unified panel never introduces a new nag path for dev
+# checkout users whose owner record is absent.
+
+
+def _desktop_shell_observation(project_root: Path) -> str:
+    """Cheap file stamps that change when the installed shell bytes change."""
+    stamps: list[str] = []
+    try:
+        from core.launcher.desktop_shell import (
+            packaged_asar_path,
+            packaged_desktop_exe,
+            unpackaged_electron_executable,
+            unpackaged_main_js,
+        )
+    except ImportError:
+        return "unavailable"
+    for path in (
+        unpackaged_electron_executable(project_root),
+        unpackaged_main_js(project_root),
+        packaged_desktop_exe(project_root),
+        packaged_asar_path(project_root),
+    ):
+        if path is None:
+            stamps.append("absent")
+            continue
+        try:
+            stat = path.stat()
+            stamps.append(f"{stat.st_mtime_ns}:{stat.st_size}")
+        except OSError:
+            stamps.append("missing")
+    return "|".join(stamps)
+
+
+def _inspect_unpackaged_shell_with_owner_gate(project_root: Path) -> dict[str, Any]:
+    """Unpackaged Electron staleness under the historical launcher owner gate."""
+    from core.launcher.desktop_shell import (
+        inspect_unpackaged_electron,
+        unpackaged_electron_executable,
+    )
+    from core.launcher.desktop_shell_owner import read_desktop_shell_owner
+
+    status = inspect_unpackaged_electron(project_root)
+    reason = str(status.get("reason") or "")
+    owner = read_desktop_shell_owner(project_root) or {}
+    electron_bin = unpackaged_electron_executable(project_root)
+    owner_exe = str(owner.get("executable") or "").strip()
+    owner_matches = False
+    if electron_bin is not None and owner_exe:
+        try:
+            owner_matches = Path(owner_exe).resolve() == electron_bin.resolve()
+        except OSError:
+            owner_matches = False
+    gated_stale = bool(
+        reason != "missing_binary"
+        and status.get("stale")
+        and owner_matches
+    )
+    return {
+        "available": electron_bin is not None,
+        "stale": gated_stale,
+        "rawStale": bool(status.get("stale")),
+        "rawReason": reason,
+        "reason": reason if gated_stale else ("current" if not status.get("stale") else reason),
+        "ownerMatchesElectron": owner_matches,
+        "electronExecutable": str(electron_bin or ""),
+    }
+
+
+def _not_inspected_unpackaged_panel(project_root: Path) -> dict[str, Any]:
+    """Placeholder unpackaged panel when the packaged shell governs instead.
+
+    Only the cheap binary-path lookup runs; no git, no bundle hashing.  The
+    shape matches a real inspection so consumers can treat the field
+    uniformly, while ``reason: not_inspected`` marks it as not measured.
+    """
+    try:
+        from core.launcher.desktop_shell import unpackaged_electron_executable
+
+        electron_bin = unpackaged_electron_executable(project_root)
+    except ImportError:
+        electron_bin = None
+    return {
+        "available": electron_bin is not None,
+        "stale": False,
+        "rawStale": False,
+        "rawReason": "not_inspected",
+        "reason": "not_inspected",
+        "ownerMatchesElectron": False,
+        "electronExecutable": str(electron_bin or ""),
+    }
+
+
+def _resolve_desktop_shell_kind(project_root: Path, owner_exe: str) -> str:
+    try:
+        from core.launcher.desktop_shell import (
+            packaged_desktop_exe,
+            unpackaged_electron_executable,
+        )
+    except ImportError:
+        return "unpackaged"
+    if owner_exe:
+        try:
+            if packaged_desktop_exe(project_root).resolve() == Path(owner_exe).resolve():
+                return "packaged"
+        except OSError:
+            pass
+        try:
+            electron_bin = unpackaged_electron_executable(project_root)
+            if electron_bin is not None and electron_bin.resolve() == Path(owner_exe).resolve():
+                return "unpackaged"
+        except OSError:
+            pass
+    # No owner record: keep the historical default (the launcher freshness has
+    # only ever judged the unpackaged checkout shell).
+    return "unpackaged"
+
+
+def _packaged_shell_installed(project_root: Path) -> bool:
+    try:
+        from core.launcher.desktop_shell import (
+            packaged_asar_path,
+            packaged_desktop_exe,
+        )
+
+        return (
+            packaged_desktop_exe(project_root).is_file()
+            and packaged_asar_path(project_root).is_file()
+        )
+    except (OSError, ImportError):
+        return False
+
+
+def _compute_desktop_shell_freshness(project_root: Path) -> dict[str, Any]:
+    """One full desktop-shell freshness computation.
+
+    Inspection is per-governing-shell: the owner record decides the shell
+    kind first (cheap path comparisons), and only that shell's inspection
+    runs.  A machine that has a packaged shell installed but runs the dev
+    checkout shell (the normal developer setup) therefore never pays the
+    packaged asar + embedded-frontend hash during HEAD drift, which would
+    otherwise stall every launcher control-plane poll after each merge.
+    """
+    try:
+        from core.launcher.desktop_shell_owner import read_desktop_shell_owner
+
+        owner = read_desktop_shell_owner(project_root) or {}
+    except (OSError, ImportError):
+        owner = {}
+    kind = _resolve_desktop_shell_kind(
+        project_root, str(owner.get("executable") or "").strip()
+    )
+    packaged_installed = _packaged_shell_installed(project_root)
+
+    if kind == "packaged":
+        packaged_panel: dict[str, Any]
+        packaged_raw: dict[str, Any] = {}
+        inspected = False
+        if packaged_installed:
+            # Heavy (asar + packaged frontend hashing + electron source walk)
+            # and only paid by the process whose owner really is the package.
+            try:
+                from core.launcher.desktop_shell import inspect_desktop_shell
+
+                packaged_raw = inspect_desktop_shell(project_root)
+                inspected = bool(packaged_raw)
+            except (OSError, RuntimeError, ValueError, TypeError, ImportError):
+                packaged_raw = {}
+        if packaged_installed and inspected:
+            packaged_panel = {
+                "installed": True,
+                "inspected": True,
+                "stale": bool(packaged_raw.get("stale")),
+                "reason": str(packaged_raw.get("reason") or ""),
+            }
+            stale = bool(packaged_panel["stale"])
+            reason = packaged_panel["reason"]
+            available = True
+        elif packaged_installed:
+            packaged_panel = {
+                "installed": True,
+                "inspected": False,
+                "stale": False,
+                "reason": "inspection_failed",
+            }
+            stale = False
+            reason = "inspection_failed"
+            available = False
+        else:
+            packaged_panel = {
+                "installed": False,
+                "inspected": False,
+                "stale": False,
+                "reason": "packaged_shell_missing",
+            }
+            stale = False
+            reason = "packaged_shell_missing"
+            available = False
+        unpackaged_panel = _not_inspected_unpackaged_panel(project_root)
+    else:
+        # The governing shell is the unpackaged checkout bundle: the packaged
+        # install stays unreported ("not_inspected") instead of being hashed
+        # on every poll for a shell this user is not even running.
+        packaged_panel = {
+            "installed": packaged_installed,
+            "inspected": False,
+            "stale": False,
+            "reason": "not_inspected" if packaged_installed else "packaged_shell_missing",
+        }
+        unpackaged_panel = _inspect_unpackaged_shell_with_owner_gate(project_root)
+        stale = bool(unpackaged_panel.get("stale"))
+        reason = str(unpackaged_panel.get("reason") or "")
+        available = bool(unpackaged_panel.get("available"))
+    return {
+        "schemaVersion": 1,
+        "available": available,
+        "shellKind": kind,
+        "stale": stale,
+        "current": bool(available and not stale),
+        "reason": reason,
+        "action": REQUIRED_ACTION_REPLACE_SHELL if (available and stale) else REQUIRED_ACTION_NONE,
+        "unpackaged": unpackaged_panel,
+        "packaged": packaged_panel,
+    }
+
+
+def resolve_desktop_shell_freshness(*, project_root: Path | str) -> dict[str, Any]:
+    """Desktop-shell freshness panel with observation-keyed caching.
+
+    Polling must not re-hash the packaged frontend or re-walk electron sources
+    on every read, so the full inspection is cached under the cheap HEAD text
+    plus bundle/asar file stamps; any byte-level shell change misses the key
+    and recomputes immediately.  Failures compute a conservative panel instead
+    of raising: a freshness read must never break its caller.
+    """
+    root = Path(project_root)
+    head_text = _read_git_head_text(root)
+    observation = _desktop_shell_observation(root)
+    cache_key = f"{_freshness_root_flight_key(root)}|{head_text}|{observation}"
+    with _freshness_cache_lock:
+        cached = _desktop_shell_cache.get(cache_key)
+        if cached is not None:
+            return copy.deepcopy(cached)
+    panel = _compute_desktop_shell_freshness(root)
+    with _freshness_cache_lock:
+        if len(_desktop_shell_cache) >= _DESKTOP_SHELL_CACHE_LIMIT:
+            _desktop_shell_cache.clear()
+        _desktop_shell_cache[cache_key] = copy.deepcopy(panel)
+    return copy.deepcopy(panel)
+
+
+# --- frontend release switch decision ----------------------------------------
+
+
+def _serving_frontend_from_fingerprint(project_root: Path) -> dict[str, Any]:
+    fingerprint = read_running_code_fingerprint(project_root) or {}
+    return {
+        "buildKey": str(fingerprint.get("servingFrontendBuildKey") or "").strip(),
+        "release": str(fingerprint.get("servingFrontendRelease") or "").strip(),
+        "dist": str(fingerprint.get("servingFrontendDist") or "").strip(),
+        "builtFromCommit": str(fingerprint.get("servingFrontendBuiltFromCommit") or "").strip(),
+    }
+
+
+def evaluate_frontend_switch(
+    *,
+    project_root: Path | str,
+    running_head: str | None = None,
+    serving_frontend: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Decide whether the backend can switch its serving frontend release to
+    the active one without a restart.  Pure decision: no state mutation.
+
+    ``status`` values: ``already_current`` (serving == active), ``ready``
+    (all three safety checks pass), ``restart_required`` (records exist but a
+    check failed), ``unavailable`` (cannot even evaluate).  ``available`` is
+    True only for ``ready``/``already_current`` — it is the "switch capability
+    is real in this process" signal the layered verdict maps to reload_page.
+    """
+    root = Path(project_root)
+    serving = serving_frontend if isinstance(serving_frontend, dict) else _serving_frontend_from_fingerprint(root)
+    serving_release = str(serving.get("release") or "").strip()
+    serving_build_key = str(serving.get("buildKey") or "").strip()
+    serving_built_from = str(serving.get("builtFromCommit") or "").strip()
+    try:
+        from core.launcher.frontend_build import (
+            active_release_path,
+            frontend_releases_dir,
+            is_complete_release,
+        )
+
+        pointer = {}
+        try:
+            decoded = json.loads(active_release_path(root).read_text(encoding="utf-8"))
+            if isinstance(decoded, dict):
+                pointer = decoded
+        except (OSError, ValueError, TypeError):
+            pointer = {}
+        active_release = str(pointer.get("release") or "").strip()
+        active_build_key = str(pointer.get("buildKey") or "").strip()
+    except ImportError:
+        return {
+            "available": False,
+            "status": "unavailable",
+            "reason": "frontend_build_module_unavailable",
+            "servingRelease": serving_release,
+            "activeRelease": "",
+        }
+    if not serving_release or not serving_build_key:
+        return {
+            "available": False,
+            "status": "unavailable",
+            "reason": "serving_release_unrecorded",
+            "servingRelease": serving_release,
+            "activeRelease": active_release,
+        }
+    if not active_release:
+        return {
+            "available": False,
+            "status": "unavailable",
+            "reason": "active_release_missing",
+            "servingRelease": serving_release,
+            "activeRelease": "",
+        }
+    if serving_release == active_release:
+        return {
+            "available": True,
+            "status": "already_current",
+            "reason": "",
+            "servingRelease": serving_release,
+            "activeRelease": active_release,
+        }
+    # Safety check 3: the target release must be structurally complete.
+    target_dir = frontend_releases_dir(root) / active_release
+    if not is_complete_release(target_dir, build_key=active_build_key or None):
+        return {
+            "available": False,
+            "status": "restart_required",
+            "reason": "target_release_incomplete",
+            "servingRelease": serving_release,
+            "activeRelease": active_release,
+        }
+    # Safety check 1: both sides must record the commit they were built from,
+    # and those commits must exist in this repository.
+    try:
+        target_provenance = json.loads((target_dir / ".vibelution-build.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        target_provenance = {}
+    target_built_from = ""
+    if isinstance(target_provenance, dict):
+        target_built_from = str(target_provenance.get("builtFromCommit") or target_provenance.get("sourceCommit") or "").strip()
+    if not serving_built_from or not target_built_from:
+        return {
+            "available": False,
+            "status": "restart_required",
+            "reason": "build_source_commit_unrecorded",
+            "servingRelease": serving_release,
+            "activeRelease": active_release,
+        }
+    if not git_commit_exists(root, serving_built_from) or not git_commit_exists(root, target_built_from):
+        return {
+            "available": False,
+            "status": "restart_required",
+            "reason": "build_source_commit_missing",
+            "servingRelease": serving_release,
+            "activeRelease": active_release,
+        }
+    # Safety check 2: no backend bucket change between the running process's
+    # commit and the target release's build source commit.
+    effective_running_head = str(running_head or "").strip() or serving_built_from
+    classification = _changed_path_classification(
+        root, from_head=effective_running_head, to_head=target_built_from
+    )
+    if not bool(classification.get("available")):
+        return {
+            "available": False,
+            "status": "restart_required",
+            "reason": "changed_paths_unavailable",
+            "servingRelease": serving_release,
+            "activeRelease": active_release,
+        }
+    backend_changed = int(classification["counts"].get("backend", 0)) > 0
+    if backend_changed:
+        return {
+            "available": False,
+            "status": "restart_required",
+            "reason": "backend_code_changed",
+            "servingRelease": serving_release,
+            "activeRelease": active_release,
+        }
+    return {
+        "available": True,
+        "status": "ready",
+        "reason": "",
+        "servingRelease": serving_release,
+        "activeRelease": active_release,
+    }
+
+
+def update_serving_frontend_release(
+    project_root: Path | str,
+    *,
+    release: str,
+    build_key: str,
+    dist: str,
+    built_from_commit: str,
+) -> dict[str, Any]:
+    """Rewrite the fingerprint's serving frontend fields after a hot switch.
+
+    The backend process did not restart, so ``runningHead`` and identity stay
+    exactly as captured at startup; only the pinned serving release identity
+    moves.  Best effort like every fingerprint write: a failed rewrite is
+    reported, never raised.  The per-process serving lease file is left
+    untouched on purpose — it still names the release this process switched
+    away from, which is precisely the release open tabs keep loading, so GC
+    keeps it protected until this process exits.
+    """
+    root = Path(project_root)
+    fingerprint = read_running_code_fingerprint(root)
+    if not isinstance(fingerprint, dict):
+        return {"updated": False, "reason": "no_fingerprint"}
+    fingerprint.update(
+        {
+            "servingFrontendBuildKey": str(build_key or "").strip(),
+            "servingFrontendRelease": str(release or "").strip(),
+            "servingFrontendDist": str(dist or "").strip(),
+            "servingFrontendBuiltFromCommit": str(built_from_commit or "").strip(),
+        }
+    )
+    try:
+        path = running_code_fingerprint_path(root)
+    except ProjectStorageMigrationStateError as exc:
+        return {"updated": False, "reason": type(exc).__name__}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_name(f"{path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
+        try:
+            tmp_path.write_text(json.dumps(fingerprint, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp_path.replace(path)
+        except OSError:
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+            raise
+    except OSError as exc:
+        return {"updated": False, "reason": type(exc).__name__, "errorMessage": str(exc)}
+    return {"updated": True, "reason": "", "path": str(path)}
+
+
 def _freshness_fast_path_hit(
     project_root: Path | str,
     fallback_snapshot: dict[str, Any] | None,
@@ -709,6 +1373,53 @@ def _compute_freshness_response(
     else:
         verdict = "unknown"
 
+    backend_changed_path_counts = backend.get("changedPathCounts")
+    if not isinstance(backend_changed_path_counts, dict) or not backend_changed_path_counts:
+        backend_changed_path_counts = _empty_changed_path_counts()
+    backend_restart_required_raw = backend.get("restartRequired")
+    if backend_restart_required_raw is None:
+        # Panel unavailable or pre-layer payload: fall back to the behind
+        # count exactly like the classification fallback inside the panel.
+        backend_restart_required = bool((backend.get("behindCount") or 0) > 0)
+    else:
+        backend_restart_required = bool(backend_restart_required_raw)
+    backend_path_classification = str(backend.get("pathClassification") or "unavailable")
+    # Layered verdict.  ``current`` is a confidence statement: an unavailable
+    # layer is never claimed current, and its action stays "none" because an
+    # unknown layer cannot justify an action (the legacy ``verdict`` above
+    # keeps carrying the combined unknown for those consumers).
+    backend_current = backend_available and not backend_restart_required
+    shell_panel = resolve_desktop_shell_freshness(project_root=project_root)
+    shell_available = bool(shell_panel.get("available"))
+    shell_stale = bool(shell_panel.get("stale"))
+    shell_current = bool(shell_panel.get("current"))
+    switch_decision = None
+    frontend_current = frontend_available and not frontend_stale_raw
+    if frontend_available and frontend_stale_raw:
+        # The reload action exists only while this process can actually move
+        # the serving release; otherwise the historical restart advice stands.
+        switch_decision = evaluate_frontend_switch(
+            project_root=project_root,
+            running_head=str((backend.get("running") or {}).get("head") or ""),
+        )
+        switch_ready = switch_decision.get("status") == "ready"
+        frontend_action = REQUIRED_ACTION_RELOAD_PAGE if switch_ready else REQUIRED_ACTION_RESTART_BACKEND
+    else:
+        frontend_action = REQUIRED_ACTION_NONE
+    backend_action = (
+        REQUIRED_ACTION_RESTART_BACKEND if backend_available and backend_restart_required else REQUIRED_ACTION_NONE
+    )
+    # Priority shell > backend > frontend: a shell replacement subsumes the
+    # other two (it restarts everything), a backend restart reloads the page.
+    if shell_available and shell_stale:
+        required_action = REQUIRED_ACTION_REPLACE_SHELL
+    elif backend_available and backend_restart_required:
+        required_action = REQUIRED_ACTION_RESTART_BACKEND
+    elif frontend_available and frontend_stale_raw:
+        required_action = frontend_action
+    else:
+        required_action = REQUIRED_ACTION_NONE
+
     response = {
         "schemaVersion": FINGERPRINT_SCHEMA_VERSION,
         "verdict": verdict,
@@ -716,6 +1427,9 @@ def _compute_freshness_response(
             "available": backend_available,
             "behind": backend_behind,
             "behindCount": backend.get("behindCount"),
+            "changedPathCounts": backend_changed_path_counts,
+            "restartRequired": backend_restart_required,
+            "pathClassification": backend_path_classification,
             "reason": backend.get("reason") or "",
             "source": backend.get("source") or "",
             "running": backend.get("running"),
@@ -732,6 +1446,13 @@ def _compute_freshness_response(
             "servingRelease": str(frontend.get("servingRelease") or ""),
             "activeRelease": str(frontend.get("activeRelease") or ""),
         },
+        "desktopShell": shell_panel,
+        "layers": {
+            "frontend": {"current": frontend_current, "action": frontend_action},
+            "backend": {"current": backend_current, "action": backend_action},
+            "desktopShell": {"current": shell_current, "action": str(shell_panel.get("action") or REQUIRED_ACTION_NONE)},
+        },
+        "requiredAction": required_action,
     }
     # An empty observation means the refs layout could not be read cheaply
     # (odd refs / packed-refs-only), so the full path stays uncached there.

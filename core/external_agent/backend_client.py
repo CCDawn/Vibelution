@@ -1223,6 +1223,20 @@ class ManagedAgentBackendClient:
             task_capability=capability)
         return await self._record_acceptance(request_id, capability, payload)
 
+    async def task_capability_present(self, *, client_request_id: str) -> bool:
+        """Read-only ledger probe: does this request hold a durable credential?
+
+        Answers presence only and never returns the credential itself, and it
+        writes nothing (no state save, no network). Dispatch records use it to
+        mark whether a start attempt reached the persistence-before-POST
+        stage, so a retry of a never-submitted request may mint the first
+        capability while a submitted one keeps requiring the existing one.
+        """
+        request_id = str(client_request_id or "").strip()
+        async with self._state_lock:
+            request_state = self._state.get("requests", {}).get(request_id) or {}
+            return bool(str(request_state.get("taskCapability") or "").strip())
+
     async def _record_acceptance(self, request_id: str, capability: str,
                                  payload: dict[str, Any]) -> dict[str, Any]:
         task_id = str(payload.get("taskId") or "").strip()

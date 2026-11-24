@@ -15,6 +15,9 @@ TEST_MODEL_CONFIG = '''
 [llm]
 schema_version = 2
 [llm.providers.local]
+# Providers default to disabled since 9943e0471; the synthetic fixture models
+# an operator who opted in, so its models stay settable through the bridge.
+enabled = true
 label = "Isolated test provider"
 service_class = "local_runtime"
 vendor = "custom"

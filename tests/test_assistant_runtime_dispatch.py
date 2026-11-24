@@ -25,6 +25,10 @@ class ClientProbe:
         self.instances: list[dict[str, Any]] = []
         self.get_error = False
         self.start_error = False
+        self.diagnostics_error = False
+        # Faithful local ledger: a capability is minted (and thereby durable)
+        # before the first POST, matching the real client invariant.
+        self.capabilities: dict[str, str] = {}
 
     def factory(self, project_root: Path, **kwargs: Any):
         probe = self
@@ -33,6 +37,8 @@ class ClientProbe:
         class Client:
             async def diagnostics(self):
                 probe.calls.append(("diagnostics", {}))
+                if probe.diagnostics_error:
+                    raise BackendClientError("private token and path", code="RUNTIME_IDENTITY_MISMATCH")
                 return {"status": "healthy"}
 
             async def list_agents(self, **kwargs):
@@ -41,9 +47,17 @@ class ClientProbe:
 
             async def start_task(self, **kwargs):
                 probe.calls.append(("start", kwargs))
+                request_id = str(kwargs.get("client_request_id") or "")
+                if request_id not in probe.capabilities:
+                    if kwargs.get("require_existing_capability"):
+                        raise BackendClientError("no durable credential for this request", code="UNKNOWN_REQUEST")
+                    probe.capabilities[request_id] = "cap-" + request_id
                 if probe.start_error:
                     raise BackendClientError("secret transport detail", code="BACKEND_UNAVAILABLE")
                 return {"taskId": "eat-1", "status": "running", "pollAfterMs": 500}
+
+            async def task_capability_present(self, *, client_request_id):
+                return str(client_request_id) in probe.capabilities
 
             async def get_task(self, **kwargs):
                 probe.calls.append(("get", kwargs))
@@ -432,6 +446,129 @@ async def test_unconfirmed_start_needs_explicit_original_dispatch_retry(tmp_path
     probe.start_error = False
     await start(adapter(tmp_path, probe))
     assert [args["client_request_id"] for name, args in probe.calls if name == "start"] == [first_request] * 2
+
+
+@pytest.mark.anyio
+async def test_retry_before_first_submission_mints_the_first_capability(tmp_path, journal_source):
+    """A pre-submission failure (identity drift at diagnostics) must not wedge the dispatch ID."""
+    runtime, original, current = journal_source
+    probe = ClientProbe()
+    probe.diagnostics_error = True
+    service = adapter(tmp_path, probe)
+    with pytest.raises(DispatchError) as first:
+        await service.dispatch_from_source("project-a", agent_id="coder", dispatch_id="never-sent",
+            runtime=runtime, task_source={})
+    assert first.value.code == "RUNTIME_IDENTITY_MISMATCH"
+    stored = json.loads(service._path("never-sent").read_text(encoding="utf-8"))
+    assert stored["capabilityMinted"] is False and stored["nativeTaskId"] == ""
+    assert stored["lastError"]["code"] == "RUNTIME_IDENTITY_MISMATCH"
+    assert probe.capabilities == {}  # start_task was never invoked
+    # The same-payload retry is the first submission: one credential, one start.
+    probe.diagnostics_error = False
+    recovered = await adapter(tmp_path, probe).dispatch_from_source("project-a", agent_id="coder",
+        dispatch_id="never-sent", runtime=runtime, task_source={})
+    starts = [args for name, args in probe.calls if name == "start"]
+    assert len(starts) == 1 and starts[0]["require_existing_capability"] is False
+    assert recovered["nativeTaskId"] == "eat-1" and recovered["capabilityMinted"] is True
+    assert list(probe.capabilities) == ["launcher-assistant:never-sent"]
+    stored = json.loads(service._path("never-sent").read_text(encoding="utf-8"))
+    assert stored["capabilityMinted"] is True and stored["lastError"] is None
+
+
+@pytest.mark.anyio
+async def test_retry_after_submitted_failure_reuses_the_existing_capability(tmp_path, journal_source):
+    runtime, original, current = journal_source
+    probe = ClientProbe()
+    probe.start_error = True
+    service = adapter(tmp_path, probe)
+    with pytest.raises(DispatchError) as first:
+        await service.dispatch_from_source("project-a", agent_id="coder", dispatch_id="submitted",
+            runtime=runtime, task_source={})
+    assert first.value.code == "BACKEND_UNAVAILABLE"
+    stored = json.loads(service._path("submitted").read_text(encoding="utf-8"))
+    assert stored["capabilityMinted"] is True
+    request_id = "launcher-assistant:submitted"
+    minted = probe.capabilities[request_id]
+    probe.start_error = False
+    recovered = await adapter(tmp_path, probe).dispatch_from_source("project-a", agent_id="coder",
+        dispatch_id="submitted", runtime=runtime, task_source={})
+    starts = [args for name, args in probe.calls if name == "start"]
+    assert [args["require_existing_capability"] for args in starts] == [False, True]
+    assert probe.capabilities[request_id] == minted  # reused, never re-minted
+    assert recovered["nativeTaskId"] == "eat-1"
+    # A known task is never started again, even by the same payload.
+    replay = await adapter(tmp_path, probe).dispatch_from_source("project-a", agent_id="coder",
+        dispatch_id="submitted", runtime=runtime, task_source={})
+    assert replay["nativeTaskId"] == "eat-1"
+    assert [name for name, _ in probe.calls].count("start") == 2
+
+
+@pytest.mark.anyio
+async def test_minted_flag_with_lost_credential_keeps_the_conservative_denial(tmp_path, journal_source):
+    runtime, original, current = journal_source
+    probe = ClientProbe()
+    probe.start_error = True
+    service = adapter(tmp_path, probe)
+    with pytest.raises(DispatchError):
+        await service.dispatch_from_source("project-a", agent_id="coder", dispatch_id="lost-ledger",
+            runtime=runtime, task_source={})
+    probe.capabilities.pop("launcher-assistant:lost-ledger")  # ledger loss after submission
+    probe.start_error = False
+    with pytest.raises(DispatchError) as retry:
+        await adapter(tmp_path, probe).dispatch_from_source("project-a", agent_id="coder",
+            dispatch_id="lost-ledger", runtime=runtime, task_source={})
+    assert retry.value.code == "UNKNOWN_REQUEST"
+    assert probe.capabilities == {}  # no replacement credential was minted
+
+
+@pytest.mark.anyio
+async def test_heartbeat_and_reconcile_leave_never_submitted_records_alone(tmp_path, journal_source):
+    runtime, original, current = journal_source
+    probe = ClientProbe()
+    probe.diagnostics_error = True
+    service = adapter(tmp_path, probe)
+    with pytest.raises(DispatchError):
+        await service.dispatch_from_source("project-a", agent_id="coder", dispatch_id="unsubmitted",
+            runtime=runtime, task_source={})
+    original_error = json.loads(service._path("unsubmitted").read_text(encoding="utf-8"))["lastError"]
+    probe.diagnostics_error = False
+    probe.calls.clear()  # drop the failed first attempt's own diagnostics call
+    resumed = adapter(tmp_path, probe)
+    row = next(row for row in await resumed.heartbeat() if row["dispatchId"] == "unsubmitted")
+    assert row["lastError"] == original_error  # the original failure survives patrol
+    reconciled = await resumed.reconcile("unsubmitted")
+    assert reconciled["lastError"] == original_error
+    # No backend traffic at all: no diagnostics gate, no request lookup, no renewal.
+    assert probe.calls == []
+    assert json.loads(service._path("unsubmitted").read_text(encoding="utf-8"))["lastError"] == original_error
+
+
+@pytest.mark.anyio
+async def test_legacy_records_without_capability_flag_keep_previous_behavior(tmp_path, journal_source):
+    runtime, original, current = journal_source
+    probe = ClientProbe()
+    probe.diagnostics_error = True
+    service = adapter(tmp_path, probe)
+    with pytest.raises(DispatchError):
+        await service.dispatch_from_source("project-a", agent_id="coder", dispatch_id="legacy-row",
+            runtime=runtime, task_source={})
+    path = service._path("legacy-row")
+    stored = json.loads(path.read_text(encoding="utf-8"))
+    del stored["capabilityMinted"]
+    path.write_text(json.dumps(stored), encoding="utf-8")
+    resumed = adapter(tmp_path, probe)
+    probe.diagnostics_error = False  # legacy rows still pass the shared diagnostics gate
+    # Heartbeat keeps the legacy query: the backend is asked and the observed
+    # denial is recorded exactly as before this field existed.
+    row = next(row for row in await resumed.heartbeat() if row["dispatchId"] == "legacy-row")
+    assert [name for name, _ in probe.calls].count("lookup") == 1
+    assert row["lastError"]["code"] == "TASK_NOT_FOUND"
+    # The same-payload retry still submits normally.
+    probe.diagnostics_error = False
+    recovered = await adapter(tmp_path, probe).dispatch_from_source("project-a", agent_id="coder",
+        dispatch_id="legacy-row", runtime=runtime, task_source={})
+    assert recovered["nativeTaskId"] == "eat-1"
+    assert [args for name, args in probe.calls if name == "start"][-1]["require_existing_capability"] is False
 
 
 @pytest.mark.anyio

@@ -100,6 +100,26 @@ class RuntimeCodeFreshnessResponse(BaseModel):
     frontend: dict[str, Any] = Field(default_factory=dict)
 
 
+class RuntimeFrontendSwitchResponse(BaseModel):
+    """POST /runtime/frontend/switch result.
+
+    ``status``: switched (serving release now equals active), already_current,
+    restart_required (a safety check failed; ``reason`` says which),
+    unavailable (serving/active records missing, apply failed).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    status: str = ""
+    servingRelease: str = ""
+    activeRelease: str = ""
+    reason: str = ""
+    # Only meaningful on status=switched: the serving release moved even when
+    # this best-effort fingerprint rewrite failed, so callers can tell when
+    # the next freshness poll may still see the old serving identity.
+    fingerprintPersisted: bool = False
+
+
 class RuntimeLifecycleResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 

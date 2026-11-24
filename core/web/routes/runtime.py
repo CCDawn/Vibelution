@@ -15,6 +15,7 @@ from core.web.routes.runtime_models import (
     BrowserTelemetryPayload,
     RuntimeBrowserTelemetryResponse,
     RuntimeCodeFreshnessResponse,
+    RuntimeFrontendSwitchResponse,
     RuntimeLifecycleCancelPayload,
     RuntimeLifecycleCancelResponse,
     RuntimeLifecycleResponse,
@@ -64,6 +65,22 @@ def runtime_code_freshness(request: Request) -> dict:
             getattr(request.app.state, "serving_metadata", None)
         ),
     )
+
+
+@router.post(
+    "/runtime/frontend/switch",
+    response_model=RuntimeFrontendSwitchResponse,
+    response_model_exclude_unset=True,
+)
+def runtime_frontend_switch(request: Request) -> dict:
+    # Hot frontend release switch: move the pinned serving release to the
+    # active one when only frontend bytes changed since the backend process
+    # started. Validation lives in the service (build-source commits, backend
+    # path bucket, release completeness); the restart route above stays the
+    # answer for every case the safety checks reject.
+    from core.web.services.frontend_switch import switch_frontend_to_active_release
+
+    return switch_frontend_to_active_release(app=request.app, project_root=PROJECT_ROOT)
 
 
 @router.post(

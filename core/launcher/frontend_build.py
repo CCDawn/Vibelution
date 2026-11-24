@@ -1217,6 +1217,18 @@ def validate_staging_release(path: Path) -> None:
     _validate_release_assets(path)
 
 
+def is_complete_release(path: Path, *, build_key: str | None = None) -> bool:
+    """Public completeness check for a published release directory.
+
+    Mirrors the publish-path definition: usable ``index.html`` with every
+    referenced asset present, plus schema-current provenance (and, when a
+    build key is given, a matching recorded key — legacy keys admitted like
+    inspection admits them).  The frontend hot-switch safety gate uses this so
+    "complete" has exactly one meaning across publish and switch.
+    """
+    return _is_complete_release(path, build_key=build_key)
+
+
 def _retryable_frontend_publish_error(error: PermissionError) -> bool:
     """Return whether Windows reported a transient sharing/access conflict."""
     return getattr(error, "winerror", None) in {None, 5, 32}
