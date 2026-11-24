@@ -111,9 +111,12 @@ export function launcherAssistantModelGroups(
         })),
       });
     }
+    // A disabled provider is not a recent candidate either; only the bound
+    // model survives so the menu never hides what the assistant runs on.
     const recent = recentModelIds
       .map(id => choices.find(choice => choice.modelId === id))
-      .filter((choice): choice is LauncherAssistantModelChoice => Boolean(choice));
+      .filter((choice): choice is LauncherAssistantModelChoice =>
+        choice !== undefined && (choice.providerEnabled !== false || choice.modelId === currentModelId));
     if (recent.length) {
       groups.set(RECENT_GROUP_KEY, {
         groupKey: RECENT_GROUP_KEY,
@@ -128,6 +131,10 @@ export function launcherAssistantModelGroups(
     }
   }
   for (const choice of choices) {
+    // Disabled providers are not candidates at all: rows the operator cannot
+    // pick must not crowd the menu. The bound model stays visible so the menu
+    // never hides what the assistant actually runs on.
+    if (choice.providerEnabled === false && choice.modelId !== currentModelId) continue;
     const label = (choice.label || choice.modelId).trim() || choice.modelId;
     const providerLabel = (choice.providerLabel || "").trim();
     if (
@@ -206,6 +213,7 @@ export function LauncherAssistantModelControl({
         defaultExpandedGroupKeys={defaultExpandedGroupKeys}
         listLabel={zh ? "助理模型候选" : "Assistant model candidates"}
         searchLabel={zh ? "搜索模型" : "Search models"}
+        emptyLabel={zh ? "没有已启用的服务，请在模型设置中开启" : "No enabled service; enable one in model settings"}
         onSelect={(nextModelId) => {
           setRecentModelIds(rememberModelId(nextModelId));
           onModelChange(nextModelId);

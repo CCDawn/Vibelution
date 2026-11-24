@@ -210,4 +210,23 @@ it("retains a current model absent from the catalogue and locks pending configur
     const pending = await renderControl({ pending: true });
     expect(pending.trigger.disabled).toBe(true);
   });
+  it("hides models whose provider is disabled", async () => {
+    const choices = [
+      { ...CHOICES[0] },
+      { ...CHOICES[1], modelId: "hidden", label: "未启用模型", providerLabel: "停用服务", providerEnabled: false },
+    ];
+    const { trigger } = await renderControl({ choices });
+    await act(async () => trigger.click());
+    expect(options().some(node => (node.textContent || "").includes("未启用模型"))).toBe(false);
+    expect([...document.querySelectorAll<HTMLButtonElement>("button[aria-expanded]")]
+      .some(node => (node.textContent || "").includes("停用服务"))).toBe(false);
+  });
+
+  it("keeps the bound model visible when its provider is disabled", async () => {
+    const choices = [{ ...CHOICES[0], providerLabel: "停用服务", providerEnabled: false }];
+    const { trigger } = await renderControl({ choices });
+    await act(async () => trigger.click());
+    expect(options().some(node => (node.textContent || "").includes("DeepSeek V4.1 Flash"))).toBe(true);
+  });
+
 });
