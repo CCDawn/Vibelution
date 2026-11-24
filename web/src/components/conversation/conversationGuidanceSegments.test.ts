@@ -39,22 +39,19 @@ function order(messages: ConversationMessage[]) {
 }
 
 describe("guidance work segments", () => {
-  // 产品决策（2026-11-24）：插入消息固定渲染在本轮工作内容之后。
-  // 一轮工作不再按 drained 的 consumed 序列切成多段；所有插入行都在 turn 尾部
-  // 按 guidanceSequence 排序。下面每个用例都锁定这个单一形状。
-
-  it("keeps the whole turn before the guide even after the drain receipt arrives", () => {
+  it("uses the consumption boundary, keeping work between submission and consumption before the guide", () => {
     const projected = layout([guide(), assistant([item("old-step", 10), item("finishing-tool", 25), item("new-step", 40)])]);
-    expect(order(projected.messages)).toEqual(["old-step,finishing-tool,new-step", "guide-1"]);
+    expect(order(projected.messages)).toEqual(["old-step,finishing-tool", "guide-1", "new-step"]);
     expect(projected.streamingMessages).toHaveLength(1);
+    expect(projected.messages[0].role === "assistant" && projected.messages[0].status).toBe("completed");
   });
 
-  it("keeps the same order after a fresh snapshot and final settlement", () => {
+  it("keeps the same order and segment identities after a fresh snapshot and final settlement", () => {
     const items = [item("old-step", 10), item("new-step", 40)];
     const live = layout([guide(), assistant(items)]);
     const refreshed = layout([assistant(items), guide()]);
     const settled = layout([assistant(items, false), guide()]);
-    expect(order(live.messages)).toEqual(["old-step,new-step", "guide-1"]);
+    expect(order(live.messages)).toEqual(["old-step", "guide-1", "new-step"]);
     expect(order(refreshed.messages)).toEqual(order(live.messages));
     expect(order(settled.messages)).toEqual(order(live.messages));
     expect(refreshed.rowIdentities.map((row) => row.rowKey)).toEqual(live.rowIdentities.map((row) => row.rowKey));
@@ -67,8 +64,8 @@ describe("guidance work segments", () => {
       guide(), guide("guide-2", 45, 60),
       assistant([item("first", 10), item("second", 40), item("third", 70)]),
     ]);
-    expect(order(projected.messages)).toEqual(["first,second,third", "guide-1", "guide-2"]);
-    expect(new Set(projected.rowIdentities.map((row) => row.rowKey)).size).toBe(3);
+    expect(order(projected.messages)).toEqual(["first", "guide-1", "second", "guide-2", "third"]);
+    expect(new Set(projected.rowIdentities.map((row) => row.rowKey)).size).toBe(5);
   });
 
   it("keeps guide row identities when a refreshed message window changes positional ids", () => {
@@ -87,22 +84,22 @@ describe("guidance work segments", () => {
     expect(conversationLiveTailStartIndex(projected.messages)).toBe(0);
   });
 
-  it("keeps synthetic work before the guide no matter when the drain receipt lands", () => {
+  it("keeps synthetic work created before consumption in place as the guide drains", () => {
     const old = item("live-reasoning", 1, true);
     old.metadata = { ...old.metadata, orderSequence: 10 };
     expect(order(layout([guide("guide-1", 20, 0), assistant([old])]).messages))
       .toEqual(["live-reasoning", "guide-1"]);
     expect(order(layout([guide(), assistant([old])]).messages))
-      .toEqual(["live-reasoning", "guide-1"]);
+      .toEqual(["live-reasoning", "guide-1", ""]);
     expect(order(layout([guide(), guide("guide-2", 45, 60), assistant([old], false)]).messages))
       .toEqual(["live-reasoning", "guide-1", "guide-2"]);
   });
 
-  it("keeps new synthetic work inside its turn instead of splitting it out after the guide", () => {
+  it("orders new synthetic work by its durable creation sequence instead of its local ordinal", () => {
     const current = item("new-reasoning", 1, true);
     current.metadata = { ...current.metadata, orderSequence: 40 };
     expect(order(layout([guide(), assistant([item("old-step", 10), current])]).messages))
-      .toEqual(["old-step,new-reasoning", "guide-1"]);
+      .toEqual(["old-step", "guide-1", "new-reasoning"]);
   });
 
   it("does not move an existing item across a guide when a later revision updates it", () => {
@@ -112,22 +109,21 @@ describe("guidance work segments", () => {
       .toEqual(["same-item,next-old-step", "guide-1"]);
   });
 
-  it("never synthesizes an empty work segment after the guide", () => {
+  it("keeps a running tail shell after a consumed guide until the next step arrives", () => {
     const projected = layout([guide(), assistant([item("old-step", 10)])]);
-    expect(order(projected.messages)).toEqual(["old-step", "guide-1"]);
+    expect(order(projected.messages)).toEqual(["old-step", "guide-1", ""]);
     expect(projected.streamingMessages).toHaveLength(1);
   });
 
-  it("keeps canonical action and usage ownership on the whole turn", () => {
+  it("preserves original action and usage ownership only on the last segment", () => {
     const source = assistant([item("old-step", 10), item("new-step", 40)], false);
     source.nodeId = "canonical-answer-node";
-    source.usageStats = { inputTokens: 10, completionTokens: 5, totalTokens: 15, cachedInputTokens: 0 };
-    const projected = layout([guide(), source]);
-    expect(order(projected.messages)).toEqual(["old-step,new-step", "guide-1"]);
-    const turn = projected.messages[0];
-    expect(turn.role === "assistant" && turn.nodeId).toBe("canonical-answer-node");
-    expect(turn.role === "assistant" && turn.usageStats).toBeDefined();
-    expect(projected.messages.at(-1)?.id).toBe("guide-1");
+    source.usageStats = { inputTokens: 10, completionTokens: 5, totalTokens: 15, cachedInputTokens: 0, elapsedMs: 1000 };
+    const projected = layout([source, guide()]);
+    expect(projected.messages[0].nodeId).toBeUndefined();
+    expect(projected.messages[0].role === "assistant" && projected.messages[0].usageStats).toBeUndefined();
+    expect(projected.messages.at(-1)?.id).toBe(source.id);
+    expect(projected.messages.at(-1)?.nodeId).toBe(source.nodeId);
   });
 
   it("leaves Companion projection and unrelated turns untouched", () => {
@@ -139,10 +135,10 @@ describe("guidance work segments", () => {
     expect(companion.messages.filter((message) => message.role === "assistant")).toHaveLength(1);
   });
 
-  it("keeps the whole turn and its guides outside virtualized history", () => {
+  it("keeps only the last work segment outside virtualized history", () => {
     const projected = layout([guide(), guide("waiting", 50, 0), assistant([item("old", 10), item("new", 40)])]);
-    expect(order(projected.messages)).toEqual(["old,new", "guide-1", "waiting"]);
-    expect(conversationLiveTailStartIndex(projected.messages)).toBe(0);
+    expect(order(projected.messages)).toEqual(["old", "guide-1", "new", "waiting"]);
+    expect(conversationLiveTailStartIndex(projected.messages)).toBe(2);
     expect(conversationLiveTailStartIndex([guide("orphan", 20, 0)])).toBe(1);
   });
 
