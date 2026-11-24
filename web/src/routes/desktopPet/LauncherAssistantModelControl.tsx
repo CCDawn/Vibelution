@@ -57,7 +57,7 @@ function launcherAssistantModelDisabledReason(
   choice: LauncherAssistantModelChoice,
   lang: "zh" | "en",
 ): string {
-  if (choice.providerEnabled === false) {
+  if (choice.providerEnabled !== true) {
     return lang === "zh" ? "此服务未启用，请在模型设置中开启" : "This provider is disabled; enable it in model settings";
   }
   if (choice.missingApiKey) {
@@ -116,7 +116,7 @@ export function launcherAssistantModelGroups(
     const recent = recentModelIds
       .map(id => choices.find(choice => choice.modelId === id))
       .filter((choice): choice is LauncherAssistantModelChoice =>
-        choice !== undefined && (choice.providerEnabled !== false || choice.modelId === currentModelId));
+        choice !== undefined && (choice.providerEnabled === true || choice.modelId === currentModelId));
     if (recent.length) {
       groups.set(RECENT_GROUP_KEY, {
         groupKey: RECENT_GROUP_KEY,
@@ -134,7 +134,7 @@ export function launcherAssistantModelGroups(
     // Disabled providers are not candidates at all: rows the operator cannot
     // pick must not crowd the menu. The bound model stays visible so the menu
     // never hides what the assistant actually runs on.
-    if (choice.providerEnabled === false && choice.modelId !== currentModelId) continue;
+    if (choice.providerEnabled !== true && choice.modelId !== currentModelId) continue;
     const label = (choice.label || choice.modelId).trim() || choice.modelId;
     const providerLabel = (choice.providerLabel || "").trim();
     if (
@@ -203,7 +203,7 @@ export function LauncherAssistantModelControl({
   const enabledServices = useMemo(() => {
     const counts = new Map<string, number>();
     for (const choice of choices) {
-      if (choice.providerEnabled === false) continue;
+      if (choice.providerEnabled !== true) continue;
       const serviceLabel = (choice.providerLabel || "").trim();
       if (!serviceLabel) continue;
       counts.set(serviceLabel, (counts.get(serviceLabel) ?? 0) + 1);

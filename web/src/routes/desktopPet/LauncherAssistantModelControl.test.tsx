@@ -25,6 +25,7 @@ const CHOICES = [
     providerHealthy: true,
     missingApiKey: false,
     availability: "ready",
+    providerEnabled: true,
   },
   {
     modelId: "next",
@@ -34,6 +35,7 @@ const CHOICES = [
     providerHealthy: true,
     missingApiKey: false,
     availability: "ready",
+    providerEnabled: true,
   },
   {
     modelId: "unavailable",
@@ -43,6 +45,7 @@ const CHOICES = [
     providerHealthy: true,
     missingApiKey: true,
     availability: "unavailable",
+    providerEnabled: true,
   },
 ];
 
@@ -139,6 +142,7 @@ describe("Launcher model toolbar control", () => {
       providerHealthy: true,
       missingApiKey: false,
       availability: "ready",
+      providerEnabled: true,
     }));
     const { trigger } = await renderControl({ choices: many });
     await act(async () => trigger.click());
@@ -165,6 +169,7 @@ describe("Launcher model toolbar control", () => {
       providerHealthy: true,
       missingApiKey: false,
       availability: "ready",
+      providerEnabled: true,
     }));
     const { trigger } = await renderControl({ choices: many });
     await act(async () => trigger.click());
@@ -220,6 +225,14 @@ it("retains a current model absent from the catalogue and locks pending configur
     expect(options().some(node => (node.textContent || "").includes("未启用模型"))).toBe(false);
     expect([...document.querySelectorAll<HTMLButtonElement>("button[aria-expanded]")]
       .some(node => (node.textContent || "").includes("停用服务"))).toBe(false);
+  });
+
+  it("treats a missing provider switch as disabled until the host says enabled", async () => {
+    const legacy: LauncherAssistantModelChoice = { ...CHOICES[1] };
+    delete (legacy as { providerEnabled?: boolean }).providerEnabled;
+    const { trigger } = await renderControl({ choices: [CHOICES[0], legacy] });
+    await act(async () => trigger.click());
+    expect(options().some(node => (node.textContent || "").includes("另一个模型"))).toBe(false);
   });
 
   it("keeps the bound model visible when its provider is disabled", async () => {
