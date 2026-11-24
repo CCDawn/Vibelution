@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+
+## 3.3.4 - 2026-11-24
 - Split the session tab band into a center surface and a rail surface when the
 - The band keeps its single-surface shape whenever the rail is closed or shown
 
