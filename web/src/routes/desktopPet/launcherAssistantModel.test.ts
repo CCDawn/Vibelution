@@ -1518,7 +1518,7 @@ describe("Launcher assistant composer surface model", () => {
 
   it("switches the assistant model through the fixed bridge while preserving the composer", async () => {
     const status = { assistant: { agentId: "a", directSessionId: "s", displayName: "助理" }, settings: { ok: true,
-      modelId: "m1", displayName: "助理", modelChoices: [{ modelId: "m1", label: "模型一" }, { modelId: "m2", label: "模型二" }],
+      modelId: "m1", displayName: "助理", modelChoices: [{ modelId: "m1", label: "模型一", providerEnabled: true }, { modelId: "m2", label: "模型二", providerEnabled: true }],
       preferences: { characterId: "xiaoluo", showStatus: true, showTitles: true, showCompletion: false, idleMessage: "" } } };
     await renderAssistant(undefined, status, undefined, { embedded: true });
     await act(async () => conversation?.onComposerChange("保留我的草稿"));

@@ -43,7 +43,7 @@ async function renderEmbedded(options: { dispatches?: Array<Record<string, unkno
         operatorAssetsVersion: 1,
         settings: { ok: true, displayName: "助理", modelId: selectedModel,
           modelChoices: ["model-1", "model-2"].map(modelId => ({ modelId, label: modelId === "model-1" ? "当前对话模型" : "备用对话模型",
-            providerLabel: "官方", isDefault: modelId === "model-1", providerHealthy: true, missingApiKey: false, availability: "ready" })),
+            providerLabel: "官方", isDefault: modelId === "model-1", providerHealthy: true, missingApiKey: false, availability: "ready", providerEnabled: true })),
           preferences: { characterId: "dafeiyu", showStatus: true, showTitles: true, showCompletion: true, idleMessage: "在的，随时吩咐。" } },
       };
       case "config": return { language: "zh" };

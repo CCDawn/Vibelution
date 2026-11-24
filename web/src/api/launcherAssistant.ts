@@ -407,9 +407,10 @@ export async function getLauncherAssistantStatus(): Promise<LauncherAssistantSta
     }
     if (settings.modelChoices !== undefined && (!Array.isArray(settings.modelChoices)
       || settings.modelChoices.some(choice => !record(choice) || Array.isArray(choice)
-        || !exactFields(choice, ["modelId", "label", "providerLabel", "isDefault", "providerHealthy", "missingApiKey", "availability"])
+        || !exactFields(choice, ["modelId", "label", "providerLabel", "isDefault", "providerHealthy", "missingApiKey", "availability", "providerEnabled"])
         || ![choice.modelId, choice.label, choice.providerLabel, choice.availability].every(value => typeof value === "string")
         || ![choice.isDefault, choice.providerHealthy, choice.missingApiKey].every(value => typeof value === "boolean")
+        || (choice.providerEnabled !== undefined && typeof choice.providerEnabled !== "boolean")
         || typeof choice.modelId !== "string" || !choice.modelId.trim()))) {
       throw new Error("Launcher 个人助理模型列表不可用。");
     }
