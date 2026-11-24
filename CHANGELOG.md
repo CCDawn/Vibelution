@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+
+## 3.4.1 - 2026-11-24
 - `web/src/routes/chat/useChatComposerTurnMutations.ts`：guidance onMutate 从会话缓存解析
 - `web/src/components/conversation/conversationGuidanceSegments.test.ts`：新增乐观行归位用例，
 - `npx vitest run conversationGuidanceSegments.test.ts ConversationView.test.tsx`：165 用例通过。
