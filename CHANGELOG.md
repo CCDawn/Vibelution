@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- `web/src/routes/chat/useChatComposerTurnMutations.ts`：guidance onMutate 从会话缓存解析
+- `web/src/components/conversation/conversationGuidanceSegments.test.ts`：新增乐观行归位用例，
+- `npx vitest run conversationGuidanceSegments.test.ts ConversationView.test.tsx`：165 用例通过。
+- `npx tsc -b`：无类型错误。
 
 ## 3.4.0 - 2026-11-24
 - fix: 个人助理的助理状态、派遣任务、团队任务三类读取失败时各记录一条浏览器遥测（操作名、失败序号、是否有缓存、错误摘要），同一失败只记一次，便于下次定位「暂时查不到任务进度」的真实原因。
