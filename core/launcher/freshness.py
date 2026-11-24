@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from core.infrastructure import git_process
@@ -121,31 +120,21 @@ def _git_identity() -> dict[str, str]:
 
 
 def _unpackaged_shell_update() -> tuple[bool, str]:
-    """Report whether the checkout Electron bundle is behind the current sources.
+    """Report whether the desktop shell is behind the current sources.
 
-    A missing Electron binary is an environment gap, not a version the user can
-    restart into. Inspection failure must not turn a freshness read into a prompt.
+    Single authority: this delegates to the workbench's ``desktopShell``
+    freshness panel (cached, owner-gated), so the launcher payload and the
+    workbench layered verdict can never disagree about the same shell.  The
+    panel reproduces the historical gate exactly — a missing Electron binary
+    is an environment gap, not a version the user can restart into, and
+    inspection failure must not turn a freshness read into a prompt.
     """
 
     try:
-        from core.launcher.desktop_shell import (
-            inspect_unpackaged_electron,
-            unpackaged_electron_executable,
-        )
-        from core.launcher.desktop_shell_owner import read_desktop_shell_owner
+        from core.web.services.code_freshness import resolve_desktop_shell_freshness
 
-        status = inspect_unpackaged_electron(PROJECT_ROOT)
-        reason = str(status.get("reason") or "")
-        if reason == "missing_binary" or not status.get("stale"):
-            return False, reason
-        owner = read_desktop_shell_owner(PROJECT_ROOT) or {}
-        electron_bin = unpackaged_electron_executable(PROJECT_ROOT)
-        owner_exe = str(owner.get("executable") or "").strip()
-        if electron_bin is None or not owner_exe:
-            return False, reason
-        if Path(owner_exe).resolve() != electron_bin.resolve():
-            return False, reason
-        return True, reason
+        panel = resolve_desktop_shell_freshness(project_root=PROJECT_ROOT)
+        return bool(panel.get("stale")), str(panel.get("reason") or "")
     except (OSError, RuntimeError, ValueError, TypeError, ImportError):
         return False, ""
 

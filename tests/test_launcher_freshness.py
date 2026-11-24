@@ -195,3 +195,90 @@ def test_git_identity_outside_a_repo_stays_unknown(tmp_path, monkeypatch):
 
     assert read_git_identity(plain) is None
     assert launcher_freshness._git_identity() == {"commit": "", "branch": ""}
+
+
+# --- unified desktop shell delegation + payload compatibility -----------------
+
+
+LAUNCHER_FRESHNESS_LEGACY_FIELDS = (
+    "schemaVersion",
+    "current",
+    "label",
+    "runningCommit",
+    "runningShort",
+    "runningBranch",
+    "headCommit",
+    "headShort",
+    "headBranch",
+    "startedAt",
+    "shellStale",
+    "shellReason",
+    "updateAvailable",
+)
+
+
+def _patch_shell_panel(monkeypatch, *, stale: bool, reason: str) -> list[dict]:
+    from core.web.services import code_freshness
+
+    calls: list[dict] = []
+
+    def fake_panel(*, project_root):
+        calls.append({"project_root": str(project_root)})
+        return {
+            "schemaVersion": 1,
+            "available": True,
+            "shellKind": "unpackaged",
+            "stale": stale,
+            "current": not stale,
+            "reason": reason,
+            "action": "replace_shell" if stale else "none",
+            "unpackaged": {},
+            "packaged": {},
+        }
+
+    monkeypatch.setattr(code_freshness, "resolve_desktop_shell_freshness", fake_panel)
+    return calls
+
+
+def test_freshness_payload_keeps_every_legacy_field(monkeypatch):
+    launcher_freshness.reset_launcher_start_identity_for_tests()
+    monkeypatch.setattr(launcher_freshness, "_git_identity", lambda: {"commit": "aaa111bbbbcc", "branch": "main"})
+    calls = _patch_shell_panel(monkeypatch, stale=False, reason="current")
+
+    payload = launcher_freshness.get_launcher_freshness()
+
+    for field in LAUNCHER_FRESHNESS_LEGACY_FIELDS:
+        assert field in payload, f"compat field {field} disappeared from the launcher freshness payload"
+    assert payload["current"] is True
+    assert payload["shellStale"] is False
+    assert payload["shellReason"] == "current"
+    assert payload["updateAvailable"] is False
+    assert calls, "shellStale must be delegated to the unified desktop shell panel"
+
+
+def test_freshness_shell_stale_flows_from_unified_panel(monkeypatch):
+    launcher_freshness.reset_launcher_start_identity_for_tests()
+    monkeypatch.setattr(launcher_freshness, "_git_identity", lambda: {"commit": "aaa111", "branch": "main"})
+    _patch_shell_panel(monkeypatch, stale=True, reason="provenance_mismatch")
+
+    payload = launcher_freshness.get_launcher_freshness()
+
+    assert payload["shellStale"] is True
+    assert payload["shellReason"] == "provenance_mismatch"
+    assert payload["updateAvailable"] is True
+
+
+def test_launcher_freshness_response_model_still_accepts_legacy_payload(monkeypatch):
+    """The workbench /api/launcher/freshness contract keeps every legacy field."""
+
+    from core.launcher.api_contract import LauncherFreshnessResponse
+
+    launcher_freshness.reset_launcher_start_identity_for_tests()
+    monkeypatch.setattr(launcher_freshness, "_git_identity", lambda: {"commit": "aaa111", "branch": "main"})
+    _patch_shell_panel(monkeypatch, stale=False, reason="current")
+    payload = launcher_freshness.get_launcher_freshness()
+
+    rendered = LauncherFreshnessResponse.model_validate(payload).model_dump(exclude_unset=True)
+
+    for field in LAUNCHER_FRESHNESS_LEGACY_FIELDS:
+        assert field in rendered, f"contract field {field} was dropped by the response model"
