@@ -407,7 +407,9 @@ export async function getLauncherAssistantStatus(): Promise<LauncherAssistantSta
     }
     if (settings.modelChoices !== undefined && (!Array.isArray(settings.modelChoices)
       || settings.modelChoices.some(choice => !record(choice) || Array.isArray(choice)
-        || !exactFields(choice, ["modelId", "label", "providerLabel", "isDefault", "providerHealthy", "missingApiKey", "availability", "providerEnabled"])
+        || !["modelId", "label", "providerLabel", "isDefault", "providerHealthy", "missingApiKey", "availability"]
+          .every(field => Object.prototype.hasOwnProperty.call(choice, field))
+        || Object.keys(choice).some(key => !["modelId", "label", "providerLabel", "isDefault", "providerHealthy", "missingApiKey", "availability", "providerEnabled"].includes(key))
         || ![choice.modelId, choice.label, choice.providerLabel, choice.availability].every(value => typeof value === "string")
         || ![choice.isDefault, choice.providerHealthy, choice.missingApiKey].every(value => typeof value === "boolean")
         || (choice.providerEnabled !== undefined && typeof choice.providerEnabled !== "boolean")
