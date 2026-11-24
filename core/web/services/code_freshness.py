@@ -114,6 +114,10 @@ _CHANGED_PATHS_CACHE_LIMIT = 8
 # rebuilt shell publishes immediately instead of within a TTL window.
 _desktop_shell_cache: dict[str, dict[str, Any]] = {}
 _DESKTOP_SHELL_CACHE_LIMIT = 4
+# (root_key, commit) -> exists.  Existence is monotonic per checkout; the cap
+# only bounds how long a "missing" answer can outlive a fetch that added it.
+_commit_exists_cache: dict[tuple[str, str], bool] = {}
+_COMMIT_EXISTS_CACHE_LIMIT = 64
 
 # Per-project-root single-flight gate: same-root concurrent full resolutions
 # share one compute.  Modeled on config_service._config_result_cache_single_flight
@@ -139,6 +143,7 @@ def reset_freshness_caches_for_tests() -> None:
         _dirty_summary_cache.clear()
         _changed_paths_cache.clear()
         _desktop_shell_cache.clear()
+        _commit_exists_cache.clear()
     with _FRESHNESS_FLIGHT_LOCK:
         _FRESHNESS_FLIGHTS.clear()
 
@@ -531,10 +536,22 @@ def _git_changed_paths_between(
 
 
 def git_commit_exists(project_root: Path | str, commit: str) -> bool:
-    """True when the commit object exists in this repository."""
+    """True when the commit object exists in this repository.
+
+    Cached per (project root, commit): the switch gate asks this twice per
+    frontend-stale resolution, and existence is monotonic for a checkout's
+    lifetime.  A negative answer is only ever conservative here (the switch
+    gate refuses and falls back to a restart), and the small cap keeps a
+    long-lived process from pinning stale negatives forever.
+    """
     candidate = str(commit or "").strip()
     if not candidate:
         return False
+    cache_key = (_freshness_root_flight_key(project_root), candidate)
+    with _freshness_cache_lock:
+        cached = _commit_exists_cache.get(cache_key)
+    if cached is not None:
+        return cached
     try:
         result = run_git(
             [*POLL_GIT_GLOBAL_ARGS, "rev-parse", "--verify", "--quiet", f"{candidate}^{{commit}}"],
@@ -543,7 +560,12 @@ def git_commit_exists(project_root: Path | str, commit: str) -> bool:
         )
     except (OSError, subprocess.SubprocessError):
         return False
-    return int(result.returncode or 0) == 0
+    exists = int(result.returncode or 0) == 0
+    with _freshness_cache_lock:
+        if len(_commit_exists_cache) >= _COMMIT_EXISTS_CACHE_LIMIT:
+            _commit_exists_cache.clear()
+        _commit_exists_cache[cache_key] = exists
+    return exists
 
 
 def _changed_path_classification(
@@ -924,37 +946,80 @@ def _resolve_desktop_shell_kind(project_root: Path, owner_exe: str, *, packaged_
     return "unpackaged"
 
 
-def _compute_desktop_shell_freshness(project_root: Path) -> dict[str, Any]:
+def _not_inspected_unpackaged_panel(project_root: Path) -> dict[str, Any]:
+    """Placeholder unpackaged panel when the packaged shell governs instead.
+
+    Only the cheap binary-path lookup runs; no git, no bundle hashing.  The
+    shape matches a real inspection so consumers can treat the field
+    uniformly, while ``reason: not_inspected`` marks it as not measured.
+    """
+    try:
+        from core.launcher.desktop_shell import unpackaged_electron_executable
+
+        electron_bin = unpackaged_electron_executable(project_root)
+    except ImportError:
+        electron_bin = None
+    return {
+        "available": electron_bin is not None,
+        "stale": False,
+        "rawStale": False,
+        "rawReason": "not_inspected",
+        "reason": "not_inspected",
+        "ownerMatchesElectron": False,
+        "electronExecutable": str(electron_bin or ""),
+    }
+
+
+def _resolve_desktop_shell_kind(project_root: Path, owner_exe: str) -> str:
+    try:
+        from core.launcher.desktop_shell import (
+            packaged_desktop_exe,
+            unpackaged_electron_executable,
+        )
+    except ImportError:
+        return "unpackaged"
+    if owner_exe:
+        try:
+            if packaged_desktop_exe(project_root).resolve() == Path(owner_exe).resolve():
+                return "packaged"
+        except OSError:
+            pass
+        try:
+            electron_bin = unpackaged_electron_executable(project_root)
+            if electron_bin is not None and electron_bin.resolve() == Path(owner_exe).resolve():
+                return "unpackaged"
+        except OSError:
+            pass
+    # No owner record: keep the historical default (the launcher freshness has
+    # only ever judged the unpackaged checkout shell).
+    return "unpackaged"
+
+
+def _packaged_shell_installed(project_root: Path) -> bool:
     try:
         from core.launcher.desktop_shell import (
             packaged_asar_path,
             packaged_desktop_exe,
         )
 
-        packaged_installed = (
+        return (
             packaged_desktop_exe(project_root).is_file()
             and packaged_asar_path(project_root).is_file()
         )
     except (OSError, ImportError):
-        packaged_installed = False
-    packaged_raw: dict[str, Any] = {}
-    if packaged_installed:
-        # Only inspect an actually installed package: hashing the packaged
-        # frontend and walking electron sources for an absent install would
-        # only ever produce "missing" answers at real cost.
-        try:
-            from core.launcher.desktop_shell import inspect_desktop_shell
+        return False
 
-            packaged_raw = inspect_desktop_shell(project_root)
-        except (OSError, RuntimeError, ValueError, TypeError, ImportError):
-            packaged_raw = {}
-    packaged_panel = {
-        "installed": packaged_installed,
-        "stale": bool(packaged_raw.get("stale")) if packaged_raw else False,
-        "reason": str(packaged_raw.get("reason") or ("packaged_shell_missing" if not packaged_installed else "inspection_failed")),
-    }
-    unpackaged_panel = _inspect_unpackaged_shell_with_owner_gate(project_root)
-    owner = {}
+
+def _compute_desktop_shell_freshness(project_root: Path) -> dict[str, Any]:
+    """One full desktop-shell freshness computation.
+
+    Inspection is per-governing-shell: the owner record decides the shell
+    kind first (cheap path comparisons), and only that shell's inspection
+    runs.  A machine that has a packaged shell installed but runs the dev
+    checkout shell (the normal developer setup) therefore never pays the
+    packaged asar + embedded-frontend hash during HEAD drift, which would
+    otherwise stall every launcher control-plane poll after each merge.
+    """
     try:
         from core.launcher.desktop_shell_owner import read_desktop_shell_owner
 
@@ -962,19 +1027,66 @@ def _compute_desktop_shell_freshness(project_root: Path) -> dict[str, Any]:
     except (OSError, ImportError):
         owner = {}
     kind = _resolve_desktop_shell_kind(
-        project_root,
-        str(owner.get("executable") or "").strip(),
-        packaged_installed=packaged_installed,
+        project_root, str(owner.get("executable") or "").strip()
     )
-    if kind == "packaged" and packaged_installed:
-        stale = packaged_panel["stale"]
-        reason = packaged_panel["reason"]
-        available = bool(packaged_raw)
-    elif kind == "packaged":
-        stale = False
-        reason = "packaged_shell_missing"
-        available = False
+    packaged_installed = _packaged_shell_installed(project_root)
+
+    if kind == "packaged":
+        packaged_panel: dict[str, Any]
+        packaged_raw: dict[str, Any] = {}
+        inspected = False
+        if packaged_installed:
+            # Heavy (asar + packaged frontend hashing + electron source walk)
+            # and only paid by the process whose owner really is the package.
+            try:
+                from core.launcher.desktop_shell import inspect_desktop_shell
+
+                packaged_raw = inspect_desktop_shell(project_root)
+                inspected = bool(packaged_raw)
+            except (OSError, RuntimeError, ValueError, TypeError, ImportError):
+                packaged_raw = {}
+        if packaged_installed and inspected:
+            packaged_panel = {
+                "installed": True,
+                "inspected": True,
+                "stale": bool(packaged_raw.get("stale")),
+                "reason": str(packaged_raw.get("reason") or ""),
+            }
+            stale = bool(packaged_panel["stale"])
+            reason = packaged_panel["reason"]
+            available = True
+        elif packaged_installed:
+            packaged_panel = {
+                "installed": True,
+                "inspected": False,
+                "stale": False,
+                "reason": "inspection_failed",
+            }
+            stale = False
+            reason = "inspection_failed"
+            available = False
+        else:
+            packaged_panel = {
+                "installed": False,
+                "inspected": False,
+                "stale": False,
+                "reason": "packaged_shell_missing",
+            }
+            stale = False
+            reason = "packaged_shell_missing"
+            available = False
+        unpackaged_panel = _not_inspected_unpackaged_panel(project_root)
     else:
+        # The governing shell is the unpackaged checkout bundle: the packaged
+        # install stays unreported ("not_inspected") instead of being hashed
+        # on every poll for a shell this user is not even running.
+        packaged_panel = {
+            "installed": packaged_installed,
+            "inspected": False,
+            "stale": False,
+            "reason": "not_inspected" if packaged_installed else "packaged_shell_missing",
+        }
+        unpackaged_panel = _inspect_unpackaged_shell_with_owner_gate(project_root)
         stale = bool(unpackaged_panel.get("stale"))
         reason = str(unpackaged_panel.get("reason") or "")
         available = bool(unpackaged_panel.get("available"))

@@ -404,6 +404,10 @@ def test_desktop_shell_panel_governs_packaged_shell_when_owner_is_packaged(tmp_p
     assert panel["available"] is True
     assert panel["stale"] is True
     assert panel["reason"] == "electron_source_stale"
+    # The governing packaged shell was really inspected.
+    assert panel["packaged"]["installed"] is True
+    assert panel["packaged"]["inspected"] is True
+    assert panel["packaged"]["stale"] is True
 
 
 def test_desktop_shell_panel_result_is_cached_by_observation(tmp_path: Path, monkeypatch) -> None:
@@ -630,3 +634,113 @@ def test_legacy_panel_fields_stay_pinned(tmp_path: Path, monkeypatch) -> None:
         "current",
         "unknown",
     }
+
+
+def test_desktop_shell_panel_skips_packaged_inspection_for_unpackaged_owner(tmp_path: Path, monkeypatch) -> None:
+    """Owner is the dev checkout shell, yet a packaged install exists on disk.
+
+    The packaged asar + embedded frontend hash must not run for a shell the
+    user is not running: launcher control-plane polls would pay it after every
+    HEAD move on exactly the machines that keep an old package installed.
+    """
+    import core.launcher.desktop_shell as desktop_shell
+
+    electron_bin = tmp_path / "electron.exe"
+    electron_bin.write_text("bin", encoding="utf-8")
+    packaged_exe = tmp_path / "packaged" / "Vibelution.exe"
+    packaged_exe.parent.mkdir(parents=True)
+    packaged_exe.write_text("exe", encoding="utf-8")
+    asar = tmp_path / "packaged" / "resources" / "app.asar"
+    asar.parent.mkdir(parents=True)
+    asar.write_text("asar", encoding="utf-8")
+
+    def forbidden_packaged_inspection(_root):
+        raise AssertionError("packaged shell must not be inspected for an unpackaged owner")
+
+    unpackaged_calls = _patch_unpackaged_shell(
+        monkeypatch, stale=False, reason="current", electron_bin=electron_bin
+    )
+    monkeypatch.setattr(desktop_shell, "inspect_desktop_shell", forbidden_packaged_inspection)
+
+    panel = code_freshness.resolve_desktop_shell_freshness(project_root=tmp_path)
+
+    assert panel["shellKind"] == "unpackaged"
+    assert panel["stale"] is False
+    assert panel["reason"] == "current"
+    # The installed-but-not-running package is reported as unmeasured, stale-free.
+    assert panel["packaged"] == {
+        "installed": True,
+        "inspected": False,
+        "stale": False,
+        "reason": "not_inspected",
+    }
+    assert unpackaged_calls == [1], "the governing unpackaged shell is still inspected"
+
+
+def test_desktop_shell_panel_skips_unpackaged_inspection_for_packaged_owner(tmp_path: Path, monkeypatch) -> None:
+    import core.launcher.desktop_shell as desktop_shell
+    import core.launcher.desktop_shell_owner as shell_owner
+
+    electron_bin = tmp_path / "electron.exe"
+    electron_bin.write_text("bin", encoding="utf-8")
+    packaged_exe = tmp_path / "packaged" / "Vibelution.exe"
+    packaged_exe.parent.mkdir(parents=True)
+    packaged_exe.write_text("exe", encoding="utf-8")
+    asar = tmp_path / "packaged" / "resources" / "app.asar"
+    asar.parent.mkdir(parents=True)
+    asar.write_text("asar", encoding="utf-8")
+
+    def forbidden_unpackaged_inspection(_root):
+        raise AssertionError("unpackaged shell must not be inspected for a packaged owner")
+
+    _patch_unpackaged_shell(monkeypatch, stale=False, reason="current", electron_bin=electron_bin)
+    monkeypatch.setattr(desktop_shell, "inspect_unpackaged_electron", forbidden_unpackaged_inspection)
+    monkeypatch.setattr(
+        desktop_shell, "inspect_desktop_shell", lambda root: {"stale": False, "reason": "current"}
+    )
+    monkeypatch.setattr(
+        shell_owner,
+        "read_desktop_shell_owner",
+        lambda root: {"owner": "electron", "pid": 1, "executable": str(packaged_exe)},
+    )
+
+    panel = code_freshness.resolve_desktop_shell_freshness(project_root=tmp_path)
+
+    assert panel["shellKind"] == "packaged"
+    assert panel["stale"] is False
+    assert panel["available"] is True
+    assert panel["packaged"]["inspected"] is True
+    assert panel["unpackaged"]["reason"] == "not_inspected"
+
+
+def test_git_commit_exists_is_cached_per_commit(tmp_path: Path, monkeypatch) -> None:
+    import subprocess
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-b", "main"], cwd=str(repo), check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "c@example.local"], cwd=str(repo), check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "C"], cwd=str(repo), check=True, capture_output=True)
+    (repo / "f.txt").write_text("x\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=str(repo), check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "base"], cwd=str(repo), check=True, capture_output=True)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=str(repo), check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    calls: list[int] = []
+    real_run_git = code_freshness.run_git
+
+    def counting_run_git(args, **kwargs):
+        if args[1:2] == ["rev-parse"]:
+            calls.append(1)
+        return real_run_git(args, **kwargs)
+
+    monkeypatch.setattr(code_freshness, "run_git", counting_run_git)
+
+    assert code_freshness.git_commit_exists(repo, head) is True
+    assert code_freshness.git_commit_exists(repo, head) is True
+    assert code_freshness.git_commit_exists(repo, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef") is False
+    assert code_freshness.git_commit_exists(repo, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef") is False
+    # Two commits, one git child each: the (root, commit) pair is asked once.
+    assert len(calls) == 2

@@ -114,6 +114,10 @@ class RuntimeFrontendSwitchResponse(BaseModel):
     servingRelease: str = ""
     activeRelease: str = ""
     reason: str = ""
+    # Only meaningful on status=switched: the serving release moved even when
+    # this best-effort fingerprint rewrite failed, so callers can tell when
+    # the next freshness poll may still see the old serving identity.
+    fingerprintPersisted: bool = False
 
 
 class RuntimeLifecycleResponse(BaseModel):

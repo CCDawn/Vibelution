@@ -425,3 +425,131 @@ def test_update_serving_frontend_release_report_missing_fingerprint(tmp_path: Pa
     )
     assert result["updated"] is False
     assert result["reason"] == "no_fingerprint"
+
+
+# --- rollback on shell repin failure (R1) + fingerprintPersisted (R6) ----------
+
+
+def test_switch_rolls_back_when_new_release_fails_shell_validation(tmp_path: Path, monkeypatch) -> None:
+    """A repin that lands on an invalid dist must restore the old serving state.
+
+    register_spa_routes swallows shell-validation failures into
+    ``web_shell_ready=False`` instead of raising, so the rollback must trigger
+    on the silent mode as well as on exceptions; afterwards the page shell and
+    the pinned serving identity are exactly what they were before the switch.
+    """
+    import core.web.route_bootstrap as route_bootstrap
+
+    root, base, frontend_commit, release_old, release_new = _make_repo_with_releases(tmp_path)
+    _write_fingerprint(root, head=base, release=release_old, build_key="key-old", built_from=base)
+    _set_active_pointer(root, release_new, "key-new")
+    app = _make_app(root, base, release_old)
+    client = TestClient(app)
+    real_repin = route_bootstrap.repin_web_shell
+    old_dir = root / "web" / ".vibelution-builds" / release_old
+    new_dir = root / "web" / ".vibelution-builds" / release_new
+
+    def failing_repin(app_, web_dist):
+        if Path(web_dist) == new_dir:
+            # Simulate register_spa_routes failing shell validation silently.
+            app_.state.web_shell_ready = False
+            app_.state.web_shell_error = "Frontend release references a missing asset."
+            return {
+                "repinned": True,
+                "dist": str(web_dist),
+                "shellReady": False,
+                "shellError": app_.state.web_shell_error,
+            }
+        return real_repin(app_, web_dist)
+
+    monkeypatch.setattr(route_bootstrap, "repin_web_shell", failing_repin)
+
+    result = frontend_switch.switch_frontend_to_active_release(app=app, project_root=root)
+
+    assert result["status"] == "unavailable"
+    assert result["reason"] == "shell_repin_failed"
+    assert "missing asset" in result.get("detail", "")
+    # Serving state restored to the pre-switch snapshot.
+    assert app.state.serving_metadata["frontend"]["release"] == release_old
+    assert app.state.serving_metadata["frontend"]["buildKey"] == "key-old"
+    assert app.state.serving_frontend_dist == str(old_dir)
+    # Shell routes are pinned back to the old dist and actually usable.
+    assert app.state.web_shell_ready is True
+    assert _page(client.get("/")).endswith("build key-old</body></html>\n")
+    # The on-disk fingerprint never moved.
+    fingerprint = code_freshness.read_running_code_fingerprint(root) or {}
+    assert fingerprint.get("servingFrontendRelease") == release_old
+
+
+def test_switch_rolls_back_when_repin_raises(tmp_path: Path, monkeypatch) -> None:
+    import core.web.route_bootstrap as route_bootstrap
+
+    root, base, frontend_commit, release_old, release_new = _make_repo_with_releases(tmp_path)
+    _write_fingerprint(root, head=base, release=release_old, build_key="key-old", built_from=base)
+    _set_active_pointer(root, release_new, "key-new")
+    app = _make_app(root, base, release_old)
+    client = TestClient(app)
+    old_dir = root / "web" / ".vibelution-builds" / release_old
+
+    real_repin = route_bootstrap.repin_web_shell
+    new_dir = root / "web" / ".vibelution-builds" / release_new
+
+    def exploding_repin(app_, web_dist):
+        if Path(web_dist) == new_dir:
+            raise RuntimeError(f"repin boom for {web_dist}")
+        return real_repin(app_, web_dist)
+
+    monkeypatch.setattr(route_bootstrap, "repin_web_shell", exploding_repin)
+
+    result = frontend_switch.switch_frontend_to_active_release(app=app, project_root=root)
+
+    assert result["status"] == "unavailable"
+    assert result["reason"] == "shell_repin_failed"
+    assert "repin boom" in result.get("detail", "")
+    assert app.state.serving_frontend_dist == str(old_dir)
+    assert app.state.serving_metadata["frontend"]["release"] == release_old
+    assert _page(client.get("/")).endswith("build key-old</body></html>\n")
+
+
+def test_switch_reports_rollback_failure_when_old_dist_repin_also_fails(tmp_path: Path, monkeypatch) -> None:
+    import core.web.route_bootstrap as route_bootstrap
+
+    root, base, frontend_commit, release_old, release_new = _make_repo_with_releases(tmp_path)
+    _write_fingerprint(root, head=base, release=release_old, build_key="key-old", built_from=base)
+    _set_active_pointer(root, release_new, "key-new")
+    app = _make_app(root, base, release_old)
+    client = TestClient(app)
+
+    def always_failing_repin(_app, _web_dist):
+        raise RuntimeError("rollback repin boom")
+
+    monkeypatch.setattr(route_bootstrap, "repin_web_shell", always_failing_repin)
+
+    result = frontend_switch.switch_frontend_to_active_release(app=app, project_root=root)
+
+    assert result["status"] == "unavailable"
+    assert result["reason"].startswith("shell_rollback_failed_restart_required")
+    # The exception detail must reach the caller verbatim, not be swallowed.
+    assert "rollback repin boom" in result["reason"]
+
+
+def test_switched_response_marks_failed_fingerprint_persistence(tmp_path: Path, monkeypatch) -> None:
+    root, base, frontend_commit, release_old, release_new = _make_repo_with_releases(tmp_path)
+    _write_fingerprint(root, head=base, release=release_old, build_key="key-old", built_from=base)
+    _set_active_pointer(root, release_new, "key-new")
+    app = _make_app(root, base, release_old)
+    client = TestClient(app)
+
+    def failing_persistence(*_args, **_kwargs):
+        return {"updated": False, "reason": "no_fingerprint"}
+
+    monkeypatch.setattr(frontend_switch, "update_serving_frontend_release", failing_persistence)
+
+    result = frontend_switch.switch_frontend_to_active_release(app=app, project_root=root)
+
+    # The switch itself is the user-visible success; the failed persistence is
+    # surfaced through the flag instead of failing the whole switch.
+    assert result["status"] == "switched"
+    assert result["fingerprintPersisted"] is False
+    assert app.state.serving_frontend_dist == str(root / "web" / ".vibelution-builds" / release_new)
+    assert _page(client.get("/")).endswith("build key-new</body></html>\n")
