@@ -197,6 +197,19 @@ export function LauncherAssistantModelControl({
     [choices, lang, modelDisplay, modelId, query, recentModelIds],
   );
   const currentProviderLabel = (choices.find(choice => choice.modelId === modelId)?.providerLabel || "").trim();
+  // Enabled services are the operator's current reach, not a second projection:
+  // the same explicit provider switch that hides disabled rows also feeds this
+  // read-only summary, so the popover never disagrees with itself.
+  const enabledServices = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const choice of choices) {
+      if (choice.providerEnabled === false) continue;
+      const serviceLabel = (choice.providerLabel || "").trim();
+      if (!serviceLabel) continue;
+      counts.set(serviceLabel, (counts.get(serviceLabel) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((left, right) => left[0].localeCompare(right[0]));
+  }, [choices]);
   const defaultExpandedGroupKeys = [
     ...(choices.some(choice => choice.modelId === modelId) ? [] : ["__current__"]),
     ...(choices.length >= QUICK_VIEW_MIN_CHOICES ? [RECENT_GROUP_KEY, USABLE_GROUP_KEY] : []),
@@ -221,6 +234,20 @@ export function LauncherAssistantModelControl({
           setQuery("");
         }}
       />
+      {onOpenSettings && enabledServices.length ? <div className={styles.services}
+        aria-label={zh ? "已启用的服务" : "Enabled services"}>
+        <p className={styles.servicesLabel}>{zh ? "已启用的服务" : "Enabled services"}</p>
+        <ul className={styles.servicesList}>
+          {enabledServices.map(([serviceLabel, count]) => <li key={serviceLabel}>
+            <VButton variant="ghost" density="compact" contentLayout="plain" className={styles.serviceRow}
+              aria-label={`${serviceLabel} ${count}`} data-testid="launcher-enabled-service"
+              onClick={() => { setOpen(false); setQuery(""); onOpenSettings(); }}>
+              <span className={styles.serviceName}>{serviceLabel}</span>
+              <span className={styles.serviceCount}>{count}</span>
+            </VButton>
+          </li>)}
+        </ul>
+      </div> : null}
       {onOpenSettings ? <div className={styles.actions}>
         <VButton variant="ghost" density="compact" isDisabled={pending}
           icon={<SlidersHorizontal size={12} aria-hidden="true" />}

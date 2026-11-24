@@ -229,4 +229,21 @@ it("retains a current model absent from the catalogue and locks pending configur
     expect(options().some(node => (node.textContent || "").includes("DeepSeek V4.1 Flash"))).toBe(true);
   });
 
+  it("lists enabled services and routes each row to model settings", async () => {
+    const choices = [
+      { ...CHOICES[0], providerLabel: "官方服务" },
+      { ...CHOICES[1], providerLabel: "停用服务", providerEnabled: false },
+    ];
+    const { trigger, onOpenSettings } = await renderControl({ choices });
+    await act(async () => trigger.click());
+    // The provider heading is also a button, so address the service row by its
+    // own accessible name instead of matching loose text.
+    const row = [...document.querySelectorAll<HTMLButtonElement>("button")]
+      .find(node => !node.hasAttribute("aria-expanded") && (node.textContent || "").trim() === "官方服务1");
+    expect(row).toBeTruthy();
+    expect(document.body.textContent).not.toContain("停用服务");
+    await act(async () => row!.click());
+    expect(onOpenSettings).toHaveBeenCalledTimes(1);
+  });
+
 });
