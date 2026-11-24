@@ -600,6 +600,87 @@ def test_unreachable_target_without_removable_history_does_not_report_budget_app
     assert "agent.context_compression.token_budget_applied" not in codes
 
 
+def _capture_ledger_writers(monkeypatch):
+    checkpoints, attempts = [], []
+    monkeypatch.setattr(
+        "core.chat.conversation_ledger.append_context_compression_checkpoint",
+        lambda *args, **kwargs: checkpoints.append(kwargs) or object(),
+    )
+    monkeypatch.setattr(
+        "core.chat.conversation_ledger.append_context_compression_attempt",
+        lambda *args, **kwargs: attempts.append(kwargs) or object(),
+    )
+    return checkpoints, attempts
+
+
+def test_compression_effective_when_post_compression_reaches_target_below_ratio_threshold(monkeypatch, tmp_path):
+    checkpoints, attempts = _capture_ledger_writers(monkeypatch)
+    extras = {}
+    rules, current_request = SystemMessage(content="r" * 20), HumanMessage(content="q" * 400)
+    original = [rules, AIMessage(content="old" * 100), current_request]
+    result = _run(
+        messages=original,
+        compressor=_FakeCompressor([rules, current_request]),
+        config=_feature_config(threshold=0.5), project_root=str(tmp_path), extra=extras,
+        context_input_hard_limit=1000, post_compression_target_tokens=600,
+    )
+    # 720 -> 420 tokens: ratio 0.417 misses the 0.5 threshold, but the send
+    # payload (420 + notice) stays at or below the 600-token target, so the
+    # compression must be persisted like any other effective compression.
+    assert result[0] == [rules, current_request]
+    assert result[2] is True
+    assert len(checkpoints) == 1
+    assert checkpoints[0]["effective"] is True
+    assert checkpoints[0]["effectiveness_ratio"] < 0.5
+    assert attempts == []
+    assert all("收益不足" not in message for _level, message in extras["ui"].logs)
+
+
+def test_compression_stays_ineffective_when_target_missed_and_window_cannot_cut(monkeypatch, tmp_path):
+    checkpoints, attempts = _capture_ledger_writers(monkeypatch)
+    extras = {}
+    rules, current_request = SystemMessage(content="r" * 20), HumanMessage(content="q" * 600)
+    original = [AIMessage(content="old" * 200), current_request]
+    result = _run(
+        messages=original,
+        compressor=_FakeCompressor([rules, current_request]),
+        config=_feature_config(threshold=0.5), project_root=str(tmp_path), extra=extras,
+        context_input_hard_limit=1000, post_compression_target_tokens=600,
+    )
+    # 1200 -> 620 tokens: ratio 0.483 misses the 0.5 threshold and the send
+    # payload (620 + notice) stays above the 600-token target; only the
+    # required system prefix and the current request remain, so the budget
+    # window has nothing to retire. The old ineffective semantics hold: the
+    # compressed output is used in memory, but no checkpoint is persisted.
+    assert result[0] == [rules, current_request]
+    assert result[2] is True
+    assert len(attempts) == 1
+    assert attempts[0]["status"] == "skipped_low_savings"
+    assert checkpoints == []
+    assert any("收益不足" in message for _level, message in extras["ui"].logs)
+
+
+def test_unconfigured_target_keeps_ratio_threshold_semantics(monkeypatch, tmp_path):
+    checkpoints, attempts = _capture_ledger_writers(monkeypatch)
+    extras = {}
+    rules, current_request = SystemMessage(content="r" * 20), HumanMessage(content="q" * 400)
+    original = [rules, AIMessage(content="old" * 100), current_request]
+    result = _run(
+        messages=original,
+        compressor=_FakeCompressor([rules, current_request]),
+        config=_feature_config(threshold=0.5), project_root=str(tmp_path), extra=extras,
+        context_input_hard_limit=1000,
+    )
+    # Without a configured post-compression target the judgment falls back to
+    # the ratio threshold alone, exactly as before the target-reached rule:
+    # used in memory, but only a skipped_low_savings attempt is persisted.
+    assert result[0] == [rules, current_request]
+    assert result[2] is True
+    assert len(attempts) == 1
+    assert attempts[0]["status"] == "skipped_low_savings"
+    assert checkpoints == []
+
+
 def test_budget_fallback_fails_closed_when_required_context_and_notice_exceed_hard_limit():
     current_request = HumanMessage(content="q" * 950)
     rules = SystemMessage(content="r" * 20)

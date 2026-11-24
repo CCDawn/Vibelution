@@ -911,6 +911,10 @@ def compress_turn_messages(
                         fields={"targetTokens": window_limit, "sendTokens": budget_tokens,
                                 "contextInputHardLimit": normalized_hard_limit},
                     )
+    # One send-payload basis shared with the budget-window gate above: the
+    # compressed context plus the notice the caller appends. Recomputed here
+    # so a budget-window replacement is measured with the same yardstick.
+    send_tokens = estimate_send_payload(compressed)
     if retention_violation or over_hard_limit:
         guard_reason = retention_violation or "post_compression_over_hard_limit"
         return fail_closed(guard_reason, after_pairing, after_tokens)
@@ -992,11 +996,27 @@ def compress_turn_messages(
     except Exception:
         effectiveness_threshold = 0.0
     effectiveness_ratio = (max(0, token_saved) / current_tokens) if current_tokens > 0 else 0.0
+    # Reaching the configured post-compression target is effectiveness on its
+    # own, even when the relative savings ratio misses the advisory threshold:
+    # the compressed context is what the turn actually keeps using (the
+    # compressed return below is unconditional), so withholding the checkpoint
+    # over a marginal ratio would resurrect the full context on the next
+    # replay. Measured on the same send-payload basis as the budget-window
+    # gate (compressed context plus notice).
+    target_tokens = _coerce_nonnegative_int(post_compression_target_tokens)
+    target_reached = target_tokens > 0 and send_tokens <= target_tokens
     # A budget window is an actual context replacement. Persist it even when
     # savings are below the advisory threshold, or replay resurrects its cuts.
     compression_effective = bool(
         budget_window_applied
-        or (token_saved > 0 and (effectiveness_threshold <= 0 or effectiveness_ratio >= effectiveness_threshold))
+        or (
+            token_saved > 0
+            and (
+                effectiveness_threshold <= 0
+                or effectiveness_ratio >= effectiveness_threshold
+                or target_reached
+            )
+        )
     )
     ui.add_log(
         f"[压缩] {level.value.upper()} | {token_saved:+d} tokens "
