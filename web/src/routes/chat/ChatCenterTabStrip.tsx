@@ -79,8 +79,20 @@ export function ChatCenterTabStrip({
   const railOpen = rightRailOpen ?? statusRailOverlayOpen;
   // Collapse belongs to the open rail's own header; this row only restores it.
   const showRightToggle = !railOpen && (Boolean(rightRailLabel) || (statusRailAvailable && !rightOverlayVisible));
+  // The band spans the center column and the rail column. When the rail owns a
+  // column, split the band into two surfaces so the pane gutter stays open
+  // through the tab row instead of one white strip painting over it.
+  const splitRailBand = Boolean(rightRailOpen) && !statusRailOverlayOpen;
   return (
-    <div className={styles.tabStrip}>
+    <div
+      className={styles.tabStrip}
+      style={splitRailBand ? {
+        display: "grid",
+        gridTemplateColumns: "minmax(0, 1fr) var(--chat-right-pane-width, 240px)",
+        backgroundColor: "transparent",
+      } : undefined}
+    >
+      <div className={splitRailBand ? `${styles.tabStripCenter} mx-1 overflow-hidden rounded-tl-[12px] bg-vui-surface-chat px-2.5` : styles.tabStripCenter}>
       {conversationIndexControl}
       {chatReturnTarget && !groupPanelActive ? (
         <Link
@@ -157,6 +169,8 @@ export function ChatCenterTabStrip({
           {sessionActionsControl}
         </div>
       ) : null}
+      </div>
+      {splitRailBand ? <div className={styles.tabStripRailSurface} aria-hidden="true" /> : null}
     </div>
   );
 }
