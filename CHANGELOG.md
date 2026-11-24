@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+
+## 3.3.3 - 2026-11-24
 - Reverted the transparent/gradient tab strip band: the gradient depended on a pane-width
 - Restored the solid tab surface; the leading 12px corner stays.
 
