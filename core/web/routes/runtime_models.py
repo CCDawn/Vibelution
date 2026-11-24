@@ -100,6 +100,22 @@ class RuntimeCodeFreshnessResponse(BaseModel):
     frontend: dict[str, Any] = Field(default_factory=dict)
 
 
+class RuntimeFrontendSwitchResponse(BaseModel):
+    """POST /runtime/frontend/switch result.
+
+    ``status``: switched (serving release now equals active), already_current,
+    restart_required (a safety check failed; ``reason`` says which),
+    unavailable (serving/active records missing, apply failed).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    status: str = ""
+    servingRelease: str = ""
+    activeRelease: str = ""
+    reason: str = ""
+
+
 class RuntimeLifecycleResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
