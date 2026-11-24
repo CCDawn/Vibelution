@@ -750,7 +750,6 @@ class DispatchService:
                 raise DispatchError("This task was permanently cleaned; use a new dispatch identity for new work.",
                                     code="DISPATCH_ALREADY_CLEANED")
             path = self._path(dispatch_id)
-            retrying = path.exists()
             if path.exists():
                 record = self._read(dispatch_id)
                 if record.get("requestDigest") != request_digest:
@@ -774,6 +773,7 @@ class DispatchService:
                     "nativeTaskId": "",
                     "receipt": None,
                     "lastError": None,
+                    "capabilityMinted": False,
                     "createdAt": _now(),
                     "updatedAt": _now(),
                 }
@@ -782,11 +782,19 @@ class DispatchService:
                 if derived_ref is not None:
                     record["derivedSourceRef"] = deepcopy(derived_ref)
                 self._save(record)
-            return await self._update(record, lambda client: client.start_task(
+            # A durable credential is persisted before the first POST (client
+            # invariant), so a record without a minted capability never reached
+            # the backend: resubmitting it is the first submission and creates
+            # exactly one task. Once a capability exists, retries must require
+            # it so the backend can answer with the original task by idempotency
+            # key. Records from before this field exist count as minted-absent
+            # (False) but the marking below heals them from the shared ledger.
+            require_existing = bool(record.get("capabilityMinted"))
+            return await self._update(record, self._mark_minted_capability(record, lambda client: client.start_task(
                 agent_id=agent_id, task=task, permission_profile=permission_profile,
                 client_request_id=record["clientRequestId"], title=title,
-                require_existing_capability=retrying,
-            ))
+                require_existing_capability=require_existing,
+            )))
 
     async def dispatch_from_source(self, project_id: str, *, agent_id: str, dispatch_id: str, runtime: dict,
                                    task: str | None = None, task_source: dict | None = None, title: str = "") -> dict:
@@ -840,6 +848,13 @@ class DispatchService:
         async with self._dispatch_lock(dispatch_id):
             record = self._read(dispatch_id)
             unconfirmed = not record.get("nativeTaskId")
+            if unconfirmed and record.get("capabilityMinted") is False:
+                # Explicitly never submitted: no capability was ever minted, so
+                # the backend cannot know this request. Querying it would only
+                # overwrite the original failure with UNKNOWN_REQUEST. Keep the
+                # stable key and denial; only an explicit same-payload retry can
+                # start it. A heartbeat never resubmits a prompt.
+                return self._public(record)
 
             async def query(client: Any) -> dict[str, Any]:
                 if unconfirmed:
@@ -1140,7 +1155,17 @@ class DispatchService:
                                 or isinstance(receipt, dict) and receipt.get("taskId") != row.get("nativeTaskId")
                                 or row.get("lastError") is not None and not isinstance(row.get("lastError"), dict)):
                             raise DispatchError("Invalid native task state.", code="DISPATCH_STATE_INVALID")
-                        records.append(row)
+                        if not row.get("nativeTaskId") and row.get("capabilityMinted") is False:
+                            # Explicitly never submitted: no capability was ever
+                            # minted, so the backend cannot know this request.
+                            # Skip it without any backend traffic (including the
+                            # shared diagnostics gate) and keep the original
+                            # failure; only an explicit same-payload retry can
+                            # start it. A heartbeat never resubmits a prompt.
+                            # Records without the field keep the legacy query.
+                            results.append(self._public(row))
+                        else:
+                            records.append(row)
                     except DispatchError as exc:
                         results.append({"dispatchId": dispatch_id, "lastError": {"code": exc.code}})
                     except Exception:
@@ -1388,6 +1413,45 @@ class DispatchService:
         if not isinstance(receipt, dict) or receipt.get("status") != "completed":
             return None
         return {**receipt, "reconciledAfterTimeout": True}
+
+    @staticmethod
+    def _mark_minted_capability(
+        record: dict[str, Any], action: Callable[[Any], Awaitable[dict[str, Any]]],
+    ) -> Callable[[Any], Awaitable[dict[str, Any]]]:
+        """Flag the record once its request holds a durable native credential.
+
+        Clients persist a capability before the first idempotent POST, so a
+        present capability after ``start_task`` — on success or on failure —
+        proves the request may exist server-side and every later retry must
+        require that credential. ``_update`` saves the record on both paths,
+        so the flag persists with this very attempt. A failed presence probe
+        never masks the submit outcome; the next attempt re-derives the flag
+        from the same shared ledger.
+        """
+        request_id = record.get("clientRequestId")
+
+        async def mark_if_minted(client: Any) -> None:
+            # Never raises and never returns a value: the submit outcome and
+            # the next attempt's own probe stay authoritative for this flag.
+            probe = getattr(client, "task_capability_present", None)
+            if probe is None or not isinstance(request_id, str) or not request_id:
+                return
+            try:
+                present = bool(await probe(client_request_id=request_id))
+            except Exception:
+                return
+            if present:
+                record["capabilityMinted"] = True
+
+        async def submit(client: Any) -> dict[str, Any]:
+            # No ``return`` inside ``finally``: a bare return there would
+            # discard the action's payload or mask its exception.
+            try:
+                return await action(client)
+            finally:
+                await mark_if_minted(client)
+
+        return submit
 
     async def _update(self, record: dict[str, Any], action: Callable[[Any], Awaitable[dict[str, Any]]]) -> dict[str, Any]:
         try:

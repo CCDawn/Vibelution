@@ -246,6 +246,19 @@ async def test_legacy_accepted_task_keeps_external_read_heartbeat_and_cancel(tmp
 
 
 @pytest.mark.anyio
+async def test_capability_presence_probe_answers_without_disclosure_traffic_or_writes(tmp_path, monkeypatch):
+    _write_state(tmp_path, requests={"known-request": {"taskCapability": "known-capability", "taskId": "eat-1"}})
+    client, calls, business = _client(tmp_path, monkeypatch)
+    before = json.loads(json.dumps(client._state))
+    assert await client.task_capability_present(client_request_id="known-request") is True
+    assert await client.task_capability_present(client_request_id="missing-request") is False
+    assert await client.task_capability_present(client_request_id="   ") is False
+    assert await client.task_capability_present(client_request_id="") is False
+    assert client._state == before  # read-only: no state mutation, no re-save
+    assert calls == [] and business == []  # no network traffic
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize("accepted", [False, True])
 async def test_old_request_retry_with_launcher_authority_never_starts_in_new_namespace(tmp_path, monkeypatch, accepted):
     old_cap = "old-task-capability"
